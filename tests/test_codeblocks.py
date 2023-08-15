@@ -1,11 +1,11 @@
-from codeblocks.codeblocks import CodeBlockType, CodeBlock
+from code_blocks.codeblocks import CodeBlockType, CodeBlock
 
 
-def test_print_child():
+def test_to_string():
     code = CodeBlock(
         content="public class TreeSitterExample ",
         type=CodeBlockType.CLASS,
-        pre_code="\n\n",
+        pre_code="",
         children=[
             CodeBlock(content="{",
                       type=CodeBlockType.BLOCK_DELIMITER,
@@ -24,7 +24,7 @@ def test_print_child():
                         pre_code=""),
                     CodeBlock(
                         content="myVariable = parameter;",
-                        type=CodeBlockType.NONE,
+                        type=CodeBlockType.CODE,
                         pre_code="\n        "),
                     CodeBlock(
                         content="}",
@@ -35,4 +35,11 @@ def test_print_child():
                       pre_code="\n")
         ])
 
-    print(code)
+    assert str(code) == """public class TreeSitterExample {
+
+    int myVariable = 10;
+
+    public void myMethod(int parameter) {
+        myVariable = parameter;
+    }
+}"""

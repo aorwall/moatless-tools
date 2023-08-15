@@ -1,9 +1,20 @@
+# Chunk 1
+```python
 class TreeSitterExample:
 
-    my_variable = 10
+    # ...
 
     def __init__(self):
         self.instance_variable = 20
+
+    # ...
+```
+
+# Chunk 2
+```python
+class TreeSitterExample:
+
+    # ...
 
     def my_method(self, parameter):
         self.my_variable = parameter
@@ -18,6 +29,21 @@ class TreeSitterExample:
             print(f"While loop, parameter: {parameter}")
             parameter += 1
 
+        # ...
+
+    # ...
+```
+
+# Chunk 3
+```python
+class TreeSitterExample:
+
+    # ...
+
+    def my_method(self, parameter):
+
+        # ...
+
         try:
             if parameter == 8:
                 raise ValueError("Random exception")
@@ -26,17 +52,56 @@ class TreeSitterExample:
         finally:
             print("Finally block executed")
 
-    addition = lambda self, a, b: a + b
+    # ...
+```
+
+# Chunk 4
+```python
+class TreeSitterExample:
+
+    # ...
 
     class InnerClass:
         def inner_method(self):
             print("This is an inner class method")
 
+    # ...
+```
+
+# Chunk 5
+```python
+class TreeSitterExample:
+
+    # ...
+
     @staticmethod
     def static_example_method():
         print("Static method executed")
 
+    # ...
+```
+
+# Chunk 6
+```python
+class TreeSitterExample:
+
+    # ...
+
     @classmethod
     def class_example_method(cls):
         print("Class method executed")
+```
+
+# Chunk 7
+```python
+class TreeSitterExample:
+
+    my_variable = 10
+
+    # ...
+
+    addition = lambda self, a, b: a + b
+
+    # ...
+```
 

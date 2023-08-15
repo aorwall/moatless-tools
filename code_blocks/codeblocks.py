@@ -6,15 +6,16 @@ from tree_sitter import Node
 
 
 class CodeBlockType(str, Enum):
-    PROGRAM = "program"
+    MODULE = "module"
     DECLARATION = "declaration"
     CLASS = "class"
     FUNCTION = "function"
     STATEMENT = "statement"
+    CODE = "code"
+    BLOCK_DELIMITER = "block_delimiter"
     COMMENT = "comment"
     COMMENTED_OUT_CODE = "commented_out_code"
-    NONE = "none"
-    BLOCK_DELIMITER = "block_delimiter"
+    SPACE = "space"
 
 
 @dataclass
@@ -45,6 +46,7 @@ class CodeBlock:
             "type": self.type,
             "tree_sitter_type": self.tree_sitter_type,
             "pre_code": self.pre_code,
+            #"is_nested": self.is_nested,
             "children": [child.to_dict() for child in self.children]
         }
 
