@@ -1,5 +1,5 @@
-from codeblocks.codeblocks import CodeBlock, CodeBlockType
-from codeblocks.splitter import CodeSplitter
+from code_blocks.codeblocks import CodeBlock, CodeBlockType
+from code_blocks.splitter import CodeSplitter
 
 java_code = CodeBlock(
     content="public class TreeSitterExample ",
@@ -23,7 +23,7 @@ java_code = CodeBlock(
                     pre_code=""),
                 CodeBlock(
                     content="myVariable = parameter;",
-                    type=CodeBlockType.NONE,
+                    type=CodeBlockType.CODE,
                     pre_code="\n        "),
                 CodeBlock(
                     content="}",
@@ -64,12 +64,44 @@ def test_java_class():
     with open("java/treesitterexample.java", "r") as f:
         content = f.read()
 
+    with open("java/treesitterexample_splitted.md", "r") as f:
+        expected = f.read()
+
+
     splitter = CodeSplitter("java", max_chars=400)
 
     chunks = splitter.split_text(content)
 
+    mkdown = ""
+
     i = 1
     for chunk in chunks:
-        print("--- Chunk", i, "---")
-        print(chunk)
+        mkdown += f"# Chunk {i}\n```java\n{chunk}\n```\n\n"
         i += 1
+
+    print(mkdown)
+
+    assert mkdown == expected
+
+
+def test_split_python_class():
+    with open("python/treesitterexample.py", "r") as f:
+        content = f.read()
+
+    with open("python/treesitterexample_splitted.md", "r") as f:
+        expected = f.read()
+
+    splitter = CodeSplitter("python", max_chars=400)
+
+    chunks = splitter.split_text(content)
+
+    mkdown = ""
+
+    i = 1
+    for chunk in chunks:
+        mkdown += f"# Chunk {i}\n```python\n{chunk}\n```\n\n"
+        i += 1
+
+    print(mkdown)
+
+    assert mkdown == expected
