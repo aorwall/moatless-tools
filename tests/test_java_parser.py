@@ -4,7 +4,7 @@ from code_blocks.parser.java import JavaParser
 
 
 def test_java_class():
-    with open("java/treesitterexample.java", "r") as f:
+    with open("java/example.java", "r") as f:
         content = f.read()
 
     parser = JavaParser()

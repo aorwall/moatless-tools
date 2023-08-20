@@ -1,6 +1,6 @@
 # Chunk 1
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -12,7 +12,7 @@ class TreeSitterExample:
 
 # Chunk 2
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -36,7 +36,7 @@ class TreeSitterExample:
 
 # Chunk 3
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -57,7 +57,7 @@ class TreeSitterExample:
 
 # Chunk 4
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -70,7 +70,7 @@ class TreeSitterExample:
 
 # Chunk 5
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -83,7 +83,7 @@ class TreeSitterExample:
 
 # Chunk 6
 ```python
-class TreeSitterExample:
+class Example:
 
     # ...
 
@@ -94,7 +94,7 @@ class TreeSitterExample:
 
 # Chunk 7
 ```python
-class TreeSitterExample:
+class Example:
 
     my_variable = 10
 

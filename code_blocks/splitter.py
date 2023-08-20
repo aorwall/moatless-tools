@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List
 
 from code_blocks.codeblocks import CodeBlock, CodeBlockType
@@ -21,7 +22,7 @@ class CodeSplitter:
         try:
             self.parser = create_parser(language)
         except Exception as e:
-            print(f"Could not get parser for language {language}.")
+            logging.warning(f"Could not get parser for language {language}.")
             raise e
 
     def comment(self, comment: str) -> str:
@@ -29,7 +30,6 @@ class CodeSplitter:
             return f"# {comment}"
         else:
             return f"// {comment}"
-
 
     def _comment_out_block(self, block: CodeBlock):
         return CodeBlock(

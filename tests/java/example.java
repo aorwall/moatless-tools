@@ -1,12 +1,12 @@
-package com.treesitter.example;
+package codeblocks.example;
 
 import java.util.Random;
 
-public class TreeSitterExample {
+public class Example {
 
     int myVariable = 10;
 
-    public TreeSitterExample() {
+    public Example() {
         myVariable = 20;
     }
 
@@ -73,7 +73,7 @@ public class TreeSitterExample {
     }
 
     public static void main(String[] args) {
-        TreeSitterExample example = new TreeSitterExample();
+        Example example = new Example();
         example.myMethod(3);
     }
 }

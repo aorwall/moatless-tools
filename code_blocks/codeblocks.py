@@ -245,8 +245,8 @@ class CodeBlock:
         return max_i
 
     def merge(self, updated_block: "CodeBlock", first_level: bool = False) -> List[str]:
-        print(f"Merging block `{self.type.value}: {self.content}` with "
-              f"`{updated_block.type.value}: {updated_block.content}`")
+        print(f"Merging block `{self.type.value}: {self.content}` ({len(self.children)} children) with "
+              f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
 
         if first_level and not self.has_any_matching_child(updated_block.children, 0):
             matching_block = self.find_nested_matching_block(updated_block)
@@ -266,7 +266,7 @@ class CodeBlock:
                 self.children = updated_block.children
                 return ["replace"]
         if self.has_all_matching_children(updated_block.children, 0) and updated_block.is_complete():
-            print(f"All children match, and updated content is complete, will merge updated blocks")
+            print("All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
             self.children = updated_block.children
             return []
 
