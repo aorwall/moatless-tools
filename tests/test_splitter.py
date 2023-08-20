@@ -43,14 +43,14 @@ def test_chunk_block():
     i = 1
     for chunk in chunks:
         print("--- Chunk", i, "---")
-        print(str(chunk.root()))
+        print(chunk.root().to_string())
         i += 1
 
 
 def test_trim_blocks():
     splitter = CodeSplitter("java")
     splitter.trim_code_block(java_code, java_code.children[2])
-    assert str(java_code.children[3].root()) == """public class TreeSitterExample {
+    assert java_code.children[3].root().to_string() == """public class TreeSitterExample {
 
     // ...
 
