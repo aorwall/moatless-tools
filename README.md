@@ -1,11 +1,7 @@
 # Code Blocks
 
 Code Blocks is a simplified variant of [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) implemented to simplify the
-handling of code read and written by a LLM. It is designed to assist
-in the process of code generation and manipulation, providing a structured way
-to handle code blocks.
-
-The two main use cases are merging of incomplete code written by the LLM and 
+handling of code read and written by a LLM. The two main use cases are merging of incomplete code written by the LLM and 
 splitting up code for embedding and indexing in a vector store.
 
 ## Merging
