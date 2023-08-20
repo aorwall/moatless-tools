@@ -67,3 +67,15 @@ def test_python_two_classes():
 
     assert code_blocks.to_string() == content
 
+
+def test_python_sublist():
+    with open("python/sublist.py", "r") as f:
+        content = f.read()
+    parser = PythonParser(gpt_mode=True)
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree())
+
+    assert code_blocks.to_string() == content
+

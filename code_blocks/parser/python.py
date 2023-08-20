@@ -16,6 +16,13 @@ block_delimiters = [
 ]
 
 
+def _find_type(node: Node, type: str):
+    for i, child in enumerate(node.children):
+        if child.type == type:
+            return i
+    return None
+
+
 def _find_delimiter_index(node: Node):
     for i, child in enumerate(node.children):
         if child.type == ":":
@@ -39,10 +46,15 @@ class PythonParser(CodeParser):
     def get_block_node_types(self):
         return block_node_types
 
-    def parse_code(self, contents: str, node: Node, start_byte: int = 0) -> List[CodeBlock]:
-        pre_code = contents[start_byte:node.start_byte]
+    def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0) -> List[CodeBlock]:
+        pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
 
         block_type = self.get_block_type(node)
+
+        # if pre code have other chars than " " and "\n" then it is an error
+        if pre_code.strip():
+            block_type = CodeBlockType.ERROR
+
         child_nodes = self.get_child_blocks(node)
 
         children = []
@@ -55,14 +67,14 @@ class PythonParser(CodeParser):
             end_byte = node.end_byte
             end_line = node.end_point[0]
 
-        code = contents[node.start_byte:end_byte]
+        code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
 
         for child in child_nodes:
-            if child.type in ["ERROR", "block"]:
+            if child.type in ["ERROR", "block", "expression_statement"]:
                 child_children = []
                 if child.children:
                     for child_child in child.children:
-                        child_children.extend(self.parse_code(contents, child_child, start_byte=end_byte))
+                        child_children.extend(self.parse_code(content_bytes, child_child, start_byte=end_byte))
                         end_byte = child_child.end_byte
                 if self._is_error(child):
                     children.append(CodeBlock(
@@ -77,15 +89,16 @@ class PythonParser(CodeParser):
                 else:
                     children.extend(child_children)
             else:
-                children.extend(self.parse_code(contents, child, start_byte=end_byte))
+                children.extend(self.parse_code(content_bytes, child, start_byte=end_byte))
                 end_byte = child.end_byte
 
         if not node.parent and child_nodes and child_nodes[-1].end_byte < node.end_byte:
             children.append(CodeBlock(
                 type=CodeBlockType.SPACE,
-                pre_code=contents[child_nodes[-1].end_byte:node.end_byte],
+                pre_code=content_bytes[child_nodes[-1].end_byte:node.end_byte].decode(self.encoding),
                 content="",
         ))
+
 
         blocks = [CodeBlock(
             type=block_type,
@@ -100,7 +113,7 @@ class PythonParser(CodeParser):
         if child_nodes:
             next_sibling = child_nodes[-1].next_sibling
             while next_sibling:
-                blocks.extend(self.parse_code(contents, next_sibling, start_byte=end_byte))
+                blocks.extend(self.parse_code(content_bytes, next_sibling, start_byte=end_byte))
                 end_byte = next_sibling.end_byte
                 next_sibling = next_sibling.next_sibling
 
@@ -131,6 +144,12 @@ class PythonParser(CodeParser):
 
         if node.type == "decorated_definition" and len(node.children) > 1:
             node = node.children[-1]
+
+        if node.type == "assignment":
+            delimiter = _find_type(node, "=")
+            if delimiter:
+                return node.children[delimiter + 1:]
+
 
         nodes = []
         delimiter_index = _find_delimiter_index(node)
