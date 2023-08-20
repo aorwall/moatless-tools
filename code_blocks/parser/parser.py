@@ -37,8 +37,8 @@ class CodeParser:
         return True
 
 
-    def parse_code(self, contents: str, node: Node, start_byte: int = 0) -> List[CodeBlock]:
-        pre_code = contents[start_byte:node.start_byte]
+    def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0) -> List[CodeBlock]:
+        pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
 
         block_type = self.get_block_type(node)
         child_nodes = self.get_child_blocks(node)
@@ -57,14 +57,14 @@ class CodeParser:
             end_byte = node.end_byte
             end_line = node.end_point[0]
 
-        code = contents[node.start_byte:end_byte]
+        code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
 
         for child in child_nodes:
             if child.type in ["ERROR", "block"]:
                 child_children = []
                 if child.children:
                     for child_child in child.children:
-                        child_children.extend(self.parse_code(contents, child_child, start_byte=end_byte))
+                        child_children.extend(self.parse_code(content_bytes, child_child, start_byte=end_byte))
                         end_byte = child_child.end_byte
                 if self._is_error(child):
                     children.append(CodeBlock(
@@ -79,14 +79,14 @@ class CodeParser:
                 else:
                     children.extend(child_children)
             else:
-                children.extend(self.parse_code(contents, child, start_byte=end_byte))
+                children.extend(self.parse_code(content_bytes, child, start_byte=end_byte))
                 end_byte = child.end_byte
 
 
         if not node.parent and child_nodes and child_nodes[-1].end_byte < node.end_byte:
             children.append(CodeBlock(
                 type=CodeBlockType.SPACE,
-                pre_code=contents[child_nodes[-1].end_byte:node.end_byte],
+                pre_code=content_bytes[child_nodes[-1].end_byte:node.end_byte].decode(self.encoding),
                 start_line=child_nodes[-1].start_point[0],
                 end_line=child_nodes[-1].end_point[0],
                 content="",
@@ -104,7 +104,7 @@ class CodeParser:
 
     def parse(self, content: str) -> CodeBlock:
         tree = self.tree_parser.parse(bytes(content, self.encoding))
-        blocks = self.parse_code(content, tree.root_node)
+        blocks = self.parse_code(content.encode(self.encoding), tree.root_node)
         if len(blocks) > 1:
             block_string = "\n".join([f"- {b.type.value} {b.content}" for b in blocks])
             print("Expect only one root block, but got more. Will return the first one. "

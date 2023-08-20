@@ -1,7 +1,8 @@
+from code_blocks import CodeParser, create_parser
 from code_blocks.merger import CodeMerger
 
 
-def verify_merge(original_file, updated_file, expected_file, language, dont_remove_missing_blocks: bool = False):
+def verify_merge(original_file, updated_file, expected_file, language):
     with open(original_file, 'r') as f:
         original_content = f.read()
 
@@ -11,11 +12,15 @@ def verify_merge(original_file, updated_file, expected_file, language, dont_remo
     with open(expected_file, 'r') as f:
         expected_content = f.read()
 
-    merger = CodeMerger(language)
-    merged, gpt_tweaks = merger.merge(original_content, updated_content)
-    print(merged)
-    print(gpt_tweaks)
-    assert merged == expected_content
+    parser = create_parser(language)
+    original_block = parser.parse(original_content)
+    updated_block = parser.parse(updated_content)
+
+    gpt_tweaks = original_block.merge(updated_block, first_level=True)
+
+    print("gpt_tweaks: ", gpt_tweaks)
+    print(original_block.to_string())
+    assert original_block.to_string() == expected_content
 
 
 def test_merge_java_insert_after_comment():
@@ -77,13 +82,12 @@ def test_merge_python_replace():
         "python/calculator_replace.py",
         "python")
 
-def test_merge_python_update_class():
+def test_merge_python_sublist_update():
     verify_merge(
-        "python/dsl_dsl.py",
-        "python/dsl_dsl_find_update.py",
-        "python/calculator_merged1.py",
+        "python/sublist.py",
+        "python/sublist_update.py",
+        "python/sublist_update.py",
         "python")
-
 
 def test_merge_python_update_method():
     verify_merge(

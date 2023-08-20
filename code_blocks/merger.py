@@ -73,7 +73,7 @@ class CodeMerger:
         print(f"Merging block `{original_block.type.value}: {original_block.content}` with "
               f"`{updated_block.type.value}: {updated_block.content}`")
 
-        if first_level and not original_block.has_matching_child(updated_block.children, 0):
+        if first_level and not original_block.has_any_matching_child(updated_block.children, 0):
             matching_block = original_block.find_nested_matching_block(updated_block)
             if matching_block:
                 print(
@@ -90,6 +90,11 @@ class CodeMerger:
                     f"will replace contents")
                 original_block.children = updated_block.children
                 return original_block, ["replace"]
+
+        if original_block.has_all_matching_children(updated_block.children, 0) and updated_block.is_complete():
+            print(f"All children match, and updated content is complete, will return updated block")
+            original_block.children = updated_block.children
+            return original_block, []
 
         gpt_tweaks = []
 
@@ -146,8 +151,8 @@ class CodeMerger:
                         print(f"Expected most similar original block to be `{original_block_child.content}, "
                               f"but was {original_block.children[similar_original_block].content}`")
 
-                next_original_match = original_block.find_next_matching_block(i, updated_block_child)
-                next_updated_match = updated_block.find_next_matching_block(j, original_block_child)
+                next_original_match = original_block.find_next_matching_child_block(i, updated_block_child)
+                next_updated_match = updated_block.find_next_matching_child_block(j, original_block_child)
                 next_commented_out = updated_block.find_next_commented_out(j)
 
                 if next_original_match:
