@@ -27,7 +27,7 @@ at these boundaries. The resulting code blocks can then be individually indexed
 in the vector store, allowing for more efficient storage and retrieval of code.
 
 For examples of how Code Blocks splits code into chunks, see the following examples:
-- [Java Example](tests/java/example.md)
+- [Java Example](tests/java/Example.md)
 - [Python Example](tests/python/example.md)
 
 ## Supported Languages
