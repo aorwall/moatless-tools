@@ -26,6 +26,10 @@ of the code (such as functions, classes, and statements), and splitting the code
 at these boundaries. The resulting code blocks can then be individually indexed
 in the vector store, allowing for more efficient storage and retrieval of code.
 
+For examples of how Code Blocks splits code into chunks, see the following examples:
+- [Java Example](tests/java/example.md)
+- [Python Example](tests/python/example.md)
+
 ## Supported Languages
 - [x] Python
 - [x] Java
@@ -35,25 +39,3 @@ in the vector store, allowing for more efficient storage and retrieval of code.
 
 ## Installation
 To install Code Blocks, you can use pip:
-
-```sh
-pip install code-blocks
-```
-
-## Usage
-Here is a basic example of how to use Code Blocks to split and merge code:
-```python
-from code_blocks import create_parser, CodeSplitter
-
-# Create a parser for the language of your code (e.g., Python)
-parser = create_parser("python")
-
-# Parse your code into a CodeBlock
-code_block = parser.parse(your_code)
-
-# Create a CodeSplitter to split your code into blocks
-splitter = CodeSplitter("python")
-
-# Split your code into blocks
-blocks = splitter.split_text(your_code)
-```

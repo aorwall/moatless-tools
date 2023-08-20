@@ -62,10 +62,10 @@ def test_trim_blocks():
 
 
 def test_java_class():
-    with open("java/example.java", "r") as f:
+    with open("java/Example.java", "r") as f:
         content = f.read()
 
-    with open("java/example.md", "r") as f:
+    with open("java/Example.md", "r") as f:
         expected = f.read()
 
     splitter = CodeSplitter("java", max_chars=400)
