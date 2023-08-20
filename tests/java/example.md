@@ -1,14 +1,14 @@
 # Chunk 1
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
-    public TreeSitterExample() {
+    public Example() {
         myVariable = 20;
     }
 
@@ -18,11 +18,11 @@ public class TreeSitterExample {
 
 # Chunk 2
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -36,27 +36,6 @@ public class TreeSitterExample {
         for (int i = 0; i < 10; i++) {
             System.out.println("For loop iteration: " + i);
         }
-
-        // ...
-    }
-
-    // ...
-}
-```
-
-# Chunk 3
-```java
-package com.treesitter.example;
-
-// ...
-
-public class TreeSitterExample {
-
-    // ...
-
-    public void myMethod(int parameter) {
-
-        // ...
 
         while (parameter < 10) {
             System.out.println("While loop, parameter: " + parameter);
@@ -75,13 +54,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 4
+# Chunk 3
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -105,13 +84,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 5
+# Chunk 4
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -135,13 +114,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 6
+# Chunk 5
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -153,13 +132,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 7
+# Chunk 6
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -171,13 +150,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 8
+# Chunk 7
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -189,13 +168,13 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 9
+# Chunk 8
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
@@ -207,30 +186,30 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 10
+# Chunk 9
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     // ...
 
     public static void main(String[] args) {
-        TreeSitterExample example = new TreeSitterExample();
+        Example example = new Example();
         example.myMethod(3);
     }
 }
 ```
 
-# Chunk 11
+# Chunk 10
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 // ...
 
-public class TreeSitterExample {
+public class Example {
 
     int myVariable = 10;
 
@@ -244,9 +223,9 @@ public class TreeSitterExample {
 }
 ```
 
-# Chunk 12
+# Chunk 11
 ```java
-package com.treesitter.example;
+package codeblocks.example;
 
 import java.util.Random;
 

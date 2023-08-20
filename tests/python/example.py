@@ -1,4 +1,4 @@
-class TreeSitterExample:
+class Example:
 
     my_variable = 10
 

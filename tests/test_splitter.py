@@ -11,6 +11,7 @@ java_code = CodeBlock(
                   pre_code=""),
         CodeBlock(
             content="int myVariable = 10;",
+            type=CodeBlockType.CODE,
             pre_code="\n\n    "),
         CodeBlock(
             content="public void myMethod(int parameter) ",
@@ -61,12 +62,11 @@ def test_trim_blocks():
 
 
 def test_java_class():
-    with open("java/treesitterexample.java", "r") as f:
+    with open("java/example.java", "r") as f:
         content = f.read()
 
-    with open("java/treesitterexample_splitted.md", "r") as f:
+    with open("java/example.md", "r") as f:
         expected = f.read()
-
 
     splitter = CodeSplitter("java", max_chars=400)
 
@@ -85,10 +85,10 @@ def test_java_class():
 
 
 def test_split_python_class():
-    with open("python/treesitterexample.py", "r") as f:
+    with open("python/example.py", "r") as f:
         content = f.read()
 
-    with open("python/treesitterexample_splitted.md", "r") as f:
+    with open("python/example.md", "r") as f:
         expected = f.read()
 
     splitter = CodeSplitter("python", max_chars=400)

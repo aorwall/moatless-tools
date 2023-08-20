@@ -40,7 +40,7 @@ block_delimiters = [
 
 class JavaParser(CodeParser):
 
-    def __init__(self, use_indentation_level: bool = False):
+    def __init__(self):
         super().__init__("java")
 
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
@@ -65,7 +65,7 @@ class JavaParser(CodeParser):
     def get_block_node_types(self):
         return class_node_types + function_node_types + statement_node_types
 
-    def get_child_blocks(self, node: Node) -> List[Node]:
+    def get_child_nodes(self, node: Node) -> List[Node]:
         if node.type == "program":
             for i, child in enumerate(node.children):
                 if child.type == "package_declaration":

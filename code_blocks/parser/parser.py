@@ -5,7 +5,9 @@ from tree_sitter import Node
 
 from code_blocks.codeblocks import CodeBlock, CodeBlockType
 
+COMMENTED_OUT_CODE_KEYWORDS = ["rest of the code", "existing code", "other code"]
 
+child_block_types = ["ERROR", "block"]
 
 class CodeParser:
 
@@ -23,8 +25,11 @@ class CodeParser:
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         pass
 
-    def get_child_blocks(self, node: Node) -> List[Node]:
+    def get_child_nodes(self, node: Node) -> List[Node]:
         pass
+
+    def get_child_node_block_types(self):
+        return child_block_types
 
     def get_block_node_types(self) -> List[str]:
         return []
@@ -41,7 +46,7 @@ class CodeParser:
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
 
         block_type = self.get_block_type(node)
-        child_nodes = self.get_child_blocks(node)
+        child_nodes = self.get_child_nodes(node)
 
         children = []
 
@@ -60,7 +65,7 @@ class CodeParser:
         code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
 
         for child in child_nodes:
-            if child.type in ["ERROR", "block"]:
+            if child.type in self.get_child_node_block_types():
                 child_children = []
                 if child.children:
                     for child_child in child.children:

@@ -1,5 +1,4 @@
-from code_blocks import CodeParser, create_parser
-from code_blocks.merger import CodeMerger
+from code_blocks import create_parser
 
 
 def verify_merge(original_file, updated_file, expected_file, language):
@@ -89,7 +88,21 @@ def test_merge_python_sublist_update():
         "python/sublist_update.py",
         "python")
 
-def test_merge_python_update_method():
+def test_merge_python_update_function():
+    verify_merge(
+        "python/affine_cipher.py",
+        "python/affine_cipher_update_function.py",
+        "python/affine_cipher_merged.py",
+        "python")
+
+def test_merge_python_update_function_2():
+    verify_merge(
+        "python/list_ops.py",
+        "python/list_ops_update_function.py",
+        "python/list_ops_merged.py",
+        "python")
+
+def test_merge_python_update_nested_function():
     verify_merge(
         "python/restapi.py",
         "python/restapi_updated_function.py",
