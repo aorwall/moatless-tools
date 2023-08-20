@@ -10,7 +10,7 @@ splitting up code for embedding and indexing in a vector store.
 
 ## Merging
 If you send a complete code file along with an instruction on what should be 
-changed to an LLM like GPT3.5 and 4 (ChatGPT), it often returns only the parts 
+changed to an LLM like GPT3.5 and 4, it often responds with only the parts 
 of the code that have been updated. Even if you explicitly instruct the LLM to
 return the entire file, it doesn't always do so. Code Blocks' strategy is to 
 handle the returned code instead of instructing GPT on how to return the code.
