@@ -1,6 +1,6 @@
 # Code Blocks
 
-Code Blocks is a simplified variant of Tree-sitter implemented to simplify the
+Code Blocks is a simplified variant of [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) implemented to simplify the
 handling of code read and written by a LLM. It is designed to assist
 in the process of code generation and manipulation, providing a structured way
 to handle code blocks.
