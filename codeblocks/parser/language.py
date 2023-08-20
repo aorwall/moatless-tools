@@ -2,7 +2,7 @@ from typing import Optional, List
 
 from tree_sitter import Node
 
-from code_blocks import CodeBlockType
+from codeblocks import CodeBlockType
 
 
 def find_block_node(node: Node):

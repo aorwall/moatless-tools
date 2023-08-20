@@ -1,4 +1,4 @@
-from code_blocks.codeblocks import CodeBlockType, CodeBlock
+from codeblocks.codeblocks import CodeBlockType, CodeBlock
 
 code = CodeBlock(content="",
                  type=CodeBlockType.MODULE,

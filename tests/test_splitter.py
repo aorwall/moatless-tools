@@ -1,5 +1,5 @@
-from code_blocks.codeblocks import CodeBlock, CodeBlockType
-from code_blocks.splitter import CodeSplitter
+from codeblocks.codeblocks import CodeBlock, CodeBlockType
+from codeblocks.splitter import CodeSplitter
 
 java_code = CodeBlock(
     content="public class TreeSitterExample ",
