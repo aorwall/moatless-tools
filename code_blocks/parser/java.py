@@ -3,7 +3,8 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from code_blocks.codeblocks import CodeBlockType
-from code_blocks.language.language import Language, find_block_node
+from code_blocks.parser.language import find_block_node
+from code_blocks.parser.parser import CodeParser
 
 class_node_types = [
     "annotation_type_declaration",
@@ -37,7 +38,10 @@ block_delimiters = [
 ]
 
 
-class Java(Language):
+class JavaParser(CodeParser):
+
+    def __init__(self, use_indentation_level: bool = False):
+        super().__init__("java")
 
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         if node.type == "program":
@@ -58,6 +62,9 @@ class Java(Language):
         else:
             return CodeBlockType.CODE
 
+    def get_block_node_types(self):
+        return class_node_types + function_node_types + statement_node_types
+
     def get_child_blocks(self, node: Node) -> List[Node]:
         if node.type == "program":
             for i, child in enumerate(node.children):
@@ -77,6 +84,3 @@ class Java(Language):
                 next_sibling = next_sibling.next_sibling
 
         return nodes
-
-    def comment(self, comment: str) -> str:
-        return f"// {comment}"

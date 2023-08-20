@@ -1,8 +1,7 @@
 from typing import Optional, List
 
 from code_blocks.codeblocks import CodeBlock, CodeBlockType
-from code_blocks.language import get_language
-from code_blocks.parser import CodeParser
+from code_blocks.parser import create_parser
 
 non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.SPACE]
 
@@ -15,25 +14,28 @@ class CodeSplitter:
             chunk_lines: int = 40,
             max_chars: int = 1500
     ):
-        self.language = get_language(language)
-        if not self.language:
-            print(f"Could not get parser for language {language}.")
-            raise Exception(f"Could not get parser for language {language}.")
-
         self.chunk_lines = chunk_lines
         self.max_chars = max_chars
 
+        self.language = language
         try:
-            self.parser = CodeParser(language)
+            self.parser = create_parser(language)
         except Exception as e:
             print(f"Could not get parser for language {language}.")
             raise e
+
+    def comment(self, comment: str) -> str:
+        if self.language == "python":
+            return f"# {comment}"
+        else:
+            return f"// {comment}"
+
 
     def _comment_out_block(self, block: CodeBlock):
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
             pre_code=block.pre_code,
-            content=self.language.comment("..."))
+            content=self.comment("..."))
 
     @staticmethod
     def _count_code_blocks(codeblocks: List[CodeBlock]) -> int:
@@ -94,14 +96,14 @@ class CodeSplitter:
                     current_chunk.children.append(self._comment_out_block(child_block))
                 chunk_blocks.extend(self._chunk_block(child_block, codeblock))
             else:
-                if len(str(child_block)) > self.max_chars:
+                if len(child_block.to_string()) > self.max_chars:
                     finished_chunk = self._finish_chunk_block(current_chunk, codeblock.children, i)
                     if finished_chunk:
                         chunk_blocks.append(finished_chunk)
 
                     current_chunk = self._new_chunk_block(codeblock, i, parent)
                     chunk_blocks.extend(self._chunk_block(child_block, codeblock))
-                elif len(str(current_chunk)) + len(str(child_block)) > self.max_chars:
+                elif len(child_block.to_string()) + len(child_block.to_string()) > self.max_chars:
                     finished_chunk = self._finish_chunk_block(current_chunk, codeblock.children, i)
                     if finished_chunk:
                         chunk_blocks.append(finished_chunk)
@@ -152,4 +154,4 @@ class CodeSplitter:
     def split_text(self, text: str) -> List[str]:
         codeblock = self.parser.parse(text)
         chunk_blocks = self._chunk_block(codeblock)
-        return [str(block.root()) for block in chunk_blocks]
+        return [block.root().to_string() for block in chunk_blocks]

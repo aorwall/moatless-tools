@@ -13,6 +13,10 @@ def find_block_node(node: Node):
 
 
 class Language:
+
+    def __init__(self, use_indentation_level: bool = False):
+        self.use_indentation_level = use_indentation_level
+
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         pass
 
