@@ -3,7 +3,7 @@ from typing import Optional, List
 import tree_sitter_languages
 from tree_sitter import Node
 
-from code_blocks.codeblocks import CodeBlock, CodeBlockType
+from codeblocks.codeblocks import CodeBlock, CodeBlockType
 
 COMMENTED_OUT_CODE_KEYWORDS = ["rest of the code", "existing code", "other code"]
 

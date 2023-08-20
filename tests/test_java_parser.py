@@ -1,6 +1,6 @@
 import json
 
-from code_blocks.parser.java import JavaParser
+from codeblocks.parser.java import JavaParser
 
 
 def test_java_class():

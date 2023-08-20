@@ -1,6 +1,6 @@
 import json
 
-from code_blocks.parser.python import PythonParser
+from codeblocks.parser.python import PythonParser
 
 
 def test_python_with_comment():

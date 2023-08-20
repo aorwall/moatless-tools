@@ -1,8 +1,8 @@
 from typing import Optional
 
-from code_blocks.parser.java import JavaParser
-from code_blocks.parser.parser import CodeParser
-from code_blocks.parser.python import PythonParser
+from codeblocks.parser.java import JavaParser
+from codeblocks.parser.parser import CodeParser
+from codeblocks.parser.python import PythonParser
 
 
 def create_parser(language: str) -> Optional[CodeParser]:

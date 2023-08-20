@@ -2,8 +2,8 @@ from typing import Optional, List
 
 from tree_sitter import Node
 
-from code_blocks import CodeBlockType, CodeBlock
-from code_blocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS
+from codeblocks import CodeBlockType, CodeBlock
+from codeblocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS
 
 block_node_types = [
     "function_definition", "class_definition", "if_statement",
