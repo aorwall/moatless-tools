@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable, Tuple
@@ -12,6 +13,7 @@ class CodeBlockType(str, Enum):
     CLASS = "class"
     FUNCTION = "function"
 
+    IMPORT = "import"
     STATEMENT = "statement"
     CODE = "code"
     BLOCK_DELIMITER = "block_delimiter"
@@ -34,6 +36,7 @@ class CodeBlock:
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
+    language: str = None
 
     children: List["CodeBlock"] = field(default_factory=list)
     parent: Optional["CodeBlock"] = field(default=None)
@@ -78,8 +81,38 @@ class CodeBlock:
     def __str__(self):
         return str(self.to_dict())
 
-    def to_string(self):
-        child_code = "".join([child.to_string() for child in self.children])
+    def trim_code_block(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
+        children = []
+        for child in self.children:
+            if child.type == CodeBlockType.BLOCK_DELIMITER:
+                children.append(copy.copy(child))
+            elif (show_block and child.find_nested_matching_block(show_block)) or \
+                    (include_types and child.type in include_types):
+                children.append(child.trim_code_block(show_block, include_types))
+            elif self == show_block:
+                children.append(child.trim_code_block(show_block, include_types))
+            elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
+                children.append(child.create_commented_out_block())
+
+        return CodeBlock(
+            content=self.content,
+            pre_code=self.pre_code,
+            type=self.type,
+            parent=self.parent,
+            children=children
+        )
+
+
+    def to_string(self, include_types: List[CodeBlockType] = None):
+        child_code = ""
+        if include_types:
+            for child in self.children:
+                if child.type in include_types:
+                    child_code += child.to_string(include_types)
+                else:
+                    child_code += self.create_commented_out_block().to_string()
+        else:
+            child_code = "".join([child.to_string() for child in self.children])
 
         if self.pre_lines:
             linebreaks = "\n" * self.pre_lines
@@ -89,10 +122,18 @@ class CodeBlock:
 
         return f"{content}{child_code}"
 
-    def to_tree(self, indent: int = 0):
-        child_code = "".join([child.to_tree(indent+1) for child in self.children])
+    def to_tree(self, indent: int = 0, include_tree_sitter_type: bool = False):
+        child_tree = "".join([
+            child.to_tree(indent=indent+1, include_tree_sitter_type=include_tree_sitter_type)
+            for child in self.children])
         indent_str = " " * indent
-        return f"\n{indent_str} {indent}. {self.type.value} : {self.content}{child_code}"
+
+        tree_sitter_type = ""
+        if include_tree_sitter_type and self.tree_sitter_type:
+            tree_sitter_type = f" ({self.tree_sitter_type})"
+
+        content = self.content.strip().replace("\n", "\\n")
+        return f"{indent_str} {indent} {self.type.value} `{content}`{tree_sitter_type}\n{child_tree}"
 
     def __eq__(self, other):
         if not isinstance(other, CodeBlock):
@@ -132,6 +173,18 @@ class CodeBlock:
             errors.append(self)
 
         return errors
+
+    def create_commented_out_block(self):
+        return CodeBlock(
+            type=CodeBlockType.COMMENTED_OUT_CODE,
+            pre_code=self.pre_code,
+            content=self.create_comment("..."))
+
+    def create_comment(self, comment: str) -> str:
+        if self.root().language == "python":
+            return f"# {comment}"
+        else:
+            return f"// {comment}"
 
     def add_indentation(self, indentation: str):
         if self.pre_lines:

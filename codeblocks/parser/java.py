@@ -62,7 +62,7 @@ class JavaParser(CodeParser):
         else:
             return CodeBlockType.CODE
 
-    def get_block_node_types(self):
+    def get_compound_node_types(self):
         return class_node_types + function_node_types + statement_node_types
 
     def get_child_nodes(self, node: Node) -> List[Node]:
