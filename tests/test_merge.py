@@ -108,3 +108,10 @@ def test_merge_python_update_nested_function():
         "python/restapi_updated_function.py",
         "python/restapi_merged.py",
         "python")
+
+def test_merge_typescript_react():
+    verify_merge(
+        "typescript/todo.tsx",
+        "typescript/todo_add_filter.tsx",
+        "typescript/todo_merged.tsx",
+        "tsx")

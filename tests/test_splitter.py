@@ -105,3 +105,27 @@ def test_split_python_class():
     print(mkdown)
 
     assert mkdown == expected
+
+
+
+def test_split_react_component():
+    with open("typescript/react_component.tsx", "r") as f:
+        content = f.read()
+
+    with open("typescript/react_component.md", "r") as f:
+        expected = f.read()
+
+    splitter = CodeSplitter("tsx", max_chars=400)
+
+    chunks = splitter.split_text(content)
+
+    mkdown = ""
+
+    i = 1
+    for chunk in chunks:
+        mkdown += f"# Chunk {i}\n```tsx\n{chunk}\n```\n\n"
+        i += 1
+
+    print(mkdown)
+
+    assert mkdown == expected
