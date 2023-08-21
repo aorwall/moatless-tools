@@ -86,10 +86,9 @@ class CodeBlock:
         for child in self.children:
             if child.type == CodeBlockType.BLOCK_DELIMITER:
                 children.append(copy.copy(child))
-            elif (show_block and child.find_nested_matching_block(show_block)) or \
-                    (include_types and child.type in include_types):
+            elif self == show_block or (include_types and self.type in include_types):
                 children.append(child.trim_code_block(show_block, include_types))
-            elif self == show_block:
+            elif child.has_nested_matching_block(show_block) or child.has_nested_blocks_with_types(include_types):
                 children.append(child.trim_code_block(show_block, include_types))
             elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
                 children.append(child.create_commented_out_block())
@@ -236,6 +235,21 @@ class CodeBlock:
                 if nested_match:
                     return nested_match
         return None
+
+    def has_nested_matching_block(self, other: Optional["CodeBlock"], start_original: int = 0) -> bool:
+        if not other:
+            return False
+        return self.find_nested_matching_block(other, start_original) is not None
+
+    def has_nested_blocks_with_types(self, find_types: Optional[List["CodeBlock"]], start_original: int = 0) -> bool:
+        if not find_types:
+            return False
+        for child_block in self.children[start_original:]:
+            if child_block.type in find_types:
+                return True
+            if child_block.has_nested_blocks_with_types(find_types):
+                return True
+        return False
 
     def find_next_commented_out(self, start):
         i = start
