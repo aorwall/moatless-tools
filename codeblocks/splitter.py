@@ -25,18 +25,6 @@ class CodeSplitter:
             logging.warning(f"Could not get parser for language {language}.")
             raise e
 
-    def comment(self, comment: str) -> str:
-        if self.language == "python":
-            return f"# {comment}"
-        else:
-            return f"// {comment}"
-
-    def _comment_out_block(self, block: CodeBlock):
-        return CodeBlock(
-            type=CodeBlockType.COMMENTED_OUT_CODE,
-            pre_code=block.pre_code,
-            content=self.comment("..."))
-
     @staticmethod
     def _count_code_blocks(codeblocks: List[CodeBlock]) -> int:
         count = 0
@@ -49,7 +37,7 @@ class CodeSplitter:
         if self._count_code_blocks(chunk_block.children) > 0:
             if i < len(child_blocks):
                 if self._count_code_blocks(child_blocks[i:]) > 0:
-                    chunk_block.children.append(self._comment_out_block(child_blocks[i]))
+                    chunk_block.children.append(child_blocks[i].create_commented_out_block())
                 for c in child_blocks[i:]:
                     if c.type == CodeBlockType.BLOCK_DELIMITER:
                         chunk_block.children.append(c)
@@ -67,7 +55,7 @@ class CodeSplitter:
             if child.type == CodeBlockType.BLOCK_DELIMITER:
                 new_children.append(child)
 
-        new_children.append(self._comment_out_block(codeblock.children[i - 1]))
+        new_children.append(codeblock.children[i - 1].create_commented_out_block())
         new_children.append(codeblock.children[i])
 
         return self._new_chunk_bock(codeblock, children=new_children, parent=parent)
@@ -93,7 +81,7 @@ class CodeSplitter:
             if self.separate_block(child_block, codeblock):
                 if (len(current_chunk.children) > 0
                         and current_chunk.children[-1].type != CodeBlockType.COMMENTED_OUT_CODE):
-                    current_chunk.children.append(self._comment_out_block(child_block))
+                    current_chunk.children.append(child_block.create_commented_out_block())
                 chunk_blocks.extend(self._chunk_block(child_block, codeblock))
             else:
                 if len(child_block.to_string()) > self.max_chars:
@@ -134,7 +122,7 @@ class CodeSplitter:
             elif child.content != keep_child.content:
                 if (child.type not in non_code_blocks and
                         (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
-                    children.append(self._comment_out_block(child))
+                    children.append(child.create_commented_out_block())
             else:
                 children.append(keep_child)
 

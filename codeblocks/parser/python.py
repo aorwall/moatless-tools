@@ -5,13 +5,13 @@ from tree_sitter import Node
 from codeblocks import CodeBlockType, CodeBlock
 from codeblocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS
 
-block_node_types = [
+compound_node_types = [
     "function_definition", "class_definition", "if_statement",
     "for_statement", "while_statement", "try_statement", "with_statement",
-    "expression_statement", "else_clause", "elif_clause"
+    "expression_statement", "dictionary"
 ]
 
-child_block_types = ["ERROR", "block", "expression_statement"]
+child_block_types = ["ERROR", "block"]
 
 block_delimiters = [
     ":"
@@ -39,8 +39,8 @@ class PythonParser(CodeParser):
     def get_child_node_block_types(self):
         return child_block_types
 
-    def get_block_node_types(self):
-        return block_node_types
+    def get_compound_node_types(self):
+        return compound_node_types
 
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         if node.type == "decorated_definition" and len(node.children) > 1:
@@ -51,6 +51,8 @@ class PythonParser(CodeParser):
             return CodeBlockType.FUNCTION
         elif node.type == "class_definition":
             return CodeBlockType.CLASS
+        elif node.type in ["import_statement", "import_from_statement", "future_import_statement"]:
+            return CodeBlockType.IMPORT
         elif node.type in block_delimiters:
             return CodeBlockType.BLOCK_DELIMITER
         elif "comment" in node.type:
@@ -66,13 +68,19 @@ class PythonParser(CodeParser):
         if node.type == "module":
             return node.children
 
-        if node.type == "decorated_definition" and len(node.children) > 1:
+        if node.type in ["decorated_definition", "expression_statement"] and node.children \
+                and any(child.children for child in node.children):
             node = node.children[-1]
 
         if node.type == "assignment":
             delimiter = _find_type(node, "=")
             if delimiter:
                 return node.children[delimiter + 1:]
+
+        if node.type == "dictionary":
+            delimiter = _find_type(node, "{")
+            if delimiter is not None:
+                return node.children[delimiter:]
 
         delimiter_index = _find_delimiter_index(node)
         if delimiter_index != -1:

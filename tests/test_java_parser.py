@@ -1,5 +1,6 @@
 import json
 
+from codeblocks import CodeBlockType
 from codeblocks.parser.java import JavaParser
 
 
@@ -11,6 +12,7 @@ def test_java_class():
 
     code_blocks = parser.parse(content)
 
+    print(code_blocks.trim_code_block(include_types=[CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.FUNCTION]).to_string())
     print(code_blocks.to_tree())
     assert code_blocks.to_string() == content
 
