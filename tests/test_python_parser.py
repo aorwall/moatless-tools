@@ -84,4 +84,3 @@ def test_python_sublist():
     print(code_blocks.to_tree())
 
     assert code_blocks.to_string() == content
-

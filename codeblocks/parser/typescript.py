@@ -2,46 +2,42 @@ from typing import Optional, List
 
 from tree_sitter import Node
 
-from codeblocks.codeblocks import CodeBlockType
+from codeblocks.codeblocks import CodeBlockType, CodeBlock
 from codeblocks.parser.language import find_block_node
 from codeblocks.parser.parser import CodeParser, _find_type
 
 class_node_types = [
-    "annotation_type_declaration",
     "class_declaration",
+    "abstract_class_declaration",
     "enum_declaration",
-    "interface_declaration",
-    "record_declaration"
+    "interface_declaration"
 ]
 
 function_node_types = [
-    "method_declaration",
-    "constructor_declaration"
+    "method_definition",
+    "function_declaration"
 ]
 
 statement_node_types = [
-    "static_initializer",
-    "instance_initializer",
     "if_statement",
     "for_statement",
-    "enhanced_for_statement",
-    "while_statement",
-    "do_statement",
-    "synchronized_statement",
-    "try_statement"
-    "switch_expression"
+    "try_statement",
+    "return_statement"
 ]
 
 block_delimiters = [
     "{",
-    "}"
+    "}",
+    "(",
+    ")"
 ]
 
 
-class JavaParser(CodeParser):
 
-    def __init__(self):
-        super().__init__("java")
+class TypeScriptParser(CodeParser):
+
+    def __init__(self, language: str = "typescript"):
+        super().__init__(language)
 
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         if node.type == "program":
@@ -54,7 +50,7 @@ class JavaParser(CodeParser):
             return CodeBlockType.STATEMENT
         elif node.type in block_delimiters:
             return CodeBlockType.BLOCK_DELIMITER
-        elif node.type == "import_declaration":
+        elif node.type == "import_statement":
             return CodeBlockType.IMPORT
         elif "comment" in node.type:
             if "..." in node.text.decode("utf8"):
@@ -63,6 +59,12 @@ class JavaParser(CodeParser):
                 return CodeBlockType.COMMENT
         else:
             return CodeBlockType.CODE
+
+    def get_compound_node_types(self):
+        return ["program"] + class_node_types + function_node_types + statement_node_types + ["jsx_element"]
+
+    def get_child_node_block_types(self):
+        return ["ERROR", "block"]
 
     def get_block_delimiter_types(self):
         return block_delimiters
@@ -76,21 +78,29 @@ class JavaParser(CodeParser):
             return node.children
 
         nodes = []
-        if node.type in ["local_variable_declaration", "field_declaration", "constant_declaration"] and node.children \
+        if node.type in ["lexical_declaration", "type_alias_declaration"] and node.children \
                 and any(child.children for child in node.children):
             i, variable_declarator = _find_type(node, "variable_declarator")
             if variable_declarator and variable_declarator.children:
                 delimiter, _ = _find_type(variable_declarator, "=")
                 if delimiter:
-                    return variable_declarator.children[delimiter+1:] + node.children[i+1:]
+                    return variable_declarator.children[delimiter:] + node.children[i+1:]
+                else:
+                    end_delimiter, _ = _find_type(node, ";")
+                    if end_delimiter:
+                        return node.children[end_delimiter:]
+
+        if node.type == "return_statement":
+            return node.children[1:]
+
+        if node.type in ["jsx_element"]:
+            return node.children[1:]
+
+        if node.type in ["parenthesized_expression"]:
+            return node.children
 
         if node.type == "variable_declarator":
             delimiter, _ = _find_type(node, "=")
-            if delimiter:
-                return node.children[delimiter + 1:]
-
-        if node.type == "switch_rule":
-            delimiter, _ = _find_type(node, "->")
             if delimiter:
                 return node.children[delimiter + 1:]
 

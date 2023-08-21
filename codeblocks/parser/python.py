@@ -36,6 +36,9 @@ class PythonParser(CodeParser):
     def get_compound_node_types(self):
         return compound_node_types
 
+    def get_block_delimiter_types(self):
+        return block_delimiters
+
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         if node.type == "decorated_definition" and len(node.children) > 1:
             node = node.children[-1]
