@@ -9,6 +9,12 @@ COMMENTED_OUT_CODE_KEYWORDS = ["rest of the code", "existing code", "other code"
 
 child_block_types = ["ERROR", "block"]
 
+def _find_type(node: Node, type: str):
+    for i, child in enumerate(node.children):
+        if child.type == type:
+            return i, child
+    return None, None
+
 class CodeParser:
 
     def __init__(self,

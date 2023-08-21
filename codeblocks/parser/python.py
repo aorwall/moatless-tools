@@ -3,7 +3,7 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks import CodeBlockType, CodeBlock
-from codeblocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS
+from codeblocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS, _find_type
 
 compound_node_types = [
     "function_definition", "class_definition", "if_statement",
@@ -16,12 +16,6 @@ child_block_types = ["ERROR", "block"]
 block_delimiters = [
     ":"
 ]
-
-def _find_type(node: Node, type: str):
-    for i, child in enumerate(node.children):
-        if child.type == type:
-            return i
-    return None
 
 
 def _find_delimiter_index(node: Node):
@@ -73,12 +67,12 @@ class PythonParser(CodeParser):
             node = node.children[-1]
 
         if node.type == "assignment":
-            delimiter = _find_type(node, "=")
+            delimiter, _ = _find_type(node, "=")
             if delimiter:
                 return node.children[delimiter + 1:]
 
         if node.type == "dictionary":
-            delimiter = _find_type(node, "{")
+            delimiter, _ = _find_type(node, "{")
             if delimiter is not None:
                 return node.children[delimiter:]
 
