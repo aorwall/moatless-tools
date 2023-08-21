@@ -4,7 +4,7 @@ from tree_sitter import Node
 
 from codeblocks.codeblocks import CodeBlockType
 from codeblocks.parser.language import find_block_node
-from codeblocks.parser.parser import CodeParser
+from codeblocks.parser.parser import CodeParser, _find_type
 
 class_node_types = [
     "annotation_type_declaration",
@@ -54,6 +54,8 @@ class JavaParser(CodeParser):
             return CodeBlockType.STATEMENT
         elif node.type in block_delimiters:
             return CodeBlockType.BLOCK_DELIMITER
+        elif node.type == "import_declaration":
+            return CodeBlockType.IMPORT
         elif "comment" in node.type:
             if "..." in node.text.decode("utf8"):
                 return CodeBlockType.COMMENTED_OUT_CODE
@@ -74,6 +76,24 @@ class JavaParser(CodeParser):
             return node.children
 
         nodes = []
+        if node.type in ["local_variable_declaration", "field_declaration", "constant_declaration"] and node.children \
+                and any(child.children for child in node.children):
+            i, variable_declarator = _find_type(node, "variable_declarator")
+            if variable_declarator and variable_declarator.children:
+                delimiter, _ = _find_type(variable_declarator, "=")
+                if delimiter:
+                    return variable_declarator.children[delimiter+1:] + node.children[i+1:]
+
+        if node.type == "variable_declarator":
+            delimiter, _ = _find_type(node, "=")
+            if delimiter:
+                return node.children[delimiter + 1:]
+
+        if node.type == "switch_rule":
+            delimiter, _ = _find_type(node, "->")
+            if delimiter:
+                return node.children[delimiter + 1:]
+
         block_node = find_block_node(node)
         if block_node:
             nodes.extend(block_node.children)
