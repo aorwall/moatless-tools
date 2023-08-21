@@ -22,7 +22,7 @@ def test_react_tsx():
     parser = TypeScriptParser("tsx")
     codeblock = parser.parse(content)
 
-    print(codeblock.to_tree(include_tree_sitter_type=True))
+    print(codeblock.to_tree(include_tree_sitter_type=False))
 
     assert codeblock.to_tree() == expected_tree
 

@@ -19,6 +19,7 @@ public class Book {
     public Book(Long id, String title, String author) { // Updated constructor
         this.id = id;
         this.title = title;
+        this.author = author;
         this.publicationDate = publicationDate; // Added new field to constructor
     }
 

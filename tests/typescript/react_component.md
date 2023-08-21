@@ -1,3 +1,5 @@
+# Chunk 1
+```tsx
 import React, { useState } from 'react';
 
 // Define a type for the props
@@ -6,6 +8,14 @@ interface MyComponentProps {
 }
 
 // Define the component
+// ...
+```
+
+# Chunk 2
+```tsx
+
+
+// ...
 const MyComponent: React.FC<MyComponentProps> = ({ initialCount = 0 }) => {
   // Use a state variable
   const [count, setCount] = useState(initialCount);
@@ -25,3 +35,6 @@ const MyComponent: React.FC<MyComponentProps> = ({ initialCount = 0 }) => {
 }
 
 export default MyComponent;
+
+```
+

@@ -286,7 +286,7 @@ class CodeBlock:
         if next_updated_incomplete:
             similar_block = self.most_similar_block(other_blocks[next_updated_incomplete], start_original)
             if similar_block:
-                print(f"Will return index for similar block `{other_blocks[similar_block].content}`")
+                print(f"Will return index for similar block `{self.children[similar_block].content}`")
                 return similar_block, next_updated_incomplete
 
         return len(original_blocks), len(other_blocks)
@@ -408,11 +408,11 @@ class CodeBlock:
                         self.children = self.children[:i] + self.children[next_original_match:]
                 elif next_commented_out is not None and (not next_updated_match or next_commented_out < next_updated_match):
                     # if there is commented out code after the updated block,
-                    # we will insert the lines before in the original block
+                    # we will insert the lines before the commented out block in the original block
                     merge_tweaks.append("next_commented_out_insert")
                     self.insert_children(i, updated_block.children[j:next_commented_out])
-                    i += next_commented_out - j + 2
-                    j = next_commented_out + 1
+                    i += next_commented_out - j
+                    j = next_commented_out
                 elif next_updated_match:
                     # if there is a match in the updated block, we expect this to be an addition
                     # and insert the lines before in the original block
