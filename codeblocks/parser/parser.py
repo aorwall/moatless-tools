@@ -38,6 +38,9 @@ class CodeParser:
     def get_child_node_block_types(self):
         return child_block_types
 
+    def get_block_delimiter_types(self):
+        return []
+
     def get_compound_node_types(self) -> List[str]:
         return []
 
@@ -47,7 +50,6 @@ class CodeParser:
         if len(node.children) == 1 and node.children[0].type in self.get_compound_node_types():
             return False
         return True
-
 
     def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0) -> CodeBlock:
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
@@ -71,28 +73,37 @@ class CodeParser:
 
         code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
 
-        for child in child_nodes:
-            if child.type in self.get_child_node_block_types():
-                child_blocks = []
-                if child.children:
-                    for child_child in child.children:
-                        child_blocks.append(self.parse_code(content_bytes, child_child, start_byte=end_byte))
-                        end_byte = child_child.end_byte
-                if self._is_error(child):
-                    children.append(CodeBlock(
-                        type=CodeBlockType.ERROR,
-                        tree_sitter_type=node.type,
-                        start_line=node.start_point[0],
-                        end_line=end_line,
-                        pre_code=pre_code,
-                        content=code,
-                        children=child_blocks
-                    ))
+        if child_nodes and not any(child_node.children or child_node.type in self.get_block_delimiter_types()
+                                   for child_node in child_nodes):
+            children.append(CodeBlock(
+                type=CodeBlockType.CODE,
+                pre_code=content_bytes[end_byte:child_nodes[0].start_byte].decode(self.encoding),
+                content=content_bytes[child_nodes[0].start_byte:child_nodes[-1].end_byte].decode(self.encoding),
+                start_line=child_nodes[0].start_point[0],
+                end_line=child_nodes[-1].end_point[0],))
+        else:
+            for child in child_nodes:
+                if child.type in self.get_child_node_block_types():
+                    child_blocks = []
+                    if child.children:
+                        for child_child in child.children:
+                            child_blocks.append(self.parse_code(content_bytes, child_child, start_byte=end_byte))
+                            end_byte = child_child.end_byte
+                    if self._is_error(child):
+                        children.append(CodeBlock(
+                            type=CodeBlockType.ERROR,
+                            tree_sitter_type=node.type,
+                            start_line=node.start_point[0],
+                            end_line=end_line,
+                            pre_code=pre_code,
+                            content=code,
+                            children=child_blocks
+                        ))
+                    else:
+                        children.extend(child_blocks)
                 else:
-                    children.extend(child_blocks)
-            else:
-                children.append(self.parse_code(content_bytes, child, start_byte=end_byte))
-                end_byte = child.end_byte
+                    children.append(self.parse_code(content_bytes, child, start_byte=end_byte))
+                    end_byte = child.end_byte
 
         if not node.parent and child_nodes and child_nodes[-1].end_byte < node.end_byte:
             children.append(CodeBlock(
@@ -116,6 +127,6 @@ class CodeParser:
 
     def parse(self, content: str) -> CodeBlock:
         tree = self.tree_parser.parse(bytes(content, self.encoding))
-        codeblock = self.parse_code(content.encode(self.encoding), tree.root_node)
+        codeblock = self.parse_code(content.encode(self.encoding), tree.walk().node)
         codeblock.language = self.language
         return codeblock
