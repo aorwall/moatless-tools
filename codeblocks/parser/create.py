@@ -13,4 +13,5 @@ def create_parser(language: str) -> Optional[CodeParser]:
         return PythonParser()
     elif language == "typescript" or language == "tsx":
         return TypeScriptParser(language)
-    return None
+    else:
+        return CodeParser(language)

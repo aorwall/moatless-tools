@@ -1,7 +1,9 @@
 import copy
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Callable, Tuple
+from typing import List, Optional, Callable
+
+from codeblocks.parser.comment import get_comment_symbol
 
 
 class CodeBlockType(str, Enum):
@@ -180,10 +182,8 @@ class CodeBlock:
             content=self.create_comment("..."))
 
     def create_comment(self, comment: str) -> str:
-        if self.root().language == "python":
-            return f"# {comment}"
-        else:
-            return f"// {comment}"
+        symbol = get_comment_symbol(self.root().language)
+        return f"{symbol} {comment}"
 
     def add_indentation(self, indentation: str):
         if self.pre_lines:

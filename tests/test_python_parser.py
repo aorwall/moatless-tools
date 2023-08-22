@@ -17,7 +17,6 @@ def test_python_with_comment():
     assert code_blocks.to_string() == content
 
 
-
 def test_python_all_treesitter_types():
     with open("python/treesitter_types.py", "r") as f:
         content = f.read()

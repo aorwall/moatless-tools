@@ -3,7 +3,7 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks import CodeBlockType, CodeBlock
-from codeblocks.parser.parser import CodeParser, COMMENTED_OUT_CODE_KEYWORDS, _find_type
+from codeblocks.parser.parser import CodeParser, commented_out_keywords, _find_type
 
 compound_node_types = [
     "function_definition", "class_definition", "if_statement",
@@ -54,7 +54,7 @@ class PythonParser(CodeParser):
             return CodeBlockType.BLOCK_DELIMITER
         elif "comment" in node.type:
             comment = node.text.decode("utf8").strip()
-            if comment.startswith("# ...") or any(keyword in comment.lower() for keyword in COMMENTED_OUT_CODE_KEYWORDS):
+            if comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords):
                 return CodeBlockType.COMMENTED_OUT_CODE
             else:
                 return CodeBlockType.COMMENT
