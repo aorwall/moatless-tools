@@ -2,6 +2,19 @@
 ```python
 class Example:
 
+    my_variable = 10
+
+    # ...
+
+    addition = lambda self, a, b: a + b
+
+    # ...
+```
+
+# Chunk 2
+```python
+class Example:
+
     # ...
 
     def __init__(self):
@@ -10,7 +23,7 @@ class Example:
     # ...
 ```
 
-# Chunk 2
+# Chunk 3
 ```python
 class Example:
 
@@ -34,7 +47,7 @@ class Example:
     # ...
 ```
 
-# Chunk 3
+# Chunk 4
 ```python
 class Example:
 
@@ -55,7 +68,7 @@ class Example:
     # ...
 ```
 
-# Chunk 4
+# Chunk 5
 ```python
 class Example:
 
@@ -68,7 +81,7 @@ class Example:
     # ...
 ```
 
-# Chunk 5
+# Chunk 6
 ```python
 class Example:
 
@@ -81,7 +94,7 @@ class Example:
     # ...
 ```
 
-# Chunk 6
+# Chunk 7
 ```python
 class Example:
 
@@ -90,18 +103,5 @@ class Example:
     @classmethod
     def class_example_method(cls):
         print("Class method executed")
-```
-
-# Chunk 7
-```python
-class Example:
-
-    my_variable = 10
-
-    # ...
-
-    addition = lambda self, a, b: a + b
-
-    # ...
 ```
 

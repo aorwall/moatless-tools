@@ -1,5 +1,6 @@
 from codeblocks.codeblocks import CodeBlock, CodeBlockType
 from codeblocks.parser.parser import CodeParser
+from codeblocks.parser.typescript import TypeScriptParser
 from codeblocks.splitter import CodeSplitter
 
 java_code = CodeBlock(
@@ -92,7 +93,7 @@ def test_split_python_class():
     with open("python/example.md", "r") as f:
         expected = f.read()
 
-    splitter = CodeSplitter("python", max_chars=400)
+    splitter = CodeSplitter("python", max_chars=300)
 
     chunks = splitter.split_text(content)
 
@@ -108,14 +109,15 @@ def test_split_python_class():
     assert mkdown == expected
 
 
-
-def test_split_react_component():
+def test_split_react_component_todo_app():
     with open("typescript/todo.tsx", "r") as f:
         content = f.read()
 
-    with open("typescript/todo.tsx", "r") as f:
+    with open("typescript/todo.md", "r") as f:
         expected = f.read()
 
+    parser = TypeScriptParser("tsx")
+    print(parser.parse(content).to_tree(include_tree_sitter_type=True))
     splitter = CodeSplitter("tsx", max_chars=400)
     chunks = splitter.split_text(content)
 

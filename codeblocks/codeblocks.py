@@ -1,4 +1,5 @@
 import copy
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable
@@ -103,6 +104,9 @@ class CodeBlock:
             children=children
         )
 
+    def length_without_whitespace(self):
+        string_without_whitespace = re.sub(r'\s', '', self.to_string())
+        return len(string_without_whitespace)
 
     def to_string(self, include_types: List[CodeBlockType] = None):
         child_code = ""

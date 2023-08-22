@@ -10,18 +10,24 @@ commented_out_keywords = ["rest of the code", "existing code", "other code"]
 child_block_types = ["ERROR", "block"]
 module_types = ["program", "module"]
 
-def find_block_node(node: Node):
-    for child in node.children:
-        if child.type.endswith("block") or child.type.endswith("body"):
-            return child
-    return None
-
 
 def _find_type(node: Node, type: str):
     for i, child in enumerate(node.children):
         if child.type == type:
             return i, child
     return None, None
+
+
+def find_nested_type(node: Node, type: str):
+
+    if node.type == type:
+        return node
+    for child in node.children:
+        found_node = find_nested_type(child, type)
+        if found_node:
+            return found_node
+    return None
+
 
 class CodeParser:
 
@@ -33,6 +39,12 @@ class CodeParser:
             raise e
         self.encoding = encoding
         self.language = language
+
+    def find_block_node(self, node: Node):
+        for child in node.children:
+            if child.type.endswith("block") or child.type.endswith("body"):
+                return child
+        return None
 
     def get_block_type(self, node: Node) -> Optional[CodeBlockType]:
         if node.type in module_types:
@@ -68,7 +80,7 @@ class CodeParser:
         if delimiter_index != -1:
             return node.children[delimiter_index:]
 
-        block_node = find_block_node(node)
+        block_node = self.find_block_node(node)
         if block_node:
             nodes = block_node.children
             next_sibling = block_node.next_sibling

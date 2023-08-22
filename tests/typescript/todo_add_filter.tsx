@@ -6,7 +6,6 @@ enum Filter {
   Completed = 'COMPLETED',
 }
 
-// Main TodoApp component
 const TodoApp: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState<string>("");
