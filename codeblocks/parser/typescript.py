@@ -3,8 +3,8 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks.codeblocks import CodeBlockType, CodeBlock
-from codeblocks.parser.language import find_block_node
-from codeblocks.parser.parser import CodeParser, _find_type
+
+from codeblocks.parser.parser import CodeParser, _find_type, find_block_node
 
 class_node_types = [
     "class_declaration",
@@ -78,8 +78,7 @@ class TypeScriptParser(CodeParser):
             return node.children
 
         nodes = []
-        if node.type in ["lexical_declaration", "type_alias_declaration"] and node.children \
-                and any(child.children for child in node.children):
+        if node.type == "lexical_declaration":
             i, variable_declarator = _find_type(node, "variable_declarator")
             if variable_declarator and variable_declarator.children:
                 delimiter, _ = _find_type(variable_declarator, "=")
@@ -89,6 +88,11 @@ class TypeScriptParser(CodeParser):
                     end_delimiter, _ = _find_type(node, ";")
                     if end_delimiter:
                         return node.children[end_delimiter:]
+
+        if node.type == "type_alias_declaration":
+            delimiter, _ = _find_type(node, "=")
+            if delimiter:
+                return node.children[delimiter:]
 
         if node.type == "return_statement":
             return node.children[1:]

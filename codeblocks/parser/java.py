@@ -3,8 +3,7 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks.codeblocks import CodeBlockType
-from codeblocks.parser.language import find_block_node
-from codeblocks.parser.parser import CodeParser, _find_type
+from codeblocks.parser.parser import CodeParser, _find_type, find_block_node
 
 class_node_types = [
     "annotation_type_declaration",

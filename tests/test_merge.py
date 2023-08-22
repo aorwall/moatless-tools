@@ -1,4 +1,4 @@
-from codeblocks import create_parser
+from codeblocks.parser.create import create_parser
 
 
 def verify_merge(original_file, updated_file, expected_file, language):

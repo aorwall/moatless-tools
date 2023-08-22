@@ -1,7 +1,7 @@
 from codeblocks.parser.typescript import TypeScriptParser
 
 
-def test_all_treesitter_types():
+def test_typescript_treesitter_types():
     with open("typescript/treesitter_types.ts", "r") as f:
         content = f.read()
     with open("typescript/treesitter_types_expected.txt", "r") as f:
@@ -9,6 +9,18 @@ def test_all_treesitter_types():
 
     parser = TypeScriptParser()
     codeblock = parser.parse(content)
+
+    assert codeblock.to_tree() == expected_tree
+
+def test_javascript_treesitter_types():
+    with open("typescript/treesitter_types.ts", "r") as f:
+        content = f.read()
+    with open("typescript/treesitter_types_expected.txt", "r") as f:
+        expected_tree = f.read()
+
+    parser = TypeScriptParser()
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=False))
 
     assert codeblock.to_tree() == expected_tree
 
