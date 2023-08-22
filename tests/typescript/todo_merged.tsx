@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 
-// TypeScript interfaces for our components
 interface Todo {
   id: number;
   text: string;
@@ -13,7 +12,6 @@ interface TodoProps {
   onToggle: (id: number) => void;
 }
 
-// Single TodoItem component
 const TodoItem: React.FC<TodoProps> = ({ todo, onDelete, onToggle }) => {
   return (
     <div>
@@ -34,7 +32,6 @@ enum Filter {
   Completed = 'COMPLETED',
 }
 
-// Main TodoApp component
 const TodoApp: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState<string>("");
@@ -42,7 +39,7 @@ const TodoApp: React.FC = () => {
 
   const addTodo = () => {
     const newTodo: Todo = {
-      id: Date.now(), // For simplicity, using timestamp as an ID
+      id: Date.now(),
       text: input,
       done: false,
     };

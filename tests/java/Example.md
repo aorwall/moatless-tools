@@ -2,6 +2,35 @@
 ```java
 package codeblocks.example;
 
+import java.util.Random;
+
+// ...
+```
+
+# Chunk 2
+```java
+package codeblocks.example;
+
+// ...
+
+public class Example {
+
+    int myVariable = 10;
+
+    // ...
+
+    MathOperation addition = (a, b) -> {
+        return a + b;
+    };
+
+    // ...
+}
+```
+
+# Chunk 3
+```java
+package codeblocks.example;
+
 // ...
 
 public class Example {
@@ -16,7 +45,7 @@ public class Example {
 }
 ```
 
-# Chunk 2
+# Chunk 4
 ```java
 package codeblocks.example;
 
@@ -42,11 +71,6 @@ public class Example {
             parameter++;
         }
 
-        do {
-            System.out.println("Do-while loop, parameter: " + parameter);
-            parameter--;
-        } while (parameter > 0);
-
         // ...
     }
 
@@ -54,7 +78,7 @@ public class Example {
 }
 ```
 
-# Chunk 3
+# Chunk 5
 ```java
 package codeblocks.example;
 
@@ -67,6 +91,11 @@ public class Example {
     public void myMethod(int parameter) {
 
         // ...
+
+        do {
+            System.out.println("Do-while loop, parameter: " + parameter);
+            parameter--;
+        } while (parameter > 0);
 
         switch (parameter) {
             case 1:
@@ -84,7 +113,7 @@ public class Example {
 }
 ```
 
-# Chunk 4
+# Chunk 6
 ```java
 package codeblocks.example;
 
@@ -114,7 +143,7 @@ public class Example {
 }
 ```
 
-# Chunk 5
+# Chunk 7
 ```java
 package codeblocks.example;
 
@@ -132,7 +161,7 @@ public class Example {
 }
 ```
 
-# Chunk 6
+# Chunk 8
 ```java
 package codeblocks.example;
 
@@ -150,7 +179,7 @@ public class Example {
 }
 ```
 
-# Chunk 7
+# Chunk 9
 ```java
 package codeblocks.example;
 
@@ -168,7 +197,7 @@ public class Example {
 }
 ```
 
-# Chunk 8
+# Chunk 10
 ```java
 package codeblocks.example;
 
@@ -186,7 +215,7 @@ public class Example {
 }
 ```
 
-# Chunk 9
+# Chunk 11
 ```java
 package codeblocks.example;
 
@@ -201,34 +230,5 @@ public class Example {
         example.myMethod(3);
     }
 }
-```
-
-# Chunk 10
-```java
-package codeblocks.example;
-
-// ...
-
-public class Example {
-
-    int myVariable = 10;
-
-    // ...
-
-    MathOperation addition = (a, b) -> {
-        return a + b;
-    };
-
-    // ...
-}
-```
-
-# Chunk 11
-```java
-package codeblocks.example;
-
-import java.util.Random;
-
-// ...
 ```
 

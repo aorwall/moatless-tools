@@ -3,7 +3,7 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks.codeblocks import CodeBlockType
-from codeblocks.parser.parser import CodeParser, _find_type, find_block_node
+from codeblocks.parser.parser import CodeParser, _find_type
 
 class_node_types = [
     "annotation_type_declaration",
@@ -93,7 +93,7 @@ class JavaParser(CodeParser):
             if delimiter:
                 return node.children[delimiter + 1:]
 
-        block_node = find_block_node(node)
+        block_node = self.find_block_node(node)
         if block_node:
             nodes.extend(block_node.children)
 
