@@ -1,7 +1,7 @@
 # Code Blocks
 
 Code Blocks is a simplified variant of [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) implemented to simplify the
-handling of code read and written by a LLM. The two main use cases are merging of incomplete code written by the LLM and 
+handling of code read and written by an LLM. The two main use cases are merging of incomplete code written by the LLM and 
 splitting up code for embedding and indexing in a vector store.
 
 ## Merging
@@ -14,6 +14,9 @@ This is done by applying a number of not entirely scientific methods. The
 merging process involves comparing the original and updated code blocks, 
 identifying the differences, and merging them into a single, updated code block.
 
+Examples and explanations of merge strategies:
+- [Add new field to Java bean](docs/add_new_field_to_java_bean.md)
+
 ## Splitting
 In order to index code in a vector store, it must first be split into blocks. 
 Code Blocks attempts to do this by dividing the code into code blocks based 
@@ -25,6 +28,7 @@ in the vector store, allowing for more efficient storage and retrieval of code.
 For examples of how Code Blocks splits code into chunks, see the following examples:
 - [Java Example](tests/java/Example.md)
 - [Python Example](tests/python/example.md)
+- [TypeScript and React Example](tests/typescript/todo.md)
 
 ## Supported Languages
 - [x] Python

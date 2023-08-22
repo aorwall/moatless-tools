@@ -127,6 +127,8 @@ class CodeBlock:
 
         return f"{content}{child_code}"
 
+
+
     def to_tree(self, indent: int = 0, include_tree_sitter_type: bool = False):
         child_tree = "".join([
             child.to_tree(indent=indent+1, include_tree_sitter_type=include_tree_sitter_type)
@@ -385,6 +387,16 @@ class CodeBlock:
                     print(f"Updated block with definition `{updated_block_child.content}` is not complete")
                     if similar_original_block == i:
                         merge_tweaks.append("replace_similar")
+
+                        original_block_child = CodeBlock(
+                            content=updated_block_child.content,
+                            pre_code=updated_block_child.pre_code,
+                            type=updated_block_child.type,
+                            parent=self.parent,
+                            children=original_block_child.children
+                        )
+
+                        self.children[i]= original_block_child
 
                         print(f"Will replace similar original block definition: `{original_block_child.content}`")
                         child_tweaks = original_block_child.merge(updated_block_child)
