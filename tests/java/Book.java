@@ -20,7 +20,10 @@ public class Book {
         this.author = author;
     }
 
-    // Getters
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public Long getId() {
         return id;
     }
@@ -29,17 +32,12 @@ public class Book {
         return title;
     }
 
-    public String getAuthor() {
-        return author;
-    }
-
-    // Setters
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public void setTitle(String title) {
         this.title = title;
+    }
+
+    public String getAuthor() {
+        return author;
     }
 
     public void setAuthor(String author) {

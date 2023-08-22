@@ -21,15 +21,11 @@ public class Book {
         this.publicationDate = publicationDate; // Added new field to constructor
     }
 
-    // Getters
     // ...
 
     public LocalDate getPublicationDate() { // Added new getter
         return publicationDate;
     }
-
-    // Setters
-    // ...
 
     public void setPublicationDate(LocalDate publicationDate) { // Added new setter
         this.publicationDate = publicationDate;
