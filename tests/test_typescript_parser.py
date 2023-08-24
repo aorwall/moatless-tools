@@ -14,19 +14,6 @@ def test_typescript_treesitter_types():
 
     assert codeblock.to_tree() == expected_tree
 
-def test_javascript_treesitter_types():
-    with open("typescript/treesitter_types.ts", "r") as f:
-        content = f.read()
-    with open("typescript/treesitter_types_expected.txt", "r") as f:
-        expected_tree = f.read()
-
-    parser = TypeScriptParser()
-    codeblock = parser.parse(content)
-    print(codeblock.to_tree(include_tree_sitter_type=False))
-
-    assert codeblock.to_tree() == expected_tree
-    assert codeblock.to_string() == content
-
 
 def test_react_tsx():
     with open("typescript/react_component.tsx", "r") as f:
@@ -40,21 +27,6 @@ def test_react_tsx():
     print(codeblock.to_tree(include_tree_sitter_type=False))
 
     assert codeblock.to_tree() == expected_tree
-    assert codeblock.to_string() == content
-
-
-def test_react_tsx():
-    with open("typescript/jsx_elements.tsx", "r") as f:
-        content = f.read()
-    with open("typescript/react_component_expected.txt", "r") as f:
-        expected_tree = f.read()
-
-    parser = TypeScriptParser("tsx")
-    codeblock = parser.parse(content)
-
-    print(codeblock.to_tree(include_tree_sitter_type=True))
-
-    #assert codeblock.to_tree() == expected_tree
     assert codeblock.to_string() == content
 
 

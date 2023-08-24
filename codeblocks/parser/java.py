@@ -96,7 +96,6 @@ class JavaParser(CodeParser):
         block_node = self.find_block_node(node)
         if block_node:
             nodes.extend(block_node.children)
-
             next_sibling = block_node.next_sibling
             while next_sibling:
                 nodes.append(next_sibling)
