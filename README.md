@@ -16,6 +16,7 @@ identifying the differences, and merging them into a single, updated code block.
 
 Examples and explanations of merge strategies:
 - [Add new field to Java bean](docs/add_new_field_to_java_bean.md)
+- [Add a new feature to a React component](docs/new_feature_in_react_component.md)
 
 ## Splitting
 In order to index code in a vector store, it must first be split into blocks. 

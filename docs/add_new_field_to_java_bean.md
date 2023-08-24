@@ -1,5 +1,29 @@
 # Add field to Java bean
 
+## Merge strategies
+
+### Find next matching code block
+`import java.time.LocalDate` will be added to the top of the file as it isn't present in 
+the original file but the next line `import javax.persistence.Entity` are.
+
+`private LocalDate publicationDate` will be added previous to the next matching code block 
+`public Book()`.
+
+### Find most similar block if updated block is incomplete
+As the `public Book(Long id, String title, String author, LocalDate publicationDate)` is 
+has commented out code we expect it to replace an existing constructor. But as there are 
+no exact match we find the most similar one `public Book(Long id, String title, String author)`
+and merge it with the updated content.
+
+### Keep original code when updated code is commented out
+As there are comments that indicate that original code has been commented out before the 
+following blocks the original code will first be written out until a matching code block
+or a block delimiter (`}`) is found:
+* `this.publicationDate = publicationDate;`  
+* `public LocalDate getPublicationDate()`
+* `public void setPublicationDate(LocalDate publicationDate)`
+
+
 ## Original content
 ```java
 import java.time.LocalDate;
@@ -89,29 +113,6 @@ public class Book {
         this.publicationDate = publicationDate;
     }
 ```
-
-### Merge strategies
-
-#### Find next matching code block
-`import java.time.LocalDate` will be added to the top of the file as it isn't present in 
-the original file but the next line `import javax.persistence.Entity` are.
-
-`private LocalDate publicationDate` will be added previous to the next matching code block 
-`public Book()`.
-
-#### Find most similar block if updated block is incomplete
-As the `public Book(Long id, String title, String author, LocalDate publicationDate)` is 
-has commented out code we expect it to replace an existing constructor. But as there are 
-no exact match we find the most similar one `public Book(Long id, String title, String author)`
-and merge it with the updated content.
-
-#### Keep original code when code is commented out
-As there are comments that indicate that original code has been commented out before the 
-following blocks the original code will first be written out until a matching code block
-or a block delimiter (`}`) is found:
-* `this.publicationDate = publicationDate;`  
-* `public LocalDate getPublicationDate()`
-* `public void setPublicationDate(LocalDate publicationDate)`
 
 ## Merged file
 ```java
