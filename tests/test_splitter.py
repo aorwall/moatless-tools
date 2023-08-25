@@ -116,8 +116,6 @@ def test_split_react_component_todo_app():
     with open("typescript/todo.md", "r") as f:
         expected = f.read()
 
-    parser = TypeScriptParser("tsx")
-    print(parser.parse(content).to_tree(include_tree_sitter_type=True))
     splitter = CodeSplitter("tsx", max_chars=400)
     chunks = splitter.split_text(content)
 

@@ -34,8 +34,8 @@ For examples of how Code Blocks splits code into chunks, see the following examp
 ## Supported Languages
 - [x] Python
 - [x] Java
-- [X] TypeScript
-- [ ] JavaScript
+- [x] TypeScript
+- [x] JavaScript
 - [ ] ???
 
 ## Installation
