@@ -3,8 +3,9 @@ from typing import Optional, List
 from tree_sitter import Node
 
 from codeblocks.codeblocks import CodeBlockType, CodeBlock
+from codeblocks.parser.javascript import JavaScriptParser, block_delimiters
 
-from codeblocks.parser.parser import CodeParser, _find_type, find_nested_type
+from codeblocks.parser.parser import CodeParser, _find_type, find_nested_type, find_type
 
 class_node_types = [
     "class_declaration",
@@ -15,7 +16,8 @@ class_node_types = [
 
 function_node_types = [
     "method_definition",
-    "function_declaration"
+    "function_declaration",
+    "abstract_method_signature"
 ]
 
 statement_node_types = [
@@ -25,17 +27,8 @@ statement_node_types = [
     "return_statement"
 ]
 
-block_delimiters = [
-    "{",
-    "}",
-    "(",
-    ")",
-    ";"
-]
 
-
-
-class TypeScriptParser(CodeParser):
+class TypeScriptParser(JavaScriptParser):
 
     def __init__(self, language: str = "typescript"):
         super().__init__(language)
@@ -92,60 +85,8 @@ class TypeScriptParser(CodeParser):
                 return child
         return None
 
-    def get_child_nodes(self, node: Node) -> List[Node]:
-        if node.type == "program":
-            for i, child in enumerate(node.children):
-                if child.type == "package_declaration":
-                    if len(node.children) > i+1:
-                        return node.children[i+1:]
-            return node.children
+    def find_first_child_(self, node: Node) -> Optional[Node]:
+        if node.type in ["expression_statement"]:
+            node = node.children[0]
 
-        nodes = []
-        if node.type == "lexical_declaration":
-            i, variable_declarator = _find_type(node, "variable_declarator")
-            if variable_declarator and variable_declarator.children:
-                arrow_func = find_nested_type(node, "arrow_function")
-                if arrow_func:
-                    delimiter, _ = _find_type(arrow_func, "=>")
-                    return arrow_func.children[delimiter+1:] + self.get_next_siblings(variable_declarator.next_sibling)
-
-                delimiter, _ = _find_type(variable_declarator, "=")
-                if delimiter:
-                    return variable_declarator.children[delimiter:] + node.children[i+1:]
-                else:
-                    end_delimiter, _ = _find_type(node, ";")
-                    if end_delimiter:
-                        return node.children[end_delimiter:]
-
-        if node.type == "type_alias_declaration":
-            delimiter, _ = _find_type(node, "=")
-            if delimiter:
-                return node.children[delimiter:]
-
-        if node.type == "return_statement":
-            if len(node.children) > 1 and node.children[1].type == "parenthesized_expression":
-                return node.children[1].children + node.children[2:]
-            else:
-                return node.children[1:]
-
-        if node.type in ["jsx_element", "call_expression"]:
-            return node.children[1:]
-
-        if node.type in ["parenthesized_expression", "jsx_expression"]:
-            return node.children
-
-        if node.type == "variable_declarator":
-            delimiter, _ = _find_type(node, "=")
-            if delimiter:
-                return node.children[delimiter + 1:]
-
-        block_node = self.find_block_node(node)
-        if block_node:
-            nodes.extend(block_node.children)
-
-            next_sibling = block_node.next_sibling
-            while next_sibling:
-                nodes.append(next_sibling)
-                next_sibling = next_sibling.next_sibling
-
-        return nodes
+        return super().find_first_child(node)
