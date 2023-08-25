@@ -67,16 +67,6 @@ try {
   console.error('Caught an error:', error.message);
 }
 
-// 11. Promises and Async/Await
-const asyncFunction = async () => {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      resolve('Async function resolved');
-    }, 1000);
-  });
-};
-
-asyncFunction().then(console.log).catch(console.error);
 
 // 12. Destructuring
 const { key } = obj;
@@ -90,9 +80,7 @@ const newArray = [...array, 5];
 const message = `This is a number: ${number}`;
 
 // 15. Import/Export (common in modules)
-// Assuming this was in a module, you might have:
-// export { greet };
-// And in another module:
-// import { greet } from './path-to-this-file';
+export { greet };
+import { greet } from './path-to-this-file';
 
 console.log('Demonstration complete.');

@@ -48,6 +48,9 @@ class CodeBlock:
         for child in self.children:
             child.parent = self
 
+        if self.pre_code.strip():
+            raise ValueError("Expected pre_code to only contain spaces and line breaks. Got ", self.pre_code)
+
         pre_code_lines = self.pre_code.split("\n")
         self.pre_lines = len(pre_code_lines) - 1
         if self.pre_lines > 0:

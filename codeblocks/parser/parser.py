@@ -17,9 +17,15 @@ def _find_type(node: Node, type: str):
             return i, child
     return None, None
 
+def find_type(node: Node, types: List[str]):
+    if node.type in types:
+        return node
+    for child in node.children:
+        if child.type in types:
+            return child
+    return None
 
 def find_nested_type(node: Node, type: str):
-
     if node.type == type:
         return node
     for child in node.children:
@@ -192,3 +198,4 @@ class CodeParser:
         codeblock = self.parse_code(content.encode(self.encoding), tree.walk().node)
         codeblock.language = self.language
         return codeblock
+
