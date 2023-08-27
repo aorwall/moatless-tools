@@ -10,7 +10,7 @@ def test_typescript_treesitter_types():
     parser = TypeScriptParser()
     codeblock = parser.parse(content)
 
-    print(codeblock.to_tree(include_tree_sitter_type=False))
+    print(codeblock.to_tree(include_tree_sitter_type=True))
 
     assert codeblock.to_tree() == expected_tree
 

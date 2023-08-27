@@ -5,6 +5,17 @@ from codeblocks.parser.python import PythonParser
 
 parser = PythonParser()
 
+def test_python_calculator():
+    with open("python/calculator.py", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    print(code_blocks.to_string())
+
+    assert code_blocks.to_string() == content
 
 def test_python_with_comment():
     with open("python/calculator_insert1.py", "r") as f:
@@ -12,10 +23,31 @@ def test_python_with_comment():
 
     code_blocks = parser.parse(content)
 
-    print(code_blocks.to_tree())
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
 
     assert code_blocks.to_string() == content
 
+def test_python_with_comment_2():
+    with open("python/calculator_insert2.py", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+
+
+def test_python_example():
+    with open("python/example.py", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
 
 def test_python_all_treesitter_types():
     with open("python/treesitter_types.py", "r") as f:
@@ -25,15 +57,33 @@ def test_python_all_treesitter_types():
 
     code_blocks = parser.parse(content)
 
+    print(code_blocks.to_tree(include_tree_sitter_type=False))
+
     assert code_blocks.to_tree() == expected_tree
     assert code_blocks.to_string() == content
 
 
 def test_expression_list():
-    code_blocks = parser.parse("1, 2, 3, 4, 5")
+    code_blocks = parser.parse("1, 2, 3")
     assert code_blocks.to_tree() == """ 0 module ``
-  1 code `1, 2, 3, 4, 5`
+  1 code `1`
+  1 code `,`
+  1 code `2`
+  1 code `,`
+  1 code `3`
 """
+
+
+def test_outer_inner_def():
+    codeblocks = parser.parse("""def outer():
+    x = 10
+    def inner():
+        nonlocal x
+        x = 20
+    inner()
+    print(x)
+""")
+    print(codeblocks.to_tree(include_tree_sitter_type=True))
 
 
 def test_python_has_error_blocks():
@@ -42,11 +92,11 @@ def test_python_has_error_blocks():
 
     code_blocks = parser.parse(content)
 
-    print(code_blocks.to_tree())
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+    print(code_blocks.find_errors()[0].to_string())
 
     assert len(code_blocks.find_errors()) == 1
     assert code_blocks.find_errors()[0].to_string() == """
-        for item in data
             # ...
             elif item[0] == EDGE:"""
 

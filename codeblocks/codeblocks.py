@@ -130,11 +130,9 @@ class CodeBlock:
 
         return f"{content}{child_code}"
 
-
-
     def to_tree(self, indent: int = 0, include_tree_sitter_type: bool = False):
         child_tree = "".join([
-            child.to_tree(indent=indent+1, include_tree_sitter_type=include_tree_sitter_type)
+            child.to_tree(indent=indent + 1, include_tree_sitter_type=include_tree_sitter_type)
             for child in self.children])
         indent_str = " " * indent
 
@@ -156,7 +154,7 @@ class CodeBlock:
             "type": self.type,
             "tree_sitter_type": self.tree_sitter_type,
             "pre_code": self.pre_code,
-            #"is_nested": self.is_nested,
+            # "is_nested": self.is_nested,
             "children": [child.to_dict() for child in self.children]
         }
 
@@ -342,7 +340,8 @@ class CodeBlock:
                 self.children = updated_block.children
                 return ["replace"]
         if self.has_all_matching_children(updated_block.children, 0) and updated_block.is_complete():
-            print("All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
+            print(
+                "All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
             self.children = updated_block.children
             return []
 
@@ -399,7 +398,7 @@ class CodeBlock:
                             children=original_block_child.children
                         )
 
-                        self.children[i]= original_block_child
+                        self.children[i] = original_block_child
 
                         print(f"Will replace similar original block definition: `{original_block_child.content}`")
                         child_tweaks = original_block_child.merge(updated_block_child)
@@ -425,7 +424,8 @@ class CodeBlock:
                         merge_tweaks.append("next_original_match_replace")
                         # if it's not on the first level we expect the blocks to be replaced
                         self.children = self.children[:i] + self.children[next_original_match:]
-                elif next_commented_out is not None and (not next_updated_match or next_commented_out < next_updated_match):
+                elif next_commented_out is not None and (
+                        not next_updated_match or next_commented_out < next_updated_match):
                     # if there is commented out code after the updated block,
                     # we will insert the lines before the commented out block in the original block
                     merge_tweaks.append("next_commented_out_insert")
