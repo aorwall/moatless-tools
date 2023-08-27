@@ -18,7 +18,8 @@ public class TreeSitterTypes implements ExampleInterface {
     }
 
     void literalsAndExpressions() {
-        int a = 4, String b = "4";
+        int a = 4, b = 3;
+        String b = "4";
         double decimal = 5.5;
 
         int intValue = (int) decimal;  // cast expression

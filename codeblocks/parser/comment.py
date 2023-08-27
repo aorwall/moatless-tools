@@ -42,8 +42,8 @@ comment_symbols = {
     "motorola 68000 assembly": ";",
     "nix": "#",
     "objective-c": "//",
-    "ocaml": "(*", # TODO ... *)
-    "pascal": "{", # TODO ... }
+    "ocaml": "(*",  # TODO ... *)
+    "pascal": "{",  # TODO ... }
     "perl": "#",
     "php": "//",
     "powershell": "#",
@@ -76,4 +76,3 @@ def get_comment_symbol(language):
     if language:
         return comment_symbols.get(language.lower(), None)
     return "//"
-

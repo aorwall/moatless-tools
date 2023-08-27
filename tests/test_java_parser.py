@@ -20,7 +20,7 @@ def test_all_type_sitter_types():
         expected_tree = f.read()
 
     code_blocks = parser.parse(content)
-    print(code_blocks.to_tree(include_tree_sitter_type=True))
+    print(code_blocks.to_tree(include_tree_sitter_type=False))
     assert code_blocks.to_string() == content
     assert code_blocks.to_tree() == expected_tree
 

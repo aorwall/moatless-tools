@@ -10,7 +10,7 @@ def test_javascript_treesitter_types():
         expected_tree = f.read()
 
     codeblock = parser.parse(content)
-    print(codeblock.to_tree(include_tree_sitter_type=True))
+    print(codeblock.to_tree(include_tree_sitter_type=False))
 
     assert codeblock.to_tree() == expected_tree
     assert codeblock.to_string() == content
@@ -27,4 +27,16 @@ def test_javascript_async_function():
 
     assert codeblock.to_tree() == expected_tree
     assert codeblock.to_string() == content
+
+
+def test_javascript_object_literal():
+    content = """const obj = {
+  key: 'value',
+  method() {
+    return 'This is a method';
+  }
+};
+"""
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
 
