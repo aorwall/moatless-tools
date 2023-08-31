@@ -1,0 +1,31 @@
+import time
+from typing import List
+
+from langchain.prompts.base import StringPromptValue
+from langchain.schema.language_model import BaseLanguageModel
+
+from ghostcoder.schema import Message, Stats
+
+
+class LLMWrapper:
+
+    def __init__(self, llm: BaseLanguageModel):
+        self.llm = llm
+
+    def generate(self, sys_prompt: str, messages: List[Message]) -> (str, Stats):
+        starttime = time.time()
+
+        prompt_value = "System: " + sys_prompt + "\n" + self.messages_to_prompt(messages)
+        result = self.llm.generate_prompt([StringPromptValue(text=prompt_value)])
+        content = result.generations[0][0].text
+        usage = Stats.from_dict(
+            prompt=self.__class__.__name__,
+            llm_output={},
+            duration=time.time() - starttime)
+        return content, usage
+
+    def messages_to_prompt(self, messages: List[Message], few_shot_example: bool = False):
+        llm_messages = ""
+        for message in messages:
+            llm_messages += "\n" + message.sender + ": " + str(message)
+        return llm_messages
