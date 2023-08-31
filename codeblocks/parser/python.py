@@ -22,12 +22,17 @@ class PythonParser(CodeParser):
     def __init__(self):
         super().__init__("python")
 
+    def get_first_child(self, node: Node):
+        if node.children:
+            return node.children[0]
+        return None
+
     def find_block_child(self, node: Node):
         delimiter = find_type(node, [":"])
         if not delimiter:
-            return node.children[0]
+            return self.get_first_child(node)
         if delimiter.next_sibling.type == "block":
-            return delimiter.next_sibling.children[0]
+            return self.get_first_child(delimiter.next_sibling)
         else:
             return delimiter.next_sibling
 
@@ -38,11 +43,11 @@ class PythonParser(CodeParser):
         if node.type == "decorated_definition" and len(node.children) > 1:
             node = node.children[-1]
 
-        if node.type == "block":
+        if node.type == "block" and node.children:
             node = node.children[0]
 
         if node.type == "module":
-            return CodeBlockType.MODULE, node.children[0]
+            return CodeBlockType.MODULE, self.get_first_child(node)
 
         if node.type == "function_definition":
             return CodeBlockType.FUNCTION, self.find_block_child(node)
@@ -67,7 +72,10 @@ class PythonParser(CodeParser):
             return CodeBlockType.STATEMENT, self.find_block_child(node)
 
         if node.type in ["return_statement"]:
-            return CodeBlockType.CODE, node.children[1]
+            if len(node.children) > 1:
+                return CodeBlockType.CODE, node.children[1]
+            else:
+                return CodeBlockType.CODE, None
 
         if node.type == "assignment":
             return CodeBlockType.CODE, find_type(node, ["="])

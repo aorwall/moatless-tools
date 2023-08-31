@@ -109,6 +109,13 @@ def test_merge_python_update_nested_function():
         "python/restapi_merged.py",
         "python")
 
+def test_merge_python_update_function_before_vars():
+    verify_merge(
+        "python/say.py",
+        "python/say_update.py",
+        "python/say_merged.py",
+        "python")
+
 def test_merge_typescript_react():
     verify_merge(
         "typescript/todo.tsx",

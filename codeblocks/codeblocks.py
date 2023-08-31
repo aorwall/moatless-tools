@@ -318,6 +318,13 @@ class CodeBlock:
             i += 1
         return max_i
 
+    def has_any_similarity(self, updated_block: "CodeBlock"):
+        if self.has_any_matching_child(updated_block.children, 0):
+            return True
+        elif self.find_nested_matching_block(updated_block):
+            return True
+        return False
+
     def merge(self, updated_block: "CodeBlock", first_level: bool = False) -> List[str]:
         print(f"Merging block `{self.type.value}: {self.content}` ({len(self.children)} children) with "
               f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
@@ -407,6 +414,8 @@ class CodeBlock:
                         j += 1
 
                         continue
+                    elif not similar_original_block:
+                        print(f"No most similar original block found to `{original_block_child.content}")
                     else:
                         print(f"Expected most similar original block to be `{original_block_child.content}, "
                               f"but was {self.children[similar_original_block].content}`")
