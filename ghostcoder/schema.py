@@ -12,7 +12,10 @@ class Item(BaseModel):
     type: str
 
     def to_history(self) -> str:
-        return str(self)
+        pass
+
+    def to_prompt(self, style: Optional[str] = None) -> str:
+        pass
 
 
 class TextItem(Item):
@@ -23,44 +26,60 @@ class TextItem(Item):
     def __str__(self) -> str:
         return self.text
 
+    def to_prompt(self, style: Optional[str] = None) -> str:
+        return self.text
 
-class FileItem(Item):
+
+class CodeItem(Item):
+    type: str = "code"
+    content: Optional[str] = Field(default=None, description="Code")
+    language: Optional[str] = Field(default=None, description="Programming language")
+
+    def to_prompt(self, style: Optional[str] = None) -> str:
+        if style == "llama" and self.language:
+            return f"[{self.language.upper()}]\n{self.content}\n[/{self.language.upper()}]\n"
+
+        if self.language:
+            return f"```{self.language}\n{self.content}\n```\n"
+
+        return f"```\n{self.content}\n```\n"
+
+
+class FileItem(CodeItem):
     type: str = "file"
     file_path: str = Field(default="", description="Path to file")
-    content: Optional[str] = Field(default=None, description="Content of file")
     readonly: bool = Field(default=False, description="Is the file readonly")
+
+    def __post_init__(self):
+        if self.language is None:
+            self.language = language_by_filename(self.file_path)
 
     def __str__(self) -> str:
         return self.to_prompt()
 
-    def to_prompt(self):
-        language = language_by_filename(self.file_path)
-
-        content = self.content
-
-        return f"Filepath: {self.file_path}\n```{language}\n{content}\n```"
+    def to_prompt(self, style: Optional[str] = None):
+        return f"Filepath: {self.file_path}\n{super().to_prompt(style=style)}"
 
     def to_history(self) -> str:
         return f"Filepath: {self.file_path}"
 
 
-class UpdatedFileItem(Item):
+class UpdatedFileItem(FileItem):
     type: str = "updated_file"
     file_path: str = Field(description="file to update or create")
-    content: str = Field(description="content of the file")
     diff: Optional[str] = Field(default=None, description="diff of the file change")
     error: Optional[str] = Field(default=None, description="error message")
     invalid: bool = Field(default=False, description="file is invalid")
 
-    def __str__(self) -> str:
-        language = language_by_filename(self.file_path)
+    def __post_init__(self):
+        if self.language is None:
+            self.language = language_by_filename(self.file_path)
 
-        if self.diff:
-            return f"I updated a file.\nFilepath: {self.file_path}\n```{language}\n{self.content}\n```"
-        elif self.error:
-            return f"I failed to update file.\nFilepath: {self.file_path}\n```{language}\n{self.content}\n```"
-        else:
-            return f"I added a new file.\nFilepath: {self.file_path}\n```{language}\n{self.content}\n```"
+    def to_prompt(self, style: Optional[str] = None):
+        return f"I updated file with Filepath: {self.file_path}\n{super().to_prompt(style=style)}"
+
+    def __str__(self) -> str:
+        return self.to_prompt()
 
     def to_history(self) -> str:
         return str(self)
@@ -80,6 +99,8 @@ class ItemHolder(BaseModel):
             item_type = item.get('type')
             if item_type == 'text':
                 parsed_items.append(TextItem(**item))
+            elif item_type == 'code':
+                parsed_items.append(CodeItem(**item))
             elif item_type == 'file':
                 parsed_items.append(FileItem(**item))
             elif item_type == 'updated_file':
@@ -103,7 +124,7 @@ class Stats(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_cost: float = 0.0
-    duration: int = 0
+    duration: float = 0.0
     extra: dict = {}
     metrics: dict = {}
 
@@ -168,6 +189,10 @@ class Message(ItemHolder):
 
     def __str__(self) -> str:
         return "\n".join([str(item) for item in self.items])
+
+    def to_prompt(self, style: Optional[str] = None) -> str:
+        return "\n".join([item.to_prompt(style=style) for item in self.items])
+
 
     def to_history(self):
         item_str = "\n".join([item.to_history() for item in self.items])

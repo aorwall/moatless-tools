@@ -11,7 +11,7 @@ from ghostcoder.actions.base import BaseAction
 from ghostcoder.actions.write_code.prompt import get_implement_prompt, FEW_SHOT_PYTHON_1
 from ghostcoder.filerepository import FileRepository
 from ghostcoder.llm.base import LLMWrapper
-from ghostcoder.schema import Message, FileItem, Stats, TextItem, UpdatedFileItem
+from ghostcoder.schema import Message, FileItem, Stats, TextItem, UpdatedFileItem, CodeItem
 from ghostcoder.utils import is_complete, language_by_filename
 
 
@@ -136,7 +136,7 @@ class WriteCodeAction(BaseAction):
         self.few_shot_prompt = few_shot_prompt
 
     def execute(self, message: Message, message_history: List[Message] = []) -> List[Message]:
-        logging.info("Running implementation prompt")
+        logging.info("Execute the Write Code Action")
         file_items = message.find_items_by_type(item_type="file")
         for file_item in file_items:
             if not file_item.content and self.repository:
@@ -167,7 +167,7 @@ class WriteCodeAction(BaseAction):
                 if file_block:
                     block = file_block
                 else:
-                    items.append(TextItem(text=f"\n```{block.language}\n{block.content}\n```"))
+                    items.append(CodeItem(language=block.language, content=block.content))
                     continue
 
             if isinstance(block, FileBlock):
@@ -182,20 +182,29 @@ class WriteCodeAction(BaseAction):
                 parser = None
                 try:
                     parser = create_parser(block.language)
+
                 except Exception as e:
                     logging.warning(f"Could not create parser for language {block.language}: {e}")
 
                 if parser:
-                    updated_block = parser.parse(updated_content)
+                    try:
+                        updated_block = parser.parse(updated_content)
+                    except Exception as e:
+                        logging.warning(f"Could not parse updated content: {e}")
+                        stats.increment("invalid_code_block")
+                        logging.info("The updated file {} has errors. ".format(block.file_path))
+                        retry_input = f"You returned a file with the following invalid code blocks: \n" + updated_content
+                        retry_inputs.append(TextItem(text=retry_input))
+                        continue
+
                     error_blocks = updated_block.find_errors()
                     if error_blocks:
                         stats.increment("files_with_errors")
                         logging.info("The updated file {} has errors. ".format(block.file_path))
-                        retry_input = f"You returned a file with the following invalid code blocks: \n"
+                        retry_inputs.append(TextItem(text="You returned a file with the following invalid code blocks:"))
                         invalid = True
                         for error_block in error_blocks:
-                            retry_input += f"\nFilepath: {block.file_path}\n```\n{error_block.to_string()}\n```\n"
-                        retry_inputs.append(TextItem(text=retry_input))
+                            retry_inputs.append(CodeItem(language=block.language, content=error_block.to_string(), file_path=block.file_path))
                     elif original_file_item:
                         original_block = parser.parse(original_file_item.content)
                         gpt_tweaks = original_block.merge(updated_block, first_level=True)
@@ -211,11 +220,10 @@ class WriteCodeAction(BaseAction):
                         if error_blocks:
                             stats.increment("merged_files_with_errors")
                             logging.info("The merged file {} has errors..".format(block.file_path))
-                            retry_input = f"The merged contents from your file resulted in invalid code blocks: \n"
+                            retry_inputs.append(TextItem(text="The merged contents from your file resulted in invalid code blocks: "))
                             invalid = True
                             for error_block in error_blocks:
-                                retry_input += f"\nFilepath: {block.file_path}\n```\n{error_block.to_string()}\n```\n"
-                            retry_inputs.append(TextItem(text=retry_input))
+                                retry_inputs.append(CodeItem(language=block.language, content=error_block.to_string(),file_path=block.file_path))
 
                 if not retry_inputs and not is_complete(updated_content):
                     stats.increment("not_complete_file")
@@ -274,6 +282,8 @@ class WriteCodeAction(BaseAction):
         return ai_messages
 
     def code_to_file_block(self, block: CodeBlock, file_items: List[FileItem], stats: Stats) -> Optional[FileBlock]:
+        """Tries to find a file item that matches the code block."""
+
         for file_item in file_items:
             language = language_by_filename(file_item.file_path)
 

@@ -131,22 +131,10 @@ class FileRepository:
     def as_retriever(self, top_k: int):
         return self._index.as_retriever(similarity_top_k=top_k)
 
-    def get_files_as_string(self, file_paths: List[str]) -> str:
-        if len(file_paths) == 0:
-            return ""
-        formatted_blocks = [self._get_file_as_string(file_path)
-                            for file_path in file_paths]
-        return '\n'.join(formatted_blocks)
-
     def get_files_by_suffix(self, file_suffixes: List[str]) -> list[str]:
         return [file.path
                  for file in self.file_tree().traverse()
                  if any(file.path.endswith(suffix) for suffix in file_suffixes)]
-
-    def _get_file_as_string(self, file_path: str) -> str:
-        file = self.get_file_content(file_path)
-        language = language_by_filename(file_path)
-        return f"Filepath: {file_path}\n```{language}\n{file}\n```"
 
     def get_file_content(self, file_path: str) -> Optional[str]:
         if not os.path.exists(os.path.join(self.repo_path, file_path)):

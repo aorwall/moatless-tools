@@ -14,7 +14,7 @@ class AlpacaLLMWrapper(LLMWrapper):
 
         prompt_value = "### System Prompt\n" + sys_prompt + "\n\n"
         prompt_value += self.messages_to_prompt(messages)
-        prompt_value += "[/INST]"
+        prompt_value += "\n\n### Assistant\n"
 
         retry_decorator = create_base_retry_decorator(error_types=[ValueError], max_retries=5)
 

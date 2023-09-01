@@ -13,10 +13,10 @@ When you update or add a new file you must follow the rules below:
 * YOU MUST include all the original code in the updated files, even if it hasn't been altered.  
 * YOU SHOULD avoid adding any comments to the new code sections you are proposing.
 * ALL files should be presented in the following format:
-Filepath: file_path
-```language
-code
-```
+Filepath: path/to/file
+[PYTHON]
+# ... code 
+[/PYTHON]
 """
 
 FEW_SHOT_PYTHON_1 = [
