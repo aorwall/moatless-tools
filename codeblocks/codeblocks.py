@@ -28,6 +28,9 @@ class CodeBlockType(str, Enum):
     ERROR = "error"
 
 
+non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.SPACE]
+
+
 @dataclass
 class CodeBlock:
     content: str
@@ -462,3 +465,40 @@ class CodeBlock:
                 i += 1
 
         return merge_tweaks
+
+    def copy_with_trimmed_parents(self):
+        block_copy = CodeBlock(
+            type=self.type,
+            content=self.content,
+            pre_code=self.pre_code,
+            tree_sitter_type=self.tree_sitter_type,
+            children=self.children
+        )
+
+        if self.parent:
+            block_copy.parent = self.parent.trim_code_block(block_copy)
+        return block_copy
+
+    def trim_code_block(self, keep_child: "CodeBlock"):
+        children = []
+        for child in self.children:
+            if child.type == CodeBlockType.BLOCK_DELIMITER:
+                children.append(child)
+            elif child.content != keep_child.content: # TODO: Fix ID to compare to
+                if (child.type not in non_code_blocks and
+                        (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
+                    children.append(child.create_commented_out_block())
+            else:
+                children.append(keep_child)
+
+        trimmed_block = CodeBlock(
+            content=self.content,
+            pre_code=self.pre_code,
+            type=self.type,
+            children=children
+        )
+
+        if trimmed_block.parent:
+            trimmed_block.parent = self.parent.trim_code_block(trimmed_block)
+
+        return trimmed_block

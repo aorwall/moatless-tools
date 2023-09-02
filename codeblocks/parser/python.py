@@ -37,8 +37,8 @@ class PythonParser(CodeParser):
             return delimiter.next_sibling
 
     def get_block_definition(self, node: Node) -> Tuple[CodeBlockType, Optional[Node]]:
-        if node.type == "ERROR" and len(node.children) == 1:
-            node = node.children[0]
+        if node.type == "ERROR" or any(child.type == "ERROR" for child in node.children):
+            return CodeBlockType.ERROR, None
 
         if node.type == "decorated_definition" and len(node.children) > 1:
             node = node.children[-1]
@@ -85,8 +85,5 @@ class PythonParser(CodeParser):
 
         if node.type == "dictionary":
             return CodeBlockType.CODE, find_type(node, ["{"])
-
-        if node.type == "ERROR":
-            return CodeBlockType.ERROR, None
 
         return CodeBlockType.CODE, None

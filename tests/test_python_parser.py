@@ -38,7 +38,6 @@ def test_python_with_comment_2():
     assert code_blocks.to_string() == content
 
 
-
 def test_python_example():
     with open("python/example.py", "r") as f:
         content = f.read()
@@ -96,10 +95,31 @@ def test_python_has_error_blocks():
     print(code_blocks.find_errors()[0].to_string())
 
     assert len(code_blocks.find_errors()) == 1
-    assert code_blocks.find_errors()[0].to_string() == """
-            # ...
-            elif item[0] == EDGE:"""
+    assert code_blocks.find_errors()[0].to_string() == """for item in data:
+    # ...
+    elif item[0] == EDGE:
+        if len(item) != 3 or not isinstance(item[1], str) or not isinstance(item[2], str) or not isinstance(item[3], dict):
+            raise ValueError("Edge is malformed")
+        self.edges.append(Edge(item[1], item[2], item[3]))"""
 
+
+
+def test_python_has_two_error_blocks():
+    with open("python/proverb_replace.py", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert len(code_blocks.find_errors()) == 2
+    assert code_blocks.find_errors()[0].to_string() == """
+    for i in reversed(range(len(len(input_list)):
+        result.append(f"For {qualifier} of a {input_list[i]}")"""
+    assert code_blocks.find_errors()[1].to_string() == """
+    return "."""
+
+    print(code_blocks.find_errors()[0].copy_with_trimmed_parents().root().to_string())
 
 def test_python_if_and_indentation_parsing_2():
     with open("python/if_clause.py", "r") as f:
@@ -110,7 +130,6 @@ def test_python_if_and_indentation_parsing_2():
     print(code_blocks.to_tree())
 
     assert code_blocks.to_string() == content
-
 
 
 def test_python_two_classes():
