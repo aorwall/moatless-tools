@@ -2,8 +2,8 @@ from typing import Optional, Tuple
 
 from tree_sitter import Node
 
-from codeblocks import CodeBlockType
-from codeblocks.parser.parser import CodeParser, commented_out_keywords, find_type
+from codeblocks_gpt import CodeBlockType
+from codeblocks_gpt.parser.parser import CodeParser, commented_out_keywords, find_type
 
 statement_node_types = [
     "if_statement", "for_statement", "while_statement", "try_statement", "with_statement",

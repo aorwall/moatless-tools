@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable
 
-from codeblocks.parser.comment import get_comment_symbol
+from codeblocks_gpt.parser.comment import get_comment_symbol
 
 
 class CodeBlockType(str, Enum):

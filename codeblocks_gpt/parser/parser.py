@@ -3,8 +3,8 @@ from typing import List
 import tree_sitter_languages
 from tree_sitter import Node
 
-from codeblocks.codeblocks import CodeBlock, CodeBlockType
-from codeblocks.parser.comment import get_comment_symbol
+from codeblocks_gpt.codeblocks import CodeBlock, CodeBlockType
+from codeblocks_gpt.parser.comment import get_comment_symbol
 
 commented_out_keywords = ["rest of the code", "existing code", "other code"]
 child_block_types = ["ERROR", "block"]

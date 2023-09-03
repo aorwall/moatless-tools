@@ -2,8 +2,8 @@ from typing import Optional, Tuple
 
 from tree_sitter import Node
 
-from codeblocks.codeblocks import CodeBlockType
-from codeblocks.parser.parser import CodeParser, find_type, find_nested_type
+from codeblocks_gpt.codeblocks import CodeBlockType
+from codeblocks_gpt.parser.parser import CodeParser, find_type, find_nested_type
 
 class_node_types = [
     "annotation_type_declaration",

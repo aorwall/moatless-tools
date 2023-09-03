@@ -1,4 +1,4 @@
-from codeblocks.parser.javascript import JavaScriptParser
+from codeblocks_gpt.parser.javascript import JavaScriptParser
 
 
 class TypeScriptParser(JavaScriptParser):

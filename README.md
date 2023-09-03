@@ -49,7 +49,7 @@ pip install codeblocks-gpt
 Here is a basic example of how to use Code Blocks to split and merge code:
 
 ```python
-from codeblocks import create_parser, CodeSplitter
+from codeblocks_gpt import create_parser, CodeSplitter
 
 # Create a parser for the language of your code (e.g., Python)
 parser = create_parser("python")
