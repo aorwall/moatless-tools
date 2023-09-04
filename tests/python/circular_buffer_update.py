@@ -4,5 +4,5 @@ class BufferFullException(BufferError):
     message: explanation of the error.
 
     """
-    def __init__(self, message):
-        pass
+    def __init__(self, message="Circular buffer is full."):
+        super().__init__(message)

@@ -1,8 +1,8 @@
 import logging
 from typing import Optional, List
 
-from codeblocks_gpt.codeblocks import CodeBlock, CodeBlockType
-from codeblocks_gpt.parser.create import create_parser
+from codeblocks.codeblocks import CodeBlock, CodeBlockType
+from codeblocks.parser.create import create_parser
 
 non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.SPACE]
 

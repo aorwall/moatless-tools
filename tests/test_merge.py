@@ -116,6 +116,20 @@ def test_merge_python_update_function_before_vars():
         "python/say_merged.py",
         "python")
 
+def test_merge_python_update_function_with_comments():
+    verify_merge(
+        "python/word_search.py",
+        "python/word_search_update.py",
+        "python/word_search_merged.py",
+        "python")
+
+def test_merge_python_keep_line_break():
+    verify_merge(
+        "python/bank_account.py",
+        "python/bank_account_update.py",
+        "python/bank_account_merged.py",
+        "python")
+
 def test_merge_typescript_react():
     verify_merge(
         "typescript/todo.tsx",

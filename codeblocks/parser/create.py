@@ -1,9 +1,9 @@
 from typing import Optional
 
-from codeblocks_gpt.parser.java import JavaParser
-from codeblocks_gpt.parser.parser import CodeParser
-from codeblocks_gpt.parser.python import PythonParser
-from codeblocks_gpt.parser.typescript import TypeScriptParser
+from codeblocks.parser.java import JavaParser
+from codeblocks.parser.parser import CodeParser
+from codeblocks.parser.python import PythonParser
+from codeblocks.parser.typescript import TypeScriptParser
 
 
 def create_parser(language: str) -> Optional[CodeParser]:

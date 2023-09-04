@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable
 
-from codeblocks_gpt.parser.comment import get_comment_symbol
+from codeblocks.parser.comment import get_comment_symbol
 
 
 class CodeBlockType(str, Enum):
@@ -384,6 +384,10 @@ class CodeBlock:
             elif (original_block_child.content == updated_block_child.content and
                   original_block_child.children and updated_block_child.children):
                 child_tweaks = original_block_child.merge(updated_block_child)
+                if updated_block_child.pre_code:
+                    original_block_child.pre_code = updated_block_child.pre_code
+                    original_block_child.__post_init__()  # FIXME
+
                 merge_tweaks.extend(child_tweaks)
                 i += 1
                 j += 1
