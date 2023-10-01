@@ -1,6 +1,7 @@
 import time
 from typing import List
 
+from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chat_models.base import BaseChatModel
 from langchain.schema import SystemMessage, AIMessage, HumanMessage
 
@@ -14,17 +15,19 @@ class ChatLLMWrapper(LLMWrapper):
         super().__init__(llm)
         self.llm = llm
 
-    def generate(self, sys_prompt: str, messages: List[Message]) -> (str, Stats):
+    def generate(self, sys_prompt: str, messages: List[Message], callback: BaseCallbackHandler = None) -> (str, Stats):
         starttime = time.time()
         llm_messages = [SystemMessage(content=sys_prompt)]
 
         for message in messages:
             if message.sender == "AI":
-                llm_messages.append(AIMessage(content=str(message)))
+                llm_messages.append(AIMessage(content=message.to_prompt()))
             else:
-                llm_messages.append(HumanMessage(content=str(message)))
+                llm_messages.append(HumanMessage(content=message.to_prompt()))
 
-        result = self.llm.generate([llm_messages])
+        callbacks = [callback] if callback else []
+        result = self.llm.generate([llm_messages], callbacks=callbacks)
+
         content = result.generations[0][0].text
         usage = Stats.from_dict(
             prompt=self.__class__.__name__,
