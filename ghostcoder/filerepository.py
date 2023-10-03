@@ -150,9 +150,8 @@ class FileRepository:
         all_files = list(full_dir_path.rglob(file_pattern))
         file_paths = [
             file
-            for file in all_files
-            if file.is_file() and not any(part.startswith('.') for part in file.parts)
-               and (include_test_files or not (file.name.endswith(language_test_suffix[language])))
+            for file in all_files if file.is_file() and not any(part.startswith('.') for part in file.parts) and
+                                     (include_test_files or "test" not in file.name.lower())
         ]
 
         return [

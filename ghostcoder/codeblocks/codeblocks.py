@@ -95,15 +95,15 @@ class CodeBlock:
     def __str__(self):
         return str(self.to_dict())
 
-    def trim_code_block(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
+    def trim2(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
         children = []
         for child in self.children:
             if child.type == CodeBlockType.BLOCK_DELIMITER:
                 children.append(copy.copy(child))
-            elif self == show_block or (include_types and self.type in include_types):
-                children.append(child.trim_code_block(show_block, include_types))
+            elif self == show_block or (include_types and child.type in include_types):
+                children.append(child.trim2(show_block, include_types))
             elif child.has_nested_matching_block(show_block) or child.has_nested_blocks_with_types(include_types):
-                children.append(child.trim_code_block(show_block, include_types))
+                children.append(child.trim2(show_block, include_types))
             elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
                 children.append(child.create_commented_out_block())
 

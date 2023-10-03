@@ -113,3 +113,22 @@ class TestCustomerDatabase(unittest.TestCase):
 
 if __name__ == '__main__':
     #  ... rest of the code ... """
+
+def test_trim_with_function():
+    content = """def three_sum(nums, target):
+    pair_dict = {}
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            pair_sum = nums[i] + nums[j]
+            diff = target - pair_sum
+            if diff in nums and nums.index(diff) not in [i, j]:
+                return [i, j, nums.index(diff)]
+            pair_dict[pair_sum] = (i, j)
+    return []"""
+
+    code_block = parser.parse(content)
+    assert code_block.to_string() == content
+
+    trimmed_block = code_block.trim2(include_types=[CodeBlockType.FUNCTION])
+
+    print(trimmed_block.to_string())

@@ -45,7 +45,7 @@ class StreamCallback(BaseCallbackHandler):
             self.callback.ai_stream(token)
 
 
-def get_file_item(items: list, file_path: str):
+def get_file_item(items: list, file_path: str, similar: bool = False) -> Optional[FileItem]:
     equal_match = [item for item in items if "file" in item.type and item.file_path == file_path]
     if equal_match:
         return equal_match[0]
@@ -53,8 +53,8 @@ def get_file_item(items: list, file_path: str):
     similar_matches = [item for item in items if "file" in item.type and file_path in item.file_path]
     if len(similar_matches) == 1:
         return similar_matches[0]
-    else:
-        logger.info(f"Found {len(similar_matches)} similar matches for {file_path}: {similar_matches}, expected one")
+    elif len(similar_matches) > 1:
+        logger.debug(f"Found {len(similar_matches)} similar matches for {file_path}: {similar_matches}, expected one")
 
     return None
 

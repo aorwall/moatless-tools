@@ -56,6 +56,10 @@ def test_expect_one_file(mock_llm_wrapper):
     prompt = CodeWriter(llm=mock_llm_wrapper, expect_one_file=True)
     verify_execute(mock_llm_wrapper, "expect_one_file", "hello_world.py", prompt=prompt)
 
+def test_update_definition(mock_llm_wrapper):
+    prompt = CodeWriter(llm=mock_llm_wrapper, expect_one_file=True)
+    verify_execute(mock_llm_wrapper, "update_definition", "tic_tac_toe.py", prompt=prompt)
+
 def test_updated_content_is_invalid(mock_llm):
     with open(f"resources/invalid_content/response.txt", 'r') as f:
         response = f.read()

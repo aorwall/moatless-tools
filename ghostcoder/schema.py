@@ -43,7 +43,8 @@ class CodeItem(Item):
         if self.language:
             return f"```{self.language}\n{self.content}\n```"
 
-        return f"```\n{self.content}\n```"
+        content = self.content if self.content else ""
+        return f"```\n{content}\n```"
 
 
 class VerificationFailureItem(Item):

@@ -11,8 +11,8 @@ from ghostcoder.test_tools.test_tool import TestTool
 
 logger = logging.getLogger(__name__)
 
-class PythonPytestTestTool(TestTool):
 
+class PythonPytestTestTool(TestTool):
     def __init__(self,
                  test_file_pattern: str = "*.py",
                  current_dir: Optional[Path] = None,
@@ -37,7 +37,7 @@ class PythonPytestTestTool(TestTool):
         if self.callback:
             self.callback.display("Ghostcoder", f"Run tests with command `$ {command_str}` in directory `{self.current_dir}`")
 
-        logger.info(f"Run tests with command `$ {command_str}` in {self.current_dir}")
+        logger.info(f"Run tests with command: `$ {command_str}` in {self.current_dir}")
 
         try:
             result = subprocess.run(
@@ -74,6 +74,13 @@ class PythonPytestTestTool(TestTool):
                     verification_count=total_test_count,
                     message=f"{failed_tests_count} out of {total_test_count} tests failed.",
                     failures=failed_tests
+                )
+            elif "no tests ran" in output:
+                logger.info(f"No tests found.")
+                return VerificationResult(
+                    success=True,
+                    verification_count=0,
+                    message=f"No tests found."
                 )
             else:
                 logger.warning(f"Tests failed to run. \nOutput from {command_str}:\n{output}")
