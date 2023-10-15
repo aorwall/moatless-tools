@@ -40,10 +40,11 @@ class CodeItem(Item):
         if style == "llama" and self.language:
             return f"[{self.language.upper()}]\n{self.content}\n[/{self.language.upper()}]\n"
 
+        content = self.content if self.content else "# ... "
+
         if self.language:
             return f"```{self.language}\n{self.content}\n```"
 
-        content = self.content if self.content else ""
         return f"```\n{content}\n```"
 
 
@@ -57,7 +58,14 @@ class VerificationFailureItem(Item):
 
     def to_prompt(self, style: Optional[str] = None):
         code = "" if not self.test_code else f"```\n{self.test_code}\n```"
-        return (f"Test method `{self.test_class}.{self.test_method}` in `{self.test_file}` failed."
+
+        if self.test_method:
+            method = f"{self.test_class}.{self.test_method}" if self.test_class else f"{self.test_method}"
+            header = f"Test method `{method}` in `{self.test_file}` failed."
+        else:
+            header = f"Tests in `{self.test_file}` failed."
+
+        return (f"{header}"
                 f"\n{code} "
                 f"\nOutput:\n```\n{self.output}\n```")
 
@@ -87,7 +95,7 @@ class FileItem(CodeItem):
         if self.readonly:
             readonly_str = " (readonly)"
 
-        return f"{self.file_path}{readonly_str}\n{super().to_prompt(style=style)}"
+        return f"\n{self.file_path}{readonly_str}\n{super().to_prompt(style=style)}"
 
     def to_history(self) -> str:
         return f"{self.file_path}"

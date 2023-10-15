@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class PythonPytestTestTool(TestTool):
     def __init__(self,
-                 test_file_pattern: str = "*.py",
+                 test_file_pattern: str = "*",
                  current_dir: Optional[Path] = None,
                  callback: DisplayCallback = None,
                  timeout: Optional[int] = 30):
@@ -29,7 +29,9 @@ class PythonPytestTestTool(TestTool):
 
     def run_tests(self) -> VerificationResult:
         command = [
-            "pytest"
+            "pytest",
+            "-v",
+            self.test_file_pattern
         ]
 
         command_str = " ".join(command)
@@ -45,6 +47,7 @@ class PythonPytestTestTool(TestTool):
                 cwd=self.current_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                shell=True,
                 text=True,
                 timeout=self.timeout)
         except subprocess.TimeoutExpired as e:
@@ -59,6 +62,7 @@ class PythonPytestTestTool(TestTool):
             )
 
         output = result.stdout
+        output = output.replace(str(self.current_dir), "")
 
         failed_tests_count, passed_tests_count = self.parse_test_results(output)
         total_test_count = failed_tests_count + passed_tests_count
@@ -80,7 +84,7 @@ class PythonPytestTestTool(TestTool):
                 return VerificationResult(
                     success=True,
                     verification_count=0,
-                    message=f"No tests found."
+                    message=f""
                 )
             else:
                 logger.warning(f"Tests failed to run. \nOutput from {command_str}:\n{output}")
@@ -137,39 +141,51 @@ class PythonPytestTestTool(TestTool):
         test_code = None
 
         failures = []
+        extract_output = False
         extract = False
-        for line in data.split("\n"):
+        lines = data.split("\n")
+        for line in lines:
             if "= FAILURES =" in line:
                 extract = True
                 continue
 
             if extract:
-                test_file_search = re.search(r'(\w+\.py)', line)
+                # TODO Match on test_tic_tac_toe.py:12: AssertionError
+                test_file_search = re.search(r'^(\w+\.py)', line)
 
-                if line.startswith("=") or line.startswith("_"):
+                if line.startswith("="):
+                    failures.append(
+                        VerificationFailureItem(test_file=test_file, test_class=test_class, test_method=test_method,
+                                                output=test_output, test_code=test_code))
+                    return failures
+                elif line.startswith("_") or (line.startswith("-") and test_file):
                     match = re.search(r'(\w+)\.(\w+)', line)
-                    if match:
+                    single_match = re.search(r'_\s(\w+)\s_', line)
+
+                    if match or single_match:
                         if test_file:
                             failures.append(
-                                VerificationFailureItem(test_file=test_file, test_class=test_class, test_method=test_method,
+                                VerificationFailureItem(test_file=test_file, test_class=test_class,
+                                                        test_method=test_method,
                                                         output=test_output, test_code=test_code))
                             test_output = ""
                             test_code = None
                             test_file = None
 
-                        test_class = match.group(1)
-                        test_method = match.group(2)
-
-                    if line.startswith("="):
-                        failures.append(
-                            VerificationFailureItem(test_file=test_file, test_class=test_class, test_method=test_method,
-                                                    output=test_output, test_code=test_code))
-                        return failures
-
+                        if match:
+                            test_class = match.group(1)
+                            test_method = match.group(2)
+                        else:
+                            test_class = None
+                            test_method = single_match.group(1)
                 elif not test_file and test_file_search:
                     test_file = test_file_search.group(1)
+                    extract_output = False
                 elif line.startswith("E "):
                     test_output += line[2:].strip() + "\n"
+                    extract_output = True
+                elif extract_output:
+                    test_output += line.strip() + "\n"
                 elif not line.startswith("self") and line.strip() and not test_file:
                     if not test_code:
                         test_code = line

@@ -14,6 +14,7 @@ def create_openai_client(log_dir: Path, llm_name: str, temperature: float, strea
     logger.info(f"create_openai_client(): llm_name={llm_name}, temperature={temperature}, log_dir={log_dir}")
     return ChatLLMWrapper(ChatOpenAI(
         model=llm_name,
+        max_tokens=2000, # TODO Needed?
         temperature=temperature,
         streaming=streaming,
         callbacks=[callback]

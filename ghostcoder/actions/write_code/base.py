@@ -2,12 +2,15 @@ import difflib
 import logging
 import re
 from dataclasses import dataclass
+from enum import Enum
 from typing import List, Union, Tuple, Any
 from typing import Optional
 from uuid import UUID
 
 from langchain.callbacks.base import BaseCallbackHandler
+from langchain.output_parsers import PydanticOutputParser
 from langchain.schema.output import GenerationChunk, ChatGenerationChunk
+from pydantic.main import BaseModel
 
 from ghostcoder.actions.base import BaseAction
 from ghostcoder.actions.write_code.prompt import get_implement_prompt, ROLE_PROMPT, FEW_SHOTS_PYTHON
@@ -20,11 +23,18 @@ from ghostcoder.utils import is_complete
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class CodeBlock:
+class CodeBlock(BaseModel):
     content: str
     language: str = None
     file_path: str = None
+
+class CodeChanges(BaseModel):
+    files: List[CodeBlock]
+
+# enum
+class OutputFormat(str, Enum):
+    TEXT = "text"
+    JSON = "json"
 
 
 class StreamCallback(BaseCallbackHandler):
@@ -172,6 +182,7 @@ class CodeWriter(BaseAction):
                  role_prompt: Optional[str] = None,
                  sys_prompt_id: Optional[str] = None,
                  sys_prompt: Optional[str] = None,
+                 output_format: str = OutputFormat.TEXT,
                  repository: FileRepository = None,
                  auto_mode: bool = False,
                  few_shot_prompt: bool = False,
@@ -189,10 +200,12 @@ class CodeWriter(BaseAction):
         self.tries = tries
         self.role_prompt = role_prompt
         self.few_shot_prompt = few_shot_prompt
+        self.output_format = output_format
         self.guess_similar_files = guess_similar_files
         self.expect_one_file = expect_one_file
         self.allow_hallucinations = allow_hallucinated_files
         self.callback = callback
+        self.output_parser = PydanticOutputParser(pydantic_object=CodeChanges)
 
     def execute(self, incoming_messages: List[Message]) -> List[Message]:
         outgoing_messages = self._execute(incoming_messages=incoming_messages, retry=0)
@@ -229,12 +242,66 @@ class CodeWriter(BaseAction):
         try:
             result, stats = self.generate(messages=incoming_messages, callback=StreamCallback(callback=self.callback))
         except Exception as e: # TODO: Handle context_length_exceeded...
-            return [Message(sender="Ghostcoder", items=[TextItem(text=str(e))])]
+            logger.error(f"Failed to generate code: {e}")
+            raise e
 
-        blocks = extract_response_parts(result)
+        if self.output_format == OutputFormat.JSON:
+            changes = self.output_parser.parse(result)
+            blocks = changes.files
+        else:
+            blocks = extract_response_parts(result)
 
+        items, retry_inputs = self.handle_response(blocks, file_items, stats)
+        updated_files_str = ""
+
+        did_changes = False
+        for item in items:
+            if item.type == "updated_file":
+                if not item.invalid and self.repository:
+                    try:
+                        diff = self.repository.update_file(item.file_path, item.content)
+                        did_changes = bool(diff)
+                        item.diff = diff
+                        if not did_changes:
+                            item.invalid = "no_change"
+                    except Exception as e:
+                        item.error = f"Failed to update file {item.file_path}: {e}"
+                        stats.increment("failed_to_update_file")
+                        logger.error(item.error)
+                updated_files_str += f"\n- {item.to_log()}"
+
+        if updated_files_str:
+            logger.info(f"Updated files: {updated_files_str}")
+        else:
+            logger.info(f"No updated files")
+
+        ai_message = Message(sender="AI", items=items, stats=stats)
+
+        if self.callback:
+            self.callback.display_message(ai_message)
+
+        outgoing_messages = [ai_message]
+
+        if self.auto_mode and retry_inputs:
+            retry += 1
+            retry_message = Message(sender="Ghostcoder", items=retry_inputs, auto=True)
+
+            if self.callback:
+                self.callback.display_message(retry_message)
+
+            logger.info(f"Found invalid input in the response.\n {retry_message.to_prompt()}")
+            outgoing_messages.append(retry_message)
+
+            if retry < self.tries:
+                logger.info(f"Retrying execution (try: {retry}/{self.tries})")
+                outgoing_messages.extend(self._execute(
+                    incoming_messages=incoming_messages + outgoing_messages,
+                    retry=retry + 1))
+
+        return outgoing_messages
+
+    def handle_response(self, blocks: List, file_items: List[FileItem], stats: Stats):
         retry_inputs = []
-
         items = []
         for block in blocks:
             if isinstance(block, CodeBlock):
@@ -284,53 +351,7 @@ class CodeWriter(BaseAction):
                         TextItem(text="You responded with a incomplete code block. "
                                       "Please provide the contents of the whole file in a code block closed with ```."))
 
-        updated_files_str = ""
-
-        did_changes = False
-        for item in items:
-            if item.type == "updated_file":
-                if not item.invalid and self.repository:
-                    try:
-                        diff = self.repository.update_file(item.file_path, item.content)
-                        did_changes = bool(diff)
-                        item.diff = diff
-                        if not did_changes:
-                            item.invalid = "no_change"
-                    except Exception as e:
-                        item.error = f"Failed to update file {item.file_path}: {e}"
-                        stats.increment("failed_to_update_file")
-                        logger.error(item.error)
-                updated_files_str += f"\n- {item.to_log()}"
-
-        if updated_files_str:
-            logger.info(f"Updated files: {updated_files_str}")
-        else:
-            logger.info(f"No updated files")
-
-        ai_message = Message(sender="AI", items=items, stats=stats)
-
-        if self.callback:
-            self.callback.display_message(ai_message)
-
-        outgoing_messages = [ai_message]
-
-        if self.auto_mode and retry_inputs:
-            retry += 1
-            retry_message = Message(sender="Ghostcoder", items=retry_inputs, auto=True)
-
-            if self.callback:
-                self.callback.display_message(retry_message)
-
-            logger.info(f"Found invalid input in the response.\n {retry_message.to_prompt()}")
-            outgoing_messages.append(retry_message)
-
-            if retry < self.tries:
-                logger.info(f"Retrying execution (try: {retry}/{self.tries})")
-                outgoing_messages.extend(self._execute(
-                    incoming_messages=incoming_messages + outgoing_messages,
-                    retry=retry + 1))
-
-        return outgoing_messages
+        return items, retry_inputs
 
     def set_file_path_to_block(self, block: CodeBlock, file_items: List[FileItem], stats: Stats):
         """Tries to find a file item that matches the code block."""
@@ -512,6 +533,9 @@ class CodeWriter(BaseAction):
             sys_prompt += ROLE_PROMPT + "\n"
 
         sys_prompt += self.sys_prompt
+
+        if self.output_format == OutputFormat.JSON:
+            sys_prompt += "\n" + self.output_parser.get_format_instructions()
 
         if self.few_shot_prompt:
             sys_prompt += "\n" + self.llm.messages_to_prompt(messages=FEW_SHOTS_PYTHON, few_shot_example=True)
