@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import tree_sitter_languages
 from tree_sitter import Node
@@ -59,6 +59,8 @@ class CodeParser:
     def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0) -> Tuple[CodeBlock, Node]:
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
         block_type, first_child, last_child = self.get_block_definition(node)
+
+        #  print("block_type: ", block_type, "first_child: ", first_child, "last_child: ", last_child)
 
         children = []
 
@@ -132,8 +134,22 @@ class CodeParser:
                 return self.get_parent_next(node.parent, orig_node)
         return None
 
+    def has_error(self, node: Node):
+        if node.type == "ERROR":
+            return True
+        if node.children:
+            return any(self.has_error(child) for child in node.children)
+        return False
+
     def parse(self, content: str) -> CodeBlock:
         tree = self.tree_parser.parse(bytes(content, self.encoding))
+
+        # FIXME: Ugly hack to fix functions with only commented out code
+        # if self.has_error(tree.walk().node):
+        #    codeblock, _ = self.parse_code(content.encode(self.encoding), tree.walk().node)
+        #    content = codeblock.to_string()
+        #    tree = self.tree_parser.parse(bytes(content, self.encoding))
+
         codeblock, _ = self.parse_code(content.encode(self.encoding), tree.walk().node)
         codeblock.language = self.language
         return codeblock

@@ -213,7 +213,7 @@ class CodeWriter(BaseAction):
         use_log = ""
         if stats:
             total_usage = sum(stats[1:], stats[0])
-            use_log = f"Used {total_usage.prompt_tokens} prompt tokens, {total_usage.prompt_tokens}. "
+            use_log = f"Used {total_usage.prompt_tokens} prompt tokens and {total_usage.completion_tokens} completion tokens. "
             if total_usage.total_cost:
                 use_log += f"Total cost: {total_usage.total_cost}. "
 
@@ -400,6 +400,7 @@ class CodeWriter(BaseAction):
 
         # Don't merge and mark as invalid if the file is readonly
         if existing_file_item and existing_file_item.readonly:
+            retry_inputs.append(TextItem(text=f"You updated the file `{block.file_path}` but it's marked as readonly. "))
             return UpdatedFileItem(
                 file_path=existing_file_item.file_path,
                 content=updated_content,
@@ -454,7 +455,9 @@ class CodeWriter(BaseAction):
                         CodeItem(language=block.language, content=error_block.to_string()))
             elif existing_file_item and not existing_file_item.readonly:
                 original_block = parser.parse(existing_file_item.content)
-                gpt_tweaks = original_block.merge(updated_block, first_level=True)
+                gpt_tweaks = original_block.merge(updated_block,
+                                                  first_level=True,
+                                                  replace_types=[CodeBlockType.FUNCTION, CodeBlockType.STATEMENT]) # TODO: Make this configurable
 
                 stats.increment("merged_file")
                 if gpt_tweaks:

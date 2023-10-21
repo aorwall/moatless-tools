@@ -43,7 +43,7 @@ class CodeItem(Item):
         content = self.content if self.content else "# ... "
 
         if self.language:
-            return f"```{self.language}\n{self.content}\n```"
+            return f"```{self.language}\n{content}\n```"
 
         return f"```\n{content}\n```"
 
@@ -52,22 +52,31 @@ class VerificationFailureItem(Item):
     type: str = "verification_failure"
     test_code: str = Field(default=None, description="Code of the test")
     output: str = Field(description="Output of the verification process")
+
     test_method: Optional[str] = Field(default=None, description="Test method")
     test_class: Optional[str] = Field(default=None, description="Test class")
     test_file: Optional[str] = Field(default=None, description="Test file")
+    test_linenumber: Optional[int] = Field(default=None, description="Test line number")
 
     def to_prompt(self, style: Optional[str] = None):
-        code = "" if not self.test_code else f"```\n{self.test_code}\n```"
+        code = "" if not self.test_code else f"```\n\n{self.test_code}\n```"
 
         if self.test_method:
             method = f"{self.test_class}.{self.test_method}" if self.test_class else f"{self.test_method}"
-            header = f"Test method `{method}` in `{self.test_file}` failed."
-        else:
+            header = f"Test method `{method}` in `{self.test_file}` failed"
+
+            if self.test_linenumber:
+                header += f" on line {self.test_linenumber}."
+            else:
+                header += "."
+        elif self.test_file:
             header = f"Tests in `{self.test_file}` failed."
+        else:
+            header = "Tests failed."
 
         return (f"{header}"
-                f"\n{code} "
-                f"\nOutput:\n```\n{self.output}\n```")
+                f"{code} "
+                f"\n```\n{self.output}```")
 
 
 class FileItem(CodeItem):
@@ -266,9 +275,11 @@ class Message(ItemHolder):
 
 
 class VerificationResult(BaseModel):
-    success: bool
+    success: bool = False
+    error: bool = False
     message: str = ""
     verification_count: int = 0
+    failed_tests_count: int = 0
     failures: List[VerificationFailureItem] = []
 
     def to_prompt(self):

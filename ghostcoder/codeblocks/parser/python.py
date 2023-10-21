@@ -42,8 +42,8 @@ class PythonParser(CodeParser):
 
             # Set indented lines as children, see test case test_python_function_with_only_comment
             next_sibling = node.next_sibling
-            while next_sibling and node.next_sibling.start_point[1] > node.start_point[0]:
-                if next_sibling.start_point[1] == node.start_point[0]:
+            while next_sibling and node.next_sibling.start_point[1] > node.start_point[1]:
+                if next_sibling.start_point[1] == node.start_point[1]:
                     return node.next_sibling, next_sibling
                 next_sibling = next_sibling.next_sibling
 
@@ -58,13 +58,20 @@ class PythonParser(CodeParser):
         if node.type == "decorated_definition" and len(node.children) > 1:
             node = node.children[-1]
 
+        block = None
         if node.type == "block" and node.children:
+            block = node
             node = node.children[0]
 
         if node.type == "module":
             return CodeBlockType.MODULE, self.get_first_child(node), self.get_last_child(node)
 
         if node.type == "function_definition":
+            if (node.children[-1].type == "block" and not node.children[-1].children and
+                    node.next_sibling and self.is_outcommented_code(node.next_sibling) and
+                    node.next_sibling.start_point[1] > node.start_point[1]):
+                return CodeBlockType.COMMENTED_OUT_CODE, node.next_sibling, node.next_sibling
+
             first, last = self.find_block_child(node)
             return CodeBlockType.FUNCTION, first, last
 
@@ -82,17 +89,16 @@ class PythonParser(CodeParser):
             return CodeBlockType.BLOCK_DELIMITER, None, None
 
         if "comment" in node.type:
-            comment = node.text.decode("utf8").strip()
-            if comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords):
+            if self.is_outcommented_code(node):
                 return CodeBlockType.COMMENTED_OUT_CODE, None, None
             else:
                 return CodeBlockType.COMMENT, None, None
 
         if node.type in statement_node_types:
-            first, last = self.find_block_child(node)
+            first, last = self.find_block_child(block if block else node)
             return CodeBlockType.STATEMENT, first, last
 
-        if node.type in ["return_statement"]:
+        if node.type in ["return_statement", "raise_statement"]:
             if len(node.children) > 1:
                 return CodeBlockType.CODE, node.children[1], node.children[-1]
             else:
@@ -108,3 +114,7 @@ class PythonParser(CodeParser):
             return CodeBlockType.CODE, find_type(node, ["{"]), self.get_last_child(node)
 
         return CodeBlockType.CODE, None, None
+
+    def is_outcommented_code(self, node):
+        comment = node.text.decode("utf8").strip()
+        return comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords)

@@ -120,6 +120,9 @@ class CodeBlock:
         return len(string_without_whitespace)
 
     def to_string(self, include_types: List[CodeBlockType] = None):
+        if self.type == CodeBlockType.COMMENTED_OUT_CODE and self.children:
+            return self.create_commented_out_block().to_string()
+
         child_code = ""
         if include_types:
             for child in self.children:
@@ -358,7 +361,7 @@ class CodeBlock:
         return max_i
 
 
-    def merge(self, updated_block: "CodeBlock", first_level: bool = False) -> List[str]:
+    def merge(self, updated_block: "CodeBlock", first_level: bool = False, replace_types: List[CodeBlockType] = None) -> List[str]:
         logging.debug(f"Merging block `{self.type.value}: {self.content}` ({len(self.children)} children) with "
               f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
 
@@ -371,7 +374,7 @@ class CodeBlock:
                 indentation = matching_block.indentation
                 updated_block.add_indentation(indentation)
 
-                child_tweaks = matching_block.parent.merge(updated_block, first_level=True)
+                child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
                 return child_tweaks + ["find_nested"]
             else:
                 logging.debug(
@@ -384,6 +387,11 @@ class CodeBlock:
                 "All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
             self.children = updated_block.children
             return []
+
+        if replace_types and self.type in replace_types and updated_block.is_complete():
+            logging.debug(f"Will replace complete blocks from type level {self.type}")
+            self.children = updated_block.children
+            return ["replace_from_level"]
 
         merge_tweaks = []
 
@@ -413,7 +421,7 @@ class CodeBlock:
                 merge_tweaks.append("commented_out")
             elif (original_block_child.content == updated_block_child.content and
                   original_block_child.children and updated_block_child.children):
-                child_tweaks = original_block_child.merge(updated_block_child)
+                child_tweaks = original_block_child.merge(updated_block_child, replace_types=replace_types)
                 if updated_block_child.indentation or updated_block_child.pre_lines:
                     original_block_child.indentation = updated_block_child.indentation
                     original_block_child.pre_lines = updated_block_child.pre_lines
@@ -445,7 +453,7 @@ class CodeBlock:
                         self.children[i] = original_block_child
 
                         logging.debug(f"Will replace similar original block definition: `{original_block_child.content}`")
-                        child_tweaks = original_block_child.merge(updated_block_child)
+                        child_tweaks = original_block_child.merge(updated_block_child, replace_types=replace_types)
                         merge_tweaks.extend(child_tweaks)
                         i += 1
                         j += 1
