@@ -59,6 +59,8 @@ class CodeBlock:
         self.pre_lines = len(pre_code_lines) - 1
         if self.pre_lines > 0:
             self.indentation = pre_code_lines[-1]
+        else:
+            self.indentation = self.pre_code
 
         self.content_lines = self.content.split("\n")
         if self.indentation and self.pre_lines:
@@ -371,8 +373,10 @@ class CodeBlock:
                 logging.debug(
                     f"Found matching children in original block `{self.type.value}: {self.content}`, "
                     f"will merge with updated children")
-                indentation = matching_block.indentation
-                updated_block.add_indentation(indentation)
+
+                if updated_block.indentation != matching_block.indentation:
+                    indentation = matching_block.indentation
+                    updated_block.add_indentation(indentation)
 
                 child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
                 return child_tweaks + ["find_nested"]

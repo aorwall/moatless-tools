@@ -1,0 +1,37 @@
+    def create_turn(self, game_id: str, turn: Turn) -> TurnResponse:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if len(game.ships) < 5:
+            raise ValueError("All ships must be placed before starting turns")
+
+        target_row = turn.target["row"]
+        target_column = ord(turn.target["column"]) - ord("A")
+
+        if (target_row, target_column) in game.board:
+            ship_type = game.board[(target_row, target_column)]
+            game.board[(target_row, target_column)] = "hit"
+            if all(value == "hit" for value in game.board.values() if value == ship_type):
+                game.turns.append(turn)  # Add the turn to the game's turns list
+                return TurnResponse(result="sunk", ship_type=ship_type)
+            else:
+                game.turns.append(turn)  # Add the turn to the game's turns list
+                return TurnResponse(result="hit", ship_type=ship_type)
+        else:
+            game.board[(target_row, target_column)] = "miss"
+            game.turns.append(turn)  # Add the turn to the game's turns list
+            return TurnResponse(result="miss", ship_type=None)
+
+    def get_winner(self, game_id: str) -> str:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if all(value == "hit" for value in game.board.values() if value in self.SHIP_LENGTHS):
+            if game.players:  # Check if there are players in the game
+                return game.players[0]  # Assuming player 1 always wins for simplicity
+            else:
+                return None
+        else:
+            return None

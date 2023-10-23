@@ -169,3 +169,6 @@ def test_merge_python_outcommented_block():
 
 def test_merge_python_outcommented_functions():
     verify_merge_dir("python/outcommented_functions", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+
+def test_merge_wrong_indentation():
+    verify_merge_dir("python/wrong_indentation", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])

@@ -1,0 +1,98 @@
+import uuid
+from typing import Dict, List
+
+from abstract_class import AbstractBattleship, Game, GameStatus, ShipPlacement, Turn, TurnResponse
+
+
+class Battleship(AbstractBattleship):
+    def __init__(self):
+        self.games: Dict[str, Game] = {}
+
+    def create_game(self) -> str:
+        game_id = str(uuid.uuid4())
+        self.games[game_id] = Game(game_id=game_id, players=[], board={}, ships=[], turns=[])
+        return game_id
+
+    def delete_game(self, game_id: str) -> None:
+        if game_id in self.games:
+            del self.games[game_id]
+
+    def get_game(self, game_id: str) -> Game:
+        return self.games.get(game_id)
+
+    def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if len(game.ships) == 5:
+            raise ValueError("All ships are already placed. Cannot place more ships.")
+
+        if placement.ship_type not in self.SHIP_LENGTHS:
+            raise ValueError("Invalid ship type")
+
+        if placement.direction not in ["horizontal", "vertical"]:
+            raise ValueError("Invalid ship direction")
+
+        start_row = placement.start["row"]
+        start_column = ord(placement.start["column"]) - ord("A")
+        ship_length = self.SHIP_LENGTHS[placement.ship_type]
+
+        if placement.direction == "horizontal":
+            if start_column + ship_length > 10:
+                raise ValueError("Ship extends beyond board boundaries")
+            for i in range(start_column, start_column + ship_length):
+                if (start_row, i) in game.board:
+                    raise ValueError("Ships cannot overlap")
+                game.board[(start_row, i)] = placement.ship_type
+        else:
+            if start_row + ship_length > 10:
+                raise ValueError("Ship extends beyond board boundaries")
+            for i in range(start_row, start_row + ship_length):
+                if (i, start_column) in game.board:
+                    raise ValueError("Ships cannot overlap")
+                game.board[(i, start_column)] = placement.ship_type
+
+        game.ships.append(placement)
+
+    def create_turn(self, game_id: str, turn: Turn) -> TurnResponse:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if len(game.ships) < 5:
+            raise ValueError("All ships must be placed before starting turns")
+
+        target_row = turn.target["row"]
+        target_column = ord(turn.target["column"]) - ord("A")
+
+        if (target_row, target_column) in game.board:
+            ship_type = game.board[(target_row, target_column)]
+            game.board[(target_row, target_column)] = "hit"
+            if all(value == "hit" for value in game.board.values() if value == ship_type):
+                return TurnResponse(result="sunk", ship_type=ship_type)
+            else:
+                return TurnResponse(result="hit", ship_type=ship_type)
+        else:
+            game.board[(target_row, target_column)] = "miss"
+            return TurnResponse(result="miss", ship_type=None)
+
+    def get_game_status(self, game_id: str) -> GameStatus:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if all(value == "hit" for value in game.board.values() if value in self.SHIP_LENGTHS):
+            return GameStatus(is_game_over=True, winner=None)
+        else:
+            return GameStatus(is_game_over=False, winner=None)
+
+    def get_winner(self, game_id: str) -> str:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if all(value == "hit" for value in game.board.values() if value in self.SHIP_LENGTHS):
+            return game.players[0]  # Assuming player 1 always wins for simplicity
+        else:
+            return None

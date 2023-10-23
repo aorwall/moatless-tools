@@ -189,6 +189,7 @@ class CodeWriter(BaseAction):
                  guess_similar_files: bool = True,
                  expect_one_file: bool = False,
                  allow_hallucinated_files: bool = False,
+                 expect_updated_code: bool = False,
                  callback: DisplayCallback = None,
                  tries: int = 2):
         if not sys_prompt:
@@ -204,6 +205,7 @@ class CodeWriter(BaseAction):
         self.guess_similar_files = guess_similar_files
         self.expect_one_file = expect_one_file
         self.allow_hallucinations = allow_hallucinated_files
+        self.expect_updated_code = expect_updated_code
         self.callback = callback
         self.output_parser = PydanticOutputParser(pydantic_object=CodeChanges)
 
@@ -260,10 +262,11 @@ class CodeWriter(BaseAction):
                 if not item.invalid and self.repository:
                     try:
                         diff = self.repository.update_file(item.file_path, item.content)
-                        did_changes = bool(diff)
                         item.diff = diff
-                        if not did_changes:
+                        if not bool(diff):
                             item.invalid = "no_change"
+                        else:
+                            did_changes = True
                     except Exception as e:
                         item.error = f"Failed to update file {item.file_path}: {e}"
                         stats.increment("failed_to_update_file")
@@ -281,6 +284,9 @@ class CodeWriter(BaseAction):
             self.callback.display_message(ai_message)
 
         outgoing_messages = [ai_message]
+
+        if self.expect_updated_code and not did_changes:
+            retry_inputs.append(TextItem(text="You did not update any files. Please update the code and try again."))
 
         if self.auto_mode and retry_inputs:
             retry += 1
