@@ -1,0 +1,46 @@
+# ...
+
+class Battleship(AbstractBattleship):
+    # ...
+
+    def create_ship_placement(self, game_id, placement):
+        game = self.get_game(game_id)
+        if len(game.ships) >= 5:
+            raise ValueError("All ships are already placed. Cannot place more ships.")
+
+        # Validate ship type
+        if placement.ship_type not in self.SHIP_LENGTHS:
+            raise ValueError("Invalid ship type")
+
+        # Validate ship direction
+        if placement.direction not in ["horizontal", "vertical"]:
+            raise ValueError("Invalid ship direction")
+
+        # Check for ship overlap and boundary extension
+        ship_length = self.SHIP_LENGTHS[placement.ship_type]
+        for i in range(ship_length):
+            row = placement.start["row"] + (i if placement.direction == "vertical" else 0)
+            column = ord(placement.start["column"]) - ord('A') + (i if placement.direction == "horizontal" else 0)
+            if not (1 <= row <= 10) or not (0 <= column <= 9):
+                raise ValueError("Ship extends beyond board boundaries")
+            if (row, column) in game.board:
+                raise ValueError("Ships cannot overlap")
+
+        game.ships.append(placement)
+
+    def create_turn(self, game_id, turn):
+        game = self.get_game(game_id)
+        if len(game.ships) < 5:
+            raise ValueError("All ships must be placed before starting turns")
+        game.turns.append(turn)
+        for ship in game.ships:
+            ship_length = self.SHIP_LENGTHS[ship.ship_type]
+            for i in range(ship_length):
+                row = ship.start["row"] + (i if ship.direction == "vertical" else 0)
+                column = ord(ship.start["column"]) - ord('A') + (i if ship.direction == "horizontal" else 0)
+                if (row, column) == (turn.target["row"], ord(turn.target["column"]) - ord('A')):
+                    game.board[(row, column)] = "hit"
+                    return TurnResponse(result="hit", ship_type=ship.ship_type)
+        return TurnResponse(result="miss", ship_type=None)
+
+    # ...

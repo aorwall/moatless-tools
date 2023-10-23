@@ -135,7 +135,7 @@ class UpdatedFileItem(FileItem):
     file_path: str = Field(description="file to update or create")
     error: Optional[str] = Field(default=None, description="error message")
     diff: Optional[str] = Field(default=None, description="diff of the file")
-    invalid: str = Field(default=None, description="file is invalid")
+    invalid: Optional[str] = Field(default=None, description="file is invalid")
     created: bool = Field(default=False, description="file is created")
 
     def to_prompt(self, style: Optional[str] = None):

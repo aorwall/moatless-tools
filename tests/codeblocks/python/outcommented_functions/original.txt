@@ -1,0 +1,45 @@
+import uuid
+from abstract_class import AbstractBattleship, Game, GameStatus, ShipPlacement, Turn, TurnResponse
+
+class Battleship(AbstractBattleship):
+    def __init__(self):
+        self.games = {}
+
+    def create_game(self):
+        game_id = str(uuid.uuid4())
+        self.games[game_id] = Game(game_id=game_id, players=["Player 1", "Player 2"], board={}, ships=[], turns=[])
+        return game_id
+
+    def delete_game(self, game_id):
+        del self.games[game_id]
+
+    def get_game(self, game_id):
+        return self.games.get(game_id)
+
+    def create_ship_placement(self, game_id, placement):
+        game = self.get_game(game_id)
+        if len(game.ships) >= 5:
+            raise ValueError("All ships are already placed. Cannot place more ships.")
+        game.ships.append(placement)
+
+    def create_turn(self, game_id, turn):
+        game = self.get_game(game_id)
+        if len(game.ships) < 5:
+            raise ValueError("All ships must be placed before starting turns")
+        game.turns.append(turn)
+        for ship in game.ships:
+            if ship.start["row"] == turn.target["row"] and ship.start["column"] == turn.target["column"]:
+                return TurnResponse(result="hit", ship_type=ship.ship_type)
+        return TurnResponse(result="miss", ship_type=None)
+
+    def get_game_status(self, game_id):
+        game = self.get_game(game_id)
+        if len(game.turns) >= 100:
+            return GameStatus(is_game_over=True, winner="Player 1")
+        return GameStatus(is_game_over=False, winner=None)
+
+    def get_winner(self, game_id):
+        game_status = self.get_game_status(game_id)
+        if game_status.is_game_over:
+            return game_status.winner
+        return None

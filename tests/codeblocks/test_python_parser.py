@@ -38,9 +38,10 @@ def test_python_with_comment_2():
     assert code_blocks.to_string() == content
 
 
-
 def test_python_function_with_only_comment():
-    content = """def foo():\n    # ... rest of the code\ni = 0"""
+    content = """def foo():
+# ... rest of the code
+i = 0"""
 
     code_blocks = parser.parse(content)
 
@@ -194,3 +195,82 @@ def test_python_indentation_empty_lines():
     print(code_blocks.to_tree())
 
     assert code_blocks.to_string() == content
+
+def test_python_indentation_empty_lines():
+    with open("python/battleship.py", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+def test_python_comment_between_functions():
+    with open("python/outcommented_functions/update.txt", "r") as f:
+        content = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+# FIXME
+def test_python_if_after_comment():
+
+    content = """
+if placement.direction == "horizontal":
+    for i in range(ship_length):
+        if (start_row, start_column + i) in game.board:
+            return True
+else:
+    return False
+"""
+
+    code_blocks = parser.parse(content)
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    content = """
+if placement.direction == "horizontal":
+    for i in range(ship_length):
+        if (start_row, start_column + i) in game.board:
+            foo = True
+else:
+    return False
+    """
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+def test_python_outcommented_method():
+    content = """class Battleship(AbstractBattleship):
+    
+    def get_game(self, game_id: str) -> Game:
+        return self.games.get(game_id)
+
+    def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
+        # ... same as before ..."""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+def test_python_right_level():
+    content = """
+class Battleship(AbstractBattleship):
+    # foo
+    def create_ship_placement(self, game_id, placement):
+        game.ships.append(placement)
+
+    def create_turn(self, game_id, turn):
+        game = self.get_game(game_id)
+"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))

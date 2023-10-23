@@ -359,7 +359,9 @@ class CodeWriter(BaseAction):
         if not self.guess_similar_files:
             return
 
-        for file_item in file_items:
+        writable_file_items = [file_item for file_item in file_items if not file_item.readonly]
+
+        for file_item in writable_file_items:
             if not file_item.language:
                 continue
 
@@ -367,6 +369,7 @@ class CodeWriter(BaseAction):
                 logger.debug(
                     f"Language in block [{block.language}] does not match language [{file_item.language}] file path {file_item.file_path}")
                 continue
+
 
             try:
                 parser = create_parser(file_item.language)
@@ -386,6 +389,13 @@ class CodeWriter(BaseAction):
             except Exception as e:
                 logger.warning(
                     f"Could not parse file with {file_item.language} or code block with language {block.language}: {e}")
+
+            if (not block.file_path and len(writable_file_items) == 1
+                    and writable_file_items[0].language == block.language):
+                logger.info(f"Found only one writable file with language {block.language}, "
+                            f"will assume it's the updated file. ")
+                block.file_path = file_item.file_path
+
 
     def updated_file(self, stats: Stats, block: CodeBlock, existing_file_item: FileItem, file_items: List[FileItem]) -> Tuple[Optional[UpdatedFileItem], List[TextItem]]:
         logger.debug("Received file block: [{}]".format(block.file_path))

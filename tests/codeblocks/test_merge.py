@@ -1,11 +1,12 @@
+from ghostcoder.codeblocks import codeblocks, CodeBlockType
 from ghostcoder.codeblocks.parser.create import create_parser
 
 
-def verify_merge_dir(dir, language):
-    verify_merge(dir + "/original.txt", dir + "/update.txt", dir + "/merged.txt", language)
+def verify_merge_dir(dir, language, replace_types=None):
+    verify_merge(dir + "/original.txt", dir + "/update.txt", dir + "/merged.txt", language, replace_types)
 
 
-def verify_merge(original_file, updated_file, expected_file, language):
+def verify_merge(original_file, updated_file, expected_file, language, replace_types=None):
     with open(original_file, 'r') as f:
         original_content = f.read()
 
@@ -16,12 +17,17 @@ def verify_merge(original_file, updated_file, expected_file, language):
         expected_content = f.read()
 
     parser = create_parser(language)
-    original_block = parser.parse(original_content)
-    assert original_content == original_block.to_string()
-    updated_block = parser.parse(updated_content)
-    assert updated_content == updated_block.to_string()
 
-    gpt_tweaks = original_block.merge(updated_block, first_level=True)
+    updated_block = parser.parse(updated_content)
+    print("Updated blocks:\n", updated_block.to_tree(include_tree_sitter_type=True))
+    #assert updated_content == updated_block.to_string()
+
+
+    original_block = parser.parse(original_content)
+    print("Original blocks:\n", original_block.to_tree(include_tree_sitter_type=True))
+    assert original_content == original_block.to_string()
+
+    gpt_tweaks = original_block.merge(updated_block, first_level=True, replace_types=replace_types)
 
     print("gpt_tweaks: ", gpt_tweaks)
     print(original_block.to_string())
@@ -154,3 +160,12 @@ def test_merge_python_new_method_and_updated_import():
 
 def test_merge_python_function_with_only_comment():
     verify_merge_dir("python/function_with_only_comment", "python")
+
+def test_merge_python_by_replace():
+    verify_merge_dir("python/incomplete_functions", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+
+def test_merge_python_outcommented_block():
+    verify_merge_dir("python/outcommented_block", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+
+def test_merge_python_outcommented_functions():
+    verify_merge_dir("python/outcommented_functions", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])

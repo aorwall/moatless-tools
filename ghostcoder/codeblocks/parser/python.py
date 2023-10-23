@@ -36,9 +36,14 @@ class PythonParser(CodeParser):
         delimiter = find_type(node, [":"])
         if not delimiter:
             return self.get_first_child(node), self.get_last_child(node)
-        if delimiter.next_sibling.type == "block":
-            if delimiter.next_sibling.children:
-                return delimiter.next_sibling.children[0], delimiter.next_sibling.children[-1]
+
+        next_node = delimiter
+        while next_node.next_sibling.type == "comment":
+            next_node = delimiter.next_sibling
+
+        if next_node.type == "block":
+            if next_node.next_sibling.children:
+                return delimiter.next_sibling.children[0], next_node.next_sibling.children[-1]
 
             # Set indented lines as children, see test case test_python_function_with_only_comment
             next_sibling = node.next_sibling
