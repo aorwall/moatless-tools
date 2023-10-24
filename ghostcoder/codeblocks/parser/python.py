@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from tree_sitter import Node
 
@@ -37,13 +37,16 @@ class PythonParser(CodeParser):
         if not delimiter:
             return self.get_first_child(node), self.get_last_child(node)
 
-        next_node = delimiter
-        while next_node.next_sibling.type == "comment":
-            next_node = delimiter.next_sibling
+        next_node = delimiter.next_sibling
+        while next_node.type == "comment":
+            next_node = next_node.next_sibling
 
         if next_node.type == "block":
-            if next_node.next_sibling.children:
-                return delimiter.next_sibling.children[0], next_node.next_sibling.children[-1]
+            if next_node.children:
+                if delimiter.next_sibling.children:
+                    return delimiter.next_sibling.children[0], next_node.children[-1]
+                else:
+                    return delimiter.next_sibling, next_node.children[-1]
 
             # Set indented lines as children, see test case test_python_function_with_only_comment
             next_sibling = node.next_sibling
@@ -72,10 +75,10 @@ class PythonParser(CodeParser):
             return CodeBlockType.MODULE, self.get_first_child(node), self.get_last_child(node)
 
         if node.type == "function_definition":
-            if (node.children[-1].type == "block" and not node.children[-1].children and
-                    node.next_sibling and self.is_outcommented_code(node.next_sibling) and
-                    node.next_sibling.start_point[1] > node.start_point[1]):
-                return CodeBlockType.COMMENTED_OUT_CODE, node.next_sibling, node.next_sibling
+            if node.children[-1].type == "block" and not node.children[-1].children:
+                comments = self.get_comments(node.next_sibling, node)
+                if any(self.is_outcommented_code(c) for c in comments):
+                    return CodeBlockType.COMMENTED_OUT_CODE, node.next_sibling, comments[-1]
 
             first, last = self.find_block_child(node)
             return CodeBlockType.FUNCTION, first, last
@@ -123,3 +126,9 @@ class PythonParser(CodeParser):
     def is_outcommented_code(self, node):
         comment = node.text.decode("utf8").strip()
         return comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords)
+
+    def get_comments(self, node: Node, original_node: Node) -> List[Node]:
+        if node and node.type == "comment" and node.start_point[1] >= original_node.start_point[1]:
+            return [node] + self.get_comments(node.next_sibling, original_node)
+        else:
+            return []

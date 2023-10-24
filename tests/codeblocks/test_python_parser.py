@@ -260,15 +260,84 @@ def test_python_outcommented_method():
 
     assert code_blocks.to_string() == content
 
+
+def test_python_method_starting_with_comment():
+    content = """def get_game(game_id: str):
+    # comment
+    return "foo"
+"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+def test_python_weird_indentation():
+    content = """
+    def get_game(self, game_id: str) -> Game:
+        return self.games.get(game_id)
+
+    def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
+        return 1
+"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+
 def test_python_right_level():
     content = """
 class Battleship(AbstractBattleship):
     # foo
     def create_ship_placement(self, game_id, placement):
-        game.ships.append(placement)
+        a = 2
 
     def create_turn(self, game_id, turn):
         game = self.get_game(game_id)
+"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+def test_python_comments():
+    content = """def get_game(self, game_id: str) -> Game:
+    # ... code
+    # Return ship type when a hit is made"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    content = """def get_game(self, game_id: str) -> Game:  # Add game_id argument
+    # ... code"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+
+
+def test_python_comment_on_line():
+    content = """def get_foo():  # Add game_id argument
+    return "foo"
+"""
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+def test_python_function_after_init():
+    content = """class Battleship(AbstractBattleship):
+    def __init__(self):
+        self.game_id = None
+
+    def create_game(self):
+        self.game_id = "1"
 """
 
     code_blocks = parser.parse(content)

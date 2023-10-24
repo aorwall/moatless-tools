@@ -51,7 +51,6 @@ class PythonPytestTestTool(TestTool):
                 cwd=self.current_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                shell=True,
                 text=True,
                 timeout=self.timeout)
         except subprocess.TimeoutExpired as e:

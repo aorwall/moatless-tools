@@ -53,7 +53,8 @@ class CodeBlock:
             child.parent = self
 
         if self.pre_code.strip():
-            raise ValueError("Expected pre_code to only contain spaces and line breaks. Got ", self.pre_code)
+            raise ValueError(f"Failed to parse code block with type {self.type} and content `{self.content}`. "
+                             f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`")
 
         pre_code_lines = self.pre_code.split("\n")
         self.pre_lines = len(pre_code_lines) - 1
@@ -379,23 +380,23 @@ class CodeBlock:
                     updated_block.add_indentation(indentation)
 
                 child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
-                return child_tweaks + ["find_nested"]
+                return child_tweaks + [f"find_nested:{matching_block.content}:{updated_block.content}"]
             else:
                 logging.debug(
                     f"No matching children in original block `{self.type.value}: {self.content}`, "
                     f"will replace contents")
                 self.children = updated_block.children
-                return ["replace"]
+                return [f"replace:{self.content}:{updated_block.content}"]
         if self.has_all_matching_children(updated_block.children, 0) and updated_block.is_complete():
             logging.debug(
                 "All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
             self.children = updated_block.children
-            return []
+            return [f"full_match:{self.content}:{updated_block.content}"]
 
         if replace_types and self.type in replace_types and updated_block.is_complete():
             logging.debug(f"Will replace complete blocks from type level {self.type}")
             self.children = updated_block.children
-            return ["replace_from_level"]
+            return [f"replace_from_level:{self.content}:{updated_block.content}"]
 
         merge_tweaks = []
 
@@ -422,7 +423,7 @@ class CodeBlock:
                     i += update_next - j
 
                 j = update_next
-                merge_tweaks.append("commented_out")
+                merge_tweaks.append(f"commented_out:{original_block_child.content}:{updated_block_child.content}")
             elif (original_block_child.content == updated_block_child.content and
                   original_block_child.children and updated_block_child.children):
                 child_tweaks = original_block_child.merge(updated_block_child, replace_types=replace_types)
@@ -444,7 +445,8 @@ class CodeBlock:
                     similar_original_block = self.most_similar_block(updated_block_child, i)
                     logging.debug(f"Updated block with definition `{updated_block_child.content}` is not complete")
                     if similar_original_block == i:
-                        merge_tweaks.append("replace_similar")
+                        merge_tweaks.append(
+                            f"replace_similar:{original_block_child.content}:{updated_block_child.content}")
 
                         original_block_child = CodeBlock(
                             content=updated_block_child.content,
@@ -475,25 +477,29 @@ class CodeBlock:
 
                 if next_original_match:
                     if first_level:
-                        merge_tweaks.append("next_original_match_keep")
+                        merge_tweaks.append(
+                            f"next_original_match_keep:{self.children[next_original_match].content}:{updated_block_child.content}")
                         # if the there is a match on the first level, we will keep the original blocks until that line
                         i = next_original_match
                     else:
-                        merge_tweaks.append("next_original_match_replace")
+                        merge_tweaks.append(
+                            f"next_original_match_replace:{self.children[next_original_match].content}:{updated_block_child.content}")
                         # if it's not on the first level we expect the blocks to be replaced
                         self.children = self.children[:i] + self.children[next_original_match:]
                 elif next_commented_out is not None and (
                         not next_updated_match or next_commented_out < next_updated_match):
                     # if there is commented out code after the updated block,
                     # we will insert the lines before the commented out block in the original block
-                    merge_tweaks.append("next_commented_out_insert")
+                    merge_tweaks.append(
+                            f"next_commented_out_insert:{original_block_child.content}:{next_commented_out.content}")
                     self.insert_children(i, updated_block.children[j:next_commented_out])
                     i += next_commented_out - j
                     j = next_commented_out
                 elif next_updated_match:
                     # if there is a match in the updated block, we expect this to be an addition
                     # and insert the lines before in the original block
-                    merge_tweaks.append("next_original_match_insert")
+                    merge_tweaks.append(
+                            f"next_original_match_insert:{original_block_child.content}:{next_updated_match.content}")
 
                     self.insert_children(i, updated_block.children[j:next_updated_match])
                     diff = next_updated_match - j

@@ -29,7 +29,7 @@ Clearing the cache
 ============================================== no tests ran in 0.00s ==============================================
 """
 
-    failed_tests_count, passed_tests_count = verifier.parse_test_results(output)
+    failed_tests_count, passed_tests_count = verifier.get_number_of_tests(output)
     assert failed_tests_count == 0
     assert passed_tests_count == 0
 
@@ -78,7 +78,7 @@ FAILED test_tic_tac_toe.py::test_game - AssertionError: assert 'Player 1 won!' i
 ================================================ 1 failed in 0.06s ================================================
 """
 
-    failed_tests_count, passed_tests_count = verifier.parse_test_results(output)
+    failed_tests_count, passed_tests_count = verifier.get_number_of_tests(output)
     assert failed_tests_count == 1
     assert passed_tests_count == 0
 
@@ -93,3 +93,66 @@ FAILED test_tic_tac_toe.py::test_game - AssertionError: assert 'Player 1 won!' i
     )
 
     assert failed_tests == [expected]
+
+def test_python_count(temp_dir, verifier):
+    output = """====================================== 9 failed, 3 passed, 7 errors in 0.14s ======================================"""
+
+    failed_tests_count, passed_tests_count, error_count = verifier.get_number_of_tests(output)
+    assert failed_tests_count == 9
+    assert passed_tests_count == 3
+    assert error_count == 7
+
+def test_pytest_without_parsing(temp_dir, verifier):
+    with open(f"resources/pytest_fail_output_1.txt", 'r') as f:
+        output = f.read()
+
+    verifier = PythonPytestTestTool(
+        current_dir=Path("/home/albert/repos/albert/AutoGPT/autogpts/ghostcoder/agbenchmark_config/workspace/2a877b44-b4ab-4a12-a910-96191d571b9d/9-gpt-3.5-turbo-16k-1.0"),
+        parse_test_results=False
+    )
+
+    failed_tests_count, passed_tests_count, error_count = verifier.get_number_of_tests(output)
+    assert failed_tests_count == 8
+    assert passed_tests_count == 11
+
+    failed_tests = verifier.find_failed_tests(output)
+    for failure in failed_tests:
+        print(failure.output)
+    assert len(failed_tests) == 1
+
+
+def test_with_syntax_error(temp_dir, verifier):
+    output = """____________________________________________ test_game_over_condition _____________________________________________
+
+battleship_game = <battleship.Battleship object at 0x7fa4b7e30250>, initialized_game_id = '9528'
+
+    def test_game_over_condition(battleship_game, initialized_game_id):
+        for row in range(1, 11):
+            for column in list("ABCDEFGHIJ"):
+                turn = Turn(target={"row": row, "column": column})
+>               battleship_game.create_turn(initialized_game_id, turn)
+
+test_positive.py:144:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+battleship.py:84: in create_turn
+    game.is_game_over = True
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   ValueError: "Game" object has no field "is_game_over"
+
+pydantic/main.py:357: ValueError"""
+
+
+def test_pytest_fail_output_1(temp_dir, verifier):
+    with open(f"resources/pytest_fail_output_1.txt", 'r') as f:
+        output = f.read()
+
+    failed_tests_count, passed_tests_count, error_count = verifier.get_number_of_tests(output)
+    assert failed_tests_count == 8
+    assert passed_tests_count == 11
+
+    failed_tests = verifier.find_failed_tests(output)
+    for failure in failed_tests:
+        print(failure.to_prompt())
+    assert len(failed_tests) == 8

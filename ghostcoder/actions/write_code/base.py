@@ -477,6 +477,7 @@ class CodeWriter(BaseAction):
 
                 stats.increment("merged_file")
                 if gpt_tweaks:
+                    logger.info(f"Applied GPT tweaks {gpt_tweaks}")
                     stats.extra["gpt_tweaks"] = gpt_tweaks
                     stats.increment("did_gpt_tweaks")
 

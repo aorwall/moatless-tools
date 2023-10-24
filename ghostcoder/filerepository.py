@@ -138,7 +138,7 @@ class FileRepository:
                 for file in self.file_tree().traverse()
                 if any(file.path.endswith(suffix) for suffix in file_suffixes)]
 
-    def get_source_files(self, language: str, directory: str = None, include_test_files: bool = False):
+    def get_source_files(self, language: str = None, directory: str = None, include_test_files: bool = False):
         language_test_suffix = {  # TODO: Move to utils
             "python": "_test.py",
             "java": "Test.java"
@@ -146,7 +146,11 @@ class FileRepository:
 
         full_dir_path = self.repo_path / directory if directory else self.repo_path
 
-        file_pattern = f"*{get_extension(language)}"
+        if language:
+            file_pattern = f"*{get_extension(language)}"
+        else:
+            file_pattern = "*.*"
+
         all_files = list(full_dir_path.rglob(file_pattern))
         file_paths = [
             file
@@ -154,10 +158,15 @@ class FileRepository:
                                      (include_test_files or "test" not in file.name.lower())
         ]
 
-        return [
-            FileItem(file_path="/" + str(file.relative_to(self.repo_path)), content=file.read_text())
-            for file in file_paths
-        ]
+        file_items = []
+        for file in file_paths:
+            try:
+                file_items.append(
+                    FileItem(file_path="/" + str(file.relative_to(self.repo_path)), content=file.read_text()))
+            except Exception as e:
+                logging.warning(f"Failed to read file {file}. Error: {e}")
+
+        return file_items
 
     def get_file_content(self, file_path: str) -> Optional[str]:
         if file_path.startswith("/"):

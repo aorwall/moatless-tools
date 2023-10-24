@@ -72,6 +72,7 @@ class CodeParser:
         end_line = node.end_point[0]
 
         code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
+
         next_node = first_child
         while next_node:
             child_block, child_last_node = self.parse_code(content_bytes, next_node, start_byte=end_byte)
