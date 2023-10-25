@@ -84,6 +84,8 @@ class FileItem(CodeItem):
     file_path: str = Field(default="", description="Path to file")
     readonly: bool = Field(default=False, description="Is the file readonly")
     new: bool = Field(default=False, description="If the file is new and doesn't exist in the repository")
+    priority: int = Field(default=0, description="Priority of the file, higher is more important and will be taken into account when trimming the prompt context")
+    stop_sequence: str = Field(default="")
 
     @root_validator(pre=True)
     def set_language(cls, values):
@@ -104,7 +106,11 @@ class FileItem(CodeItem):
         if self.readonly:
             readonly_str = " (readonly)"
 
-        return f"\n{self.file_path}{readonly_str}\n{super().to_prompt(style=style)}"
+        stop_sequence = ""
+        if self.stop_sequence:
+            stop_sequence = f"{self.stop_sequence}\n"
+
+        return f"\n{self.file_path}{readonly_str}\n{super().to_prompt(style=style)}\n{stop_sequence}"
 
     def to_history(self) -> str:
         return f"{self.file_path}"
@@ -118,11 +124,14 @@ class FileItem(CodeItem):
             if details:
                 details += ", "
             details += "readonly"
-
-        if not self.content:
+        elif not self.content:
             if details:
                 details += ", "
             details += "new"
+
+        if details:
+            details += ", "
+        details += f"priority {self.priority}"
 
         if details:
             return f"{self.file_path} ({details})"

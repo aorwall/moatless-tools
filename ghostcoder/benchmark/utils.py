@@ -10,11 +10,17 @@ from ghostcoder.llm.wizardcoder import WizardCoderLLMWrapper
 
 logger = logging.getLogger(__name__)
 
-def create_openai_client(log_dir: Path, llm_name: str, temperature: float, streaming: bool = True, max_tokens: Optional[int] = None):
+def create_openai_client(log_dir: Path, llm_name: str, temperature: float, streaming: bool = True, max_tokens: Optional[int] = None, stop_sequence: str = None):
     callback = LogCallbackHandler(str(log_dir))
     logger.info(f"create_openai_client(): llm_name={llm_name}, temperature={temperature}, log_dir={log_dir}")
+
+    model_kwargs = {}
+    if stop_sequence:
+        model_kwargs["stop"] = [stop_sequence]
+
     return ChatLLMWrapper(ChatOpenAI(
         model=llm_name,
+        model_kwargs=model_kwargs,
         max_tokens=max_tokens,
         temperature=temperature,
         streaming=streaming,

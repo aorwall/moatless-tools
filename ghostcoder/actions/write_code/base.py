@@ -7,6 +7,7 @@ from typing import List, Union, Tuple, Any
 from typing import Optional
 from uuid import UUID
 
+import tiktoken
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.output_parsers import PydanticOutputParser
 from langchain.schema.output import GenerationChunk, ChatGenerationChunk
@@ -191,6 +192,7 @@ class CodeWriter(BaseAction):
                  allow_hallucinated_files: bool = False,
                  expect_updated_code: bool = False,
                  callback: DisplayCallback = None,
+                 max_tokens_in_prompt: int = None,
                  tries: int = 2):
         if not sys_prompt:
             sys_prompt = get_implement_prompt(sys_prompt_id)
@@ -207,6 +209,7 @@ class CodeWriter(BaseAction):
         self.allow_hallucinations = allow_hallucinated_files
         self.expect_updated_code = expect_updated_code
         self.callback = callback
+        self.max_tokens_in_prompt = max_tokens_in_prompt
         self.output_parser = PydanticOutputParser(pydantic_object=CodeChanges)
 
     def execute(self, incoming_messages: List[Message]) -> List[Message]:
@@ -240,6 +243,12 @@ class CodeWriter(BaseAction):
             logger.info(f"Incoming files:{incoming_files}")
         else:
             logger.info(f"No incoming files")
+
+        if self.max_tokens_in_prompt:
+            tokens = self.calculate_tokens_in_messages(incoming_messages)
+            exceeded_tokens = tokens - self.max_tokens_in_prompt
+            if exceeded_tokens > 0:
+                self.trim_files(exceeded_tokens, file_items)
 
         try:
             result, stats = self.generate(messages=incoming_messages, callback=StreamCallback(callback=self.callback))
@@ -477,7 +486,8 @@ class CodeWriter(BaseAction):
 
                 stats.increment("merged_file")
                 if gpt_tweaks:
-                    logger.info(f"Applied GPT tweaks {gpt_tweaks}")
+                    tweaks = "\n - ".join(gpt_tweaks)
+                    logger.info(f"Applied GPT tweaks:\n - {tweaks}")
                     stats.extra["gpt_tweaks"] = gpt_tweaks
                     stats.increment("did_gpt_tweaks")
 
@@ -560,3 +570,48 @@ class CodeWriter(BaseAction):
         if self.few_shot_prompt:
             sys_prompt += "\n" + self.llm.messages_to_prompt(messages=FEW_SHOTS_PYTHON, few_shot_example=True)
         return self.llm.generate(sys_prompt, messages, callback=callback)
+
+    def trim(self, content: str):
+        parser = create_parser(language="python")
+        code_block = parser.parse(content)
+        trimmed_block = code_block.trim2(include_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS])
+        return trimmed_block.to_string()
+
+    def calculate_tokens_in_messages(self, messages: List[Message]):
+        msg_str = "\n\n".join([msg.to_prompt() for msg in messages])
+        return self.calculate_tokens(msg_str)
+
+    def calculate_tokens(self, content: str):
+        enc = tiktoken.encoding_for_model("gpt-4")
+        tokens = enc.encode(content)
+        return len(tokens)
+
+    def trim_files(self, exceeding_tokens: int, file_items: List[FileItem], retry: bool = False):
+        logger.info(f"The max tokens in the prompt context is exceeded by {exceeding_tokens}, will try to trim request, retry {retry}")
+
+        readonly_file_items = [file_item for file_item in file_items if file_item.readonly]
+        sorted_files = sorted(readonly_file_items, key=lambda file: file.priority)
+
+        for file in sorted_files:
+            if exceeding_tokens < 0:
+                return
+
+            before = file.content
+            if not retry:
+                if file.language:
+                    logger.info(f"Trimming {file.file_path}")
+                    trimmed_content = self.trim(file.content)
+                else:
+                    logger.info(f"Remove {file.file_path}")
+                    trimmed_content = ""
+            else:
+                logger.info(f"Remove {file.file_path}")
+                trimmed_content = ""
+
+            file.content = trimmed_content
+            exceeding_tokens -= self.calculate_tokens(before) - self.calculate_tokens(trimmed_content)
+
+        if exceeding_tokens > 0 and retry == 0:
+            self.trim_files(exceeding_tokens, file_items, retry + 1)
+        else:
+            return

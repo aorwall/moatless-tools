@@ -380,7 +380,7 @@ class CodeBlock:
                     updated_block.add_indentation(indentation)
 
                 child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
-                return child_tweaks + [f"find_nested:{matching_block.content}:{updated_block.content}"]
+                return  [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
             else:
                 logging.debug(
                     f"No matching children in original block `{self.type.value}: {self.content}`, "
@@ -491,7 +491,7 @@ class CodeBlock:
                     # if there is commented out code after the updated block,
                     # we will insert the lines before the commented out block in the original block
                     merge_tweaks.append(
-                            f"next_commented_out_insert:{original_block_child.content}:{next_commented_out.content}")
+                            f"next_commented_out_insert:{original_block_child.content}:{updated_block.children[next_commented_out].content}")
                     self.insert_children(i, updated_block.children[j:next_commented_out])
                     i += next_commented_out - j
                     j = next_commented_out
@@ -499,7 +499,7 @@ class CodeBlock:
                     # if there is a match in the updated block, we expect this to be an addition
                     # and insert the lines before in the original block
                     merge_tweaks.append(
-                            f"next_original_match_insert:{original_block_child.content}:{next_updated_match.content}")
+                            f"next_original_match_insert:{original_block_child.content}:{updated_block.children[next_updated_match].content}")
 
                     self.insert_children(i, updated_block.children[j:next_updated_match])
                     diff = next_updated_match - j

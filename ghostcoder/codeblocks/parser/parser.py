@@ -56,7 +56,7 @@ class CodeParser:
             return CodeBlockType.CODE, node.children[0]
         return None, None
 
-    def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0) -> Tuple[CodeBlock, Node]:
+    def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0, level: int = 0) -> Tuple[CodeBlock, Node]:
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
         block_type, first_child, last_child = self.get_block_definition(node)
 
@@ -73,9 +73,17 @@ class CodeParser:
 
         code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
 
+        l = last_child.type if last_child else "none"
+        #print(f"start [{level}]: {code} (last child {l}")
+
         next_node = first_child
         while next_node:
-            child_block, child_last_node = self.parse_code(content_bytes, next_node, start_byte=end_byte)
+            if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
+                next_node = next_node.children[0]
+
+            #print(f"next  [{level}]: {code} -> {next_node.type}")
+
+            child_block, child_last_node = self.parse_code(content_bytes, next_node, start_byte=end_byte, level=level+1)
             if not child_block.content:
                 if child_block.children:
                     child_block.children[0].pre_code = child_block.pre_code + child_block.children[0].pre_code
@@ -96,6 +104,8 @@ class CodeParser:
                 next_node = next_node.next_sibling
             else:
                 next_node = self.get_parent_next(next_node, node)
+
+        #print(f"end   [{level}]: {code}")
 
         if not node.parent and node.end_byte > end_byte:
             children.append(CodeBlock(
