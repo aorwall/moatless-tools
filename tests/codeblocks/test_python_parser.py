@@ -320,7 +320,23 @@ def test_python_comments():
 
     print(code_blocks.to_tree(include_tree_sitter_type=True))
 
+def test_python_comments_2():
 
+    content = """class Battleship(AbstractBattleship):
+    # ... code
+
+    def get_bar():
+        # ... code
+        return "bar"
+
+    def set_foo():
+        foo = 1
+
+    def set_bar():
+        bar = 5"""
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
 
 def test_python_comment_on_line():
     content = """def get_foo():  # Add game_id argument

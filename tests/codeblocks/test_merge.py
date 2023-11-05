@@ -29,7 +29,7 @@ def verify_merge(original_file, updated_file, expected_file, language, replace_t
 
     gpt_tweaks = original_block.merge(updated_block, first_level=True, replace_types=replace_types)
 
-    print("gpt_tweaks: ", gpt_tweaks)
+    print("gpt_tweaks: \n -", "\n - ".join(gpt_tweaks))
     print(original_block.to_string())
     assert original_block.to_string() == expected_content
 
@@ -172,3 +172,11 @@ def test_merge_python_outcommented_functions():
 
 def test_merge_wrong_indentation():
     verify_merge_dir("python/wrong_indentation", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+
+def test_merge_wrong_indentation_function_subset():
+    verify_merge_dir("python/function_subset", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+
+
+def test_merge_extra_comment():
+    verify_merge_dir("python/extra_comment", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
+

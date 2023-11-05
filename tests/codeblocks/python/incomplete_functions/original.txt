@@ -1,0 +1,20 @@
+def create_turn(self, game_id: str, turn: Turn) -> TurnResponse:
+    game = self.get_game(game_id)
+    if len(game.ships) < 5:
+        raise ValueError("All ships must be placed before starting turns")
+
+    target_row, target_column = turn.target["row"], ord(turn.target["column"]) - ord("A")
+    if (target_row, target_column) in game.board:
+        raise ValueError("This cell has already been targeted")
+
+    game.turns.append(turn)
+    if (target_row, target_column) in game.board:
+        game.board[(target_row, target_column)] = "hit"
+        for ship in game.ships:
+            if ship.start["row"] == target_row and ord(ship.start["column"]) - ord("A") == target_column:
+                return TurnResponse(result="hit", ship_type=ship.ship_type)
+        return TurnResponse(result="miss", ship_type=None)
+    else:
+        game.board[(target_row, target_column)] = "miss"
+        return TurnResponse(result="miss", ship_type=None)
+

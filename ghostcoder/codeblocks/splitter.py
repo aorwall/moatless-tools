@@ -1,29 +1,57 @@
 import logging
 from typing import Optional, List
 
+from llama_index.callbacks import CallbackManager
+from llama_index.text_splitter import TextSplitter
+from llama_index.text_splitter.code_splitter import DEFAULT_CHUNK_LINES, DEFAULT_LINES_OVERLAP, DEFAULT_MAX_CHARS
+from pydantic import Field
+
 from ghostcoder.codeblocks.codeblocks import CodeBlock, CodeBlockType
 from ghostcoder.codeblocks.parser.create import create_parser
 
 non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.SPACE]
 
 
-class CodeSplitter:
+class CodeSplitter(TextSplitter):
+
+    language: str = Field(
+        description="The programming language of the code being split."
+    )
+    chunk_lines: int = Field(
+        default=DEFAULT_CHUNK_LINES,
+        description="The number of lines to include in each chunk.",
+    )
+    chunk_lines_overlap: int = Field(
+        default=DEFAULT_LINES_OVERLAP,
+        description="How many lines of code each chunk overlaps with.",
+    )
+    max_chars: int = Field(
+        default=DEFAULT_MAX_CHARS, description="Maximum number of characters per chunk."
+    )
+    callback_manager: CallbackManager = Field(
+        default_factory=CallbackManager, exclude=True
+    )
 
     def __init__(
-            self,
-            language: str,
-            chunk_lines: int = 40,
-            max_chars: int = 1500
+        self,
+        language: str,
+        chunk_lines: int = 40,
+        chunk_lines_overlap: int = 15,
+        max_chars: int = 1500,
+        callback_manager: Optional[CallbackManager] = None,
     ):
-        self.chunk_lines = chunk_lines
-        self.max_chars = max_chars
+        callback_manager = callback_manager or CallbackManager([])
+        super().__init__(
+            language=language,
+            chunk_lines=chunk_lines,
+            chunk_lines_overlap=chunk_lines_overlap,
+            max_chars=max_chars,
+            callback_manager=callback_manager,
+        )
 
-        self.language = language
-        try:
-            self.parser = create_parser(language)
-        except Exception as e:
-            logging.warning(f"Could not get parser for language {language}.")
-            raise e
+    @classmethod
+    def class_name(cls):
+        return "CodeSplitter"
 
     @staticmethod
     def _count_code_blocks(codeblocks: List[CodeBlock]) -> int:
@@ -69,7 +97,7 @@ class CodeSplitter:
         )
 
         if new_chunk.parent:
-            new_chunk.parent = self.trim_code_block(new_chunk.parent, new_chunk)
+            new_chunk.parent = new_chunk.parent.trim_code_block(new_chunk)
 
         return new_chunk
 
@@ -142,6 +170,13 @@ class CodeSplitter:
         return trimmed_block
 
     def split_text(self, text: str) -> List[str]:
-        codeblock = self.parser.parse(text)
+        try:
+            parser = create_parser(self.language)
+        except Exception as e:
+            logging.warning(f"Could not get parser for language {self.language}.")
+            raise e
+
+        codeblock = parser.parse(text)
         chunk_blocks = self._chunk_block(codeblock)
-        return [block.root().to_string() for block in chunk_blocks]
+        return [block.root().to_string().strip() for block in chunk_blocks]
+

@@ -1,69 +1,111 @@
-import uuid
+from typing import Dict, List, Optional
 from abstract_class import AbstractBattleship, Game, GameStatus, ShipPlacement, Turn, TurnResponse
+from uuid import uuid4
 
 class Battleship(AbstractBattleship):
     def __init__(self):
-        self.games = {}
+        self.games: Dict[str, Game] = {}
 
-    def create_game(self):
-        game_id = str(uuid.uuid4())
+    def create_game(self) -> str:
+        # Create a new game with a unique ID and an empty board, ships, and turns
+        game_id = str(uuid4())
         self.games[game_id] = Game(game_id=game_id, players=["Player 1", "Player 2"], board={}, ships=[], turns=[])
         return game_id
 
-    def delete_game(self, game_id):
-        del self.games[game_id]
-
-    def get_game(self, game_id):
-        return self.games.get(game_id)
-
-    def create_ship_placement(self, game_id, placement):
-        game = self.get_game(game_id)
-        if len(game.ships) >= 5:
-            raise ValueError("All ships are already placed. Cannot place more ships.")
-
-        # Validate ship type
+    def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
+        # Check if the ship type is valid
         if placement.ship_type not in self.SHIP_LENGTHS:
             raise ValueError("Invalid ship type")
 
-        # Validate ship direction
+        # Check if the direction is valid
         if placement.direction not in ["horizontal", "vertical"]:
             raise ValueError("Invalid ship direction")
 
-        # Check for ship overlap and boundary extension
+        # Check if the ship placement is within the board boundaries
         ship_length = self.SHIP_LENGTHS[placement.ship_type]
-        for i in range(ship_length):
-            row = placement.start["row"] + (i if placement.direction == "vertical" else 0)
-            column = ord(placement.start["column"]) - ord('A') + (i if placement.direction == "horizontal" else 0)
-            if not (1 <= row <= 10) or not (0 <= column <= 9):
+        if placement.direction == "horizontal":
+            if ord(placement.start["column"]) - ord("A") + ship_length > 10:
                 raise ValueError("Ship extends beyond board boundaries")
-            if (row, column) in game.board:
+        else:
+            if placement.start["row"] + ship_length > 10:
+                raise ValueError("Ship extends beyond board boundaries")
+
+        # Check if the ship overlaps with any existing ship
+        for existing_ship in self.games[game_id].ships:
+            if placement.start["row"] == existing_ship.start["row"] and placement.start["column"] == existing_ship.start["column"]:
                 raise ValueError("Ships cannot overlap")
 
-        game.ships.append(placement)
+        # Add the ship to the game
+        self.games[game_id].ships.append(placement)
 
-    def create_turn(self, game_id, turn):
-        game = self.get_game(game_id)
-        if len(game.ships) < 5:
+    def create_turn(self, game_id: str, turn: Turn) -> TurnResponse:
+        # Check if all ships have been placed
+        if len(self.games[game_id].ships) < 5:
             raise ValueError("All ships must be placed before starting turns")
-        game.turns.append(turn)
-        for ship in game.ships:
-            ship_length = self.SHIP_LENGTHS[ship.ship_type]
-            for i in range(ship_length):
-                row = ship.start["row"] + (i if ship.direction == "vertical" else 0)
-                column = ord(ship.start["column"]) - ord('A') + (i if ship.direction == "horizontal" else 0)
-                if (row, column) == (turn.target["row"], ord(turn.target["column"]) - ord('A')):
-                    game.board[(row, column)] = "hit"
-                    return TurnResponse(result="hit", ship_type=ship.ship_type)
-        return TurnResponse(result="miss", ship_type=None)
 
-    def get_game_status(self, game_id):
-        game = self.get_game(game_id)
-        if len(game.turns) >= 100:
-            return GameStatus(is_game_over=True, winner="Player 1")
-        return GameStatus(is_game_over=False, winner=None)
+        # Check if the target is within the board boundaries
+        if not (1 <= turn.target["row"] <= 10) or turn.target["column"] not in list("ABCDEFGHIJ"):
+            raise ValueError("Target out of bounds")
 
-    def get_winner(self, game_id):
-        game_status = self.get_game_status(game_id)
-        if game_status.is_game_over:
-            return game_status.winner
-        return None
+        # Check if the target has already been hit or missed
+        target_key = (turn.target["row"], ord(turn.target["column"]) - ord("A"))
+        if target_key in self.games[game_id].board:
+            raise ValueError("Target has already been hit or missed")
+
+        # Determine if the target is a hit or miss
+        hit_ship = None
+        for ship in self.games[game_id].ships:
+            if ship.direction == "horizontal":
+                if turn.target["row"] == ship.start["row"] and ship.start["column"] <= turn.target["column"] < chr(ord(ship.start["column"]) + self.SHIP_LENGTHS[ship.ship_type]):
+                    hit_ship = ship
+                    break
+            else:
+                if turn.target["column"] == ship.start["column"] and ship.start["row"] <= turn.target["row"] < ship.start["row"] + self.SHIP_LENGTHS[ship.ship_type]:
+                    hit_ship = ship
+                    break
+
+        # Update the board and turns
+        if hit_ship is None:
+            self.games[game_id].board[target_key] = "miss"
+            result = "miss"
+        else:
+            self.games[game_id].board[target_key] = "hit"
+            result = "hit"
+
+        self.games[game_id].turns.append(turn)
+
+        # Check if the hit ship has been sunk
+        if result == "hit":
+            hit_count = 0
+            for value in self.games[game_id].board.values():
+                if value == "hit":
+                    hit_count += 1
+            if hit_count == self.SHIP_LENGTHS[hit_ship.ship_type]:
+                result = "sunk"
+
+        return TurnResponse(result=result, ship_type=hit_ship.ship_type if hit_ship else None)
+
+    def get_game_status(self, game_id: str) -> GameStatus:
+        # Check if all ships have been sunk
+        hit_count = 0
+        for value in self.games[game_id].board.values():
+            if value == "hit":
+                hit_count += 1
+
+        is_game_over = hit_count == sum(self.SHIP_LENGTHS.values())
+
+        # Determine the winner
+        winner = None
+        if is_game_over:
+            winner = self.games[game_id].players[len(self.games[game_id].turns) % 2]  # The player who didn't take the last turn is the winner
+
+        return GameStatus(is_game_over=is_game_over, winner=winner)
+
+    def get_winner(self, game_id: str) -> str:
+        return self.get_game_status(game_id).winner
+
+    def get_game(self, game_id: str) -> Game:
+        return self.games[game_id]
+
+    def delete_game(self, game_id: str) -> None:
+        del self.games[game_id]

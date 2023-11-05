@@ -248,8 +248,10 @@ class CodeWriter(BaseAction):
             tokens = self.calculate_tokens_in_messages(incoming_messages)
             exceeded_tokens = tokens - self.max_tokens_in_prompt
             if exceeded_tokens > 0:
+                logger.info(f"The prompt has {tokens} tokens and is exceeded by {exceeded_tokens} tokens")
                 self.trim_files(exceeded_tokens, file_items)
-
+            else:
+                logger.info(f"The prompt has {tokens} tokens")
         try:
             result, stats = self.generate(messages=incoming_messages, callback=StreamCallback(callback=self.callback))
         except Exception as e: # TODO: Handle context_length_exceeded...
@@ -574,7 +576,7 @@ class CodeWriter(BaseAction):
     def trim(self, content: str):
         parser = create_parser(language="python")
         code_block = parser.parse(content)
-        trimmed_block = code_block.trim2(include_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS])
+        trimmed_block = code_block.trim_with_types(include_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS])
         return trimmed_block.to_string()
 
     def calculate_tokens_in_messages(self, messages: List[Message]):

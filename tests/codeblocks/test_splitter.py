@@ -1,6 +1,4 @@
 from ghostcoder.codeblocks.codeblocks import CodeBlock, CodeBlockType
-from ghostcoder.codeblocks.parser.parser import CodeParser
-from ghostcoder.codeblocks.parser.typescript import TypeScriptParser
 from ghostcoder.codeblocks.splitter import CodeSplitter
 
 java_code = CodeBlock(

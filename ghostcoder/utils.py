@@ -1,6 +1,8 @@
 import re
 from typing import Optional
 
+import tiktoken
+
 comment_marker_pattern = r"^[ \t]*(//|#|--|<!--)\s*"
 
 incomplete_code_marker_patterns = [
@@ -12,7 +14,7 @@ incomplete_code_marker_patterns = [
 language_extensions = {
     "python": [".py"],
     "java": [".java"],
-    "javascript": [".js"],
+    "javascript": [".js", ".jsx"],
     "c": [".c"],
     "cpp": [".cpp"],
     "css": [".css", ".scss"],
@@ -21,7 +23,8 @@ language_extensions = {
     "ruby": [".rb"],
     "swift": [".swift"],
     "kotlin": [".kt"],
-    "typescript": [".ts", ".tsx"],
+    "typescript": [".ts"],
+    "tsx": [".tsx"],
     "json": [".json"],
     "sql": [".sql"],
     "yaml": [".yaml", ".yml"],
@@ -74,3 +77,8 @@ def wrap_code_in_markdown(filename: str = ""):
         else:
             return "```\n{}\n```".format(code)
     return _wrap_code_in_markdown
+
+def count_tokens(content: str, model_name = "gpt-4"):
+    enc = tiktoken.encoding_for_model(model_name)
+    tokens = enc.encode(content)
+    return len(tokens)

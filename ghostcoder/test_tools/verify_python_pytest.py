@@ -35,7 +35,6 @@ class PythonPytestTestTool(TestTool):
         command = [
             "pytest",
             "-v",
-            self.test_file_pattern
         ]
 
         command_str = " ".join(command)
@@ -244,6 +243,6 @@ if __name__ == "__main__":
     result = verifier.run_tests()
 
     if result.failures:
-        print("Failed tests:")
-        for item in result.failures:
-            print(f"- {item.test_file} : {item.test_class} : {item.test_method}\n{item.test_code}\n  {item.output}")
+        step_input = "\n\n".join([item.to_prompt() for item in result.failures])
+
+        print("Failed tests:\n" + step_input)

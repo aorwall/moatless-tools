@@ -1,0 +1,6 @@
+from typing import List
+from abstract_class import AbstractBattleship, ShipPlacement, Turn, TurnResponse, GameStatus, Game
+
+class Battleship(AbstractBattleship):
+    def __init__(self):
+        self.games = {}

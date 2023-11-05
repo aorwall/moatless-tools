@@ -129,6 +129,6 @@ def test_trim_with_function():
     code_block = parser.parse(content)
     assert code_block.to_string() == content
 
-    trimmed_block = code_block.trim2(include_types=[CodeBlockType.FUNCTION])
+    trimmed_block = code_block.trim_with_types(include_types=[CodeBlockType.FUNCTION])
 
     print(trimmed_block.to_string())

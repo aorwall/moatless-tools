@@ -1,0 +1,123 @@
+from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
+
+from abstract_class import (
+    AbstractBattleship,
+    Game,
+    GameStatus,
+    ShipPlacement,
+    Turn,
+    TurnResponse,
+)
+
+class Battleship(AbstractBattleship):
+    def __init__(self):
+        self.games: Dict[str, Game] = {}
+
+    def create_game(self) -> str:
+        game_id = str(uuid4())
+        self.games[game_id] = Game(
+            game_id=game_id,
+            players=["Player 1", "Player 2"],
+            board={},
+            ships=[],
+            turns=[],
+        )
+        return game_id
+
+    def delete_game(self, game_id: str) -> None:
+        if game_id in self.games:
+            del self.games[game_id]
+
+    def get_game(self, game_id: str) -> Optional[Game]:
+        return self.games.get(game_id)
+
+    def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if len(game.ships) == 5:
+            raise ValueError("All ships are already placed. Cannot place more ships.")
+
+        if placement.ship_type not in self.SHIP_LENGTHS:
+            raise ValueError("Invalid ship type")
+
+        ship_length = self.SHIP_LENGTHS[placement.ship_type]
+        start_row, start_column = (
+            placement.start["row"],
+            ord(placement.start["column"]) - ord("A"),
+        )
+
+        if placement.direction == "horizontal":
+            if start_column + ship_length > 10:
+                raise ValueError("Ship extends beyond board boundaries")
+            ship_cells = [
+                (start_row, start_column + i) for i in range(ship_length)
+            ]
+        elif placement.direction == "vertical":
+            if start_row + ship_length > 10:
+                raise ValueError("Ship extends beyond board boundaries")
+            ship_cells = [
+                (start_row + i, start_column) for i in range(ship_length)
+            ]
+        else:
+            raise ValueError("Invalid ship direction")
+
+        for cell in ship_cells:
+            if game.board.get(cell):
+                raise ValueError("Ships cannot overlap")
+
+        for cell in ship_cells:
+            game.board[cell] = placement.ship_type
+
+        game.ships.append(placement)
+
+    def create_turn(self, game_id: str, turn: Turn) -> TurnResponse:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if len(game.ships) < 5:
+            raise ValueError("All ships must be placed before starting turns")
+
+        target_row, target_column = (
+            turn.target["row"],
+            ord(turn.target["column"]) - ord("A"),
+        )
+        target_key = (target_row, target_column)
+
+        if target_key in game.board:
+            ship_type = game.board[target_key]
+            game.board[target_key] = "hit"
+            game.turns.append(turn)
+
+            if all(
+                value == "hit" or value == "miss"
+                for key, value in game.board.items()
+                if value == ship_type
+            ):
+                return TurnResponse(result="sunk", ship_type=ship_type)
+
+            return TurnResponse(result="hit", ship_type=ship_type)
+
+        game.board[target_key] = "miss"
+        game.turns.append(turn)
+        return TurnResponse(result="miss", ship_type=None)
+
+    def get_game_status(self, game_id: str) -> GameStatus:
+        game = self.get_game(game_id)
+        if not game:
+            raise ValueError("Game not found")
+
+        if all(value == "hit" or value == "miss" for value in game.board.values()):
+            return GameStatus(is_game_over=True, winner="Player 1")
+
+        return GameStatus(is_game_over=False, winner=None)
+
+    def get_winner(self, game_id: str) -> str:
+        game_status = self.get_game_status(game_id)
+        if game_status.is_game_over:
+            return game_status.winner
+
+        raise ValueError("Game is not over yet")

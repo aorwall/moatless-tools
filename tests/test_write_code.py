@@ -60,6 +60,10 @@ def test_update_definition(mock_llm_wrapper):
     prompt = CodeWriter(llm=mock_llm_wrapper, expect_one_file=True)
     verify_execute(mock_llm_wrapper, "update_definition", "tic_tac_toe.py", prompt=prompt)
 
+def test_extra_comment(mock_llm_wrapper):
+    prompt = CodeWriter(llm=mock_llm_wrapper, expect_one_file=True)
+    verify_execute(mock_llm_wrapper, "extra_comment", "battleship.py", prompt=prompt)
+
 def test_updated_content_is_invalid(mock_llm):
     with open(f"resources/invalid_content/response.txt", 'r') as f:
         response = f.read()
@@ -202,7 +206,7 @@ def verify_execute(mock_llm, test_dir, code_file, prompt: CodeWriter = None):
 
         response = prompt.execute([Message(
             sender="Human",
-            items=[TextItem(text=""), FileItem(file_path=code_file)])])
+            items=[TextItem(text=""), FileItem(file_path=code_file, content=content)])])
 
         with open(f"resources/{test_dir}/expected.py", 'r') as f:
             expected = f.read()

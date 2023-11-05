@@ -16,6 +16,10 @@ class CodeBlockType(str, Enum):
     MODULE = "module"
     CLASS = "class"
     FUNCTION = "function"
+    CONSTRUCTOR = "constructor"
+
+    TEST_SUITE = "test_suite"
+    TEST_CASE = "test_case"
 
     IMPORT = "import"
     STATEMENT = "statement"
@@ -36,6 +40,7 @@ non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CO
 class CodeBlock:
     content: str
     type: CodeBlockType
+    identifier: str = None,
     content_lines: List[str] = field(default_factory=list)
     start_line: int = 0
     end_line: int = 0
@@ -44,6 +49,7 @@ class CodeBlock:
     pre_lines: int = 0
     indentation: str = ""
     language: str = None
+    tags: List[str] = field(default_factory=list)
 
     children: List["CodeBlock"] = field(default_factory=list)
     parent: Optional["CodeBlock"] = field(default=None)
@@ -56,12 +62,13 @@ class CodeBlock:
             raise ValueError(f"Failed to parse code block with type {self.type} and content `{self.content}`. "
                              f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`")
 
-        pre_code_lines = self.pre_code.split("\n")
-        self.pre_lines = len(pre_code_lines) - 1
-        if self.pre_lines > 0:
-            self.indentation = pre_code_lines[-1]
-        else:
-            self.indentation = self.pre_code
+        if self.pre_code and not self.indentation and not self.pre_lines:
+            pre_code_lines = self.pre_code.split("\n")
+            self.pre_lines = len(pre_code_lines) - 1
+            if self.pre_lines > 0:
+                self.indentation = pre_code_lines[-1]
+            else:
+                self.indentation = self.pre_code
 
         self.content_lines = self.content.split("\n")
         if self.indentation and self.pre_lines:
@@ -78,6 +85,14 @@ class CodeBlock:
         for child in children:
             self.insert_child(index, child)
             index += 1
+
+    def append_child(self, child: "CodeBlock"):
+        self.children.append(child)
+        child.parent = self
+
+    def append_children(self, children: List["CodeBlock"]):
+        for child in children:
+            self.append_child(child)
 
     def replace_child(self, index: int, child: "CodeBlock"):
         self.children[index] = child
@@ -97,26 +112,6 @@ class CodeBlock:
 
     def __str__(self):
         return str(self.to_dict())
-
-    def trim2(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
-        children = []
-        for child in self.children:
-            if child.type == CodeBlockType.BLOCK_DELIMITER:
-                children.append(copy.copy(child))
-            elif self == show_block or (include_types and child.type in include_types):
-                children.append(child.trim2(show_block, include_types))
-            elif child.has_nested_matching_block(show_block) or child.has_nested_blocks_with_types(include_types):
-                children.append(child.trim2(show_block, include_types))
-            elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
-                children.append(child.create_commented_out_block())
-
-        return CodeBlock(
-            content=self.content,
-            pre_code=self.pre_code,
-            type=self.type,
-            parent=self.parent,
-            children=children
-        )
 
     def length_without_whitespace(self):
         string_without_whitespace = re.sub(r'\s', '', self.to_string())
@@ -199,7 +194,8 @@ class CodeBlock:
     def create_commented_out_block(self, comment_out_str: str = "..."):
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
-            pre_code=self.pre_code,
+            indentation=self.indentation,
+            pre_lines=1,
             content=self.create_comment(comment_out_str))
 
     def create_comment(self, comment: str) -> str:
@@ -363,10 +359,10 @@ class CodeBlock:
             i += 1
         return max_i
 
-
-    def merge(self, updated_block: "CodeBlock", first_level: bool = False, replace_types: List[CodeBlockType] = None) -> List[str]:
+    def merge(self, updated_block: "CodeBlock", first_level: bool = False, replace_types: List[CodeBlockType] = None) -> \
+    List[str]:
         logging.debug(f"Merging block `{self.type.value}: {self.content}` ({len(self.children)} children) with "
-              f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
+                      f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
 
         if first_level and not self.has_any_matching_child(updated_block.children, 0):
             matching_block = self.find_nested_matching_block(updated_block)
@@ -380,7 +376,7 @@ class CodeBlock:
                     updated_block.add_indentation(indentation)
 
                 child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
-                return  [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
+                return [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
             else:
                 logging.debug(
                     f"No matching children in original block `{self.type.value}: {self.content}`, "
@@ -458,7 +454,8 @@ class CodeBlock:
 
                         self.children[i] = original_block_child
 
-                        logging.debug(f"Will replace similar original block definition: `{original_block_child.content}`")
+                        logging.debug(
+                            f"Will replace similar original block definition: `{original_block_child.content}`")
                         child_tweaks = original_block_child.merge(updated_block_child, replace_types=replace_types)
                         merge_tweaks.extend(child_tweaks)
                         i += 1
@@ -469,7 +466,7 @@ class CodeBlock:
                         logging.debug(f"No most similar original block found to `{original_block_child.content}")
                     else:
                         logging.debug(f"Expected most similar original block to be `{original_block_child.content}, "
-                              f"but was {self.children[similar_original_block].content}`")
+                                      f"but was {self.children[similar_original_block].content}`")
 
                 next_original_match = self.find_next_matching_child_block(i, updated_block_child)
                 next_updated_match = updated_block.find_next_matching_child_block(j, original_block_child)
@@ -491,7 +488,7 @@ class CodeBlock:
                     # if there is commented out code after the updated block,
                     # we will insert the lines before the commented out block in the original block
                     merge_tweaks.append(
-                            f"next_commented_out_insert:{original_block_child.content}:{updated_block.children[next_commented_out].content}")
+                        f"next_commented_out_insert:{original_block_child.content}:{updated_block.children[next_commented_out].content}")
                     self.insert_children(i, updated_block.children[j:next_commented_out])
                     i += next_commented_out - j
                     j = next_commented_out
@@ -499,7 +496,7 @@ class CodeBlock:
                     # if there is a match in the updated block, we expect this to be an addition
                     # and insert the lines before in the original block
                     merge_tweaks.append(
-                            f"next_original_match_insert:{original_block_child.content}:{updated_block.children[next_updated_match].content}")
+                        f"next_original_match_insert:{original_block_child.content}:{updated_block.children[next_updated_match].content}")
 
                     self.insert_children(i, updated_block.children[j:next_updated_match])
                     diff = next_updated_match - j
@@ -522,7 +519,9 @@ class CodeBlock:
         block_copy = CodeBlock(
             type=self.type,
             content=self.content,
-            pre_code=self.pre_code,
+            indentation=self.indentation,
+            pre_lines=self.pre_lines,
+            start_line=self.start_line,
             tree_sitter_type=self.tree_sitter_type,
             children=self.children
         )
@@ -534,9 +533,9 @@ class CodeBlock:
     def trim_code_block(self, keep_child: "CodeBlock"):
         children = []
         for child in self.children:
-            if child.type == CodeBlockType.BLOCK_DELIMITER:
+            if child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
                 children.append(child)
-            elif child.content != keep_child.content: # TODO: Fix ID to compare to
+            elif child.content != keep_child.content:  # TODO: Fix ID to compare to
                 if (child.type not in non_code_blocks and
                         (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
                     children.append(child.create_commented_out_block())
@@ -545,8 +544,10 @@ class CodeBlock:
 
         trimmed_block = CodeBlock(
             content=self.content,
-            pre_code=self.pre_code,
+            indentation=self.indentation,
+            pre_lines=self.pre_lines,
             type=self.type,
+            start_line=self.start_line,
             children=children
         )
 
@@ -555,20 +556,55 @@ class CodeBlock:
 
         return trimmed_block
 
-    def trim(self, keep_blocks: List["CodeBlock"], keep_level: int = 0, comment_out_str: str = "..."):
+    def split_blocks(self) -> List["CodeBlock"]:
+        exclude_types = []
+        if self.type in [CodeBlockType.CLASS, CodeBlockType.MODULE]:
+            exclude_types = [CodeBlockType.FUNCTION]
+
+        if self.type == CodeBlockType.TEST_SUITE:
+            exclude_types = [CodeBlockType.TEST_CASE]
+
+        trimmed_block = self.trim(
+            first_level_types=[CodeBlockType.CLASS, CodeBlockType.TEST_SUITE],
+            exclude_types=exclude_types,
+            keep_the_rest=True
+        )
+        trimmed_block = trimmed_block.copy_with_trimmed_parents()
+        trimmed_blocks = [trimmed_block]
+
+        for child in self.children:
+            if child.type in exclude_types + [CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]:
+                trimmed_blocks.extend(child.split_blocks())
+
+        return trimmed_blocks
+
+    def trim(self,
+             keep_blocks: List["CodeBlock"] = [],
+             keep_level: int = 0,
+             include_types: List[CodeBlockType] = None,
+             exclude_types: List[CodeBlockType] = None,
+             first_level_types: List[CodeBlockType] = None,
+             keep_the_rest: bool = False,
+             comment_out_str: str = "..."):
         children = []
         for child in self.children:
             if keep_level:
                 if child.children:
-                    children.append(child.trim(keep_blocks=keep_blocks, keep_level=keep_level-1, comment_out_str=comment_out_str))
+                    children.append(
+                        child.trim(keep_blocks=keep_blocks, keep_level=keep_level - 1, comment_out_str=comment_out_str))
                 else:
                     children.append(child)
-            elif child.type == CodeBlockType.BLOCK_DELIMITER:
+            elif child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
                 children.append(child)
             elif any(child.has_equal_definition(block) for block in keep_blocks):
                 children.append(child)
-            elif child.find_nested_matching_blocks(keep_blocks):
+            elif first_level_types and child.type in first_level_types:
                 children.append(child.trim(keep_blocks, comment_out_str=comment_out_str))
+            elif (child.find_nested_matching_blocks(keep_blocks)
+                  or (include_types and child.type in include_types)):
+                children.append(child.trim(keep_blocks, keep_the_rest=keep_the_rest, comment_out_str=comment_out_str))
+            elif keep_the_rest and (not exclude_types or child.type not in exclude_types):
+                children.append(child.trim(keep_blocks, keep_the_rest=keep_the_rest, exclude_types=exclude_types, comment_out_str=comment_out_str))
             elif (child.type not in non_code_blocks and
                   (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
                 children.append(child.create_commented_out_block(comment_out_str))
@@ -576,8 +612,32 @@ class CodeBlock:
         trimmed_block = CodeBlock(
             content=self.content,
             pre_code=self.pre_code,
+            indentation=self.indentation,
+            pre_lines=self.pre_lines,
             type=self.type,
-            children=children
+            start_line=self.start_line,
+            children=children,
+            parent=self.parent
         )
 
         return trimmed_block
+
+    def trim_with_types(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
+        children = []
+        for child in self.children:
+            if child.type == CodeBlockType.BLOCK_DELIMITER:
+                children.append(copy.copy(child))
+            elif self == show_block or (include_types and child.type in include_types):
+                children.append(child.trim_with_types(show_block, include_types))
+            elif child.has_nested_matching_block(show_block) or child.has_nested_blocks_with_types(include_types):
+                children.append(child.trim_with_types(show_block, include_types))
+            elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
+                children.append(child.create_commented_out_block())
+
+        return CodeBlock(
+            content=self.content,
+            pre_code=self.pre_code,
+            type=self.type,
+            parent=self.parent,
+            children=children
+        )

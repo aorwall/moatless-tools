@@ -25,11 +25,13 @@ def find_type(node: Node, types: List[str]):
     return None
 
 
-def find_nested_type(node: Node, type: str):
+def find_nested_type(node: Node, type: str, levels: int = -1):
+    if levels == 0:
+        return None
     if node.type == type:
         return node
     for child in node.children:
-        found_node = find_nested_type(child, type)
+        found_node = find_nested_type(child, type, levels-1)
         if found_node:
             return found_node
     return None
@@ -53,46 +55,62 @@ class CodeParser:
 
     def get_block_definition(self, node: Node):
         if node.children:
-            return CodeBlockType.CODE, node.children[0]
-        return None, None
+            return CodeBlockType.CODE, node.children[0], node.children[-1]
+        return None, None, None
+
+    def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
+        return None, None, None
 
     def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0, level: int = 0) -> Tuple[CodeBlock, Node]:
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
-        block_type, first_child, last_child = self.get_block_definition(node)
+        end_line = node.end_point[0]
 
-        #  print("block_type: ", block_type, "first_child: ", first_child, "last_child: ", last_child)
-
-        children = []
+        code_block, first_child, last_child = self.get_block_definition_2(node, content_bytes, start_byte)
+        if not code_block:
+            block_type, first_child, last_child = self.get_block_definition(node)
 
         if first_child:
             end_byte = self.get_previous(first_child, node)
         else:
             end_byte = node.end_byte
 
-        end_line = node.end_point[0]
+        if not code_block:
+            code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
+            code_block = CodeBlock(
+                type=block_type,
+                tree_sitter_type=node.type,
+                start_line=node.start_point[0],
+                end_line=end_line,
+                pre_code=pre_code,
+                content=code,
+                language=self.language
+            )
 
-        code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
+
+        #print("block_type: ", block_type, "node_type: ", node.type, "first_child: ", first_child, "last_child: ", last_child, "start_byte", start_byte, "node.start_byte", node.start_byte,  "node.end_byte", node.end_byte)
 
         l = last_child.type if last_child else "none"
-        #print(f"start [{level}]: {code} (last child {l}")
+        #print(f"start [{level}]: {code} (last child {l}, end byte {end_byte})")
 
         next_node = first_child
         while next_node:
             if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
                 next_node = next_node.children[0]
 
-            #print(f"next  [{level}]: {code} -> {next_node.type}")
+            #print(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
             child_block, child_last_node = self.parse_code(content_bytes, next_node, start_byte=end_byte, level=level+1)
             if not child_block.content:
                 if child_block.children:
                     child_block.children[0].pre_code = child_block.pre_code + child_block.children[0].pre_code
                     child_block.children[0].__post_init__()  # FIXME
-                    children.extend(child_block.children)
+                    code_block.append_children(child_block.children)
             else:
-                children.append(child_block)
+                code_block.append_child(child_block)
 
             if child_last_node:
+                #print(f"next  [{level}]: child_last_node -> {child_last_node.start_byte}")
+
                 next_node = child_last_node
 
             end_byte = next_node.end_byte
@@ -103,12 +121,12 @@ class CodeParser:
             if next_node.next_sibling:
                 next_node = next_node.next_sibling
             else:
-                next_node = self.get_parent_next(next_node, node)
+                next_node = self.get_parent_next(next_node, last_child or node)
 
         #print(f"end   [{level}]: {code}")
 
         if not node.parent and node.end_byte > end_byte:
-            children.append(CodeBlock(
+            code_block.append_child(CodeBlock(
                 type=CodeBlockType.SPACE,
                 pre_code=content_bytes[end_byte:node.end_byte].decode(self.encoding),
                 start_line=end_line,
@@ -116,16 +134,7 @@ class CodeParser:
                 content="",
             ))
 
-        return CodeBlock(
-            type=block_type,
-            tree_sitter_type=node.type,
-            start_line=node.start_point[0],
-            end_line=end_line,
-            pre_code=pre_code,
-            content=code,
-            children=children,
-            language=self.language
-        ), next_node
+        return code_block, next_node
 
     def get_previous(self, node: Node, origin_node: Node):
         if node == origin_node:
@@ -153,14 +162,8 @@ class CodeParser:
         return False
 
     def parse(self, content: str) -> CodeBlock:
-        tree = self.tree_parser.parse(bytes(content, self.encoding))
-
-        # FIXME: Ugly hack to fix functions with only commented out code
-        # if self.has_error(tree.walk().node):
-        #    codeblock, _ = self.parse_code(content.encode(self.encoding), tree.walk().node)
-        #    content = codeblock.to_string()
-        #    tree = self.tree_parser.parse(bytes(content, self.encoding))
-
-        codeblock, _ = self.parse_code(content.encode(self.encoding), tree.walk().node)
+        content_in_bytes = bytes(content, self.encoding)
+        tree = self.tree_parser.parse(content_in_bytes)
+        codeblock, _ = self.parse_code(content_in_bytes, tree.walk().node)
         codeblock.language = self.language
         return codeblock

@@ -1,8 +1,9 @@
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Optional, Tuple, Dict
 
 from tree_sitter import Node
 
-from ghostcoder.codeblocks.codeblocks import CodeBlockType
+from ghostcoder.codeblocks.codeblocks import CodeBlockType, CodeBlock
 from ghostcoder.codeblocks.parser.parser import CodeParser, find_nested_type, find_type
 
 class_node_types = [
@@ -34,25 +35,238 @@ block_delimiters = [
 ]
 
 
+@dataclass
+class DefinitionTree:
+    block_type: Optional[CodeBlockType] = None
+    identifier: bool = False
+    first_child: bool = False
+    first_child_index: int = None
+    sub_tree: Dict[str, "DefinitionTree"] = field(default_factory=dict)
+
+
+class_declaration = DefinitionTree(
+    block_type=CodeBlockType.CLASS,
+    sub_tree={
+        "class_body": DefinitionTree(
+            first_child_index=1,
+        )
+    }
+)
+
+interface_declaration = DefinitionTree(
+    block_type=CodeBlockType.CLASS,
+    sub_tree={
+            "object_type": DefinitionTree(
+                first_child_index=1,
+            )
+        }
+    )
+
+arrow_function = DefinitionTree(
+    first_child_index=-1,
+    sub_tree={
+        "formal_parameters": DefinitionTree(
+            block_type=CodeBlockType.FUNCTION
+        ),
+    }
+)
+
+function_declaration = DefinitionTree(
+    sub_tree={
+        "variable_declarator": DefinitionTree(
+            sub_tree={
+                "arrow_function": arrow_function
+            }
+        )
+    }
+)
+
+method_definition = DefinitionTree(
+    block_type=CodeBlockType.FUNCTION,
+    sub_tree={
+        "property_identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "statement_block": DefinitionTree(
+            first_child=True
+        )
+    }
+)
+
+variable_declarator = DefinitionTree(
+    sub_tree={
+        "identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "call_expression": DefinitionTree(
+            sub_tree={
+                "type_arguments": DefinitionTree(
+                    block_type=CodeBlockType.CLASS
+                ),
+                "arguments": DefinitionTree(
+                    sub_tree={
+                        "arrow_function": arrow_function
+                    }
+                )
+            }
+        ),
+        "arrow_function": arrow_function,
+    }
+)
+
+public_field_definition = DefinitionTree(
+    sub_tree={
+        "property_identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "arrow_function": arrow_function
+    }
+)
+
+call_expression = DefinitionTree(
+        sub_tree={
+            "arguments": DefinitionTree(
+                sub_tree={
+                    "arrow_function": DefinitionTree(
+                        sub_tree={
+                            "formal_parameters": DefinitionTree(
+                                block_type=CodeBlockType.FUNCTION
+                            ),
+                            "statement_block": DefinitionTree(
+                                first_child=True
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    )
+
+_type_tree = {
+    "method_definition": method_definition,
+    "public_field_definition": public_field_definition,
+    "call_expression": call_expression,
+    "expression_statement": DefinitionTree(
+        sub_tree={
+            "call_expression": call_expression,
+        }
+    ),
+    "lexical_declaration": DefinitionTree(
+        sub_tree={
+            "variable_declarator": variable_declarator
+        }
+    ),
+    "export_statement": DefinitionTree(
+        sub_tree={
+            "class_declaration": class_declaration,
+            "interface_declaration": interface_declaration,
+            "lexical_declaration": function_declaration,
+        }
+    )
+}
+
+
 class JavaScriptParser(CodeParser):
 
     def __init__(self, language: str = "javascript"):
         super().__init__(language)
 
+    def find_in_tree(self, node: Node, type_tree: dict = _type_tree) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node]]:
+        block_type = None
+        first_child = None
+        identifier_node = None
+
+        if node.type in type_tree:
+            def_tree = type_tree[node.type]
+            if def_tree.block_type:
+                block_type = def_tree.block_type
+            if def_tree.first_child:
+                first_child = node
+            if def_tree.first_child_index:
+                first_child = node.children[def_tree.first_child_index]
+            if def_tree.identifier:
+                identifier_node = node
+
+            for child in node.children:
+                child_type, child_node, child_identifier_node = self.find_in_tree(child, def_tree.sub_tree)
+                if child_type:
+                    block_type = child_type
+                if child_node:
+                    first_child = child_node
+                if child_identifier_node:
+                    identifier_node = child_identifier_node
+
+        return block_type, first_child, identifier_node
+
     def find_arrow_func(self, node: Node):
-        arrow_func = find_nested_type(node, "arrow_function")
+        arrow_func = find_nested_type(node, "arrow_function", 2)
         if arrow_func:
-            arrow = find_nested_type(arrow_func, "=>")
+            arrow = find_type(arrow_func, ["=>"])
             if arrow:
-                block_delimiter = find_nested_type(arrow.next_sibling, "{")
+                block_delimiter = find_type(arrow.next_sibling, ["{"])
                 if block_delimiter:
                     return block_delimiter
                 else:
                     return arrow.next_sibling
         return None
 
+    def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
+        block_type, first_child, identifier_node = self.find_in_tree(node)
+        if not block_type:
+            return None, None, None
+
+        if node.next_sibling and node.next_sibling.type == ";":
+            last_child = node.next_sibling
+        elif node.children:
+            last_child = node.children[-1]
+
+        pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
+        end_line = node.end_point[0]
+
+        if first_child:
+            end_byte = self.get_previous(first_child, node)
+        else:
+            end_byte = node.end_byte
+
+        code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
+
+        if identifier_node:
+            identifier = content_bytes[identifier_node.start_byte:identifier_node.end_byte].decode(self.encoding)
+        else:
+            identifier = code
+
+        if block_type == CodeBlockType.FUNCTION and identifier == "constructor":
+            block_type = CodeBlockType.CONSTRUCTOR
+
+        # A bit of a hack to support Jest tests
+        if block_type == CodeBlockType.FUNCTION and code.startswith("describe("):
+            block_type = CodeBlockType.TEST_SUITE
+
+        if block_type == CodeBlockType.FUNCTION and code.startswith("it("):
+            block_type = CodeBlockType.TEST_CASE
+
+        # Workaround to set block type to class for React components with an identifier starting with upper case
+        if node.type == "lexical_declaration" and identifier[0].isupper():
+            block_type = CodeBlockType.CLASS
+
+        code_block = CodeBlock(
+                type=block_type,
+                identifier=identifier,
+                tree_sitter_type=node.type,
+                start_line=node.start_point[0],
+                end_line=end_line,
+                pre_code=pre_code,
+                content=code,
+                language=self.language,
+                children=[]
+            )
+
+        return code_block, first_child, last_child
+
     def get_block_definition(self, node: Node) -> Tuple[CodeBlockType, Optional[Node], Optional[Node]]:
-        if node.children:
+        if node.next_sibling and node.next_sibling.type == ";":
+            last_child = node.next_sibling
+        elif node.children:
             last_child = node.children[-1]
 
         if node.type == "program":
@@ -68,7 +282,10 @@ class JavaScriptParser(CodeParser):
             return CodeBlockType.BLOCK_DELIMITER, None, None
 
         if node.type == "import_statement":
-            return CodeBlockType.IMPORT, None, None
+            return CodeBlockType.IMPORT, find_type(node, ["import_clause"]), last_child
+
+        if node.type == "import_clause":
+            return CodeBlockType.CODE, find_nested_type(node, "import_specifier"), last_child
 
         if "comment" in node.type:
             if "..." in node.text.decode("utf8"):
@@ -82,34 +299,62 @@ class JavaScriptParser(CodeParser):
             block_type = CodeBlockType.CODE
 
         if node.type in ["binary_expression"]:
-            return block_type, None, None
+            return block_type, node.children[0], last_child
 
         if node.type in ["expression_statement"]:
             node = node.children[0]
 
-        if node.type in ["variable_declarator", "variable_declaration", "lexical_declaration", "call_expression",
-                         "new_expression", "type_alias_declaration"]:
-            arrow_func = self.find_arrow_func(node)
-            if arrow_func:
-                if node.type == "lexical_declaration":
-                    type_annotation = find_nested_type(node, "type_annotation")
-                    if type_annotation and type_annotation.start_byte < arrow_func.start_byte:
-                        return CodeBlockType.CLASS, arrow_func, last_child
-                    else:
-                        return CodeBlockType.FUNCTION, arrow_func, last_child
-                else:
-                    return block_type, arrow_func, last_child
+        found_block_type, found_first_child, _ = self.find_in_tree(node)
+        if found_block_type:
+            return found_block_type, found_first_child, last_child
 
-            delimiter = find_nested_type(node, "=")
+        if node.type == "lexical_declaration":
+            node = find_type(node, ["variable_declarator"])
+
+        if node.type in ["variable_declarator", "field_definition"]:
+            arrow_function = find_type(node, ["arrow_function"])
+            if arrow_function:
+                formal_parameters = find_type(arrow_function, ["formal_parameters"])
+                arrow = find_type(arrow_function, ["=>"])
+                if arrow:
+                    block_delimiter = find_nested_type(arrow.next_sibling, "{")
+                    if block_delimiter:
+                        first_child = block_delimiter
+                    else:
+                        first_child = arrow.next_sibling
+
+                type_annotation = find_nested_type(node, "type_annotation")
+                if type_annotation and type_annotation.start_byte < first_child.start_byte:
+                    return CodeBlockType.CLASS, first_child, last_child
+                elif formal_parameters:
+                    return CodeBlockType.FUNCTION, first_child, last_child
+                else:
+                    return CodeBlockType.STATEMENT, first_child, last_child
+
+        if node.type in ["variable_declarator", "variable_declaration", "call_expression",
+                         "new_expression", "type_alias_declaration", "field_definition"]:
+            delimiter = find_type(node, ["="])
             if delimiter:
                 return block_type, delimiter, last_child
-            else:
-                end_delimiter = find_nested_type(node, ";")
-                if end_delimiter:
-                    return block_type, end_delimiter, last_child
+
+            arrow_func = self.find_arrow_func(node)
+            if arrow_func:
+                return block_type, arrow_func, last_child
+
+            return block_type, node.children[0], last_child
 
         if node.type in ["object"]:
             return block_type, find_type(node, ["{"]).next_sibling, last_child
+
+        if node.type in ["jsx_element"]:
+            return CodeBlockType.STATEMENT, node.children[0], last_child
+
+        if node.type in ["jsx_opening_element"]:
+            jsx_attr = find_type(node, ["jsx_attribute"])
+            if jsx_attr:
+                return block_type, jsx_attr, last_child
+            else:
+                return block_type, None, None
 
         block = find_type(node,
                           ["class_body", "enum_body", "statement_block", "object_type", "object_pattern", "switch_body",
@@ -126,14 +371,18 @@ class JavaScriptParser(CodeParser):
             if arrow_func:
                 return block_type, arrow_func, last_child
 
-        parenthesized_expression = find_type(node, ["parenthesized_expression"])
+        if node.type == "parenthesized_expression":
+            parenthesized_expression = node
+        else:
+            parenthesized_expression = find_type(node, ["parenthesized_expression"])
         if parenthesized_expression:
             delimiter = find_type(parenthesized_expression, ["("])
             if delimiter:
                 return block_type, delimiter, last_child
             return block_type, parenthesized_expression.children[0], last_child
 
-        if node.type in ["switch_case", "switch_default"]:
+        # start children after :
+        if node.type in ["switch_case", "switch_default", "pair"]:
             delimiter = find_type(node, [":"])
             if delimiter:
                 return block_type, delimiter, last_child
@@ -141,7 +390,7 @@ class JavaScriptParser(CodeParser):
         if node.type in ["statement_block"]:
             return block_type, node.children[0], last_child
 
-        if node.type in ["return_statement", "jsx_element", "call_expression", "assignment_expression"]:
+        if node.type in ["return_statement", "call_expression", "assignment_expression"]:
             return block_type, node.children[1], last_child
 
         return CodeBlockType.CODE, None, None
