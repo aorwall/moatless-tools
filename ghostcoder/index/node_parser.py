@@ -12,7 +12,7 @@ from llama_index.text_splitter import TokenTextSplitter, SplitterType, get_defau
 from llama_index.utils import get_tqdm_iterable
 from pydantic import Field
 
-from ghostcoder.codeblocks import CodeSplitter, create_parser, CodeBlockType, CodeBlock
+from ghostcoder.codeblocks import create_parser, CodeBlock, CodeBlockType
 from ghostcoder.utils import count_tokens
 
 
@@ -95,23 +95,33 @@ class CodeNodeParser(NodeParser):
                         continue
 
                     codeblock = parser.parse(content)
+                    logging.debug(codeblock.to_tree(include_tree_sitter_type=False,
+                                                    show_tokens=True,
+                                                    include_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS]))
 
                     splitted_blocks = codeblock.split_blocks()
 
                     for splitted_block in splitted_blocks:
                         definitions, parent = self.get_parent_and_definitions(splitted_block)
+
                         node_metadata = document.metadata
                         node_metadata["definition"] = splitted_block.content
-                        node_metadata["type"] = str(splitted_block.type)
+                        node_metadata["block_type"] = str(splitted_block.type)
+
+                        if splitted_block.identifier:
+                            node_metadata["identifier"] = splitted_block.identifier
+                        else:
+                            node_metadata["identifier"] = splitted_block.content[:80].replace("\n", "\\n")
+
                         node_metadata["start_line"] = splitted_block.start_line
 
                         tokens = count_tokens(parent.to_string())
                         if tokens > 4000:
-                            logging.info(f"Skip node {splitted_block.content} in {document.id_} with {tokens} tokens")
+                            logging.info(f"Skip node [{node_metadata['identifier']}] in {document.id_} with {tokens} tokens")
                             continue
 
                         if tokens > 1000:
-                            logging.info(f"Big node {splitted_block.content} in {document.id_} with {tokens} tokens")
+                            logging.info(f"Big node [{node_metadata['identifier']}] in {document.id_} with {tokens} tokens")
 
                         # TODO: Add relationships between code blocks
                         node = TextNode(

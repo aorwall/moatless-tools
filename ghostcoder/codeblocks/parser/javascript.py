@@ -1,5 +1,7 @@
+import logging
+import time
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 from tree_sitter import Node
 
@@ -16,7 +18,8 @@ class_node_types = [
 function_node_types = [
     "method_definition",
     "function_declaration",
-    "abstract_method_signature"
+    "abstract_method_signature",
+    "generator_function_declaration"
 ]
 
 statement_node_types = [
@@ -34,28 +37,71 @@ block_delimiters = [
     ")"
 ]
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DefinitionTree:
     block_type: Optional[CodeBlockType] = None
     identifier: bool = False
     first_child: bool = False
+    must_include_sub_types: bool = False
     first_child_index: int = None
+    queries: List["MatchingQuery"] = field(default_factory=list)
     sub_tree: Dict[str, "DefinitionTree"] = field(default_factory=dict)
+
+
+@dataclass
+class MatchingQuery:
+    query: str
+
+    def __str__(self):
+        return f"MatchingQuery(query={self.query})"
 
 
 class_declaration = DefinitionTree(
     block_type=CodeBlockType.CLASS,
     sub_tree={
+        "type_identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "identifier": DefinitionTree(
+            identifier=True,
+        ),
         "class_body": DefinitionTree(
-            first_child_index=1,
+            sub_tree={
+                "{": DefinitionTree(
+                    first_child=True
+                )
+            }
         )
     }
 )
 
+enum_declaration = DefinitionTree(
+    block_type=CodeBlockType.CLASS,
+    sub_tree={
+        "type_identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "identifier": DefinitionTree(
+            identifier=True,
+        ),
+        "enum_body": DefinitionTree(
+            sub_tree={
+                "{": DefinitionTree(
+                    first_child=True
+                )
+            }
+        )
+    }
+)
 interface_declaration = DefinitionTree(
     block_type=CodeBlockType.CLASS,
     sub_tree={
+            "type_identifier": DefinitionTree(
+               identifier=True,
+           ),
             "object_type": DefinitionTree(
                 first_child_index=1,
             )
@@ -67,14 +113,20 @@ arrow_function = DefinitionTree(
     sub_tree={
         "formal_parameters": DefinitionTree(
             block_type=CodeBlockType.FUNCTION
-        ),
+        )
     }
 )
 
-function_declaration = DefinitionTree(
+lexical_declaration = DefinitionTree(
     sub_tree={
         "variable_declarator": DefinitionTree(
             sub_tree={
+                "identifier": DefinitionTree(
+                    identifier=True,
+                ),
+                "type_annotation": DefinitionTree(
+                    block_type=CodeBlockType.CLASS
+                ),
                 "arrow_function": arrow_function
             }
         )
@@ -99,7 +151,10 @@ variable_declarator = DefinitionTree(
             identifier=True,
         ),
         "call_expression": DefinitionTree(
+            must_include_sub_types=True,
             sub_tree={
+                "identifier": DefinitionTree(
+                ),
                 "type_arguments": DefinitionTree(
                     block_type=CodeBlockType.CLASS
                 ),
@@ -111,6 +166,12 @@ variable_declarator = DefinitionTree(
             }
         ),
         "arrow_function": arrow_function,
+        "type_annotation": DefinitionTree(
+            block_type=CodeBlockType.CODE
+        ),
+        "=": DefinitionTree(
+            first_child=True
+        )
     }
 )
 
@@ -127,44 +188,120 @@ call_expression = DefinitionTree(
         sub_tree={
             "arguments": DefinitionTree(
                 sub_tree={
-                    "arrow_function": DefinitionTree(
-                        sub_tree={
-                            "formal_parameters": DefinitionTree(
-                                block_type=CodeBlockType.FUNCTION
-                            ),
-                            "statement_block": DefinitionTree(
-                                first_child=True
-                            )
-                        }
-                    )
+                    "arrow_function": arrow_function,
+                    #"(": DefinitionTree( #  FIXME
+                    #    first_child=True,
+                    #    block_type=CodeBlockType.CODE
+                    #)
                 }
+            ),
+            "member_expression": DefinitionTree(
+                sub_tree={
+                    "identifier": DefinitionTree(
+                        identifier=True,
+                    ),
+                },
             )
         }
     )
 
 _type_tree = {
+    "class_declaration": class_declaration,
+    "enum_declaration": enum_declaration,
+    "interface_declaration": interface_declaration,
     "method_definition": method_definition,
     "public_field_definition": public_field_definition,
     "call_expression": call_expression,
+    "variable_declaration": DefinitionTree(
+        block_type=CodeBlockType.CODE,
+        sub_tree={
+            "variable_declarator": variable_declarator
+        }
+    ),
     "expression_statement": DefinitionTree(
         sub_tree={
-            "call_expression": call_expression,
-        }
+            "call_expression": call_expression
+        },
+        queries=[
+            MatchingQuery(
+                query="""(expression_statement
+  (assignment_expression
+    (identifier) @identifier
+    (arrow_function
+      (formal_parameters) @type_function
+      (statement_block) @first_child)))""",
+            )
+        ]
     ),
     "lexical_declaration": DefinitionTree(
         sub_tree={
             "variable_declarator": variable_declarator
-        }
+        },
+        queries=[
+            MatchingQuery(
+                query="""(lexical_declaration
+  (variable_declarator
+    [(identifier) @identifier
+     (array_pattern) @identifier]
+    [("=") @first_child @type_code
+    (arrow_function
+      (formal_parameters) @type_function
+      [(statement_block) @first_child
+       (expression) @first_child]
+    )
+    (call_expression
+      (arguments
+        (arrow_function
+          (formal_parameters) @type_function
+          (statement_block) @first_child
+        )
+      )
+    )]
+  )
+)"""
+            )
+        ]
     ),
     "export_statement": DefinitionTree(
         sub_tree={
             "class_declaration": class_declaration,
             "interface_declaration": interface_declaration,
-            "lexical_declaration": function_declaration,
+            "lexical_declaration": lexical_declaration,
+            "enum_declaration": enum_declaration,
         }
-    )
+    ),
+    "binary_expression": DefinitionTree(
+        block_type=CodeBlockType.CODE
+    ),
+    "new_expression": DefinitionTree(
+        block_type=CodeBlockType.CODE
+    ),
+    "program": DefinitionTree(
+        must_include_sub_types=True,
+        sub_tree={
+            "expression_statement": DefinitionTree(  # GPT corner case: constructor without a class
+                sub_tree={
+                    "call_expression": DefinitionTree(
+                        sub_tree={
+                            "identifier": DefinitionTree(
+                                block_type=CodeBlockType.FUNCTION,
+                                identifier=True
+                            ),
+                            "arguments": DefinitionTree(
+                                sub_tree={
+                                    "arrow_function": arrow_function
+                                }
+                            ),
+                        },
+                    )
+                }
+            ),
+            "statement_block": DefinitionTree(
+                first_child_index=1
+            )
+        }
+    ),
 }
-
 
 class JavaScriptParser(CodeParser):
 
@@ -178,6 +315,13 @@ class JavaScriptParser(CodeParser):
 
         if node.type in type_tree:
             def_tree = type_tree[node.type]
+
+            for match_query in def_tree.queries:
+                match_block_type, identifier_node, first_child = self.find_match(node, match_query)
+                if identifier_node and first_child:
+                    #logger.debug(f"Found match for {match_query} on node type {node.type}")
+                    return match_block_type, first_child, identifier_node
+
             if def_tree.block_type:
                 block_type = def_tree.block_type
             if def_tree.first_child:
@@ -188,12 +332,15 @@ class JavaScriptParser(CodeParser):
                 identifier_node = node
 
             for child in node.children:
+                if def_tree.must_include_sub_types and child.type not in def_tree.sub_tree:
+                    return None, None, None
+
                 child_type, child_node, child_identifier_node = self.find_in_tree(child, def_tree.sub_tree)
-                if child_type:
+                if not block_type:
                     block_type = child_type
                 if child_node:
                     first_child = child_node
-                if child_identifier_node:
+                if not identifier_node:
                     identifier_node = child_identifier_node
 
         return block_type, first_child, identifier_node
@@ -210,6 +357,30 @@ class JavaScriptParser(CodeParser):
                     return arrow.next_sibling
         return None
 
+    def find_match(self, node: Node, match_query: MatchingQuery) -> Tuple[CodeBlockType, Node, Node]:
+        query = self.tree_language.query(match_query.query + " @root")
+        captures = query.captures(node)
+
+        identifier_node = None
+        first_child = None
+        block_type = None
+
+        for node_match, tag in captures:
+            if tag == "root" and node != node_match:
+                return None, None, None
+            if tag == "identifier":
+                identifier_node = node_match
+            elif tag == "first_child":
+                first_child = node_match
+            elif tag == "type_code":
+                block_type = CodeBlockType.CODE
+            elif tag == "type_class":
+                block_type = CodeBlockType.CLASS
+            elif tag == "type_function":
+                block_type = CodeBlockType.FUNCTION
+
+        return block_type, identifier_node, first_child
+
     def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
         block_type, first_child, identifier_node = self.find_in_tree(node)
         if not block_type:
@@ -217,8 +388,12 @@ class JavaScriptParser(CodeParser):
 
         if node.next_sibling and node.next_sibling.type == ";":
             last_child = node.next_sibling
+
         elif node.children:
             last_child = node.children[-1]
+
+        if not first_child and last_child.type == ";":
+            first_child = last_child
 
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
         end_line = node.end_point[0]
@@ -233,7 +408,7 @@ class JavaScriptParser(CodeParser):
         if identifier_node:
             identifier = content_bytes[identifier_node.start_byte:identifier_node.end_byte].decode(self.encoding)
         else:
-            identifier = code
+            identifier = code.split("\n")[0].strip()
 
         if block_type == CodeBlockType.FUNCTION and identifier == "constructor":
             block_type = CodeBlockType.CONSTRUCTOR
@@ -246,7 +421,7 @@ class JavaScriptParser(CodeParser):
             block_type = CodeBlockType.TEST_CASE
 
         # Workaround to set block type to class for React components with an identifier starting with upper case
-        if node.type == "lexical_declaration" and identifier[0].isupper():
+        if block_type == CodeBlockType.FUNCTION and identifier[0].isupper():
             block_type = CodeBlockType.CLASS
 
         code_block = CodeBlock(

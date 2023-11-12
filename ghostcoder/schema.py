@@ -163,7 +163,7 @@ class UpdatedFileItem(FileItem):
         return f"{self.file_path} ({status})"
 
     def __str__(self) -> str:
-        return self.to_prompt()
+        return f"{self.file_path}\n```{self.language}\n{self.diff}\n```"
 
     def to_history(self) -> str:
         return str(self)
@@ -282,6 +282,9 @@ class Message(ItemHolder):
     def find_items_by_type(self, item_type: str):
         return [item for item in self.items if item.type == item_type]
 
+    def __str__(self) -> str:
+        return "\n".join([str(item) for item in self.items])
+
 
 class VerificationResult(BaseModel):
     success: bool = False
@@ -311,7 +314,7 @@ class File(BaseModel):
     last_modified: float = 0
     staged: bool = False
     untracked: bool = False
-    test: bool = False
+    content_type: Optional[str] = None
 
 
 class Folder(BaseModel):
@@ -338,14 +341,21 @@ class Folder(BaseModel):
                     return result
         return None
        
-    def tree_string(self, indent=0):
+    def tree_string(self, content_type: Optional[str] = None, indent=0):
         file_tree = ""
         for child in self.children:
-            if isinstance(child, Folder):
-                file_tree += " " * indent + child.name + "/\n"
-                file_tree += child.tree_string(indent + 2)
+            if indent == 0:
+                name = "/" + child.name
             else:
-                file_tree += " " * (indent) + child.name + "\n"
+                name = child.name
+            if isinstance(child, Folder):
+                file_tree += " " * indent + name + "/\n"
+
+                sub_tree = child.tree_string(content_type=content_type, indent=indent + 2)
+                if sub_tree:
+                    file_tree += sub_tree
+            elif not content_type or content_type == child.content_type:
+                file_tree += " " * (indent) + name + "\n"
         return file_tree
 
 

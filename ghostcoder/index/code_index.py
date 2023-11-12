@@ -4,12 +4,16 @@ from typing import List, Optional
 
 import chromadb
 from llama_index import ServiceContext, StorageContext, load_index_from_storage, VectorStoreIndex, Document, \
-    KnowledgeGraphIndex
+    KnowledgeGraphIndex, get_response_synthesizer, SelectorPromptTemplate, PromptTemplate
+from llama_index.prompts import PromptType
+from llama_index.prompts.default_prompts import DEFAULT_TEXT_QA_PROMPT_TMPL
+from llama_index.query_engine import RetrieverQueryEngine
+from llama_index.response_synthesizers import ResponseMode
 from llama_index.vector_stores import ChromaVectorStore
-from llama_index.vector_stores.types import VectorStore
+from llama_index.vector_stores.types import VectorStore, ExactMatchFilter, MetadataFilters
 from pydantic import BaseModel, Field
 
-from ghostcoder.codeblocks import create_parser, CodeBlockType
+from ghostcoder.codeblocks import  CodeBlockType
 from ghostcoder.filerepository import FileRepository
 from ghostcoder.index.node_parser import CodeNodeParser
 
@@ -17,11 +21,13 @@ from ghostcoder.index.node_parser import CodeNodeParser
 class BlockSearchHit(BaseModel):
     score: float = Field(default=0, description ="The similarity score of the block.")
     type: str = Field(description="The type of the block.")
+    identifier: str = Field(description="The identifier of the block.")
     content: str = Field(description="The content of the block.")
 
 
 class FileSearchHit(BaseModel):
     path: str = Field(description="The path of the file.")
+    content_type: str = Field(description="The type of the document.")
     blocks: List[BlockSearchHit] = Field(description="The blocks of the file.")
 
 
@@ -31,6 +37,7 @@ class CodeIndex:
                  repository: FileRepository,
                  index_dir: str,
                  reload: bool = False,
+                 openai_api_key: str = None,
                  vector_store: Optional[VectorStore] = None):
         self.repository = repository
         self.vector_store = vector_store
@@ -46,11 +53,13 @@ class CodeIndex:
             return
 
         try:
-            storage_context = StorageContext.from_defaults(persist_dir=index_dir, vector_store=self.vector_store)
+            storage_context = StorageContext.from_defaults(persist_dir=self.index_dir, vector_store=self.vector_store)
             self._index = load_index_from_storage(storage_context=storage_context, service_context=self.service_context, show_progress=True)
             logging.info("Index loaded from storage.")
-            if index_dir:
+            if self.index_dir:
                 self.refresh(docs)
+                self._index.storage_context.persist(persist_dir=self.index_dir)
+
         except FileNotFoundError:
             logging.info("Index not found. Creating a new one...")
             self.initiate_index(docs)
@@ -58,8 +67,10 @@ class CodeIndex:
     def initiate_index(self, docs):
         logging.info(f"Creating new index with {len(docs)} documents...")
         storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-        self._index = VectorStoreIndex.from_documents(documents=docs, service_context=self.service_context,
-                                                      storage_context=storage_context, show_progress=True)
+        self._index = VectorStoreIndex.from_documents(documents=docs,
+                                                      service_context=self.service_context,
+                                                      storage_context=storage_context,
+                                                      show_progress=True)
         if self.index_dir:
             self._index.storage_context.persist(persist_dir=self.index_dir)
             logging.info("New index created and persisted to storage.")
@@ -88,8 +99,8 @@ class CodeIndex:
                 data = self.repository.get_file_content(file.path)
                 metadata = {
                     "path": file.path,
-                    "is_test": file.test,
                     "language": file.language,
+                    "type": file.content_type
                 }
 
                 doc = Document(text=data, metadata=metadata)
@@ -98,8 +109,14 @@ class CodeIndex:
                 documents.append(doc)
         return documents
 
-    def search(self, query):
-        retriever = self._index.as_retriever(similarity_top_k=20)
+    def search(self, query: str, content_type: str = None, limit: int = 5):
+        #filters = [ExactMatchFilter(key="block_type", value=str(block_type)) for block_type in block_types]
+        filters = []
+
+        if content_type:
+            filters.append(ExactMatchFilter(key="type", value=content_type))
+
+        retriever = self._index.as_retriever(similarity_top_k=limit, filters=MetadataFilters(filters=filters))
 
         nodes = retriever.retrieve(query)
         logging.info(f"Got {len(nodes)} hits")
@@ -108,38 +125,32 @@ class CodeIndex:
         for node in nodes:
             path = node.node.metadata.get("path")
             if path not in hits:
-                hits[path] = FileSearchHit(path=path, blocks=[])
+                hits[path] = FileSearchHit(path=path, content_type=node.node.metadata.get("type", ""), blocks=[])
             hits[path].blocks.append(BlockSearchHit(
                 similarity_score=node.score,
-                type=node.node.metadata.get("type"),
+                identifier=node.node.metadata.get("identifier"),
+                type=node.node.metadata.get("block_type"),
                 content=node.node.get_content()
             ))
 
         return hits.values()
 
+    def ask(self, query: str):
+        template = PromptTemplate(
+            DEFAULT_TEXT_QA_PROMPT_TMPL, prompt_type=PromptType.QUESTION_ANSWER
+        )
+        response_synthesizer = get_response_synthesizer(
+            response_mode=ResponseMode.COMPACT,
+            text_qa_template=template
+        )
+        retriever = self._index.as_retriever(similarity_top_k=20)
 
-if __name__ == "__main__":
-    repo_dir = Path("")
-    index_dir = ".index"
-    exclude_dirs = [index_dir, ".index", ".gcoder"]
+        query_engine = RetrieverQueryEngine(
+            retriever=retriever,
+            response_synthesizer=response_synthesizer,
+         #   node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=0.7)],
+        )
+        #query_engine = self._index.as_query_engine()
+        response = query_engine.query(query)
+        return response
 
-    logging_format = '%(asctime)s - %(levelname)s - %(message)s'
-    logging.basicConfig(level=logging.INFO, format=logging_format)
-
-    repository = FileRepository(repo_path=repo_dir, exclude_dirs=exclude_dirs)
-
-    db = chromadb.PersistentClient(path=index_dir + "/.chroma_db")
-    chroma_collection = db.get_or_create_collection("collection")
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    code_index = CodeIndex(repository=repository, index_dir=index_dir, vector_store=vector_store, reload=True)
-
-    query = """
-"""
-
-    hits = code_index.search(query)
-    for hit in hits:
-        print(hit.path)
-        for codeblock in hit.blocks:
-            print(codeblock.score)
-            print(codeblock.type)
-            print(codeblock.content)

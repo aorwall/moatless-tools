@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import List
 
@@ -8,6 +9,8 @@ from langchain.schema import SystemMessage, AIMessage, HumanMessage
 from ghostcoder.llm.base import LLMWrapper
 from ghostcoder.schema import Message, Stats
 
+
+logger = logging.getLogger(__name__)
 
 class ChatLLMWrapper(LLMWrapper):
 
@@ -27,6 +30,9 @@ class ChatLLMWrapper(LLMWrapper):
 
         callbacks = [callback] if callback else []
         result = self.llm.generate([llm_messages], callbacks=callbacks)
+
+        if "system_fingerprint" in result.llm_output:
+            logger.info(f"System fingerprint: {result.llm_output['system_fingerprint']}")
 
         content = result.generations[0][0].text
         usage = Stats.from_dict(

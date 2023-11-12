@@ -42,6 +42,8 @@ class CodeParser:
     def __init__(self, language: str, encoding: str = "utf8"):
         try:
             self.tree_parser = tree_sitter_languages.get_parser(language)
+            self.tree_language = tree_sitter_languages.get_language(language)
+
         except Exception as e:
             print(f"Could not get parser for language {language}.")
             raise e
@@ -78,6 +80,7 @@ class CodeParser:
             code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
             code_block = CodeBlock(
                 type=block_type,
+                identifier=code.split("\n")[0].strip(),
                 tree_sitter_type=node.type,
                 start_line=node.start_point[0],
                 end_line=end_line,

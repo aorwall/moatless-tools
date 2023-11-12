@@ -1,38 +1,98 @@
 import logging
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
-from ghostcoder.actions import CodeWriter
+import chromadb
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain.chat_models import ChatOpenAI
+from llama_index.vector_stores import ChromaVectorStore
+
+from ghostcoder.actions.write_code import CodeWriter
 from ghostcoder.actions.verify.code_verifier import CodeVerifier
+from ghostcoder.actions.write_code.base import StreamCallback
 from ghostcoder.actions.write_code.prompt import FIX_TESTS_PROMPT
+from ghostcoder.callback import LogCallbackHandler
+from ghostcoder.codeblocks import CodeBlockType, create_parser
 from ghostcoder.filerepository import FileRepository
+from ghostcoder.index.code_index import CodeIndex
 from ghostcoder.ipython_callback import DisplayCallback
-from ghostcoder.llm import LLMWrapper
+from ghostcoder.llm import LLMWrapper, ChatLLMWrapper
 from ghostcoder.schema import Message, UpdatedFileItem, TextItem, FileItem
 from ghostcoder.test_tools import TestTool
 
 logger = logging.getLogger(__name__)
 
+def create_openai_client(
+        log_dir: Path,
+        llm_name: str,
+        temperature: float,
+        streaming: bool = True,
+        openai_api_key: str = None,
+        max_tokens: Optional[int] = None,
+        stop_sequence: str = None):
+    callback = LogCallbackHandler(str(log_dir))
+    logger.info(f"create_openai_client(): llm_name={llm_name}, temperature={temperature}, log_dir={log_dir}")
+
+    model_kwargs = {}
+    if stop_sequence:
+        model_kwargs["stop"] = [stop_sequence]
+
+    return ChatLLMWrapper(ChatOpenAI(
+        model=llm_name,
+        openai_api_key=openai_api_key,
+        model_kwargs=model_kwargs,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        streaming=streaming,
+        callbacks=[callback]
+    ))
+
+
 class Ghostcoder:
 
     def __init__(self,
-                 llm: LLMWrapper,
-                 basic_llm: LLMWrapper,
-                 repository: FileRepository,
+                 model_name: str = "gpt-4",
+                 llm: LLMWrapper = None,
+                 basic_llm: LLMWrapper = None,
+                 repository: FileRepository = None,
+                 code_index: CodeIndex = None,
                  code_writer_sys_prompt: str = None,
                  verify_code: bool = False,
                  test_tool: TestTool = None,
                  auto_mode: bool = True,
                  language: str = None,
                  callback: DisplayCallback = None,
-                 max_retries: int = 3):
-        self.basic_llm = basic_llm
-        self.repository = repository
-        self.code_writer = CodeWriter(llm=llm,
+                 max_retries: int = 3,
+                 log_dir: str = None,
+                 openai_api_key: str = None,
+                 index_dir: str = None,
+                 repo_dir: str = None,
+                 debug_mode: bool = False):
+
+        exclude_dirs = [".index", ".prompt_log"]
+
+        self.repository = repository or FileRepository(repo_path=Path(repo_dir), exclude_dirs=exclude_dirs)
+
+        repo_dir = repo_dir or repository.repo_path
+        log_dir = log_dir or repo_dir + "/.prompt_log"
+        log_path = Path(log_dir)
+        self.llm = llm or create_openai_client(log_dir=log_path, llm_name=model_name, temperature=0.0, streaming=True, openai_api_key=openai_api_key)
+        self.basic_llm = basic_llm or create_openai_client(log_dir=log_path, llm_name="gpt-3.5-turbo", temperature=0.0, streaming=True, openai_api_key=openai_api_key)
+
+        self.index_dir = index_dir or repo_dir + "/.index"
+        db = chromadb.PersistentClient(path=self.index_dir + "/.chroma_db")
+        chroma_collection = db.get_or_create_collection("code-index")
+        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+        self.code_index = code_index or CodeIndex(repository=self.repository, index_dir=self.index_dir, vector_store=vector_store)
+
+        self.code_writer = CodeWriter(llm=self.llm ,
                                       sys_prompt=code_writer_sys_prompt,
                                       repository=self.repository,
                                       callback=callback,
+                                      expect_complete_functions=True,
                                       auto_mode=True)
-        self.test_fix_writer = CodeWriter(llm=llm,
+
+        self.test_fix_writer = CodeWriter(llm=self.llm,
                                           sys_prompt=FIX_TESTS_PROMPT,
                                           repository=self.repository,
                                           callback=callback,
@@ -41,10 +101,191 @@ class Ghostcoder:
         self.auto_mode = auto_mode
         self.callback = callback
 
+        self.message_history = []
+        self.file_context = []
+
         if verify_code:
             self.verifier = CodeVerifier(repository=self.repository, test_tool=test_tool, language=language, callback=callback)
         else:
             self.verifier = None
+
+        self.debug_mode = debug_mode
+
+    def request(self, query: str, callback: BaseCallbackHandler = None) -> str:
+        system_prompt = """Decide on what ability to use based on the users input. Return only the name of the ability
+
+## Abilities
+You have access to the following abilities you can call:
+- write_code: Write code.
+- investigate: Investigate and answer questions from the user.
+"""
+        message = Message(sender="User", items=[TextItem(text=query)])
+
+        response, _ = self.basic_llm.generate(system_prompt, messages=[message])
+
+        debug_text = ""
+        if self.debug_mode:
+            debug_text = f"> _Selected ability: {response}_\n\n"
+            callback.on_llm_new_token(debug_text)
+
+        logger.info(debug_text)
+
+        if "write_code" in response and self.file_context:
+            return debug_text + self.write_code(query, callback)
+        else:
+            return debug_text + self.investigate(query, callback)
+
+    def write_code(self, query: str, callback: BaseCallbackHandler = None) -> str:
+        logger.info(f"Write code")
+
+        debug_text_before = f"> _Provided files from file context:_"
+        for i, file_item in enumerate(self.file_context):
+             debug_text_before += f"\n> {i + 1}. `{file_item.file_path}`"
+
+        debug_text_before += "\n\n"
+
+        if self.debug_mode:
+            callback.on_llm_new_token(debug_text_before)
+
+        incoming_messages = []
+        incoming_messages.append(Message(sender="User", items=self.file_context))
+        incoming_messages.extend(self.message_history)
+        incoming_messages.append(Message(sender="User", items=[TextItem(text=query)]))
+
+        outgoing_messages = self.code_writer.execute(incoming_messages=incoming_messages, callback=callback)
+
+        if self.debug_mode:
+            return debug_text_before + str(outgoing_messages[-1])
+
+        return str(outgoing_messages[-1])
+
+    def find_files(self, incoming_message: Message) -> List[Message]:
+        if not self.code_index:
+            raise Exception("Code index not initialized.")
+
+        query = incoming_message.to_prompt()
+        hits = self.code_index.search(query)
+
+        for hit in hits:
+            print(hit.path)
+            for codeblock in hit.blocks:
+                print(codeblock.score)
+                print(codeblock.type)
+                print(codeblock.content)
+
+        # TODO: Run code index and pick files
+        return []
+
+    def investigate(self, query: str, callback: BaseCallbackHandler = None):
+        message = Message(sender="User", items=[TextItem(text=query)])
+        self.message_history.append(message)
+
+        hits = self.code_index.search(str(self.message_history),content_type="code")
+                                      # block_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS],
+
+        debug_text_before = f"> _Vector store search hits : {len(hits)}_"
+        for i, hit in enumerate(hits):
+            if self.debug_mode:
+                debug_text_before += f"\n> {i+1}. `{hit.path}` ({len(hit.blocks)} blocks "
+                debug_text_before += ", ".join([f"`{block.identifier}`" for block in hit.blocks])
+                debug_text_before += ")"
+
+            if any([hit.path in item.file_path for item in self.file_context]):
+                continue
+
+            content = self.repository.get_file_content(file_path=hit.path)
+            self.file_context.append(FileItem(file_path=hit.path, content=content))
+
+        logger.debug(debug_text_before)
+
+        debug_text_before += "\n\n"
+
+        if self.debug_mode:
+            callback.on_llm_new_token(debug_text_before)
+
+        system_prompt = """You're an AI developer with superior programming skills. 
+
+You're task is to help a non technical person to understand a bug in a large codebase. Try to make short but informative responses.
+You are provided with a list of files that might be relevant to the question. If they aren't relevant you can just ignore them. 
+
+YOU MUST provide the full file path to files you refer to.
+
+DO NOT suggest code changes or show hypothetical example in code that is not in the context.
+You can ask to read files not in context by providing the full file path to the file.
+
+When you return code you should use the following format:
+
+/file.py
+```python
+# ... code  
+```
+"""
+
+        file_context_message = Message(sender="User", items=self.file_context)
+
+        file_tree_message = Message(sender="User", items=[TextItem(text="Existing files:\n" + self.repository.file_tree().tree_string(content_type="code"))])
+
+        response, _ = self.llm.generate(system_prompt, messages=[file_context_message, file_tree_message] + self.message_history, callback=callback)
+
+        debug_text_after = f"\n\n> _Filtered context files:_"
+        filtered_context = []
+        i = 0
+        for file_item in self.file_context:
+            if self.is_mentioned(file_item, response):
+                i += 1
+                debug_text_after += f"\n> {i}. `{file_item.file_path}`"
+                filtered_context.append(file_item)
+        self.file_context = filtered_context
+
+        found_files = self.repository.find_files_in_content(content=response)
+        new_file_count = 0
+        for found_file in found_files:
+            if any([found_file.path in item.file_path for item in self.file_context]):
+                logger.debug(f"File {found_file.path} already in context.")
+                continue
+
+            if new_file_count == 0:
+                debug_text_after = f"\n>\n> _Files mentioned in message:_"
+
+            new_file_count += 1
+            debug_text_after += f"\n> {new_file_count}. `{found_file.path }`"
+            content = self.repository.get_file_content(file_path=found_file.path)
+
+            self.file_context.append(FileItem(file_path=found_file.path, content=content))
+
+        if not self.file_context:
+            debug_text_after = "\n\n> _No filtered files in context._\n"
+
+        logger.debug(debug_text_after)
+        if self.debug_mode:
+            callback.on_llm_new_token(debug_text_after)
+
+        message = Message(sender="AI", items=[TextItem(text=response)])
+        self.message_history.append(message)
+
+        if self.debug_mode:
+            response = debug_text_before + response + debug_text_after
+
+        if new_file_count > 0:
+            return response + self.investigate(query, callback)
+        else:
+            return response
+
+    def is_mentioned(self, file_item, response):
+        if file_item.file_path.split("/")[-1] in response:
+            return True
+
+        try:
+            code_block = create_parser(file_item.language).parse(file_item.content)
+            child_blocks = code_block.find_blocks_with_types([CodeBlockType.FUNCTION, CodeBlockType.CLASS])
+            for child_block in child_blocks:
+                if child_block.identifier and child_block.identifier in response:
+                    return True
+        except:
+            logger.info(f"Failed to parse file {file_item.file_path}")
+
+        return False
+
 
     def run(self, message: Message) -> List[Message]:
         file_items = message.find_items_by_type(item_type="file")

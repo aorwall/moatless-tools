@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable
 
+from ghostcoder import utils
 from ghostcoder.codeblocks.parser.comment import get_comment_symbol
 
 
@@ -40,7 +41,7 @@ non_code_blocks = [CodeBlockType.BLOCK_DELIMITER, CodeBlockType.COMMENTED_OUT_CO
 class CodeBlock:
     content: str
     type: CodeBlockType
-    identifier: str = None,
+    identifier: Optional[str] = None,
     content_lines: List[str] = field(default_factory=list)
     start_line: int = 0
     end_line: int = 0
@@ -48,7 +49,7 @@ class CodeBlock:
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
-    language: str = None
+    language:  Optional[str] = None
     tags: List[str] = field(default_factory=list)
 
     children: List["CodeBlock"] = field(default_factory=list)
@@ -111,7 +112,7 @@ class CodeBlock:
         return other.content in self.content and other.type == self.type
 
     def __str__(self):
-        return str(self.to_dict())
+        return self.to_string()
 
     def length_without_whitespace(self):
         string_without_whitespace = re.sub(r'\s', '', self.to_string())
@@ -139,18 +140,23 @@ class CodeBlock:
 
         return f"{content}{child_code}"
 
-    def to_tree(self, indent: int = 0, include_tree_sitter_type: bool = False):
+    def to_tree(self, indent: int = 0, show_tokens: bool = False, include_tree_sitter_type: bool = False, include_types: List[CodeBlockType] = None):
+
         child_tree = "".join([
-            child.to_tree(indent=indent + 1, include_tree_sitter_type=include_tree_sitter_type)
-            for child in self.children])
+            child.to_tree(indent=indent + 1, include_tree_sitter_type=include_tree_sitter_type, include_types=include_types, show_tokens=show_tokens)
+            for child in self.children if not include_types or child.type in include_types])
         indent_str = " " * indent
 
-        tree_sitter_type = ""
+        extra = ""
         if include_tree_sitter_type and self.tree_sitter_type:
-            tree_sitter_type = f" ({self.tree_sitter_type})"
+            extra = f" ({self.tree_sitter_type})"
 
-        content = self.content.strip().replace("\n", "\\n")
-        return f"{indent_str} {indent} {self.type.value} `{content}`{tree_sitter_type}\n{child_tree}"
+        if show_tokens:
+            tokens = utils.count_tokens(str(self))
+            extra += f" ({tokens} tokens)"
+
+        content = self.identifier or self.content.strip().replace("\n", "\\n")
+        return f"{indent_str} {indent} {self.type.value} `{content}`{extra}\n{child_tree}"
 
     def __eq__(self, other):
         if not isinstance(other, CodeBlock):
@@ -166,6 +172,11 @@ class CodeBlock:
             # "is_nested": self.is_nested,
             "children": [child.to_dict() for child in self.children]
         }
+
+    def get_full_identifier(self):
+        if self.parent:
+            return f"{self.parent.get_full_identifier()}/{self.identifier}"
+        return self.identifier
 
     def root(self):
         if self.parent:
@@ -222,8 +233,8 @@ class CodeBlock:
         return [other_child for other_child in other_children if other_child.content in original_contents]
 
     def _check_matching(self, other_children: List["CodeBlock"], start_original: int, operation: Callable) -> bool:
-        original_contents = [child.content for child in self.children[start_original:]]
-        updated_contents = [child.content for child in other_children]
+        original_contents = [child.content for child in self.children[start_original:] if child.content.strip()]
+        updated_contents = [child.content for child in other_children if child.content.strip()]
         return operation(ub_content in original_contents for ub_content in updated_contents)
 
     def get_matching_blocks(self, other_block: "CodeBlock") -> List["CodeBlock"]:
@@ -267,6 +278,36 @@ class CodeBlock:
                 if nested_match:
                     return nested_match
         return None
+
+    def find_blocks_with_identifier(self, identifier: str) -> List["CodeBlock"]:
+        blocks = []
+        for child_block in self.children:
+            if child_block.identifier == identifier:
+                blocks.append(child_block)
+            if child_block.children:
+                blocks.extend(child_block.find_blocks_with_identifier(identifier))
+        return blocks
+
+    def has_incomplete_blocks_with_type(self, block_type: CodeBlockType):
+        return self.has_incomplete_blocks_with_types([block_type])
+
+    def has_incomplete_blocks_with_types(self, block_types: [CodeBlockType]):
+        for child_block in self.children:
+            if child_block.type in block_types and not child_block.is_complete():
+                return True
+        return False
+
+    def find_blocks_with_types(self, block_types: List[CodeBlockType]) -> List["CodeBlock"]:
+        matching_blocks = []
+        if self.type in block_types:
+            matching_blocks.append(self)
+        for child_block in self.children:
+            matching_blocks.extend(child_block.find_blocks_with_types(block_types=block_types))
+        return matching_blocks
+
+    def find_blocks_with_type(self, block_type: CodeBlockType) -> List["CodeBlock"]:
+        return self.find_blocks_with_types([block_type])
+
 
     def find_nested_matching_blocks(self, blocks: List["CodeBlock"], start_original: int = 0) -> List["CodeBlock"]:
         matching_blocks = []
@@ -359,10 +400,29 @@ class CodeBlock:
             i += 1
         return max_i
 
-    def merge(self, updated_block: "CodeBlock", first_level: bool = False, replace_types: List[CodeBlockType] = None) -> \
-    List[str]:
-        logging.debug(f"Merging block `{self.type.value}: {self.content}` ({len(self.children)} children) with "
+    def merge(self,
+              updated_block: "CodeBlock",
+              first_level: bool = False,
+              replace_types: List[CodeBlockType] = None) -> List[str]:
+        logging.debug(f"Merging block `{self.type.value}: {self.identifier}` ({len(self.children)} children) with "
                       f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
+
+        if first_level and updated_block.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.CONSTRUCTOR]:
+            matching_blocks = self.find_blocks_with_identifier(updated_block.identifier)
+
+            if len(matching_blocks) == 1:
+                matching_block = matching_blocks[0]
+                child_tweaks = matching_block.merge(updated_block, first_level=True, replace_types=replace_types)
+
+                if updated_block.indentation != matching_block.indentation:
+                    indentation = matching_block.indentation
+                    updated_block.add_indentation(indentation)
+
+                return [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
+
+            if len(matching_blocks) > 1:
+                raise ValueError(f"Will not merge updated block `{updated_block.content}` with original block "
+                                 f"`{self.content}` because it has multiple matching blocks.")
 
         if first_level and not self.has_any_matching_child(updated_block.children, 0):
             matching_block = self.find_nested_matching_block(updated_block)
@@ -375,9 +435,13 @@ class CodeBlock:
                     indentation = matching_block.indentation
                     updated_block.add_indentation(indentation)
 
-                child_tweaks = matching_block.parent.merge(updated_block, first_level=True, replace_types=replace_types)
+                child_tweaks = matching_block.parent.merge(updated_block, first_level=False, replace_types=replace_types)
                 return [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
             else:
+                if self.find_blocks_with_type(CodeBlockType.CLASS) and not updated_block.find_blocks_with_type(CodeBlockType.CLASS):
+                    raise ValueError(f"Will not merge updated block `{updated_block.content}` with original block "
+                                     f"`{self.content}` because it does not contain a class definition")
+
                 logging.debug(
                     f"No matching children in original block `{self.type.value}: {self.content}`, "
                     f"will replace contents")
@@ -446,6 +510,7 @@ class CodeBlock:
 
                         original_block_child = CodeBlock(
                             content=updated_block_child.content,
+                            identifier=updated_block_child.identifier,
                             pre_code=updated_block_child.pre_code,
                             type=updated_block_child.type,
                             parent=self.parent,
@@ -518,6 +583,7 @@ class CodeBlock:
     def copy_with_trimmed_parents(self):
         block_copy = CodeBlock(
             type=self.type,
+            identifier=self.identifier,
             content=self.content,
             indentation=self.indentation,
             pre_lines=self.pre_lines,
@@ -544,6 +610,7 @@ class CodeBlock:
 
         trimmed_block = CodeBlock(
             content=self.content,
+            identifier=self.identifier,
             indentation=self.indentation,
             pre_lines=self.pre_lines,
             type=self.type,
@@ -611,6 +678,7 @@ class CodeBlock:
 
         trimmed_block = CodeBlock(
             content=self.content,
+            identifier=self.identifier,
             pre_code=self.pre_code,
             indentation=self.indentation,
             pre_lines=self.pre_lines,
@@ -636,8 +704,10 @@ class CodeBlock:
 
         return CodeBlock(
             content=self.content,
+            identifier=self.identifier,
             pre_code=self.pre_code,
             type=self.type,
             parent=self.parent,
             children=children
         )
+

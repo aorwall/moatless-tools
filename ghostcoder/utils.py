@@ -11,25 +11,44 @@ incomplete_code_marker_patterns = [
     r"^\.\.\.\s*"
 ]
 
+#  TODO: Uncomment language when we have support for it
 language_extensions = {
     "python": [".py"],
     "java": [".java"],
     "javascript": [".js", ".jsx"],
-    "c": [".c"],
-    "cpp": [".cpp"],
-    "css": [".css", ".scss"],
-    "go": [".go"],
-    "html": [".html", ".htm"],
-    "ruby": [".rb"],
-    "swift": [".swift"],
-    "kotlin": [".kt"],
+#    "c": [".c"],
+#    "cpp": [".cpp"],
+#    "css": [".css", ".scss"],
+#    "go": [".go"],
+#    "html": [".html", ".htm"],
+#    "ruby": [".rb"],
+#    "swift": [".swift"],
+#    "kotlin": [".kt"],
     "typescript": [".ts"],
     "tsx": [".tsx"],
-    "json": [".json"],
-    "sql": [".sql"],
-    "yaml": [".yaml", ".yml"],
-    "xml": [".xml"]
+#    "json": [".json"],
+#    "sql": [".sql"],
+#    "yaml": [".yaml", ".yml"],
+#    "xml": [".xml"]
 }
+
+test_file_path_patterns = {
+    "javascript": ["__tests__", "__mocks__"],
+    "typescript": ["__tests__", "__mocks__"],
+    "tsx": ["__tests__", "__mocks__"],
+    "java": ["src/test"],
+}
+
+def get_type_by_filepath(language, file_path):  # TODO: Check content in file also
+    if not language:
+        return "file"
+
+    if language in test_file_path_patterns:
+        for pattern in test_file_path_patterns[language]:
+            if pattern in file_path:
+                return "test"
+    return "code"
+
 
 def get_extension(language: str) -> Optional[str]:
     for lang, exts in language_extensions.items():

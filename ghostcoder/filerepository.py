@@ -8,7 +8,7 @@ import tiktoken
 from git import Repo, Tree
 
 from ghostcoder.schema import Folder, File, SaveFilesRequest, DiscardFilesRequest, FileItem
-from ghostcoder.utils import language_by_filename, get_extension
+from ghostcoder.utils import language_by_filename, get_extension, get_type_by_filepath
 
 
 class FileRepository:
@@ -72,7 +72,10 @@ class FileRepository:
                     continue
 
                 language = language_by_filename(item.path)
-                nodes.append(File(name=item.name, path=item.path, language=language))
+
+                content_type = get_type_by_filepath(language, item.path)
+
+                nodes.append(File(name=item.name, path=item.path, language=language, content_type=content_type))
             elif item.type == "tree":
                 if item.name in self.exclude_dirs:
                     continue
@@ -177,6 +180,18 @@ class FileRepository:
 
         with open(os.path.join(self.repo_path, file_path), 'r') as f:
             return f.read()
+
+    def find_files_in_content(self, content=str, folder: Folder=None):
+        folder = folder or self.file_tree()
+
+        found_files = []
+        for node in folder.children:
+            if isinstance(node, File) and node.path in content:
+                found_files.append(node)
+            elif isinstance(node, Folder) and node.path in content:
+                found_files.extend(self.find_files_in_content(content, node))
+
+        return found_files
 
     def file_tokens(self, file_path: str) -> int:
         file = self.get_file_content(file_path)
