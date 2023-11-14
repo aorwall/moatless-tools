@@ -279,23 +279,30 @@ class CodeBlock:
                     return nested_match
         return None
 
-    def find_blocks_with_identifier(self, identifier: str) -> List["CodeBlock"]:
+    def find_blocks_with_identifier(self, other: "CodeBlock") -> List["CodeBlock"]:
         blocks = []
         for child_block in self.children:
-            if child_block.identifier == identifier:
+            if child_block.identifier == other.identifier:
+                blocks.append(child_block)
+            elif child_block.content == other.content:   # TODO: remove when identifiers are always set
                 blocks.append(child_block)
             if child_block.children:
-                blocks.extend(child_block.find_blocks_with_identifier(identifier))
+                blocks.extend(child_block.find_blocks_with_identifier(other))
         return blocks
 
-    def has_incomplete_blocks_with_type(self, block_type: CodeBlockType):
-        return self.has_incomplete_blocks_with_types([block_type])
+    def find_incomplete_blocks_with_type(self, block_type: CodeBlockType):
+        return self.find_incomplete_blocks_with_types([block_type])
 
-    def has_incomplete_blocks_with_types(self, block_types: [CodeBlockType]):
+    def find_incomplete_blocks_with_types(self, block_types: [CodeBlockType]):
+        matching_blocks = []
         for child_block in self.children:
             if child_block.type in block_types and not child_block.is_complete():
-                return True
-        return False
+                matching_blocks.append(child_block)
+
+            if child_block.children:
+                matching_blocks.extend(child_block.find_incomplete_blocks_with_types(block_types))
+
+        return matching_blocks
 
     def find_blocks_with_types(self, block_types: List[CodeBlockType]) -> List["CodeBlock"]:
         matching_blocks = []
@@ -407,54 +414,36 @@ class CodeBlock:
         logging.debug(f"Merging block `{self.type.value}: {self.identifier}` ({len(self.children)} children) with "
                       f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
 
-        if first_level and updated_block.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.CONSTRUCTOR]:
-            matching_blocks = self.find_blocks_with_identifier(updated_block.identifier)
-
-            if len(matching_blocks) == 1:
-                matching_block = matching_blocks[0]
-                child_tweaks = matching_block.merge(updated_block, first_level=True, replace_types=replace_types)
-
-                if updated_block.indentation != matching_block.indentation:
-                    indentation = matching_block.indentation
-                    updated_block.add_indentation(indentation)
-
-                return [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
-
-            if len(matching_blocks) > 1:
-                raise ValueError(f"Will not merge updated block `{updated_block.content}` with original block "
-                                 f"`{self.content}` because it has multiple matching blocks.")
-
         if first_level and not self.has_any_matching_child(updated_block.children, 0):
-            matching_block = self.find_nested_matching_block(updated_block)
-            if matching_block:
-                logging.debug(
-                    f"Found matching children in original block `{self.type.value}: {self.content}`, "
-                    f"will merge with updated children")
-
-                if updated_block.indentation != matching_block.indentation:
-                    indentation = matching_block.indentation
-                    updated_block.add_indentation(indentation)
-
-                child_tweaks = matching_block.parent.merge(updated_block, first_level=False, replace_types=replace_types)
-                return [f"find_nested:{matching_block.content}:{updated_block.content}"] + child_tweaks
-            else:
-                if self.find_blocks_with_type(CodeBlockType.CLASS) and not updated_block.find_blocks_with_type(CodeBlockType.CLASS):
+            child_tweaks = []
+            for other_child in updated_block.children:
+                matching_children = self.find_blocks_with_identifier(other_child)
+                if len(matching_children) == 1:
+                    child_tweaks.append(f"find_by_id:{other_child.identifier}")
+                    child_tweaks.extend(matching_children[0].merge(other_child, first_level=False, replace_types=replace_types))
+                else:
                     raise ValueError(f"Will not merge updated block `{updated_block.content}` with original block "
-                                     f"`{self.content}` because it does not contain a class definition")
+                                     f"`{self.content}` has none or multiple matching blocks.")
+            return child_tweaks
 
-                logging.debug(
-                    f"No matching children in original block `{self.type.value}: {self.content}`, "
-                    f"will replace contents")
-                self.children = updated_block.children
-                return [f"replace:{self.content}:{updated_block.content}"]
         if self.has_all_matching_children(updated_block.children, 0) and updated_block.is_complete():
             logging.debug(
                 "All updated children match the original ones, and updated content is complete. Will merge updated blocks.")
+
+            if self.indentation != updated_block.indentation:
+                indentation = self.indentation
+                updated_block.add_indentation(indentation)
+
             self.children = updated_block.children
             return [f"full_match:{self.content}:{updated_block.content}"]
 
         if replace_types and self.type in replace_types and updated_block.is_complete():
             logging.debug(f"Will replace complete blocks from type level {self.type}")
+
+            if self.indentation != updated_block.indentation:
+                indentation = self.indentation
+                updated_block.add_indentation(indentation)
+
             self.children = updated_block.children
             return [f"replace_from_level:{self.content}:{updated_block.content}"]
 

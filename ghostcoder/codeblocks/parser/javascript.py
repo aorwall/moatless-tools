@@ -45,6 +45,7 @@ class DefinitionTree:
     block_type: Optional[CodeBlockType] = None
     identifier: bool = False
     first_child: bool = False
+    last_child: bool = False
     must_include_sub_types: bool = False
     first_child_index: int = None
     queries: List["MatchingQuery"] = field(default_factory=list)
@@ -277,6 +278,20 @@ _type_tree = {
         block_type=CodeBlockType.CODE
     ),
     "program": DefinitionTree(
+        queries=[
+            MatchingQuery(
+                query="""(program
+  (
+  (expression_statement
+    (call_expression 
+      (identifier) @identifier @type_function
+      (arguments)
+    )
+  )
+  (statement_block) @first_child @last_child
+  )
+)""")],
+
         must_include_sub_types=True,
         sub_tree={
             "expression_statement": DefinitionTree(  # GPT corner case: constructor without a class
@@ -297,7 +312,8 @@ _type_tree = {
                 }
             ),
             "statement_block": DefinitionTree(
-                first_child_index=1
+                first_child=True,
+                last_child=True
             )
         }
     ),
@@ -308,42 +324,54 @@ class JavaScriptParser(CodeParser):
     def __init__(self, language: str = "javascript"):
         super().__init__(language)
 
-    def find_in_tree(self, node: Node, type_tree: dict = _type_tree) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node]]:
+    def find_in_tree(self, node: Node) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node], Optional[Node]]:
+        if node.type in _type_tree:
+            def_tree = _type_tree[node.type]
+            for match_query in def_tree.queries:
+                match_block_type, match_first_child, match_identifier_node, match_last_child = self.find_match(node, match_query)
+                if match_block_type and match_identifier_node and match_first_child:
+                    # logger.debug(f"Found match for {match_query} on node type {node.type}")
+                    return match_block_type, match_first_child, match_identifier_node, match_last_child
+
+            return self._find_in_tree(node, _type_tree)
+
+        return None, None, None, None
+
+
+    def _find_in_tree(self, node: Node, type_tree: dict) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node], Optional[Node]]:
         block_type = None
         first_child = None
+        last_child = None
         identifier_node = None
 
         if node.type in type_tree:
             def_tree = type_tree[node.type]
-
-            for match_query in def_tree.queries:
-                match_block_type, identifier_node, first_child = self.find_match(node, match_query)
-                if identifier_node and first_child:
-                    #logger.debug(f"Found match for {match_query} on node type {node.type}")
-                    return match_block_type, first_child, identifier_node
-
             if def_tree.block_type:
                 block_type = def_tree.block_type
             if def_tree.first_child:
                 first_child = node
-            if def_tree.first_child_index:
+            if def_tree.last_child:
+                last_child = node
+            if def_tree.first_child_index is not None:
                 first_child = node.children[def_tree.first_child_index]
             if def_tree.identifier:
                 identifier_node = node
 
             for child in node.children:
                 if def_tree.must_include_sub_types and child.type not in def_tree.sub_tree:
-                    return None, None, None
+                    return None, None, None, None
 
-                child_type, child_node, child_identifier_node = self.find_in_tree(child, def_tree.sub_tree)
+                child_type, child_node, child_identifier_node, child_last_node = self._find_in_tree(child, def_tree.sub_tree)
                 if not block_type:
                     block_type = child_type
                 if child_node:
                     first_child = child_node
+                if child_last_node:
+                    last_child = child_last_node
                 if not identifier_node:
                     identifier_node = child_identifier_node
 
-        return block_type, first_child, identifier_node
+        return block_type, first_child, identifier_node, last_child
 
     def find_arrow_func(self, node: Node):
         arrow_func = find_nested_type(node, "arrow_function", 2)
@@ -364,14 +392,17 @@ class JavaScriptParser(CodeParser):
         identifier_node = None
         first_child = None
         block_type = None
+        last_child = None
 
         for node_match, tag in captures:
             if tag == "root" and node != node_match:
-                return None, None, None
+                return None, None, None, None
             if tag == "identifier":
                 identifier_node = node_match
             elif tag == "first_child":
                 first_child = node_match
+            elif tag == "last_child":
+                last_child = node_match
             elif tag == "type_code":
                 block_type = CodeBlockType.CODE
             elif tag == "type_class":
@@ -379,21 +410,25 @@ class JavaScriptParser(CodeParser):
             elif tag == "type_function":
                 block_type = CodeBlockType.FUNCTION
 
-        return block_type, identifier_node, first_child
+        return block_type, first_child, identifier_node, last_child
 
     def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
-        block_type, first_child, identifier_node = self.find_in_tree(node)
+        block_type, first_child, identifier_node, last_child = self.find_in_tree(node)
         if not block_type:
             return None, None, None
 
-        if node.next_sibling and node.next_sibling.type == ";":
-            last_child = node.next_sibling
+        if not last_child:
+            if node.next_sibling and node.next_sibling.type == ";":
+                last_child = node.next_sibling
 
-        elif node.children:
-            last_child = node.children[-1]
+            elif node.children:
+                last_child = node.children[-1]
 
-        if not first_child and last_child.type == ";":
-            first_child = last_child
+            if not first_child and last_child.type == ";":
+                first_child = last_child
+
+            if first_child and first_child.end_byte > last_child.end_byte:
+                last_child = first_child
 
         pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
         end_line = node.end_point[0]
@@ -479,7 +514,7 @@ class JavaScriptParser(CodeParser):
         if node.type in ["expression_statement"]:
             node = node.children[0]
 
-        found_block_type, found_first_child, _ = self.find_in_tree(node)
+        found_block_type, found_first_child, _, _ = self.find_in_tree(node)
         if found_block_type:
             return found_block_type, found_first_child, last_child
 

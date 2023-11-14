@@ -38,10 +38,12 @@ class CodeIndex:
                  index_dir: str,
                  reload: bool = False,
                  openai_api_key: str = None,
+                 limit: int = 5,
                  vector_store: Optional[VectorStore] = None):
         self.repository = repository
         self.vector_store = vector_store
         self.index_dir = index_dir
+        self.limit = limit
 
         node_parser = CodeNodeParser.from_defaults(include_metadata=False)
         self.service_context = ServiceContext.from_defaults(node_parser=node_parser)
@@ -99,8 +101,8 @@ class CodeIndex:
                 data = self.repository.get_file_content(file.path)
                 metadata = {
                     "path": file.path,
-                    "language": file.language,
-                    "type": file.content_type
+                    "language": file.language or "",
+                    "type": file.content_type,
                 }
 
                 doc = Document(text=data, metadata=metadata)
@@ -109,14 +111,14 @@ class CodeIndex:
                 documents.append(doc)
         return documents
 
-    def search(self, query: str, content_type: str = None, limit: int = 5):
+    def search(self, query: str, content_type: str = None, limit: int = None):
         #filters = [ExactMatchFilter(key="block_type", value=str(block_type)) for block_type in block_types]
         filters = []
 
         if content_type:
             filters.append(ExactMatchFilter(key="type", value=content_type))
 
-        retriever = self._index.as_retriever(similarity_top_k=limit, filters=MetadataFilters(filters=filters))
+        retriever = self._index.as_retriever(similarity_top_k=limit or self.limit, filters=MetadataFilters(filters=filters))
 
         nodes = retriever.retrieve(query)
         logging.info(f"Got {len(nodes)} hits")
@@ -154,3 +156,45 @@ class CodeIndex:
         response = query_engine.query(query)
         return response
 
+
+if __name__ == "__main__":
+    repo_dir = Path("/home/albert/repos/p24/frontends/patient-ui")
+    index_dir = "/home/albert/repos/p24/frontends/patient-ui/.index"
+    exclude_dirs = [index_dir, ".index", ".gcoder"]
+
+    logging_format = '%(asctime)s - %(levelname)s - %(message)s'
+    logging.basicConfig(level=logging.DEBUG, format=logging_format)
+    logging.getLogger('ghostcoder').setLevel(logging.DEBUG)
+    logging.getLogger('openai').setLevel(logging.INFO)
+    logging.getLogger('urllib3').setLevel(logging.INFO)
+
+    repository = FileRepository(repo_path=repo_dir, exclude_dirs=exclude_dirs)
+
+    db = chromadb.PersistentClient(path=index_dir + "/.chroma_db")
+    chroma_collection = db.get_or_create_collection("code-index")
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    code_index = CodeIndex(repository=repository, index_dir=index_dir, vector_store=vector_store)
+
+    query = """The contact details page has two versions of text:
+* Welcome and ask them to fill out their contact details  - asking a new user who have not filled out all fields
+* Are your contact details correct? Please confirm - asking a returning user who have filled out their details
+
+What is the issue/bug?
+The problem now is that we always show the user version 2. Which means that we ask users to confirm information that is
+not there. It's a problem for our screenreader users but also something that looks pretty bad in general being the 
+first thing you see in the patient app.
+
+----
+
+Can you explain the logic behind how the text is displayed.
+"""
+
+    hits = code_index.search(query, content_type="code")
+    for hit in hits:
+        print(hit.path)
+        for codeblock in hit.blocks:
+            print(codeblock.score)
+            print(codeblock.type)
+            print(codeblock.identifier)
+
+    #print(code_index.ask(query))

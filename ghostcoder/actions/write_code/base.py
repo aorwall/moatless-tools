@@ -191,10 +191,10 @@ class CodeWriter(BaseAction):
                  expect_one_file: bool = False,
                  allow_hallucinated_files: bool = False,
                  expect_updated_code: bool = False,
-                 expect_complete_functions: bool = False,
+                 expect_complete_functions: bool = True,
                  callback: DisplayCallback = None,
                  max_tokens_in_prompt: int = None,
-                 tries: int = 2):
+                 tries: int = 3):
         if not sys_prompt:
             sys_prompt = get_implement_prompt(sys_prompt_id)
         super().__init__(llm, sys_prompt)
@@ -473,6 +473,7 @@ class CodeWriter(BaseAction):
                 retry_input = f"You returned a file with the following invalid code blocks: \n" + updated_content
                 return None, [TextItem(text=retry_input)]
 
+            incomplete_blocks = updated_block.find_incomplete_blocks_with_types([CodeBlockType.CONSTRUCTOR, CodeBlockType.FUNCTION])
             error_blocks = updated_block.find_errors()
             if error_blocks:
                 stats.increment("files_with_errors")
@@ -483,18 +484,22 @@ class CodeWriter(BaseAction):
                 for error_block in error_blocks:
                     retry_inputs.append(
                         CodeItem(language=block.language, content=error_block.to_string()))
-            elif self.expect_complete_functions and updated_block.has_incomplete_blocks_with_types([CodeBlockType.CONSTRUCTOR, CodeBlockType.FUNCTION]):
+            elif self.expect_complete_functions and incomplete_blocks:
+                incomplete_blocks_str = ", ".join([f"`{block.identifier}`" for block in incomplete_blocks])
+                logger.info(f"The content in the function block [{incomplete_blocks_str} in [{block.file_path}] is not complete, will retry")
                 stats.increment("not_complete_function")
                 invalid = "not_complete"
+
                 retry_inputs.append(
-                    TextItem(text=f"You must return all code in the function {updated_block.identifier}."))
+                    TextItem(text=f"You did not return all code in the functions {incomplete_blocks_str}. "
+                                  f"You must return all code in these functions and don't replace any code with comments."))
             elif existing_file_item and not existing_file_item.readonly:
                 original_block = parser.parse(existing_file_item.content)
 
                 try:
                     gpt_tweaks = original_block.merge(updated_block,
                                                       first_level=True,
-                                                      replace_types=[CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])  # TODO: Make this configurable
+                                                      replace_types=[CodeBlockType.FUNCTION, CodeBlockType.STATEMENT, CodeBlockType.CONSTRUCTOR])  # TODO: Make this configurable
                     stats.increment("merged_file")
                     if gpt_tweaks:
                         tweaks = "\n - ".join(gpt_tweaks)
@@ -503,6 +508,7 @@ class CodeWriter(BaseAction):
                         stats.increment("did_gpt_tweaks")
 
                     updated_content = original_block.to_string()
+
                     merged_block = parser.parse(updated_content)
                     error_blocks = merged_block.find_errors()
                     if error_blocks:
@@ -525,7 +531,7 @@ class CodeWriter(BaseAction):
             logger.info(f"The content in block [{block.file_path}] is not complete, will retry")
             stats.increment("not_complete_file")
             retry_inputs.append(
-                TextItem(text=f"Return all code from the original code in the update file {block.file_path}."))
+                TextItem(text=f"You did just return parts of the code in the file. Return all code from the original code in the update file {block.file_path}."))
             invalid = "not_complete"
 
         if existing_file_item:

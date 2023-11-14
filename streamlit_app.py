@@ -36,28 +36,48 @@ class StreamHandler(BaseCallbackHandler):
 
 with st.sidebar:
     #openai_api_key = st.text_input("OpenAI API Key", key="chatbot_api_key", type="password")
-    repo_dir = st.text_input("Repository Directory", key="repo_dir", value="/repo")
-    model_name = st.text_input("Model name", key="model_name", value=os.environ.get('MODEL_NAME', 'gpt-4'))
-    debug_mode = st.toggle('Debug mode', False)
+    repo_dir = st.text_input("Repository Directory", key="repo_dir", value=os.environ.get('REPO_DIR', ''))
+    model_name = st.text_input("Model name", key="model_name", value=os.environ.get('MODEL_NAME', 'gpt-4-1106-preview'))
+    debug_mode = st.toggle('Debug mode', True)
 
-    init_button = st.button("Index repository")
+    if "ghostcoder" not in st.session_state:
+        init_button = st.button("Load")
+    else:
+        init_button = st.button("Reload")
 
-def write_code():
-    st.session_state.messages.append({"role": "user", "content": "Write code"})
+        ability_options = [("Auto", None), ("Investigate", "investigate"), ("Write code", "write_code")]
+        ability = st.radio("Select Ability:",
+                                   ability_options,
+                                   format_func=lambda x: x[0],
+                                   captions=[
+                                       "Automatically select ability based on the prompt.",
+                                       "Find files and answer questions about the code base.",
+                                       "Write and save code to the repository."]
+                                   )
 
-    with st.chat_message("user"):
-        st.markdown("Write code")
+        search_limit = number = st.number_input('File search hits', value=10, min_value=0, max_value=50)
 
-    message_placeholder = st.empty()
-    stream_handler = StreamHandler(message_placeholder, display_method='write')
+        file_type = st.radio(
+            "File types",
+            ["Code files", "Test files", "All files"])
 
-    response_message = st.session_state.ghostcoder.write_code(callback=stream_handler)
+        #show_filesystem = st.toggle('Show filesystem', True)
 
-    response = str(response_message)
+        new_file = st.text_input("File path")
 
-    message_placeholder.markdown(response)
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        if st.button("Add file to context"):
+            if new_file:
+                st.session_state.ghostcoder.add_file_to_context(new_file)
+                st.rerun()
 
+        st.caption(f'**{st.session_state.ghostcoder.get_file_context_tokens()}** tokens in file context.')
+
+        for idx, item in enumerate(st.session_state.ghostcoder.get_file_context()):
+            col1, col2 = st.columns([4, 1])
+            col1.write(item)
+            if col2.button(f"X", key=f"remove_{idx}"):
+                st.session_state.ghostcoder.remove_file_from_context(item)
+                st.rerun()
 
 if init_button:
     if repo_dir: # openai_api_key and
@@ -69,6 +89,7 @@ if init_button:
         # Set OpenAI API key
         # openai.api_key = openai_api_key
         st.success("The repository was indexed successfully!")
+        st.rerun()
     else:
         st.error("Please enter Repository Directory.")
 
@@ -92,7 +113,19 @@ if prompt := st.chat_input("Ask about anything"):
     message_placeholder = st.empty()
     stream_handler = StreamHandler(message_placeholder, display_method='write')
 
-    response = st.session_state.ghostcoder.request(prompt, callback=stream_handler)
+    content_type = None
+    if file_type == "Code files":
+        content_type = "code"
+    elif file_type == "Test files":
+        content_type = "test"
+
+    response = st.session_state.ghostcoder.request(prompt,
+                                                   callback=stream_handler,
+                                                   ability=ability,
+                                                   content_type=content_type,
+                                                   search_limit=search_limit,)
 
     message_placeholder.markdown(response)
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+    st.rerun()

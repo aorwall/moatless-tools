@@ -19,6 +19,7 @@ from ghostcoder.ipython_callback import DisplayCallback
 from ghostcoder.llm import LLMWrapper, ChatLLMWrapper
 from ghostcoder.schema import Message, UpdatedFileItem, TextItem, FileItem
 from ghostcoder.test_tools import TestTool
+from ghostcoder.utils import count_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class Ghostcoder:
                  openai_api_key: str = None,
                  index_dir: str = None,
                  repo_dir: str = None,
+                 search_limit: int = 5,
                  debug_mode: bool = False):
 
         exclude_dirs = [".index", ".prompt_log"]
@@ -76,14 +78,14 @@ class Ghostcoder:
         repo_dir = repo_dir or repository.repo_path
         log_dir = log_dir or repo_dir + "/.prompt_log"
         log_path = Path(log_dir)
-        self.llm = llm or create_openai_client(log_dir=log_path, llm_name=model_name, temperature=0.0, streaming=True, openai_api_key=openai_api_key)
+        self.llm = llm or create_openai_client(log_dir=log_path, llm_name=model_name, temperature=0.01, streaming=True, max_tokens=2000, openai_api_key=openai_api_key)
         self.basic_llm = basic_llm or create_openai_client(log_dir=log_path, llm_name="gpt-3.5-turbo", temperature=0.0, streaming=True, openai_api_key=openai_api_key)
 
         self.index_dir = index_dir or repo_dir + "/.index"
         db = chromadb.PersistentClient(path=self.index_dir + "/.chroma_db")
         chroma_collection = db.get_or_create_collection("code-index")
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        self.code_index = code_index or CodeIndex(repository=self.repository, index_dir=self.index_dir, vector_store=vector_store)
+        self.code_index = code_index or CodeIndex(repository=self.repository, index_dir=self.index_dir, vector_store=vector_store, limit=search_limit)
 
         self.code_writer = CodeWriter(llm=self.llm ,
                                       sys_prompt=code_writer_sys_prompt,
@@ -110,30 +112,45 @@ class Ghostcoder:
             self.verifier = None
 
         self.debug_mode = debug_mode
+        self.file_context = []
 
-    def request(self, query: str, callback: BaseCallbackHandler = None) -> str:
-        system_prompt = """Decide on what ability to use based on the users input. Return only the name of the ability
+        self.filter_context = False
 
-## Abilities
-You have access to the following abilities you can call:
-- write_code: Write code.
-- investigate: Investigate and answer questions from the user.
-"""
-        message = Message(sender="User", items=[TextItem(text=query)])
-
-        response, _ = self.basic_llm.generate(system_prompt, messages=[message])
+    def request(self, query: str,
+                ability: str = None,
+                search_limit: int = 10,
+                content_type: str = None,
+                callback: BaseCallbackHandler = None) -> str:
 
         debug_text = ""
-        if self.debug_mode:
-            debug_text = f"> _Selected ability: {response}_\n\n"
-            callback.on_llm_new_token(debug_text)
+        if not ability:
 
-        logger.info(debug_text)
+            system_prompt = """Decide on what ability to use based on the users input. Return only the name of the ability
+    
+    ## Abilities
+    You have access to the following abilities you can call:
+    - write_code: Write code.
+    - investigate: Investigate and answer questions from the user.
+    """
+            message = Message(sender="User", items=[TextItem(text=query)])
 
-        if "write_code" in response and self.file_context:
+            ability, _ = self.basic_llm.generate(system_prompt, messages=[message])
+
+            if self.debug_mode:
+                debug_text = f"> _Selected ability: {ability}_\n\n"
+                callback.on_llm_new_token(debug_text)
+
+            logger.info(debug_text)
+
+        if "write_code" in ability:
+            if not self.file_context:
+                return "Please provide at least one file in the context."
             return debug_text + self.write_code(query, callback)
         else:
-            return debug_text + self.investigate(query, callback)
+            return debug_text + self.investigate(query,
+                                                 content_type=content_type,
+                                                 search_limit=search_limit,
+                                                 callback=callback)
 
     def write_code(self, query: str, callback: BaseCallbackHandler = None) -> str:
         logger.info(f"Write code")
@@ -176,12 +193,14 @@ You have access to the following abilities you can call:
         # TODO: Run code index and pick files
         return []
 
-    def investigate(self, query: str, callback: BaseCallbackHandler = None):
+    def investigate(self, query: str,
+                    search_limit: int = 10,
+                    content_type: str = None,
+                    callback: BaseCallbackHandler = None):
         message = Message(sender="User", items=[TextItem(text=query)])
         self.message_history.append(message)
 
-        hits = self.code_index.search(str(self.message_history),content_type="code")
-                                      # block_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS],
+        hits = self.code_index.search(str(self.message_history), content_type=content_type, limit=search_limit)
 
         debug_text_before = f"> _Vector store search hits : {len(hits)}_"
         for i, hit in enumerate(hits):
@@ -228,14 +247,16 @@ When you return code you should use the following format:
         response, _ = self.llm.generate(system_prompt, messages=[file_context_message, file_tree_message] + self.message_history, callback=callback)
 
         debug_text_after = f"\n\n> _Filtered context files:_"
-        filtered_context = []
-        i = 0
-        for file_item in self.file_context:
-            if self.is_mentioned(file_item, response):
-                i += 1
-                debug_text_after += f"\n> {i}. `{file_item.file_path}`"
-                filtered_context.append(file_item)
-        self.file_context = filtered_context
+
+        if self.filter_context:
+            filtered_context = []
+            i = 0
+            for file_item in self.file_context:
+                if self.is_mentioned(file_item, response):
+                    i += 1
+                    debug_text_after += f"\n> {i}. `{file_item.file_path}`"
+                    filtered_context.append(file_item)
+            self.file_context = filtered_context
 
         found_files = self.repository.find_files_in_content(content=response)
         new_file_count = 0
@@ -266,10 +287,7 @@ When you return code you should use the following format:
         if self.debug_mode:
             response = debug_text_before + response + debug_text_after
 
-        if new_file_count > 0:
-            return response + self.investigate(query, callback)
-        else:
-            return response
+        return response
 
     def is_mentioned(self, file_item, response):
         if file_item.file_path.split("/")[-1] in response:
@@ -379,3 +397,20 @@ When you return code you should use the following format:
                     summarized_messages.append(Message(sender=message.sender, items=[TextItem(text=message.summary)]))
 
         return summarized_messages
+
+    def get_file_context(self):
+        files = [file.file_path for file in self.file_context]
+        files.sort()
+        return files
+
+    def add_file_to_context(self, file_path):
+        content = self.repository.get_file_content(file_path=file_path)
+        if content:
+            self.file_context.append(FileItem(file_path=file_path, content=content))
+
+    def remove_file_from_context(self, file_path):
+        self.file_context = [file for file in self.file_context if file.file_path != file_path]
+
+    def get_file_context_tokens(self):
+        tokens = [count_tokens(file.content) for file in self.file_context]
+        return sum(tokens)

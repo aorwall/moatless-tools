@@ -10,10 +10,9 @@ Please exclude files that have not been updated.
 
 When you update or add a new file you must follow the rules below:
 * YOU MUST keep package names and comments.
-* YOU SHOULD only return the functions or code you change. 
 * YOU MUST return complete functions and constructors.
 * DO NOT comment out lines of code or leave placeholders inside functions or constructors.
-* DO NOT add any comments to the new code sections you are proposing if not necessary.
+* DO NOT add any comments to the new code.
 
 ALL files should be presented in the following format:
 

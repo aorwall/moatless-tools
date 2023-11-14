@@ -89,16 +89,31 @@ class CodeParser:
                 language=self.language
             )
 
+        # Workaround to get the module root object when we get invalid content from GPT
+        wrong_level_mode = level == 0 and not node.parent and code_block.type != CodeBlockType.MODULE
+        if wrong_level_mode:
+            code_block = CodeBlock(
+                type=CodeBlockType.MODULE,
+                identifier="",
+                tree_sitter_type=node.type,
+                start_line=node.start_point[0],
+                end_line=end_line,
+                content="",
+                language=self.language
+            )
+            end_byte = start_byte
+            next_node = node
+        else:
+            next_node = first_child
 
         #print("block_type: ", block_type, "node_type: ", node.type, "first_child: ", first_child, "last_child: ", last_child, "start_byte", start_byte, "node.start_byte", node.start_byte,  "node.end_byte", node.end_byte)
 
-        l = last_child.type if last_child else "none"
+        #l = last_child.type if last_child else "none"
         #print(f"start [{level}]: {code} (last child {l}, end byte {end_byte})")
 
-        next_node = first_child
         while next_node:
-            if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
-                next_node = next_node.children[0]
+            #if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
+            #    next_node = next_node.children[0]
 
             #print(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
@@ -121,14 +136,16 @@ class CodeParser:
             if next_node == last_child:
                 break
 
-            if next_node.next_sibling:
+            if wrong_level_mode and next_node == node and last_child.next_sibling:
+                next_node = last_child.next_sibling
+            elif next_node.next_sibling:
                 next_node = next_node.next_sibling
             else:
                 next_node = self.get_parent_next(next_node, last_child or node)
 
         #print(f"end   [{level}]: {code}")
 
-        if not node.parent and node.end_byte > end_byte:
+        if level == 0 and not node.parent and node.end_byte > end_byte:
             code_block.append_child(CodeBlock(
                 type=CodeBlockType.SPACE,
                 pre_code=content_bytes[end_byte:node.end_byte].decode(self.encoding),
