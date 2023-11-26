@@ -7,14 +7,14 @@ from ghostcoder.codeblocks.parser.python import PythonParser
 from ghostcoder.codeblocks.parser.typescript import TypeScriptParser
 
 
-def create_parser(language: str) -> Optional[CodeParser]:
+def create_parser(language: str, **kwargs) -> Optional[CodeParser]:
     if language == "java":
-        return JavaParser()
+        return JavaParser(**kwargs)
     elif language == "python":
-        return PythonParser()
+        return PythonParser(**kwargs)
     elif language == "typescript" or language == "tsx":
-        return TypeScriptParser(language)
+        return TypeScriptParser(language, **kwargs)
     elif language == "javascript" or language == "jsx":
-        return JavaScriptParser(language)
+        return JavaScriptParser(language, **kwargs)
     else:
-        return CodeParser(language)
+        return CodeParser(language, **kwargs)

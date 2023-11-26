@@ -19,8 +19,8 @@ block_delimiters = [
 
 class PythonParser(CodeParser):
 
-    def __init__(self):
-        super().__init__("python")
+    def __init__(self, **kwargs):
+        super().__init__("python", **kwargs)
 
     def get_first_child(self, node: Node):
         if node.children:

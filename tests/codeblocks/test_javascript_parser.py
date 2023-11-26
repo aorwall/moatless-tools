@@ -1,7 +1,7 @@
 from ghostcoder.codeblocks import CodeBlockType
 from ghostcoder.codeblocks.parser.javascript import JavaScriptParser
 
-parser = JavaScriptParser("javascript")
+parser = JavaScriptParser("javascript", debug=False)
 
 
 def test_javascript_treesitter_types():
@@ -41,6 +41,41 @@ def test_javascript_object_literal():
     codeblock = parser.parse(content)
     print(codeblock.to_tree(include_tree_sitter_type=True))
 
+def test_if_statement():
+    content = """if (number > 5) {
+  console.log('Number is greater than 5');
+} else if (number === 5) {
+  console.log('Number is 5 ');
+} else {
+  console.log('Number is smaller than 5');
+}
+"""
+    parser = JavaScriptParser("javascript", debug=True)
+
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+
+def test_switch_statement():
+    content = """switch (number) {
+  case 10:
+    console.log('Number is 10');
+    break;
+  default:
+    console.log('Number is not 10');
+    break;
+}"""
+
+    parser = JavaScriptParser("javascript", debug=True)
+
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+def test_old_school_var():
+    content = """var foo = 1;"""
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
 
 def test_test_function():
     content = """describe('Accessibility', () => {
@@ -52,8 +87,7 @@ def test_test_function():
       ).toHaveAttribute('tabIndex', '-1');
     });
   });
-});
-    """
+});"""
     parser = JavaScriptParser("javascript")
     codeblock = parser.parse(content)
 
@@ -141,3 +175,136 @@ def test_constructor():
     print(codeblock.to_tree(include_tree_sitter_type=True))
 
     assert codeblock.to_string() == content
+
+
+def test_assignment():
+    content = """this.state = {
+      bar: null
+    };"""
+
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.to_string() == content
+
+def test_solo_constructor():
+    content = """constructor(props) {
+  this.state = {
+    foo: foo || '',
+    // ... other state properties
+  };
+}"""
+
+    parser = JavaScriptParser("javascript", apply_gpt_tweaks=True)
+
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.to_string() == content
+    assert codeblock.type == CodeBlockType.MODULE
+    assert codeblock.children[0].type == CodeBlockType.CONSTRUCTOR
+
+def test_solo_function():
+    content = """useEffect(() => {
+
+  const foo = async () => {
+  };
+
+  foo();
+}, []);"""
+
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.to_string() == content
+    assert codeblock.type == CodeBlockType.MODULE
+    assert len(codeblock.children) == 1
+    assert codeblock.children[0].type == CodeBlockType.FUNCTION
+
+def test_function_indent():
+    content ="""  isValid = () => {
+    return false;
+  };
+
+  isInvalid = () => {
+    return true;
+  };"""
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.type == CodeBlockType.MODULE
+    assert len(codeblock.children) == 2
+    assert codeblock.children[0].type == CodeBlockType.FUNCTION
+    assert codeblock.children[1].type == CodeBlockType.FUNCTION
+    assert codeblock.to_string() == content
+
+
+def test_commented_out():
+    content = """this.state = {
+        foo: foo || '',
+        // ... other state properties
+    };"""
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.type == CodeBlockType.MODULE
+
+
+def test_array_call():
+    content = """
+array.forEach((element) => {
+  console.log(element);
+});
+"""
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.type == CodeBlockType.CODE
+    assert codeblock.to_string() == content
+
+
+def test_root_functions_indent():
+    content = """
+  componentDidMount() {
+    this.setState({
+      foo: true,
+    });
+  }
+
+  checkFoo = () => {
+    return false;
+  };"""
+
+    parser = JavaScriptParser("javascript", apply_gpt_tweaks=True, debug=True)
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.type == CodeBlockType.MODULE
+    assert len(codeblock.children) == 2
+    assert codeblock.children[0].type == CodeBlockType.FUNCTION
+    assert codeblock.children[1].type == CodeBlockType.FUNCTION
+
+
+def test_const_id():
+    content = """const foo = await bar({
+});"""
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.type == CodeBlockType.MODULE
+    assert len(codeblock.children) == 1
+    assert codeblock.children[0].type == CodeBlockType.BLOCK

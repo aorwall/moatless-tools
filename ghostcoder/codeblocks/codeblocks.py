@@ -24,6 +24,7 @@ class CodeBlockType(str, Enum):
 
     IMPORT = "import"
     STATEMENT = "statement"
+    BLOCK = "block"
     CODE = "code"
     BLOCK_DELIMITER = "block_delimiter"
 
@@ -140,10 +141,15 @@ class CodeBlock:
 
         return f"{content}{child_code}"
 
-    def to_tree(self, indent: int = 0, show_tokens: bool = False, include_tree_sitter_type: bool = False, include_types: List[CodeBlockType] = None):
+    def to_tree(self,
+                indent: int = 0,
+                only_identifiers: bool = True,
+                show_tokens: bool = False,
+                include_tree_sitter_type: bool = False,
+                include_types: List[CodeBlockType] = None):
 
         child_tree = "".join([
-            child.to_tree(indent=indent + 1, include_tree_sitter_type=include_tree_sitter_type, include_types=include_types, show_tokens=show_tokens)
+            child.to_tree(indent=indent + 1, only_identifiers=only_identifiers, include_tree_sitter_type=include_tree_sitter_type, include_types=include_types, show_tokens=show_tokens)
             for child in self.children if not include_types or child.type in include_types])
         indent_str = " " * indent
 
@@ -155,7 +161,11 @@ class CodeBlock:
             tokens = utils.count_tokens(str(self))
             extra += f" ({tokens} tokens)"
 
-        content = self.identifier or self.content.strip().replace("\n", "\\n")
+        content = self.content.strip().replace("\n", "\\n") or ""
+
+        if only_identifiers:
+            content = self.identifier or content
+
         return f"{indent_str} {indent} {self.type.value} `{content}`{extra}\n{child_tree}"
 
     def __eq__(self, other):
@@ -412,11 +422,15 @@ class CodeBlock:
               first_level: bool = False,
               replace_types: List[CodeBlockType] = None) -> List[str]:
         logging.debug(f"Merging block `{self.type.value}: {self.identifier}` ({len(self.children)} children) with "
-                      f"`{updated_block.type.value}: {updated_block.content}` ({len(updated_block.children)} children)")
+                      f"`{updated_block.type.value}: {updated_block.identifier}` ({len(updated_block.children)} children)"
+                      f"First level: {first_level}")
 
         if first_level and not self.has_any_matching_child(updated_block.children, 0):
             child_tweaks = []
             for other_child in updated_block.children:
+                if other_child.type not in replace_types:
+                    continue
+
                 matching_children = self.find_blocks_with_identifier(other_child)
                 if len(matching_children) == 1:
                     child_tweaks.append(f"find_by_id:{other_child.identifier}")
@@ -468,12 +482,17 @@ class CodeBlock:
 
                 i = orig_next
                 if update_next > j:
+                    #  Clean up commented out code at the end
+                    last_updated_child = updated_block.children[update_next-1]
+                    if last_updated_child.type == CodeBlockType.COMMENTED_OUT_CODE:
+                        update_next -= 1
+
                     self.children[i:i] = updated_block.children[j:update_next]
                     i += update_next - j
 
                 j = update_next
                 merge_tweaks.append(f"commented_out:{original_block_child.content}:{updated_block_child.content}")
-            elif (original_block_child.content == updated_block_child.content and
+            elif (original_block_child.identifier == updated_block_child.identifier and
                   original_block_child.children and updated_block_child.children):
                 child_tweaks = original_block_child.merge(updated_block_child, replace_types=replace_types)
                 if updated_block_child.indentation or updated_block_child.pre_lines:

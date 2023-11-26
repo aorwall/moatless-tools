@@ -147,8 +147,8 @@ class UpdatedFileItem(FileItem):
     invalid: Optional[str] = Field(default=None, description="file is invalid")
     created: bool = Field(default=False, description="file is created")
 
-    def to_prompt(self, style: Optional[str] = None):
-        return super().to_prompt(style=style)
+    def __str__(self):
+        return super().to_prompt()
 
     def to_log(self):
         if self.error:
@@ -162,7 +162,12 @@ class UpdatedFileItem(FileItem):
 
         return f"{self.file_path} ({status})"
 
-    def __str__(self) -> str:
+    def to_prompt(self, style: Optional[str] = None) -> str:
+        if self.invalid:
+            return f"{self.file_path} (invalid: {self.invalid})\n```{self.language}\n{self.content}\n```"
+        elif self.error:
+            return f"{self.file_path} (error: {self.error})\n```{self.language}\n{self.content}\n```"
+
         return f"{self.file_path}\n```{self.language}\n{self.diff}\n```"
 
     def to_history(self) -> str:
@@ -283,7 +288,7 @@ class Message(ItemHolder):
         return [item for item in self.items if item.type == item_type]
 
     def __str__(self) -> str:
-        return "\n".join([str(item) for item in self.items])
+        return "\n".join([item.to_prompt() for item in self.items])
 
 
 class VerificationResult(BaseModel):

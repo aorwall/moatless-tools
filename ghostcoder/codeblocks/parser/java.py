@@ -41,8 +41,8 @@ block_delimiters = [
 
 class JavaParser(CodeParser):
 
-    def __init__(self):
-        super().__init__("java")
+    def __init__(self, **kwargs):
+        super().__init__("java", **kwargs)
 
     def get_block_definition(self, node: Node) -> Tuple[CodeBlockType, Optional[Node], Optional[Node]]:
         if node.type == "program":
