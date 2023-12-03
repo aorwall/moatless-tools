@@ -1,4 +1,4 @@
-from ghostcoder.codeblocks import codeblocks, CodeBlockType
+from ghostcoder.codeblocks import CodeBlockType
 from ghostcoder.codeblocks.parser.create import create_parser
 
 
@@ -16,21 +16,22 @@ def verify_merge(original_file, updated_file, expected_file, language, replace_t
     with open(expected_file, 'r') as f:
         expected_content = f.read()
 
-    parser = create_parser(language)
+    parser = create_parser(language, debug=False, apply_gpt_tweaks=True)
 
     updated_block = parser.parse(updated_content)
     print("Updated blocks:\n", updated_block.to_tree(include_tree_sitter_type=True))
-    #assert updated_content == updated_block.to_string()
-
+    assert updated_content == updated_block.to_string()
 
     original_block = parser.parse(original_content)
     print("Original blocks:\n", original_block.to_tree(include_tree_sitter_type=True))
-    #assert original_content == original_block.to_string()
+    assert original_content == original_block.to_string()
 
-    gpt_tweaks = original_block.merge(updated_block, first_level=True, replace_types=replace_types)
+    original_block.merge(updated_block)
 
-    print("gpt_tweaks: \n -", "\n - ".join(gpt_tweaks))
+    print(original_block.to_tree(include_merge_history=True))
+
     print(original_block.to_string())
+
     assert original_block.to_string() == expected_content
 
 
@@ -175,7 +176,6 @@ def test_merge_wrong_indentation():
 
 def test_merge_wrong_indentation_function_subset():
     verify_merge_dir("python/function_subset", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])
-
 
 def test_merge_extra_comment():
     verify_merge_dir("python/extra_comment", "python", [CodeBlockType.FUNCTION, CodeBlockType.STATEMENT])

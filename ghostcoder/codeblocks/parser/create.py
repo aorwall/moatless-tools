@@ -8,13 +8,13 @@ from ghostcoder.codeblocks.parser.typescript import TypeScriptParser
 
 
 def create_parser(language: str, **kwargs) -> Optional[CodeParser]:
-    if language == "java":
-        return JavaParser(**kwargs)
-    elif language == "python":
+    #if language == "java":
+    #    return JavaParser(**kwargs)
+    if language == "python":
         return PythonParser(**kwargs)
     elif language == "typescript" or language == "tsx":
         return TypeScriptParser(language, **kwargs)
-    elif language == "javascript" or language == "jsx":
+    elif language == "javascript":
         return JavaScriptParser(language, **kwargs)
     else:
-        return CodeParser(language, **kwargs)
+        raise NotImplementedError(f"Language {language} is not supported.")

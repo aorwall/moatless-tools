@@ -2,22 +2,20 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-import chromadb
+
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chat_models import ChatOpenAI
 from llama_index.vector_stores import ChromaVectorStore
 
 from ghostcoder.actions.write_code import CodeWriter
 from ghostcoder.actions.verify.code_verifier import CodeVerifier
-from ghostcoder.actions.write_code.base import StreamCallback
 from ghostcoder.actions.write_code.prompt import FIX_TESTS_PROMPT
 from ghostcoder.callback import LogCallbackHandler
 from ghostcoder.codeblocks import CodeBlockType, create_parser
 from ghostcoder.filerepository import FileRepository
 from ghostcoder.index.code_index import CodeIndex
-from ghostcoder.ipython_callback import DisplayCallback
 from ghostcoder.llm import LLMWrapper, ChatLLMWrapper
-from ghostcoder.schema import Message, UpdatedFileItem, TextItem, FileItem
+from ghostcoder.schema import Message, UpdatedFileItem, TextItem, FileItem, SearchFileResult, ReadFileResponse
 from ghostcoder.test_tools import TestTool
 from ghostcoder.utils import count_tokens
 
@@ -62,7 +60,7 @@ class Ghostcoder:
                  test_tool: TestTool = None,
                  auto_mode: bool = True,
                  language: str = None,
-                 callback: DisplayCallback = None,
+                 callback = None,
                  max_retries: int = 3,
                  log_dir: str = None,
                  openai_api_key: str = None,
@@ -82,6 +80,8 @@ class Ghostcoder:
         self.basic_llm = basic_llm or create_openai_client(log_dir=log_path, llm_name="gpt-3.5-turbo", temperature=0.0, streaming=True, openai_api_key=openai_api_key)
 
         self.index_dir = index_dir or repo_dir + "/.index"
+
+        import chromadb
         db = chromadb.PersistentClient(path=self.index_dir + "/.chroma_db")
         chroma_collection = db.get_or_create_collection("code-index")
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
@@ -92,7 +92,7 @@ class Ghostcoder:
                                       repository=self.repository,
                                       callback=callback,
                                       expect_complete_functions=True,
-                                      auto_mode=True)
+                                      auto_mode=False)
 
         self.test_fix_writer = CodeWriter(llm=self.llm,
                                           sys_prompt=FIX_TESTS_PROMPT,
@@ -120,18 +120,17 @@ class Ghostcoder:
                 ability: str = None,
                 search_limit: int = 10,
                 content_type: str = None,
-                callback: BaseCallbackHandler = None) -> str:
+                callback: BaseCallbackHandler = None) -> List[Message]:
 
         debug_text = ""
-        if not ability:
-
+        if False:
             system_prompt = """Decide on what ability to use based on the users input. Return only the name of the ability
     
-    ## Abilities
-    You have access to the following abilities you can call:
-    - write_code: Write code.
-    - investigate: Investigate and answer questions from the user.
-    """
+## Abilities
+You have access to the following abilities you can call:
+- find_files: Find relevant files. 
+- code: Answer questions about the code and write new code.
+"""
             message = Message(sender="User", items=[TextItem(text=query)])
 
             ability, _ = self.basic_llm.generate(system_prompt, messages=[message])
@@ -142,17 +141,28 @@ class Ghostcoder:
 
             logger.info(debug_text)
 
-        if "write_code" in ability:
-            if not self.file_context:
-                return "Please provide at least one file in the context."
-            return debug_text + self.write_code(query, callback)
-        else:
-            return debug_text + self.investigate(query,
-                                                 content_type=content_type,
-                                                 search_limit=search_limit,
-                                                 callback=callback)
+        outgoing_messages = []
+        if not self.file_context:
+            hits = self.code_index.search(query, content_type=content_type, limit=search_limit)
 
-    def write_code(self, query: str, callback: BaseCallbackHandler = None) -> str:
+            debug_text_before = f"> _Vector store search hits : {len(hits)}_"
+            for i, hit in enumerate(hits):
+                if self.debug_mode:
+                    debug_text_before += f"\n> {i + 1}. `{hit.path}` ({len(hit.blocks)} blocks "
+                    debug_text_before += ", ".join([f"`{block.identifier}`" for block in hit.blocks])
+                    debug_text_before += ")"
+
+                if any([hit.path in item.file_path for item in self.file_context]):
+                    continue
+
+                content = self.repository.get_file_content(file_path=hit.path)
+                self.file_context.append(FileItem(file_path=hit.path, content=content))
+                outgoing_messages.append(Message(sender="AI", items=[TextItem(text=debug_text_before)]))
+            logger.debug(debug_text_before)
+
+        return outgoing_messages + self.write_code(query, callback)
+
+    def write_code(self, query: str, callback: BaseCallbackHandler = None) -> List[Message]:
         logger.info(f"Write code")
 
         debug_text_before = f"> _Provided files from file context:_"
@@ -169,29 +179,35 @@ class Ghostcoder:
         incoming_messages.extend(self.message_history)
         incoming_messages.append(Message(sender="User", items=[TextItem(text=query)]))
 
-        outgoing_messages = self.code_writer.execute(incoming_messages=incoming_messages, callback=callback)
+        return self.code_writer.execute(incoming_messages=incoming_messages, callback=callback)
 
-        if self.debug_mode:
-            return debug_text_before + str(outgoing_messages[-1])
-
-        return str(outgoing_messages[-1])
-
-    def find_files(self, incoming_message: Message) -> List[Message]:
+    def find_files(self, query: str, search_limit: int = 10, content_type: str = None) -> SearchFileResult:
         if not self.code_index:
             raise Exception("Code index not initialized.")
 
-        query = incoming_message.to_prompt()
-        hits = self.code_index.search(query)
+        hits = self.code_index.search(query, content_type=content_type, limit=search_limit)
 
-        for hit in hits:
-            print(hit.path)
-            for codeblock in hit.blocks:
-                print(codeblock.score)
-                print(codeblock.type)
-                print(codeblock.content)
+        files = []
+        debug_text_before = f"> _Vector store search hits : {len(hits)}_"
+        for i, hit in enumerate(hits):
+            if self.debug_mode:
+                debug_text_before += f"\n> {i + 1}. `{hit.path}` ({len(hit.blocks)} blocks "
+                debug_text_before += ", ".join([f"`{block.identifier}`" for block in hit.blocks])
+                debug_text_before += ")"
 
-        # TODO: Run code index and pick files
-        return []
+            if any([hit.path in item.file_path for item in files]):
+                continue
+
+            content = self.repository.get_file_content(file_path=hit.path)
+            files.append(FileItem(file_path=hit.path, content=content))
+
+        return SearchFileResult(files=files)
+
+    def read_file(self, file_path: str) -> ReadFileResponse:
+        contents = self.repository.get_file_content(file_path=file_path)
+        if not contents:
+            return ReadFileResponse(success=False, file_path=file_path, error=f"File {file_path} not found.")
+        return ReadFileResponse(success=True, file_path=file_path, contents=contents)
 
     def investigate(self, query: str,
                     search_limit: int = 10,
@@ -229,7 +245,7 @@ You are provided with a list of files that might be relevant to the question. If
 
 YOU MUST provide the full file path to files you refer to.
 
-DO NOT suggest code changes or show hypothetical example in code that is not in the context.
+Do not show hypothetical examples in code that is not in the context.
 You can ask to read files not in context by providing the full file path to the file.
 
 When you return code you should use the following format:

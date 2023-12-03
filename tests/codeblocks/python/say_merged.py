@@ -31,7 +31,6 @@ def say(number):
             return f"{say(thousands)} thousand and {say(rest)}"
 
 
-
 _small_numbers = {
     0: "zero",
     1: "one",

@@ -132,3 +132,15 @@ def test_trim_with_function():
     trimmed_block = code_block.trim_with_types(include_types=[CodeBlockType.FUNCTION])
 
     print(trimmed_block.to_string())
+
+def test_add_indentation():
+    content = """print('Hello world!')
+"""
+
+    code_block = parser.parse(content)
+    #assert code_block.to_string() == content
+
+    code_block.add_indentation("    ")
+
+    assert code_block.to_string() == """    print( 'Hello world!')
+"""

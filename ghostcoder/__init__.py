@@ -1,2 +1,2 @@
 from ghostcoder.filerepository import FileRepository
-from ghostcoder.ghostcoder import Ghostcoder
+from ghostcoder.main import Ghostcoder

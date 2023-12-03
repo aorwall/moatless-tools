@@ -107,8 +107,8 @@ def test_function_field_definition():
     print(codeblock.to_tree(include_tree_sitter_type=True))
 
 
-def test_function():
-    content = """const isSaveButtonDisabled = () =>
+def test_lexical_declaration_function():
+    content = """const isDisabled = () =>
     this.props.disabled;
 """
 
@@ -116,6 +116,26 @@ def test_function():
     codeblock = parser.parse(content)
 
     print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.children[0].type == CodeBlockType.FUNCTION
+
+def test_field_definition_function():
+    content = """class Foo extends Component {
+  foo = () => {
+    return (
+      "foo"
+    );
+  };
+};
+"""
+
+    parser = JavaScriptParser("javascript")
+    codeblock = parser.parse(content)
+
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+
+    assert codeblock.children[0].type == CodeBlockType.CLASS
+    assert codeblock.children[0].children[1].type == CodeBlockType.FUNCTION
 
 def test_map_and_jsx():
     content = """const baz = foo?.map(
@@ -270,7 +290,7 @@ array.forEach((element) => {
 
     print(codeblock.to_tree(include_tree_sitter_type=True))
 
-    assert codeblock.type == CodeBlockType.CODE
+    assert codeblock.children[0].type == CodeBlockType.BLOCK
     assert codeblock.to_string() == content
 
 
@@ -300,7 +320,7 @@ def test_root_functions_indent():
 def test_const_id():
     content = """const foo = await bar({
 });"""
-    parser = JavaScriptParser("javascript")
+    parser = JavaScriptParser("javascript", debug=True)
     codeblock = parser.parse(content)
 
     print(codeblock.to_tree(include_tree_sitter_type=True))
@@ -308,3 +328,20 @@ def test_const_id():
     assert codeblock.type == CodeBlockType.MODULE
     assert len(codeblock.children) == 1
     assert codeblock.children[0].type == CodeBlockType.BLOCK
+
+
+def test_incorrect_outcommented_code():
+    content = """function foo() {
+    ...
+}"""
+    parser = JavaScriptParser("javascript", apply_gpt_tweaks=False)
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+    assert len(codeblock.find_errors()) == 1
+
+    parser = JavaScriptParser("javascript", apply_gpt_tweaks=True)
+    codeblock = parser.parse(content)
+    print(codeblock.to_tree(include_tree_sitter_type=True))
+    assert len(codeblock.find_errors()) == 0
+
+    assert codeblock.children[0].children[1].type == CodeBlockType.COMMENTED_OUT_CODE

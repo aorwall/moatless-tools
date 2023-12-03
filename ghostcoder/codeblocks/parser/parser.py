@@ -58,49 +58,105 @@ class CodeParser:
         with resources.open_text("ghostcoder.codeblocks.parser.queries", query_file) as file:
             return file.read()
 
-    def _build_query(self, query_file: str):
-        contents = self._read_query(query_file)
-        return self.tree_language.query(contents)
+    def _build_queries(self, query_content: str):
+        query_list = query_content.strip().split("\n\n")
+        return [self.tree_language.query(q) for q in query_list]
 
     def is_commented_out_code(self, node: Node):
         comment = node.text.decode("utf8").strip()
         return (comment.startswith(f"{get_comment_symbol(self.language)} ...") or
                 any(keyword in comment.lower() for keyword in commented_out_keywords))
 
-    def get_block_definition(self, node: Node):
-        if node.children:
-            print(f"get_block_definition: Fallback on {node.type}, first_child {node.children[0].type}, last_child { node.children[-1].type}")
-            return CodeBlockType.CODE, node.children[0], node.children[-1]
-        return CodeBlockType.CODE, None, None
+    def find_in_tree(self, node: Node) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node], Optional[Node]]:
+        if self.apply_gpt_tweaks:
+            block_type, first_child, identifier_node, last_child = self.find_match(node, True)
+            if block_type:
+                self.debug_log(f"GPT match: {node.type}")
+                return block_type, first_child, identifier_node, last_child
 
-    def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
+        return self.find_match(node)
+
+    def find_match(self, node: Node, gpt_tweaks: bool = False) -> Tuple[CodeBlockType, Node, Node, Node]:
+        queries = gpt_tweaks and self.gpt_queries or self.queries
+        for query in queries:
+            block_type, first_child, identifier_node, last_child = self._find_match(node, query)
+            if block_type:
+                return block_type, first_child, identifier_node, last_child
+
+        return None, None, None, None
+
+    def _find_match(self, node: Node, query) -> Tuple[CodeBlockType, Node, Node, Node]:
+        captures = query.captures(node)
+
+        identifier_node = None
+        first_child = None
+        block_type = None
+        last_child = None
+
+        if not captures:
+            return None, None, None, None
+
+        for node_match, tag in captures:
+            self.debug_log(f"Found tag {tag} on node {node_match}")
+
+            if tag == "root" and node != node_match:
+                self.debug_log(f"Expect first hit to be root match for {node.type}, got {tag} on {node_match.type}")
+                return block_type, first_child, identifier_node, last_child
+
+            if tag == "check_child":
+                return self.find_match(node_match)
+
+            if tag == "identifier":
+                identifier_node = node_match
+            elif tag == "child.first":
+                first_child = node_match
+            elif tag == "child.last":
+                last_child = node_match
+
+            if not block_type:
+                block_type = self._get_block_type(tag)
+
+        return block_type, first_child, identifier_node, last_child
+
+    def _get_block_type(self, tag: str):
+        if tag == "definition.code":
+            return CodeBlockType.CODE
+        elif tag == "definition.comment":
+            return CodeBlockType.COMMENT
+        elif tag == "definition.import":
+            return CodeBlockType.IMPORT
+        elif tag == "definition.class":
+            return CodeBlockType.CLASS
+        elif tag == "definition.function":
+            return CodeBlockType.FUNCTION
+        elif tag == "definition.statement":
+            return CodeBlockType.STATEMENT
+        elif tag == "definition.block":
+            return CodeBlockType.BLOCK
+        elif tag == "definition.module":
+            return CodeBlockType.MODULE
+        elif tag == "definition.block_delimiter":
+            return CodeBlockType.BLOCK_DELIMITER
+        elif tag == "definition.error":
+            return CodeBlockType.ERROR
+        return None
+
+    def get_block_definition(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
+        if node.children:
+            print(
+                f"get_block_definition: Fallback on {node.type}, first_child {node.children[0].type}, last_child {node.children[-1].type}")
+            return None, None, None # FIXME
         return None, None, None
 
     def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0, level: int = 0) -> Tuple[CodeBlock, Node]:
-        pre_code = content_bytes[start_byte:node.start_byte].decode(self.encoding)
         end_line = node.end_point[0]
 
-        code_block, first_child, last_child = self.get_block_definition_2(node, content_bytes, start_byte)
-        if not code_block:
-            block_type, first_child, last_child = self.get_block_definition(node)
+        code_block, first_child, last_child = self.get_block_definition(node, content_bytes, start_byte)
 
         if first_child:
             end_byte = self.get_previous(first_child, node)
         else:
             end_byte = node.end_byte
-
-        if not code_block:
-            code = content_bytes[node.start_byte:end_byte].decode(self.encoding)
-            code_block = CodeBlock(
-                type=block_type,
-                identifier=None,
-                tree_sitter_type=node.type,
-                start_line=node.start_point[0],
-                end_line=end_line,
-                pre_code=pre_code,
-                content=code,
-                language=self.language
-            )
 
         # Workaround to get the module root object when we get invalid content from GPT
         wrong_level_mode = level == 0 and not node.parent and code_block.type != CodeBlockType.MODULE

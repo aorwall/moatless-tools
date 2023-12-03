@@ -1,5 +1,7 @@
 (program . (_) @child.first @definition.module) @root
 
+(ERROR) @root @definition.error
+
 (comment) @root @definition.comment
 
 (import_statement) @root @definition.import
@@ -53,6 +55,19 @@
   )
 ) @root
 
+(field_definition
+  (property_identifier) @identifier
+  (arrow_function
+    parameters: (formal_parameters) @definition.function
+    body: [
+      (statement_block
+        ("{") @child.first
+      )
+      (expression) @child.first
+    ]
+  )
+) @root
+
 (expression_statement
   [
     (assignment_expression
@@ -91,7 +106,7 @@
       )
     )
   )
-)
+) @root
 
 (for_statement
   body: [
@@ -117,7 +132,7 @@
     (if_statement) @check_child
     (_) @child.first
   ]
-) @definition.statement @else @root
+)  @root @definition.statement @else
 
 (if_statement
   consequence: [
@@ -135,7 +150,6 @@
   )
   ]
 ) @root @definition.statement
-
 
 ;; TODO: Move to opening/closing code in codeblock?
 ;; ("{") @definition.block_delimiter @root

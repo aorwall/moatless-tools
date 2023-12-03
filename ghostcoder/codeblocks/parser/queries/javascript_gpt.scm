@@ -4,16 +4,20 @@
     (expression_statement
       (call_expression
         [
-          (identifier) @identifier @definition.function
+          (identifier) @identifier
           (member_expression
-            (identifier) @identifier @definition.function)
+            (identifier) @identifier)
         ]
         (arguments)
       )
     )
     (statement_block
       ("{") @child.first
-      ("}") @child.last
+      ("}") @child.last  @definition.function
     )
   )
 ]) @root
+
+;; Sometimes GPT just returns "..." when commenting out code
+((ERROR) @error
+  (#eq? @error "...")) @root @definition.comment

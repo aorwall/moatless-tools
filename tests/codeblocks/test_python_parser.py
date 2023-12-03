@@ -3,7 +3,20 @@ import json
 from ghostcoder.codeblocks import CodeBlockType
 from ghostcoder.codeblocks.parser.python import PythonParser
 
-parser = PythonParser()
+parser = PythonParser(debug=True)
+
+def test_python_all_treesitter_types():
+    with open("python/treesitter_types.py", "r") as f:
+        content = f.read()
+    with open("python/treesitter_types_expected.txt", "r") as f:
+        expected_tree = f.read()
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_tree() == expected_tree
+    assert code_blocks.to_string() == content
 
 def test_python_calculator():
     with open("python/calculator.py", "r") as f:
@@ -38,6 +51,36 @@ def test_python_with_comment_2():
     assert code_blocks.to_string() == content
 
 
+def test_python_class():
+    content = """class Calculator:
+
+    def add(self, a, b):
+        return a + b
+
+    def subtract(self, a, b):
+        return a - b
+"""
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
+
+def test_python_class_with_out_commented_code():
+    content = """class Calculator:
+
+    # ... (existing methods)
+
+    def multiply(self, a, b):
+        return a * b
+"""
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+
 def test_python_function_with_only_comment():
     content = """def foo():
 # ... rest of the code
@@ -67,19 +110,6 @@ def test_python_example():
 
     print(code_blocks.to_tree(include_tree_sitter_type=True))
 
-    assert code_blocks.to_string() == content
-
-def test_python_all_treesitter_types():
-    with open("python/treesitter_types.py", "r") as f:
-        content = f.read()
-    with open("python/treesitter_types_expected.txt", "r") as f:
-        expected_tree = f.read()
-
-    code_blocks = parser.parse(content)
-
-    print(code_blocks.to_tree(include_tree_sitter_type=False))
-
-    assert code_blocks.to_tree() == expected_tree
     assert code_blocks.to_string() == content
 
 
@@ -247,19 +277,54 @@ else:
 
 def test_python_outcommented_method():
     content = """class Battleship(AbstractBattleship):
-    
-    def get_game(self, game_id: str) -> Game:
-        return self.games.get(game_id)
 
     def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:
-        # ... same as before ..."""
+        # ... same as before ...
+
+    def get_game(self, game_id: str) -> Game:
+        return self.games.get(game_id)
+"""
+    parser = PythonParser(debug=True, apply_gpt_tweaks=True)
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=False))
+
+    assert code_blocks.to_string() == content
+
+    assert code_blocks.to_tree() == """ 0 module ``
+  1 class `Battleship`
+   2 commented_out_code `def create_ship_placement(self, game_id: str, placement: ShipPlacement) -> None:`
+    3 commented_out_code `# ... same as before ...`
+   2 function `get_game`
+    3 code `return self.games.get(game_id)`
+  1 space ``
+"""
+
+def test_pyton_outcommented_code():
+    content = """
+class WordSearch:
+    # ... existing methods remain unchanged ...
+
+    def search(self, word):
+        result = []
+        return result or None
+
+    # ... existing methods remain unchanged ..."""
 
     code_blocks = parser.parse(content)
 
     print(code_blocks.to_tree(include_tree_sitter_type=True))
 
     assert code_blocks.to_string() == content
-
+    assert code_blocks.to_tree() == """ 0 module ``
+  1 class `WordSearch`
+   2 commented_out_code `# ... existing methods remain unchanged ...`
+   2 function `search`
+    3 code `result = []`
+    3 code `return result or None`
+   2 commented_out_code `# ... existing methods remain unchanged ...`
+"""
 
 def test_python_method_starting_with_comment():
     content = """def get_game(game_id: str):
@@ -272,6 +337,28 @@ def test_python_method_starting_with_comment():
     print(code_blocks.to_tree(include_tree_sitter_type=True))
 
     assert code_blocks.to_string() == content
+    assert code_blocks.to_tree() == """ 0 module ``
+  1 function `get_game`
+   2 comment `# comment`
+   2 code `return "foo"`
+  1 space ``
+"""
+
+def test_python_pass_method():
+    content = """def sublist(list_one, list_two):
+    pass
+"""
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+    assert code_blocks.to_string() == content
+    assert code_blocks.to_tree() == """ 0 module ``
+  1 function `sublist`
+   2 code `pass`
+  1 space ``
+"""
+
 
 def test_python_weird_indentation():
     content = """
@@ -355,6 +442,14 @@ def test_python_function_after_init():
     def create_game(self):
         self.game_id = "1"
 """
+
+    code_blocks = parser.parse(content)
+
+    print(code_blocks.to_tree(include_tree_sitter_type=True))
+
+
+def test_python_print():
+    content = """print("Hello, World!")"""
 
     code_blocks = parser.parse(content)
 

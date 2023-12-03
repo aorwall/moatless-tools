@@ -26,85 +26,23 @@ class JavaScriptParser(CodeParser):
             query_contents += "\n\n" + self._read_query("javascript_only.scm")
         if language in ["tsx", "javascript"]:
             query_contents += "\n\n" + self._read_query("jsx.scm")
-        self.query = self.tree_language.query(query_contents)
+        self.queries = self._build_queries(query_contents)
 
         if self.apply_gpt_tweaks:
-            self.gpt_query = self._build_query("javascript_gpt.scm")
+            self.gpt_queries = self._build_queries(self._read_query("javascript_gpt.scm"))
 
-    def find_in_tree(self, node: Node) -> Tuple[Optional[CodeBlockType], Optional[Node], Optional[Node], Optional[Node]]:
+    def get_block_definition(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
+        first_child, identifier_node, last_child = None, None, None
+
         if node.type in block_delimiters:  # TODO: Move to query
-            return CodeBlockType.BLOCK_DELIMITER, None, None, None
-
-        if self.apply_gpt_tweaks:
-            gpt_match = self.find_match(node, True)
-            if all(gpt_match):
-                self.debug_log(f"GPT match: {node.type}")
-                return gpt_match
-
-        return self.find_match(node)
-
-    def find_match(self, node: Node, gpt_tweaks: bool = False) -> Tuple[CodeBlockType, Node, Node, Node]:
-        if gpt_tweaks:
-            query = self.gpt_query
+            block_type = CodeBlockType.BLOCK_DELIMITER
         else:
-            query = self.query
-
-        captures = query.captures(node)
-
-        identifier_node = None
-        first_child = None
-        block_type = None
-        last_child = None
-
-        for node_match, tag in captures:
-            self.debug_log(f"Found tag {tag} on node {node_match}")
-
-            if tag == "root" and node != node_match:
-                self.debug_log(f"Skipping root match on {node.type}, return type {block_type}")
-                return block_type, first_child, identifier_node, last_child
-
-            if tag == "check_child":
-                return self.find_match(node_match)
-
-            if tag == "identifier":
-                identifier_node = node_match
-            elif tag == "child.first":
-                first_child = node_match
-            elif tag == "child.last":
-                last_child = node_match
-
-            if not block_type:
-                block_type = self._get_block_type(tag)
-
-        return block_type, first_child, identifier_node, last_child
-
-    def _get_block_type(self, tag: str):
-        if tag == "definition.code":
-            return CodeBlockType.CODE
-        elif tag == "definition.comment":
-            return CodeBlockType.COMMENT
-        elif tag == "definition.import":
-            return CodeBlockType.IMPORT
-        elif tag == "definition.class":
-            return CodeBlockType.CLASS
-        elif tag == "definition.function":
-            return CodeBlockType.FUNCTION
-        elif tag == "definition.statement":
-            return CodeBlockType.STATEMENT
-        elif tag == "definition.block":
-            return CodeBlockType.BLOCK
-        elif tag == "definition.module":
-            return CodeBlockType.MODULE
-        elif tag == "definition.block_delimiter":
-            return CodeBlockType.BLOCK_DELIMITER
-        return None
-
-    def get_block_definition_2(self, node: Node, content_bytes: bytes, start_byte: int = 0) -> Tuple[Optional[CodeBlock], Optional[Node], Optional[Node]]:
-        block_type, first_child, identifier_node, last_child = self.find_in_tree(node)
-        if not block_type:
-            return None, None, None
-
-        self.debug_log(f"Found match on node type {node.type} with block type {block_type}")
+            block_type, first_child, identifier_node, last_child = self.find_in_tree(node)
+            if block_type:
+                self.debug_log(f"Found match on node type {node.type} with block type {block_type}")
+            else:
+                self.debug_log(f"Found no match on node type {node.type} set block type {CodeBlockType.CODE}")
+                block_type = CodeBlockType.CODE
 
         #if not last_child:
             #if node.next_sibling and node.next_sibling.type == ";":
@@ -142,8 +80,10 @@ class JavaScriptParser(CodeParser):
         # Support Jest tests
         if block_type == CodeBlockType.FUNCTION and code.startswith("describe("):
             block_type = CodeBlockType.TEST_SUITE
+            identifier = code  # TODO: Extract test description from node
         if block_type == CodeBlockType.FUNCTION and code.startswith("it("):
             block_type = CodeBlockType.TEST_CASE
+            identifier = code  # TODO: Extract test description from node
 
         # Expect class on components with an identifier starting with upper case
         if block_type == CodeBlockType.FUNCTION and identifier and identifier[0].isupper():
@@ -163,5 +103,3 @@ class JavaScriptParser(CodeParser):
 
         return code_block, first_child, last_child
 
-    def get_block_definition(self, node: Node):
-        return CodeBlockType.CODE, None, None
