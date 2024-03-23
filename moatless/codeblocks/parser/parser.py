@@ -2,14 +2,14 @@ import logging
 import re
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 
 import tree_sitter_languages
 from tree_sitter import Node
 
-from epicsplit.codeblocks.codeblocks import CodeBlock, CodeBlockType, Relationship, ReferenceScope, Parameter, \
+from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, Relationship, ReferenceScope, Parameter, \
     RelationshipType
-from epicsplit.codeblocks.parser.comment import get_comment_symbol
+from moatless.codeblocks.parser.comment import get_comment_symbol
 
 commented_out_keywords = ["rest of the code", "existing code", "other code"]
 child_block_types = ["ERROR", "block"]
@@ -56,7 +56,12 @@ def find_nested_type(node: Node, type: str, levels: int = -1):
 
 class CodeParser:
 
-    def __init__(self, language: str, encoding: str = "utf8", apply_gpt_tweaks: bool = False, debug: bool = False):
+    def __init__(self,
+                 language: str,
+                 encoding: str = "utf8",
+                 tokenizer: Callable[[str], List] = None,
+                 apply_gpt_tweaks: bool = False,
+                 debug: bool = False):
         try:
             self.tree_parser = tree_sitter_languages.get_parser(language)
             self.tree_language = tree_sitter_languages.get_language(language)
@@ -70,6 +75,7 @@ class CodeParser:
         self.gpt_queries = []
         self.queries = []
         self.reference_index = {}
+        self.tokenizer = tokenizer
 
     def _extract_node_type(self, query: str):
         pattern = r'\(\s*(\w+)'
@@ -80,7 +86,7 @@ class CodeParser:
             return None
 
     def _build_queries(self, query_file: str):
-        with resources.open_text("ghostcoder.codeblocks.parser.queries", query_file) as file:
+        with resources.open_text("moatless.codeblocks.parser.queries", query_file) as file:
             query_list = file.read().strip().split("\n\n")
             parsed_queries = []
             for i, query in enumerate(query_list):
@@ -133,6 +139,7 @@ class CodeParser:
             pre_code=pre_code,
             content=code,
             language=self.language,
+            tokens=self._count_tokens(code),
             children=[],
             properties={
                 "query": node_match.query,
@@ -177,7 +184,9 @@ class CodeParser:
         #l = last_child.type if last_child else "none"
         #print(f"start [{level}]: {code_block.content} (last child {l}, end byte {end_byte})")
 
-        pre_comments = []
+        identifiers = set()
+
+        index = 0
 
         while next_node:
             #if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
@@ -190,13 +199,17 @@ class CodeParser:
                 if child_block.children:
                     child_block.children[0].pre_code = child_block.pre_code + child_block.children[0].pre_code
                     code_block.append_children(child_block.children)
-            elif child_block.type == CodeBlockType.COMMENT:
-                pre_comments.append(child_block)
             else:
-                if pre_comments:
-                    child_block.pre_comments.extend(pre_comments)
-                    pre_comments = []
                 code_block.append_child(child_block)
+
+            index += 1
+
+            if not child_block.identifier:
+                child_block.identifier = f"{index}"
+            elif child_block.identifier in identifiers:
+                child_block.identifier = f"{child_block.identifier}_{index}"
+            else:
+                identifiers.add(child_block.identifier)
 
             if child_last_node:
                 self.debug_log(f"next  [{level}]: child_last_node -> {child_last_node}")
@@ -227,9 +240,6 @@ class CodeParser:
         self.post_process(code_block)
 
         self.add_to_reference_index(code_block)
-
-        if pre_comments:
-            code_block.append_children(pre_comments)
 
         if level == 0 and not node.parent and node.end_byte > end_byte:
             code_block.append_child(CodeBlock(
@@ -266,7 +276,7 @@ class CodeParser:
     def find_match(self, node: Node, gpt_tweaks: bool = False) -> Optional[NodeMatch]:
         queries = gpt_tweaks and self.gpt_queries or self.queries
         for label, node_type, query in queries:
-            if node_type and node.type != node_type:
+            if node_type and node.type != node_type and node_type != "_":
                 continue
             match = self._find_match(node, query, label)
             if match:
@@ -482,6 +492,13 @@ class CodeParser:
     def get_content(self, node: Node, content_bytes: bytes) -> str:
         return content_bytes[node.start_byte:node.end_byte].decode(self.encoding)
 
+    def _count_tokens(self, content: str):
+        if not self.tokenizer:
+            logger.warning("No tokenizer set, cannot count tokens")
+            return 0
+        return len(self.tokenizer(content))
+
     def debug_log(self, message: str):
         if self.debug:
             logger.debug(message)
+

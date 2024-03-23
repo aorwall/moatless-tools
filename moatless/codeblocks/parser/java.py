@@ -1,4 +1,4 @@
-from epicsplit.codeblocks.parser.parser import CodeParser
+from moatless.codeblocks.parser.parser import CodeParser
 
 
 class JavaParser(CodeParser):

@@ -11,9 +11,9 @@ import typer
 from datasets import load_dataset
 from llama_index.embeddings.openai import OpenAIEmbedding
 
-from epicsplit.retrievers.llama_index_retriever import IngestionPipelineSetup, LlamaIndexCodeSnippetRetriever
-from epicsplit.splitters.code_splitter_v2 import CodeSplitterV2
-from epicsplit.splitters.epic_splitter import EpicSplitter
+from moatless.retrievers.llama_index_retriever import IngestionPipelineSetup, LlamaIndexCodeSnippetRetriever
+from moatless.splitters.epic_split import EpicSplitter
+from moatless.splitters.epic_split import CommentStrategy
 
 app = typer.Typer()
 get_app = typer.Typer()
@@ -22,17 +22,17 @@ app.add_typer(get_app, name="get")
 app.add_typer(run_app, name="run")
 
 ingestion_pipelines = [
+    #IngestionPipelineSetup(
+    #    name="text-embedding-3-small--code-splitter-v2-1000",
+    #    transformations=[
+    #        CodeSplitterV2(chunk_size=1000, language="python")
+    #    ],
+    #    embed_model=OpenAIEmbedding(model="text-embedding-3-small")
+    #),
     IngestionPipelineSetup(
-        name="text-embedding-3-small--code-splitter-v2-1000",
+        name="text-embedding-3-small--epic-splitter-v3-100-750",
         transformations=[
-            CodeSplitterV2(chunk_size=1000, language="python")
-        ],
-        embed_model=OpenAIEmbedding(model="text-embedding-3-small")
-    ),
-    IngestionPipelineSetup(
-        name="text-embedding-3-small--epic-splitter-v2-100-750",
-        transformations=[
-            EpicSplitter(chunk_size=750, min_chunk_size=100, language="python")
+            EpicSplitter(chunk_size=750, min_chunk_size=100, language="python", comment_strategy=CommentStrategy.ASSOCIATE)
         ],
         embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     )
@@ -64,11 +64,9 @@ def write_json(path, name, data):
     json_path = f"{path}/{name}.json"
     write_file(json_path, json_str)
 
-
 def format_markdown_code_block(text):
     text = str(text).replace('```', '\\`\\`\\`')
     return f"```\n{text}\n```"
-
 
 def write_markdown(path, name, data):
     text = f"""# {data['instance_id']}
@@ -119,7 +117,7 @@ def download(split: str='dev', dataset_name='princeton-nlp/SWE-bench'):
 
 
 def get_case(id: str):
-    with open(f'rows/oracle.json') as f:
+    with open(f'data/oracle.json') as f:
         oracle_json = json.load(f)
 
     for row in oracle_json:
@@ -204,14 +202,14 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, path: str, repo_n
 
 
 @run_app.command()
-def benchmark_suite(suite: str):
-    suites = json.load(open('suites.json'))
+def suite(suite: str = 'retries'):
+    suites = json.load(open('benchmark/suites.json'))
     for case_id in suites[suite]:
-        benchmark_case(case_id)
+        case(case_id)
 
 
-@run_app.command
-def benchmark_case(case_id: str):
+@run_app.command()
+def case(case_id: str):
     row_data = get_case(id=case_id)
     repo_name = row_data['repo'].split('/')[-1]
     repo = f'git@github.com:{row_data["repo"]}.git'

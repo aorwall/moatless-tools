@@ -7,8 +7,8 @@ from typing import List, Optional, Callable, Tuple
 
 from pydantic import BaseModel, validator, Field, root_validator
 
-from epicsplit.codeblocks.parser.comment import get_comment_symbol
-from epicsplit.codeblocks.utils import Colors
+from moatless.codeblocks.parser.comment import get_comment_symbol
+from moatless.codeblocks.utils import Colors
 
 
 class CodeBlockType(str, Enum):
@@ -34,7 +34,7 @@ class CodeBlockType(str, Enum):
     BLOCK_DELIMITER = "BlockDelimiter"
 
     COMMENT = "Comment"
-    COMMENTED_OUT_CODE = "CommentedOutCode"
+    COMMENTED_OUT_CODE = "CommentedOutCode"  # TODO: Replace to PlaceholderComment
 
     SPACE = "Space"
     ERROR = "Error"
@@ -223,11 +223,10 @@ class CodeBlock(BaseModel):
     start_line: int = 0
     end_line: int = 0
     properties: dict = {}
-    pre_comments: List["CodeBlock"] = []
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
-    tokens: int = 0  # TODO: Set this when parsing the code block
+    tokens: int = 0
     language: Optional[str] = None
     merge_history: List[MergeAction] = []
     children: List["CodeBlock"] = []
@@ -244,7 +243,7 @@ class CodeBlock(BaseModel):
         for child in self.children:
             child.parent = self
 
-        if self.pre_code.strip():
+        if self.pre_code and not re.match(r"^[ \n\\]*$", self.pre_code):
             raise ValueError(f"Failed to parse code block with type {self.type} and content `{self.content}`. "
                              f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`")
 
@@ -349,15 +348,32 @@ class CodeBlock(BaseModel):
             self._insert_into_tree(tree[external_path], ref.path)
         return tree
 
+    def sum_tokens(self):
+        tokens = self.tokens
+        tokens += sum([child.sum_tokens() for child in self.children])
+        return tokens
+
+    def get_all_child_blocks(self) -> List["CodeBlock"]:
+        blocks = []
+        for child in self.children:
+            blocks.append(child)
+            blocks.extend(child.get_all_child_blocks())
+        return blocks
+
     def _to_context_string(self,
                            path_tree: PathTree = None,
+                           show_blocks: List["CodeBlock"] = None,
                            exclude_types: List[CodeBlockType] = None,
                            show_commented_out_code_comment: bool = True) -> str:
         contents = ""
 
-        if (not path_tree or path_tree.tree.get(self.identifier)) and self.pre_comments:
-            for comment in self.pre_comments:
-                contents += comment._to_context_string()
+        if exclude_types is None:
+            if self.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]:
+                exclude_types = [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.TEST_SUITE, CodeBlockType.TEST_CASE]
+            else:
+                exclude_types = []
+
+        show_code = self._show_code(path_tree, show_blocks, exclude_types)
 
         if self.pre_lines:
             contents += "\n" * (self.pre_lines - 1)
@@ -369,13 +385,8 @@ class CodeBlock(BaseModel):
         else:
             contents += self.pre_code + self.content
 
-        if exclude_types is None:
-            if self.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]:
-                exclude_types = [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.TEST_SUITE, CodeBlockType.TEST_CASE]
-            else:
-                exclude_types = []
-
         # ignore comments at start
+        # TODO: Should be CodeBlock trait?
         start = 0
         is_licence_comment = False
         while len(self.children) > start and self.children[start].type == CodeBlockType.COMMENT and (
@@ -392,8 +403,7 @@ class CodeBlock(BaseModel):
             if self._ignore_block(child, i):
                 continue
 
-            if not path_tree or child.identifier in path_tree.tree or (
-                    path_tree.show and (not exclude_types or child.type not in exclude_types)):
+            if show_code:
                 if outcommented_types:
                     # TODO: print by type
                     if show_commented_out_code_comment:
@@ -404,6 +414,13 @@ class CodeBlock(BaseModel):
                     outcommented_types.clear()
                 contents += child._to_context_string(
                     path_tree=path_tree.tree.get(child.identifier, None) if path_tree else None,
+                    show_blocks=show_blocks,
+                    exclude_types=exclude_types,
+                    show_commented_out_code_comment=show_commented_out_code_comment)
+            elif child in show_blocks or child.has_any_block(show_blocks):
+                contents += child._to_context_string(
+                    path_tree=path_tree.tree.get(child.identifier, None) if path_tree else None,
+                    show_blocks=show_blocks,
                     exclude_types=exclude_types,
                     show_commented_out_code_comment=show_commented_out_code_comment)
             else:
@@ -414,6 +431,24 @@ class CodeBlock(BaseModel):
             contents += self.children[-1].create_commented_out_block()._to_context_string()
 
         return contents
+
+    def _show_code(
+            self,
+            path_tree: PathTree = None,
+            show_blocks: List["CodeBlock"] = None,
+            exclude_types: List[CodeBlockType] = None):
+
+        if path_tree and not path_tree.tree.get(self.identifier):
+            return False
+
+        if show_blocks and self not in show_blocks:
+            return False
+
+        if exclude_types is not None and self.type in exclude_types:
+            return False
+
+        return True
+
 
     def _ignore_block(self, block: "CodeBlock", index: int) -> bool:
         if block.type == CodeBlockType.COMMENT:
@@ -480,6 +515,7 @@ class CodeBlock(BaseModel):
     def to_tree(self,
                 indent: int = 0,
                 only_identifiers: bool = True,
+                show_full_path: bool = False,
                 show_tokens: bool = False,
                 debug: bool = False,
                 include_types: List[CodeBlockType] = None,
@@ -495,6 +531,7 @@ class CodeBlock(BaseModel):
         child_tree = "".join([
             child.to_tree(indent=indent + 1,
                           only_identifiers=only_identifiers,
+                          show_full_path=show_full_path,
                           debug=debug,
                           include_types=include_types,
                           include_merge_history=include_merge_history,
@@ -514,12 +551,14 @@ class CodeBlock(BaseModel):
 
         content = Colors.YELLOW + (self.content.strip().replace("\n", "\\n") or "") + Colors.RESET
 
-        if only_identifiers and self.identifier:
-            content = Colors.GREEN
+        if self.identifier:
+            if only_identifiers:
+                content = ""
+            content += Colors.GREEN
             if include_parameters and self.parameters:
                 content += f"{self.identifier}({', '.join([param.identifier for param in self.parameters])})"
             else:
-                content += self.identifier
+                content += f" ({self.identifier})"
 
             content += Colors.RESET
 
@@ -534,21 +573,12 @@ class CodeBlock(BaseModel):
     def __eq__(self, other):
         if not isinstance(other, CodeBlock):
             return False
-        return self.to_dict() == other.to_dict()
+        return self.full_path() == other.full_path()
 
     def dict(self, **kwargs):
         # TODO: Add **kwargs to dict call
         return super().dict(exclude={"parent", "merge_history"})
 
-    # TODO: Remove
-    def to_dict(self):
-        return {
-            "code": self.content,
-            "type": self.type,
-            "pre_code": self.pre_code,
-            # "is_nested": self.is_nested,
-            "children": [child.to_dict() for child in self.children]
-        }
 
     def path_string(self):
         return ".".join(self.full_path())
@@ -560,8 +590,6 @@ class CodeBlock(BaseModel):
 
         if self.identifier:
             path.append(self.identifier)
-        elif self.parent:
-            path.append(str(self.type.value.lower()))
 
         return path
 
@@ -733,6 +761,12 @@ class CodeBlock(BaseModel):
                     return child.find_by_path(path[1:])
 
         return None
+
+    def has_any_block(self, blocks: List["CodeBlock"]) -> bool:
+        for block in blocks:
+            if block.full_path()[:len(self.full_path())] == self.full_path():
+                return True
+        return False
 
     def find_blocks_with_identifier(self, identifier: str) -> List["CodeBlock"]:
         blocks = []

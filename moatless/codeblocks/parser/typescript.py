@@ -1,4 +1,4 @@
-from epicsplit.codeblocks.parser.javascript import JavaScriptParser
+from moatless.codeblocks.parser.javascript import JavaScriptParser
 
 
 class TypeScriptParser(JavaScriptParser):

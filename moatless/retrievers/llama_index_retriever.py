@@ -14,8 +14,8 @@ from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-from epicsplit.retriever import CodeSnippetRetriever, CodeSnippet
-from epicsplit.splitters.epic_splitter import EpicSplitter
+from moatless.retriever import CodeSnippetRetriever, CodeSnippet
+from moatless.splitters.epic_split import EpicSplitter
 
 
 @dataclass
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     pipeline_setup = IngestionPipelineSetup(
-        name="text-embedding-3-small--epic-splitter-v2-100-750",
+        name="text-embedding-3-small--epic-splitter-v3-100-750",
         transformations=[
             EpicSplitter(chunk_size=750, min_chunk_size=100, language="python")
         ],
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     retriever = LlamaIndexCodeSnippetRetriever.from_pipeline_setup(
         pipeline_setup=pipeline_setup,
         path="/tmp/repos/scikit-learn",
-        perist_dir="/tmp/repos/scikit-learn-storage/text-embedding-3-small--epic-splitter-v2-100-750",
+        perist_dir="/tmp/repos/scikit-learn-storage/text-embedding-3-small--epic-splitter-v3-100-750",
     )
 
     retriever.run_index()

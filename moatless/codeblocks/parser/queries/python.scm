@@ -143,6 +143,14 @@
 ) @root @definition.call
 
 (expression_statement
+  . (string
+      (string_start)
+      (string_content)
+      (string_end)
+  ) @definition.comment
+) @root
+
+(expression_statement
   (_) @check_child
 ) @root
 
@@ -153,6 +161,12 @@
 
 (block
   (_) @check_child
+) @root
+
+(_
+  (":")
+  . (_) @child.first
+  (block . (_)) @definition.statement
 ) @root
 
 (_
