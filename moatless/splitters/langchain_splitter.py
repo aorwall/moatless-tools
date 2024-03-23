@@ -31,6 +31,7 @@ class RecursiveCharacterTextSplitterLangchainWrapper(TextSplitter):
         super().__init__(
             callback_manager=callback_manager
         )
+
     @classmethod
     def class_name(cls) -> str:
         return "RecursiveCharacterTextSplitterLangchainWrapper"

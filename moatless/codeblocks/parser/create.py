@@ -1,10 +1,10 @@
 from typing import Optional
 
-from epicsplit.codeblocks.parser.java import JavaParser
-from epicsplit.codeblocks.parser.javascript import JavaScriptParser
-from epicsplit.codeblocks.parser.parser import CodeParser
-from epicsplit.codeblocks.parser.python import PythonParser
-from epicsplit.codeblocks.parser.typescript import TypeScriptParser
+from moatless.codeblocks.parser.java import JavaParser
+from moatless.codeblocks.parser.javascript import JavaScriptParser
+from moatless.codeblocks.parser.parser import CodeParser
+from moatless.codeblocks.parser.python import PythonParser
+from moatless.codeblocks.parser.typescript import TypeScriptParser
 
 
 def is_supported(language: str) -> bool:

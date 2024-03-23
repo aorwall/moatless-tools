@@ -2,9 +2,9 @@ import logging
 
 from tree_sitter import Node
 
-from epicsplit.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, \
+from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, \
     RelationshipType
-from epicsplit.codeblocks.parser.parser import CodeParser, commented_out_keywords, NodeMatch
+from moatless.codeblocks.parser.parser import CodeParser, commented_out_keywords, NodeMatch
 
 child_block_types = ["ERROR", "block"]
 

@@ -2,8 +2,8 @@ import logging
 
 from tree_sitter import Node
 
-from epicsplit.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, RelationshipType
-from epicsplit.codeblocks.parser.parser import CodeParser, NodeMatch
+from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, RelationshipType
+from moatless.codeblocks.parser.parser import CodeParser, NodeMatch
 
 block_delimiters = [
     "{",
