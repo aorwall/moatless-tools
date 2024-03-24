@@ -8,9 +8,11 @@ from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, get_tokeni
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.ingestion import IngestionPipeline, DocstoreStrategy
+from llama_index.core.node_parser import NodeParser
 from llama_index.core.readers.base import BaseReader
 from llama_index.core.schema import TransformComponent, Document, BaseNode, NodeRelationship
 from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
@@ -21,7 +23,7 @@ from moatless.splitters.epic_split import EpicSplitter
 @dataclass
 class IngestionPipelineSetup:
     name: str
-    transformations: List[TransformComponent]
+    splitter: NodeParser
     embed_model: BaseEmbedding
     dimensions: int = None
 
@@ -29,11 +31,11 @@ class IngestionPipelineSetup:
 class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
 
     def __init__(self,
-                 reader: BaseReader,
-                 prepare_pipeline: IngestionPipeline,
-                 perist_dir: str,
-                 embed_pipeline: IngestionPipeline,
-                 retriever: BaseRetriever):
+                 retriever: BaseRetriever,
+                 reader: BaseReader = None,
+                 prepare_pipeline: IngestionPipeline = None,
+                 perist_dir: str = None,
+                 embed_pipeline: IngestionPipeline = None):
         self.reader = reader
         self.prepare_pipeline = prepare_pipeline
         self.perist_dir = perist_dir
@@ -42,14 +44,26 @@ class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
 
 
     @classmethod
+    def from_vector_store(cls,
+                          vector_store: BasePydanticVectorStore,
+                          embed_model: BaseEmbedding):
+        vector_index = VectorStoreIndex.from_vector_store(
+            vector_store=vector_store,
+            embed_model=embed_model,
+        )
+
+        retriever = vector_index.as_retriever(similarity_top_k=250)
+
+        return cls(
+            retriever=retriever,
+        )
+
+    @classmethod
     def from_pipeline_setup(cls,
+                            vector_store: BasePydanticVectorStore,
                             pipeline_setup: IngestionPipelineSetup,
                             path: str,
                             perist_dir: str = None):
-        db = chromadb.PersistentClient(path=f"{perist_dir}/chroma_db")
-        chroma_collection = db.get_or_create_collection("files")
-        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-
         reader = SimpleDirectoryReader(
             input_dir=path,
             exclude=[ # TODO: Shouldn't be hardcoded and filtered
@@ -64,7 +78,7 @@ class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
         )
 
         prepare_pipeline = IngestionPipeline(
-            transformations=pipeline_setup.transformations
+            transformations=[pipeline_setup.splitter]
         )
 
         embed_pipeline = IngestionPipeline(
@@ -153,6 +167,8 @@ class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
         return [CodeSnippet(
             path=node.node.metadata['file_path'],
             content=node.node.get_content(),
+            start_line=node.node.metadata.get('start_line', None),
+            end_line=node.node.metadata.get('end_line', None),
         ) for node in result]
 
 
@@ -162,16 +178,14 @@ if __name__ == "__main__":
 
     pipeline_setup = IngestionPipelineSetup(
         name="text-embedding-3-small--epic-splitter-v3-100-750",
-        transformations=[
-            EpicSplitter(chunk_size=750, min_chunk_size=100, language="python")
-        ],
+        splitter=EpicSplitter(chunk_size=750, min_chunk_size=100, language="python"),
         embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     )
 
     retriever = LlamaIndexCodeSnippetRetriever.from_pipeline_setup(
         pipeline_setup=pipeline_setup,
-        path="/tmp/repos/scikit-learn",
-        perist_dir="/tmp/repos/scikit-learn-storage/text-embedding-3-small--epic-splitter-v3-100-750",
+        path="/tmp/repos/sqlfluff",
+        perist_dir="/tmp/repos/sqlfluff/text-embedding-3-small--epic-splitter-v3-100-750",
     )
 
     retriever.run_index()
