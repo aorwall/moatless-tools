@@ -74,7 +74,9 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     print(f"Running benchmark for {pipeline_setup.name} on {repo_name} at commit {commit}")
 
     vector_store_name = f"{repo_name}-{commit}-{pipeline_setup.name}"
-    db = get_chroma_db(vector_store_name, perist_dir)
+    chromadb_path = f"{perist_dir}/{vector_store_name}"
+
+    db = get_chroma_db(vector_store_name, perist_dir, chromadb_path)
     vectors, indexed_tokens = None, None
 
     try:
@@ -97,7 +99,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         vectors, indexed_tokens = retriever.run_index()
 
         try:
-            upload_store(perist_dir, f"{repo_name}-{commit}-{pipeline_setup.name}")
+            upload_store(perist_dir, f"{repo_name}-{commit}-{pipeline_setup.name}", chromadb_path)
         except Exception as e:
             print(f"Failed to upload store: {e}")
 
@@ -125,7 +127,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     md += "\n\n## Expected patch\n\n"
     md += format_markdown_code_block(row_data["patch"], language='diff')
 
-    expected_diffs = 0
+    missing_snippets = 0
 
     snippet_table_md = "\n\n## Retrieved code snippets\n\n"
     snippet_table_md += "| Position | File | Start line | End line | Tokens | Sum tokens |\n"
@@ -143,7 +145,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         tokenizer = get_tokenizer()
         tokens = len(tokenizer(snippet.content))
 
-        if (sum_tokens + tokens >= 13000 and found_snippets == expected_diffs) or sum_tokens + tokens >= 50000:
+        if (sum_tokens + tokens >= 13000 and all_found_context_length) or sum_tokens + tokens >= 50000:
             break
 
         sum_tokens += tokens
@@ -157,7 +159,6 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
 
         file_hit = snippet.path in row_data["patch_diff_details"]
 
-
         if file_hit:
             if not top_file_pos:
                 top_file_pos = file_pos
@@ -167,8 +168,12 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
             diffs = row_data["patch_diff_details"][snippet.path]
             if snippet.start_line is not None and snippet.end_line is not None:
                 for diff in diffs["diffs"]:
+                    if "file_pos" not in diff:
+                        diff["file_pos"] = file_pos
 
-                    if snippet.start_line <= diff['start_line_old'] <= diff['end_line_old'] <= snippet.end_line:
+                    if (snippet.start_line <= diff['start_line_old'] and
+                            ('end_line_old' not in diff or snippet.end_line >= diff['end_line_old'])):
+
                         found_snippets += 1
                         diff["pos"] = i+1
                         diff["context_length"] = sum_tokens
@@ -179,7 +184,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
                         sum_pos += i+1
                         snippet_hit = True
 
-                        if any_found_context_length:
+                        if not any_found_context_length:
                             any_found_context_length = sum_tokens
                     elif "pos" not in diff:
                         snippets_missing = True
@@ -214,12 +219,16 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
             snippet_md += f"```python\n{snippet.content}\n```\n"
 
     md += "\n\n## Expected file changes\n\n"
-    md += "| File | Start line | End line | Found on position | Context length | \n"
-    md += "| --- | --- | --- | ---- |\n"
+    md += "| File | Start line | End line | Found on position | Found file position | Context length |\n"
+    md += "| ---- | ---------- | -------- | ----------------- | ------------------- | -------------- |\n"
     for file_path, diffs in row_data["patch_diff_details"].items():
         for diff in diffs["diffs"]:
-            expected_diffs += 1
-            md += f"| {file_path} | {diff['start_line_old']} | {diff['end_line_old']} | {diff.get('pos', '-')} | {diff.get('context_lenfth', '-')}\n"
+            if "post" not in diff:
+                missing_snippets += 1
+            md += f"| {file_path} | {diff['start_line_old']} | {diff.get('end_line_old', '-')} | {diff.get('pos', '-')} | {diff.get('file_pos', '-')} | {diff.get('context_length', '-')}\n"
+
+    md += "\n\n## Problem Statement\n\n"
+    md += format_markdown_code_block(row_data["problem_statement"])
 
     md += snippet_table_md
 
@@ -228,9 +237,6 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         md += "\n\n## Missing Patch Files\n"
         for i, file_path in enumerate(patch_files, start=1):
             md += f"\n * {i}: {file_path}"
-
-    md += "\n\n## Problem Statement\n\n"
-    md += format_markdown_code_block(row_data["problem_statement"])
 
     if row_data['hints_text']:
         md += "\n\n### Hint\n\n"
@@ -256,10 +262,9 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     precision, recall = calculate_precision_recall(recommended_files, patch_files)
 
     avg_pos = sum_pos / no_of_patches if no_of_patches > 0 else None
-    missing_snippets = expected_diffs - found_snippets
 
     with open(f"benchmark/reports/{benchmark_run}/summary.csv", "a") as f:
-        print(f"{instance_id}: {pipeline_setup.name}:\n vectors: {vectors}\n tokens: {indexed_tokens}\n no_of_patches: {no_of_patches}\n any_found_context_length: {any_found_context_length} all_found_context_length: {any_found_context_length} \n \n avg_pos: {avg_pos}\n top_pos: {min_pos}\n worst_pos: {max_pos}\n top_file_pos: {top_file_pos}\n missing_snippets: {missing_snippets}\n missing_patch_files: {missing_patch_files}")
+        print(f"{instance_id}: {pipeline_setup.name}:\n vectors: {vectors}\n tokens: {indexed_tokens}\n no_of_patches: {no_of_patches}\n any_found_context_length: {any_found_context_length}\n all_found_context_length: {any_found_context_length} \n \n avg_pos: {avg_pos}\n top_pos: {min_pos}\n worst_pos: {max_pos}\n top_file_pos: {top_file_pos}\n missing_snippets: {missing_snippets}\n missing_patch_files: {missing_patch_files}")
         csv.writer(f, delimiter=";").writerow([instance_id, pipeline_setup.name, vectors, indexed_tokens, no_of_patches, any_found_context_length, all_found_context_length, avg_pos, min_pos, max_pos, top_file_pos, missing_snippets, missing_patch_files])
 
     md_header = f"# {instance_id}"
@@ -275,7 +280,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
 
     md_header += f"| **No of patches** | {no_of_patches} |\n"
     md_header += f"| **All found context length** | {all_found_context_length or '-'} |\n"
-    md_header += f"| **Any found context length** | {all_found_context_length or '-'} |\n"
+    md_header += f"| **Any found context length** | {any_found_context_length or '-'} |\n"
     md_header += f"| **Avg pos** | {avg_pos or '-'} |\n"
     md_header += f"| **Min pos** | {min_pos or '-'} |\n"
     md_header += f"| **Max pos** | {max_pos or '-'} |\n"
@@ -305,48 +310,53 @@ def generate_summary(benchmark_run: str):
         csv_file = csv.reader(f, delimiter=";")
         csv_file = sorted(csv_file, key=lambda x: x[0])
 
-        sub_13 = 0
-        sub_27 = 0
-        sub_50 = 0
+        thresholds = [13000, 27000, 50000]
+        counts = {'sub': [0] * len(thresholds), 'any_sub': [0] * len(thresholds)}
+
+        def update_counts(row):
+            for i, threshold in enumerate(thresholds):
+                if row[1]:
+                    if int(row[1]) < threshold:
+                        counts['any_sub'][i] += 1
+                if row[2]:
+                    if int(row[2]) < threshold:
+                        counts['sub'][i] += 1
 
         md = ""
-        top_file_position = 0
 
         for i, row in enumerate(csv_file):
             row.pop(1)
+            row.pop(1)
+            row.pop(1)
             if i > 0:
-                row[0] = f"[{row[0]}](https://github.com/aorwall/moatless-tools/tree/main/benchmark/reports/{benchmark_run}/{row[0]}/report.md)"
+                row[0] = f"[{row[0]}]({row[0]}/report.md)"
 
             md += f"| {' | '.join(row)} |\n"
             if i == 0:
                 md += f"| {' | '.join(['---' for _ in row])} |\n"
                 continue
 
-            if row[4] != "-":
-                context_length = int(row[4])
-                if context_length < 13000:
-                    sub_13 += 1
-
-                if context_length < 27000:
-                    sub_27 += 1
-
-                if context_length < 50000:
-                    sub_50 += 1
+            update_counts(row)
 
         md += f"# Recall\n\n"
         md += "|     | 13k | 27k | 50k |\n"
         md += "| --- | --- | --- | --- |\n"
 
-        sub_13_avg = round(sub_13 / (len(csv_file) -1) * 100, 2)
-        sub_27_avg = round(sub_27 / (len(csv_file) -1) * 100, 2)
-        sub_50_avg = round(sub_50 / (len(csv_file) -1) * 100, 2)
-        md += f"| All | {sub_13_avg}% | {sub_27_avg}% | {sub_50_avg}% |\n\n"
+        def avg_percent(count):
+            return round(count / (len(csv_file) - 1) * 100, 2)
+
+        for key in ['sub', 'any_sub']:
+            md += f"| {'All' if key == 'sub' else 'Any'} | " + ' | '.join(
+                [f"{avg_percent(count)}%" for count in counts[key]]) + " |\n"
 
         with open(f"reports/{benchmark_run}/summary.md", "w") as f:
             f.write(md)
 
 
-def upload_store(store_path: str, file_name: str):
+def avg_percent(count, rows):
+    return round(count / (len(rows) -1) * 100, 2)
+
+def upload_store(store_path: str, file_name: str, chromadb_path: str):
     connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     if not connect_str:
         print("AZURE_STORAGE_CONNECTION_STRING is not set, cannot upload store.")
@@ -355,7 +365,7 @@ def upload_store(store_path: str, file_name: str):
     _blob_storage = block_storage_client.get_container_client(container="stores")
 
     zip_file_path = f"{store_path}/{file_name}"
-    shutil.make_archive(zip_file_path, 'zip', f"{store_path}/chroma_db")
+    shutil.make_archive(zip_file_path, 'zip', chromadb_path)
 
     blob_client = _blob_storage.get_blob_client(blob=file_name)
     with open(f"{zip_file_path}.zip", "rb") as data:
@@ -364,8 +374,7 @@ def upload_store(store_path: str, file_name: str):
     print(f"Uploaded {zip_file_path} to Azure Blob Storage with name {file_name}.")
 
 
-def get_chroma_db(file_name: str, store_path: str):
-    chromadb_path = f"{store_path}/{file_name}"
+def get_chroma_db(file_name: str, store_path: str, chromadb_path: str):
     if os.path.exists(chromadb_path):
         print(f"Using existing store at {chromadb_path}")
     elif download_store(file_name, store_path, chromadb_path):

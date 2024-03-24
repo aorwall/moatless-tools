@@ -38,7 +38,7 @@ ingestion_pipelines = [
     #    embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     #),
     IngestionPipelineSetup(
-        name="text-embedding-3-small--epic-splitter-v3-100-750",
+        name="text-embedding-3-small--epic-splitter-v4-100-750",
         splitter=EpicSplitter(chunk_size=750, min_chunk_size=100, language="python", comment_strategy=CommentStrategy.ASSOCIATE),
         embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     )
@@ -84,7 +84,7 @@ def diff_file_names(text: str) -> list[str]:
 
 
 def get_filename(split: str, dataset_name: str):
-    return f'{dataset_name.replace("/", "-")}-{split}.json'
+    return f'{dataset_name.replace("/", "-")}-{split}'
 
 
 @get_app.command()
@@ -143,7 +143,7 @@ def dataset(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
         os.makedirs(f"benchmark/reports/{benchmark_run}")
 
     with open(f"benchmark/reports/{benchmark_run}/summary.csv", "w") as f:
-        csv.writer(f, delimiter=";").writerow(["instance_id", "pipeline", "vectors", "tokens", "no_of_patches", "context_length", "avg_pos", "min_pos", "max_pos", "top_file_pos", "missing_snippets", "missing_patch_files"])
+        csv.writer(f, delimiter=";").writerow(["instance_id", "pipeline", "vectors", "tokens", "no_of_patches", "any_found_context_length", "all_found_context_length", "avg_pos", "min_pos", "max_pos", "top_file_pos", "missing_snippets", "missing_patch_files"])
 
     for i, row in enumerate(ds):
         print(f"{i + 1}/{len(ds)}: {row['instance_id']}")
