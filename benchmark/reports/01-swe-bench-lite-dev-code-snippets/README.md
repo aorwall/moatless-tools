@@ -5,6 +5,12 @@
 * Splitter: `EpicSplitter(chunk_size=750, min_chunk_size=100, comment_strategy=CommentStrategy.ASSOCIATE)`
 * Retrieve strategy: `RetrieveStrategy.CODE_SNIPPETS`
 
+## Recall
+
+|     | 13k | 27k | 50k |
+| --- | --- | --- | --- |
+| All | 56.52% | 69.57% | 69.57% |
+
 ## Instances
 
 | instance_id | no_of_patches | any_found_context_length | all_found_context_length | avg_pos | min_pos | max_pos | top_file_pos | missing_snippets | missing_patch_files |
@@ -32,8 +38,3 @@
 | [sqlfluff__sqlfluff-1733](sqlfluff__sqlfluff-1733/report.md) | 1 |  |  | 0.0 |  |  |  | 1 | 1 |
 | [sqlfluff__sqlfluff-1763](sqlfluff__sqlfluff-1763/report.md) | 1 |  |  | 0.0 |  |  |  | 2 | 1 |
 | [sqlfluff__sqlfluff-2419](sqlfluff__sqlfluff-2419/report.md) | 1 |  |  | 0.0 |  |  | 1 | 1 | 0 |
-# Recall
-
-|     | 13k | 27k | 50k |
-| --- | --- | --- | --- |
-| All | 56.52% | 69.57% | 69.57% |
