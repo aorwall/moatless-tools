@@ -207,8 +207,7 @@ class EpicSplitter(NodeParser):
                 elif self._ignore_comment(child) or ignoring_comment:
                     ignoring_comment = True
                     continue
-                # not first
-                elif self.comment_strategy == CommentStrategy.ASSOCIATE and current_chunk:
+                elif self.comment_strategy == CommentStrategy.ASSOCIATE and not codeblock.parent:
                     comment_chunk.append(child)
                     continue
             else:
@@ -268,7 +267,30 @@ class EpicSplitter(NodeParser):
         else:
             chunks.append(current_chunk)
 
-        return chunks
+        merged_chunks = []
+        for i, chunk in enumerate(chunks):
+            if count_chunk_tokens(chunk) < self.min_chunk_size:
+                if i == 0:
+                    if len(chunks) > 1 and count_chunk_tokens(chunks[1]) < self.chunk_size:
+                        chunks[1].extend(chunk)
+                    else:
+                        merged_chunks.append(chunk)
+                elif i == len(chunks) - 1:
+                    if count_chunk_tokens(chunks[-1]) < self.chunk_size:
+                        chunks[-2].extend(chunk)
+                    else:
+                        merged_chunks.append(chunk)
+                else:
+                    if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(chunks[i + 1]) < self.chunk_size:
+                        chunks[i - 1].extend(chunk)
+                    elif count_chunk_tokens(chunks[i + 1]) < count_chunk_tokens(chunks[i - 1]) < self.chunk_size:
+                        chunks[i + 1].extend(chunk)
+                    else:
+                        merged_chunks.append(chunk)
+            else:
+                merged_chunks.append(chunk)
+
+        return merged_chunks
 
     def _ignore_comment(self, codeblock: CodeBlock) -> bool:
         return re.search(r"(?i)copyright|license|author", codeblock.content) or not codeblock.content

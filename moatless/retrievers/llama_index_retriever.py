@@ -1,6 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from enum import Enum
 from typing import List
 
 import chromadb
@@ -28,14 +29,23 @@ class IngestionPipelineSetup:
     dimensions: int = None
 
 
+class RetrieverStrategy(Enum):
+    CODE_SNIPPETS = "code_snippets"
+    FILES = "files"
+
+
 class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
 
     def __init__(self,
                  retriever: BaseRetriever,
+                 repo_path: str = None,
+                 retriever_strategy: RetrieverStrategy = RetrieverStrategy.FILES,
                  reader: BaseReader = None,
                  prepare_pipeline: IngestionPipeline = None,
                  perist_dir: str = None,
                  embed_pipeline: IngestionPipeline = None):
+        self.retriever_strategy = retriever_strategy
+        self.repo_path = repo_path
         self.reader = reader
         self.prepare_pipeline = prepare_pipeline
         self.perist_dir = perist_dir
@@ -164,12 +174,27 @@ class LlamaIndexCodeSnippetRetriever(CodeSnippetRetriever):
 
     def retrieve(self, query: str) -> List[CodeSnippet]:
         result = self.retriever.retrieve(query)
-        return [CodeSnippet(
-            path=node.node.metadata['file_path'],
-            content=node.node.get_content(),
-            start_line=node.node.metadata.get('start_line', None),
-            end_line=node.node.metadata.get('end_line', None),
-        ) for node in result]
+        files = []
+
+        if self.retriever_strategy == RetrieverStrategy.FILES:
+            for node in result:
+                with open(node.node.metadata['file_path'], "r") as f:
+                    content = f.read()
+                files.append(CodeSnippet(
+                    path=node.node.metadata['file_path'],
+                    content=content,
+                    start_line=0,
+                    end_line=len(content.split("\n")),
+                ))
+        else:
+            files = [CodeSnippet(
+                path=node.node.metadata['file_path'],
+                content=node.node.get_content(),
+                start_line=node.node.metadata.get('start_line', None),
+                end_line=node.node.metadata.get('end_line', None),
+            ) for node in result]
+
+        return files
 
 
 if __name__ == "__main__":
