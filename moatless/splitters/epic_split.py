@@ -81,6 +81,10 @@ class EpicSplitter(NodeParser):
         default=2000, description="Max tokens in one chunk."
     )
 
+    hard_token_limit: int = Field(
+        default=6000, description="Hard token limit for a chunk."
+    )
+
     _parser: CodeParser = PrivateAttr()
     #_fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
 
@@ -90,7 +94,7 @@ class EpicSplitter(NodeParser):
         language: str = "python", # TODO: Shouldn't have to set this
         min_chunk_size: int = 256,
         max_chunk_size: int = 1500,
-        max_chunk_size_with_comments: int = 1500,
+        hard_token_limit: int = 6000,
         include_metadata: bool = True,
         include_prev_next_rel: bool = True,
         text_splitter: Optional[TextSplitter] = None,
@@ -120,7 +124,7 @@ class EpicSplitter(NodeParser):
             text_splitter=text_splitter or CodeSplitterV2(chunk_size=chunk_size, language="python"),
             min_chunk_size=min_chunk_size,
             max_chunk_size=max_chunk_size,
-            max_chunk_size_with_comments=max_chunk_size_with_comments,
+            hard_token_limit=hard_token_limit,
             comment_strategy=comment_strategy,
             include_non_code_files=include_non_code_files,
             non_code_file_extensions=non_code_file_extensions,
@@ -160,7 +164,9 @@ class EpicSplitter(NodeParser):
 
             for chunk in chunks:
                 content = self._to_context_string(codeblock, chunk)
-                all_nodes.append(self._create_node(content, node, chunk=chunk))
+                chunk_node = self._create_node(content, node, chunk=chunk)
+                if chunk_node:
+                    all_nodes.append(chunk_node)
 
         return all_nodes
 
@@ -183,9 +189,9 @@ class EpicSplitter(NodeParser):
         if tokens < self.min_chunk_size:
             return [[codeblock]]
 
-        return self._chunk_block(codeblock)
+        return self._chunk_block(codeblock, file_path)
 
-    def _chunk_block(self, codeblock: CodeBlock) -> list[CodeBlockChunk]:
+    def _chunk_block(self, codeblock: CodeBlock, file_path: str = None) -> list[CodeBlockChunk]:
         chunks: list[CodeBlockChunk] = []
         current_chunk = []
         comment_chunk = []
@@ -206,6 +212,12 @@ class EpicSplitter(NodeParser):
                     comment_chunk.append(child)
                     continue
             else:
+                if child.tokens > self.max_chunk_size:
+                    start_content = child.content[:100]
+                    logger.warning(f"Skipping code block {child.path_string()} in {file_path} as it has {child.tokens} tokens which is"
+                                   f" more than chunk size {self.chunk_size}. Content: {start_content}...")
+                    continue
+
                 ignoring_comment = False
 
             if ((child.type in SPLIT_BLOCK_TYPES and child.sum_tokens() > self.min_chunk_size)
@@ -298,7 +310,7 @@ class EpicSplitter(NodeParser):
 
         return contents
 
-    def _create_node(self, content: str, node: BaseNode, chunk: CodeBlockChunk = None) -> TextNode:
+    def _create_node(self, content: str, node: BaseNode, chunk: CodeBlockChunk = None) -> Optional[TextNode]:
         metadata = {
             "file_path": node.metadata.get("file_path"),
             "file_name": node.metadata.get("file_name"),
@@ -311,7 +323,21 @@ class EpicSplitter(NodeParser):
 
         content = content.strip()
 
-        metadata["tokens"] = self._count_tokens(content)
+        tokens = get_tokenizer()(content)
+        if len(tokens) > self.hard_token_limit:
+            logger.warning(f"Chunk in {node.metadata.get('file_path')} has {len(tokens)} tokens, will cut of at {self.hard_token_limit} tokens.")
+            tokens = tokens[:self.hard_token_limit]
+
+            try:
+                # TODO: Should be generic like get_tokenizer()
+                import tiktoken
+                enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+                content = enc.decode(tokens)
+            except Exception as e:
+                logger.warning(f"Failed to decode tokens to text. Error: {e}")
+                return None
+
+        metadata["tokens"] = len(tokens)
 
         excluded_embed_metadata_keys = node.excluded_embed_metadata_keys.copy()
         excluded_embed_metadata_keys.extend(["start_line", "end_line", "tokens"])
@@ -339,7 +365,7 @@ class EpicSplitter(NodeParser):
 
 
 if "__main__" == __name__:
-    with open("/home/albert/repos/albert/epicsplit/tests/data/python/split_case_1.py", "r") as file:
+    with open("/tmp/repos/sqlfluff/src/sqlfluff/dialects/dialect_postgres_keywords.py", "r") as file:
         content = file.read()
 
     parser = create_parser("python", tokenizer=get_tokenizer())
@@ -354,6 +380,8 @@ if "__main__" == __name__:
 
     print(codeblock.to_tree())
 
+    tokenizer = get_tokenizer()
+
     chunks = splitter._chunk_block(codeblock)
 
     for i, chunk in enumerate(chunks):
@@ -367,3 +395,4 @@ if "__main__" == __name__:
             print(f"- {block.path_string()}")
 
         print(content)
+
