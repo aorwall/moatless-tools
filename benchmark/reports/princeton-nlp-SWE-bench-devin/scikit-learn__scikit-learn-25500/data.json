@@ -1,0 +1,991 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-25500",
+  "model_patch": "diff --git a/sklearn/calibration.py b/sklearn/calibration.py\nindex 2c4a33616..b3269827c 100644\n--- a/sklearn/calibration.py\n+++ b/sklearn/calibration.py\n@@ -14,6 +14,7 @@ from functools import partial\n \n from math import log\n import numpy as np\n+import pandas as pd\n \n from scipy.special import expit\n from scipy.special import xlogy\n@@ -474,6 +475,8 @@ class CalibratedClassifierCV(ClassifierMixin, MetaEstimatorMixin, BaseEstimator)\n         mean_proba = np.zeros((_num_samples(X), len(self.classes_)))\n         for calibrated_classifier in self.calibrated_classifiers_:\n             proba = calibrated_classifier.predict_proba(X)\n+            if isinstance(proba, pd.DataFrame):\n+                proba = proba.values\n             mean_proba += proba\n \n         mean_proba /= len(self.calibrated_classifiers_)\n@@ -760,7 +763,10 @@ class _CalibratedClassifier:\n                 # When binary, `predictions` consists only of predictions for\n                 # clf.classes_[1] but `pos_class_indices` = 0\n                 class_idx += 1\n-            proba[:, class_idx] = calibrator.predict(this_pred)\n+            predicted = calibrator.predict(this_pred)\n+            if isinstance(predicted, pd.DataFrame):\n+                predicted = predicted.values\n+            proba[:, class_idx] = predicted.ravel()\n \n         # Normalize the probabilities\n         if n_classes == 2:\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/calibration.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "4db04923a754b6a2defa1b172f55d492b85d165e",
+  "patch": "diff --git a/sklearn/isotonic.py b/sklearn/isotonic.py\n--- a/sklearn/isotonic.py\n+++ b/sklearn/isotonic.py\n@@ -360,23 +360,16 @@ def fit(self, X, y, sample_weight=None):\n         self._build_f(X, y)\n         return self\n \n-    def transform(self, T):\n-        \"\"\"Transform new data by linear interpolation.\n-\n-        Parameters\n-        ----------\n-        T : array-like of shape (n_samples,) or (n_samples, 1)\n-            Data to transform.\n+    def _transform(self, T):\n+        \"\"\"`_transform` is called by both `transform` and `predict` methods.\n \n-            .. versionchanged:: 0.24\n-               Also accepts 2d array with 1 feature.\n+        Since `transform` is wrapped to output arrays of specific types (e.g.\n+        NumPy arrays, pandas DataFrame), we cannot make `predict` call `transform`\n+        directly.\n \n-        Returns\n-        -------\n-        y_pred : ndarray of shape (n_samples,)\n-            The transformed data.\n+        The above behaviour could be changed in the future, if we decide to output\n+        other type of arrays when calling `predict`.\n         \"\"\"\n-\n         if hasattr(self, \"X_thresholds_\"):\n             dtype = self.X_thresholds_.dtype\n         else:\n@@ -397,6 +390,24 @@ def transform(self, T):\n \n         return res\n \n+    def transform(self, T):\n+        \"\"\"Transform new data by linear interpolation.\n+\n+        Parameters\n+        ----------\n+        T : array-like of shape (n_samples,) or (n_samples, 1)\n+            Data to transform.\n+\n+            .. versionchanged:: 0.24\n+               Also accepts 2d array with 1 feature.\n+\n+        Returns\n+        -------\n+        y_pred : ndarray of shape (n_samples,)\n+            The transformed data.\n+        \"\"\"\n+        return self._transform(T)\n+\n     def predict(self, T):\n         \"\"\"Predict new data by linear interpolation.\n \n@@ -410,7 +421,7 @@ def predict(self, T):\n         y_pred : ndarray of shape (n_samples,)\n             Transformed data.\n         \"\"\"\n-        return self.transform(T)\n+        return self._transform(T)\n \n     # We implement get_feature_names_out here instead of using\n     # `ClassNamePrefixFeaturesOutMixin`` because `input_features` are ignored.\n",
+  "test_patch": "diff --git a/sklearn/tests/test_isotonic.py b/sklearn/tests/test_isotonic.py\n--- a/sklearn/tests/test_isotonic.py\n+++ b/sklearn/tests/test_isotonic.py\n@@ -5,6 +5,7 @@\n \n import pytest\n \n+import sklearn\n from sklearn.datasets import make_regression\n from sklearn.isotonic import (\n     check_increasing,\n@@ -680,3 +681,24 @@ def test_get_feature_names_out(shape):\n     assert isinstance(names, np.ndarray)\n     assert names.dtype == object\n     assert_array_equal([\"isotonicregression0\"], names)\n+\n+\n+def test_isotonic_regression_output_predict():\n+    \"\"\"Check that `predict` does return the expected output type.\n+\n+    We need to check that `transform` will output a DataFrame and a NumPy array\n+    when we set `transform_output` to `pandas`.\n+\n+    Non-regression test for:\n+    https://github.com/scikit-learn/scikit-learn/issues/25499\n+    \"\"\"\n+    pd = pytest.importorskip(\"pandas\")\n+    X, y = make_regression(n_samples=10, n_features=1, random_state=42)\n+    regressor = IsotonicRegression()\n+    with sklearn.config_context(transform_output=\"pandas\"):\n+        regressor.fit(X, y)\n+        X_trans = regressor.transform(X)\n+        y_pred = regressor.predict(X)\n+\n+    assert isinstance(X_trans, pd.DataFrame)\n+    assert isinstance(y_pred, np.ndarray)\n",
+  "problem_statement": "CalibratedClassifierCV doesn't work with `set_config(transform_output=\"pandas\")`\n### Describe the bug\r\n\r\nCalibratedClassifierCV with isotonic regression doesn't work when we previously set `set_config(transform_output=\"pandas\")`.\r\nThe IsotonicRegression seems to return a dataframe, which is a problem for `_CalibratedClassifier`  in `predict_proba` where it tries to put the dataframe in a numpy array row `proba[:, class_idx] = calibrator.predict(this_pred)`.\r\n\r\n### Steps/Code to Reproduce\r\n\r\n```python\r\nimport numpy as np\r\nfrom sklearn import set_config\r\nfrom sklearn.calibration import CalibratedClassifierCV\r\nfrom sklearn.linear_model import SGDClassifier\r\n\r\nset_config(transform_output=\"pandas\")\r\nmodel = CalibratedClassifierCV(SGDClassifier(), method='isotonic')\r\nmodel.fit(np.arange(90).reshape(30, -1), np.arange(30) % 2)\r\nmodel.predict(np.arange(90).reshape(30, -1))\r\n```\r\n\r\n### Expected Results\r\n\r\nIt should not crash.\r\n\r\n### Actual Results\r\n\r\n```\r\n../core/model_trainer.py:306: in train_model\r\n    cv_predictions = cross_val_predict(pipeline,\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/model_selection/_validation.py:968: in cross_val_predict\r\n    predictions = parallel(\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:1085: in __call__\r\n    if self.dispatch_one_batch(iterator):\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:901: in dispatch_one_batch\r\n    self._dispatch(tasks)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:819: in _dispatch\r\n    job = self._backend.apply_async(batch, callback=cb)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/_parallel_backends.py:208: in apply_async\r\n    result = ImmediateResult(func)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/_parallel_backends.py:597: in __init__\r\n    self.results = batch()\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:288: in __call__\r\n    return [func(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:288: in <listcomp>\r\n    return [func(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/utils/fixes.py:117: in __call__\r\n    return self.function(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/model_selection/_validation.py:1052: in _fit_and_predict\r\n    predictions = func(X_test)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/pipeline.py:548: in predict_proba\r\n    return self.steps[-1][1].predict_proba(Xt, **predict_proba_params)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/calibration.py:477: in predict_proba\r\n    proba = calibrated_classifier.predict_proba(X)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/calibration.py:764: in predict_proba\r\n    proba[:, class_idx] = calibrator.predict(this_pred)\r\nE   ValueError: could not broadcast input array from shape (20,1) into shape (20,)\r\n```\r\n\r\n### Versions\r\n\r\n```shell\r\nSystem:\r\n    python: 3.9.15 (main, Nov 24 2022, 14:31:59)  [GCC 11.2.0]\r\nexecutable: /home/philippe/.anaconda3/envs/strategy-training/bin/python\r\n   machine: Linux-5.15.0-57-generic-x86_64-with-glibc2.31\r\n\r\nPython dependencies:\r\n      sklearn: 1.2.0\r\n          pip: 22.2.2\r\n   setuptools: 62.3.2\r\n        numpy: 1.23.5\r\n        scipy: 1.9.3\r\n       Cython: None\r\n       pandas: 1.4.1\r\n   matplotlib: 3.6.3\r\n       joblib: 1.2.0\r\nthreadpoolctl: 3.1.0\r\n\r\nBuilt with OpenMP: True\r\n\r\nthreadpoolctl info:\r\n       user_api: openmp\r\n   internal_api: openmp\r\n         prefix: libgomp\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/scikit_learn.libs/libgomp-a34b3233.so.1.0.0\r\n        version: None\r\n    num_threads: 12\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/numpy.libs/libopenblas64_p-r0-742d56dc.3.20.so\r\n        version: 0.3.20\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/scipy.libs/libopenblasp-r0-41284840.3.18.so\r\n        version: 0.3.18\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n```\r\n\n",
+  "hints_text": "I can reproduce it. We need to investigate but I would expect the inner estimator not being able to handle some dataframe because we expected NumPy arrays before.\nThis could be a bit like https://github.com/scikit-learn/scikit-learn/pull/25370 where things get confused when pandas output is configured. I think the solution is different (TSNE's PCA is truely \"internal only\") but it seems like there might be something more general to investigate/think about related to pandas output and nested estimators.\nThere is something quite smelly regarding the interaction between `IsotonicRegression` and pandas output:\r\n\r\n<img width=\"1079\" alt=\"image\" src=\"https://user-images.githubusercontent.com/7454015/215147695-8aa08b83-705b-47a4-ab7c-43acb222098f.png\">\r\n\r\nIt seems that we output a pandas Series when calling `predict` which is something that we don't do for any other estimator. `IsotonicRegression` is already quite special since it accepts a single feature. I need to investigate more to understand why we wrap the output of the `predict` method.\nOK the reason is that `IsotonicRegression().predict(X)` call `IsotonicRegression().transform(X)` ;)\nI don't know if we should have:\r\n\r\n```python\r\ndef predict(self, T):\r\n    with config_context(transform_output=\"default\"):\r\n        return self.transform(T)\r\n```\r\n\r\nor\r\n\r\n```python\r\ndef predict(self, T):\r\n    return np.array(self.transform(T), copy=False).squeeze()\r\n```\nAnother solution would be to have a private `_transform` function called by both `transform` and `predict`. In this way, the `predict` call will not call the wrapper that is around the public `transform` method. I think this is even cleaner than the previous code.\n/take",
+  "created_at": "2023-01-27T19:49:28Z",
+  "version": "1.3",
+  "FAIL_TO_PASS": "[\"sklearn/tests/test_isotonic.py::test_isotonic_regression_output_predict\"]",
+  "PASS_TO_PASS": "[\"sklearn/tests/test_isotonic.py::test_assert_raises_exceptions\", \"sklearn/tests/test_isotonic.py::test_check_ci_warn\", \"sklearn/tests/test_isotonic.py::test_check_increasing_down\", \"sklearn/tests/test_isotonic.py::test_check_increasing_down_extreme\", \"sklearn/tests/test_isotonic.py::test_check_increasing_small_number_of_samples\", \"sklearn/tests/test_isotonic.py::test_check_increasing_up\", \"sklearn/tests/test_isotonic.py::test_check_increasing_up_extreme\", \"sklearn/tests/test_isotonic.py::test_fast_predict\", \"sklearn/tests/test_isotonic.py::test_get_feature_names_out[1d]\", \"sklearn/tests/test_isotonic.py::test_get_feature_names_out[2d]\", \"sklearn/tests/test_isotonic.py::test_input_shape_validation\", \"sklearn/tests/test_isotonic.py::test_isotonic_2darray_more_than_1_feature\", \"sklearn/tests/test_isotonic.py::test_isotonic_copy_before_fit\", \"sklearn/tests/test_isotonic.py::test_isotonic_dtype\", \"sklearn/tests/test_isotonic.py::test_isotonic_duplicate_min_entry\", \"sklearn/tests/test_isotonic.py::test_isotonic_make_unique_tolerance\", \"sklearn/tests/test_isotonic.py::test_isotonic_min_max_boundaries\", \"sklearn/tests/test_isotonic.py::test_isotonic_mismatched_dtype[float32]\", \"sklearn/tests/test_isotonic.py::test_isotonic_mismatched_dtype[float64]\", \"sklearn/tests/test_isotonic.py::test_isotonic_mismatched_dtype[int32]\", \"sklearn/tests/test_isotonic.py::test_isotonic_mismatched_dtype[int64]\", \"sklearn/tests/test_isotonic.py::test_isotonic_non_regression_inf_slope\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_auto_decreasing\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_auto_increasing\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_oob_clip\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_oob_nan\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_oob_raise\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_pickle\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_reversed\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_sample_weight_not_overwritten\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_ties_max\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_ties_min\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_ties_secondary_\", \"sklearn/tests/test_isotonic.py::test_isotonic_regression_with_ties_in_differently_sized_groups\", \"sklearn/tests/test_isotonic.py::test_isotonic_sample_weight\", \"sklearn/tests/test_isotonic.py::test_isotonic_sample_weight_parameter_default_value\", \"sklearn/tests/test_isotonic.py::test_isotonic_thresholds[False]\", \"sklearn/tests/test_isotonic.py::test_isotonic_thresholds[True]\", \"sklearn/tests/test_isotonic.py::test_isotonic_ymin_ymax\", \"sklearn/tests/test_isotonic.py::test_isotonic_zero_weight_loop\", \"sklearn/tests/test_isotonic.py::test_make_unique_dtype\", \"sklearn/tests/test_isotonic.py::test_make_unique_tolerance[float32]\", \"sklearn/tests/test_isotonic.py::test_make_unique_tolerance[float64]\", \"sklearn/tests/test_isotonic.py::test_permutation_invariance\"]",
+  "environment_setup_commit": "1e8a5b833d1b58f3ab84099c4582239af854b23a",
+  "patch_files": [
+    "sklearn/isotonic.py"
+  ],
+  "test_patch_files": [
+    "sklearn/tests/test_isotonic.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/isotonic.py": {
+      "diffs": [
+        {
+          "start_line_old": 363,
+          "end_line_old": 379
+        },
+        {
+          "start_line_old": 400,
+          "end_line_old": 400
+        },
+        {
+          "start_line_old": 413,
+          "end_line_old": 413
+        }
+      ]
+    }
+  },
+  "vectors": 3914,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibratedClassifierCV.1_CalibratedClassifierCV.1",
+      "distance": 0.7223742008209229,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 56,
+      "end_line": 244,
+      "tokens": 1916,
+      "context_length": 1916
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibratedClassifierCV.fit.11_CalibratedClassifierCV.fit.15.1",
+      "distance": 0.7805066108703613,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 336,
+      "end_line": 453,
+      "tokens": 932,
+      "context_length": 2848
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibratedClassifierCV._parameter_constraints_CalibratedClassifierCV.__init__.self.base_estimator.1",
+      "distance": 0.7987194061279297,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 246,
+      "end_line": 279,
+      "tokens": 227,
+      "context_length": 3075
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_curve.py_58_np",
+      "distance": 0.7991873621940613,
+      "file_path": "examples/calibration/plot_calibration_curve.py",
+      "start_line": 103,
+      "end_line": 197,
+      "tokens": 853,
+      "context_length": 3928
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration.py_1_clf_sigmoid_score.1",
+      "distance": 0.8028578758239746,
+      "file_path": "examples/calibration/plot_calibration.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 768,
+      "context_length": 4696
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_122_",
+      "distance": 0.829800009727478,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 229,
+      "end_line": 275,
+      "tokens": 545,
+      "context_length": 5241
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_1_CalibratedClassifierCV",
+      "distance": 0.8313721418380737,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 1,
+      "end_line": 511,
+      "tokens": 281,
+      "context_length": 5522
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration.py_52_",
+      "distance": 0.8484013676643372,
+      "file_path": "examples/calibration/plot_calibration.py",
+      "start_line": 89,
+      "end_line": 145,
+      "tokens": 412,
+      "context_length": 5934
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_compare_calibration.py_35_",
+      "distance": 0.8734924793243408,
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "start_line": 85,
+      "end_line": 211,
+      "tokens": 1338,
+      "context_length": 7272
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_curve.py_1_grid_positions.1",
+      "distance": 0.8785249590873718,
+      "file_path": "examples/calibration/plot_calibration_curve.py",
+      "start_line": 1,
+      "end_line": 102,
+      "tokens": 702,
+      "context_length": 7974
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_calibration_curve.y_true_calibration_curve.20.1",
+      "distance": 0.8856203556060791,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 993,
+      "end_line": 1042,
+      "tokens": 557,
+      "context_length": 8531
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_curve.py_152_",
+      "distance": 0.8897875547409058,
+      "file_path": "examples/calibration/plot_calibration_curve.py",
+      "start_line": 297,
+      "end_line": 337,
+      "tokens": 414,
+      "context_length": 8945
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_74_p1d.1",
+      "distance": 0.9079697132110596,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 171,
+      "end_line": 228,
+      "tokens": 771,
+      "context_length": 9716
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_1_57",
+      "distance": 0.9086911082267761,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 774,
+      "context_length": 10490
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_1_0_0.py_X_131_",
+      "distance": 0.910273551940918,
+      "file_path": "examples/release_highlights/plot_release_highlights_1_0_0.py",
+      "start_line": 167,
+      "end_line": 242,
+      "tokens": 729,
+      "context_length": 11219
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_curve.py_113_scores_151.1",
+      "distance": 0.9111006259918213,
+      "file_path": "examples/calibration/plot_calibration_curve.py",
+      "start_line": 222,
+      "end_line": 296,
+      "tokens": 659,
+      "context_length": 11878
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/miscellaneous/plot_set_output.py_ct_",
+      "distance": 0.9183301329612732,
+      "file_path": "examples/miscellaneous/plot_set_output.py",
+      "start_line": 88,
+      "end_line": 139,
+      "tokens": 364,
+      "context_length": 12242
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 0.9199721813201904,
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "start_line": 9,
+      "end_line": 56,
+      "tokens": 398,
+      "context_length": 12640
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_23_0.py_1_scipy",
+      "distance": 0.9202589988708496,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 857,
+      "context_length": 13497
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibratedClassifierCV.fit_CalibratedClassifierCV.fit.self.calibrated_classifiers_.1",
+      "distance": 0.9315831661224365,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 281,
+      "end_line": 335,
+      "tokens": 405,
+      "context_length": 13902
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_multilabel_output_format_predict_proba.18_check_estimators_data_not_an_array.14",
+      "distance": 0.9320334196090698,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2554,
+      "end_line": 3236,
+      "tokens": 5959,
+      "context_length": 19861
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_subset_feature_cv_results_128.1",
+      "distance": 0.9356815218925476,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 124,
+      "end_line": 215,
+      "tokens": 758,
+      "context_length": 20619
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_poisson_regression_non_normal_loss.py_45_72",
+      "distance": 0.9362719058990479,
+      "file_path": "examples/linear_model/plot_poisson_regression_non_normal_loss.py",
+      "start_line": 101,
+      "end_line": 161,
+      "tokens": 441,
+      "context_length": 21060
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py__fit_calibrator__fit_calibrator.8.1",
+      "distance": 0.9374200105667114,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 655,
+      "end_line": 700,
+      "tokens": 372,
+      "context_length": 21432
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_parameters_default_constructible_check_dataframe_column_names_consistency.30.9.1",
+      "distance": 0.9421966075897217,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 3239,
+      "end_line": 4012,
+      "tokens": 6276,
+      "context_length": 27708
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_classifiers_multilabel_output_format_predict_proba.17",
+      "distance": 0.9443991184234619,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1807,
+      "end_line": 2553,
+      "tokens": 6231,
+      "context_length": 33939
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_X_132_",
+      "distance": 0.9463338255882263,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 195,
+      "end_line": 281,
+      "tokens": 764,
+      "context_length": 34703
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_coordinate_descent.py_sys_27",
+      "distance": 0.9480050802230835,
+      "file_path": "sklearn/linear_model/_coordinate_descent.py",
+      "start_line": 8,
+      "end_line": 36,
+      "tokens": 198,
+      "context_length": 34901
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_83_149",
+      "distance": 0.9485229253768921,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 121,
+      "end_line": 210,
+      "tokens": 777,
+      "context_length": 35678
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_categorical.py_hist_one_hot_native_result.1",
+      "distance": 0.94892418384552,
+      "file_path": "examples/ensemble/plot_gradient_boosting_categorical.py",
+      "start_line": 106,
+      "end_line": 178,
+      "tokens": 592,
+      "context_length": 36270
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sample_weights_pandas_series_check_pipeline_consistency.12.2.4",
+      "distance": 0.9497876167297363,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 904,
+      "end_line": 1695,
+      "tokens": 6467,
+      "context_length": 42737
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_1_np_82",
+      "distance": 0.9529021382331848,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 1,
+      "end_line": 120,
+      "tokens": 1150,
+      "context_length": 43887
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_compare_calibration.py_1_33",
+      "distance": 0.9588202238082886,
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 387,
+      "context_length": 44274
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/setup.py_USE_NEWEST_NUMPY_C_API_USE_NEWEST_NUMPY_C_API.1",
+      "distance": 0.9589295387268066,
+      "file_path": "setup.py",
+      "start_line": 70,
+      "end_line": 128,
+      "tokens": 643,
+      "context_length": 44917
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibrationDisplay.from_estimator.4_CalibrationDisplay.from_estimator.7.1",
+      "distance": 0.9595749974250793,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 1295,
+      "end_line": 1313,
+      "tokens": 185,
+      "context_length": 45102
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_1_1_0.py_1_pd",
+      "distance": 0.9617051482200623,
+      "file_path": "examples/release_highlights/plot_release_highlights_1_1_0.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 775,
+      "context_length": 45877
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_1_2_0.py___48_",
+      "distance": 0.961755633354187,
+      "file_path": "examples/release_highlights/plot_release_highlights_1_2_0.py",
+      "start_line": 92,
+      "end_line": 167,
+      "tokens": 718,
+      "context_length": 46595
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_1_2_0.py_1_47",
+      "distance": 0.9632138013839722,
+      "file_path": "examples/release_highlights/plot_release_highlights_1_2_0.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 766,
+      "context_length": 47361
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_1_58",
+      "distance": 0.9652010202407837,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 749,
+      "context_length": 48110
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/miscellaneous/plot_set_output.py_1_num_cols.1",
+      "distance": 0.9677019119262695,
+      "file_path": "examples/miscellaneous/plot_set_output.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 701,
+      "context_length": 48811
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_20newsgroups.py_1_",
+      "distance": 0.9677963256835938,
+      "file_path": "benchmarks/bench_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 754,
+      "context_length": 49565
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_quantile.py_119_alpha.1",
+      "distance": 0.9686379432678223,
+      "file_path": "examples/ensemble/plot_gradient_boosting_quantile.py",
+      "start_line": 170,
+      "end_line": 251,
+      "tokens": 754,
+      "context_length": 50319
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.9712563753128052,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 83,
+      "end_line": 117,
+      "tokens": 323,
+      "context_length": 50642
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_categorical_only.py_argparse_",
+      "distance": 0.9729354977607727,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 651,
+      "context_length": 51293
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibrationDisplay.from_predictions_",
+      "distance": 0.9736955165863037,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 1315,
+      "end_line": 1429,
+      "tokens": 814,
+      "context_length": 52107
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_stack_predictors.py_26_estimators.1",
+      "distance": 0.9745320081710815,
+      "file_path": "examples/ensemble/plot_stack_predictors.py",
+      "start_line": 83,
+      "end_line": 194,
+      "tokens": 786,
+      "context_length": 52893
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_quantile.py_neg_mean_pinball_loss_05p_scorer_",
+      "distance": 0.9746606945991516,
+      "file_path": "examples/ensemble/plot_gradient_boosting_quantile.py",
+      "start_line": 252,
+      "end_line": 336,
+      "tokens": 822,
+      "context_length": 53715
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/__init__.py_typing_",
+      "distance": 0.9757805466651917,
+      "file_path": "sklearn/model_selection/__init__.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 632,
+      "context_length": 54347
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_58_73",
+      "distance": 0.976399302482605,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 97,
+      "end_line": 170,
+      "tokens": 746,
+      "context_length": 55093
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_89_",
+      "distance": 0.9767755270004272,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 157,
+      "end_line": 256,
+      "tokens": 911,
+      "context_length": 56004
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py_cross_val_predict.2_cross_val_predict.18.2.1.1",
+      "distance": 0.9770345687866211,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 957,
+      "end_line": 1015,
+      "tokens": 592,
+      "context_length": 56596
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py__fit_classifier_calibrator_pair__fit_classifier_calibrator_pair.11.1",
+      "distance": 0.9819451570510864,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 514,
+      "end_line": 587,
+      "tokens": 506,
+      "context_length": 57102
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_41_49.3.1.3",
+      "distance": 0.9840418100357056,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 87,
+      "end_line": 139,
+      "tokens": 382,
+      "context_length": 57484
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_23_0.py_np_62_117",
+      "distance": 0.9857653379440308,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "start_line": 98,
+      "end_line": 175,
+      "tokens": 789,
+      "context_length": 58273
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_one_run_one_run.27.1",
+      "distance": 0.9859939813613892,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 142,
+      "end_line": 238,
+      "tokens": 894,
+      "context_length": 59167
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py__CalibratedClassifier.predict_proba__CalibratedClassifier.predict_proba.13.1",
+      "distance": 0.9871964454650879,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 732,
+      "end_line": 781,
+      "tokens": 446,
+      "context_length": 59613
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_get_feature_names_out_",
+      "distance": 0.9887203574180603,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 4015,
+      "end_line": 4401,
+      "tokens": 3145,
+      "context_length": 62758
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_higgsboson.py_df_",
+      "distance": 0.9893648624420166,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "start_line": 78,
+      "end_line": 125,
+      "tokens": 391,
+      "context_length": 63149
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_categorical.py_82_",
+      "distance": 0.9908900260925293,
+      "file_path": "examples/ensemble/plot_gradient_boosting_categorical.py",
+      "start_line": 218,
+      "end_line": 278,
+      "tokens": 687,
+      "context_length": 63836
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_estimators_131",
+      "distance": 0.9922580718994141,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 90,
+      "end_line": 193,
+      "tokens": 896,
+      "context_length": 64732
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_1_location.1",
+      "distance": 0.9941642880439758,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 778,
+      "context_length": 65510
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_coordinate_descent.py_LinearModelCV.fit.11_LinearModelCV.fit.39",
+      "distance": 0.9948829412460327,
+      "file_path": "sklearn/linear_model/_coordinate_descent.py",
+      "start_line": 1563,
+      "end_line": 1649,
+      "tokens": 739,
+      "context_length": 66249
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_24_",
+      "distance": 0.9958140850067139,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 113,
+      "end_line": 232,
+      "tokens": 820,
+      "context_length": 67069
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/conftest.py_1_global_dtype.1",
+      "distance": 0.9967385530471802,
+      "file_path": "sklearn/conftest.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 425,
+      "context_length": 67494
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_poisson_regression_non_normal_loss.py_tree_preprocessor_191",
+      "distance": 0.997384786605835,
+      "file_path": "examples/linear_model/plot_poisson_regression_non_normal_loss.py",
+      "start_line": 289,
+      "end_line": 390,
+      "tokens": 988,
+      "context_length": 68482
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_cv_predict.py_1_",
+      "distance": 0.9986317753791809,
+      "file_path": "examples/model_selection/plot_cv_predict.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 602,
+      "context_length": 69084
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_cyclical_feature_engineering.py_75_gbrt_pipeline.1",
+      "distance": 0.99927818775177,
+      "file_path": "examples/applications/plot_cyclical_feature_engineering.py",
+      "start_line": 110,
+      "end_line": 220,
+      "tokens": 753,
+      "context_length": 69837
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_linear_model_coefficient_interpretation.py_cv_model_257_311",
+      "distance": 0.9999496936798096,
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "start_line": 384,
+      "end_line": 482,
+      "tokens": 752,
+      "context_length": 70589
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibrationDisplay.from_estimator_CalibrationDisplay.from_estimator.3",
+      "distance": 1.0035576820373535,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 1189,
+      "end_line": 1293,
+      "tokens": 757,
+      "context_length": 71346
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_grid_search_text_feature_extraction.py_random_search_math",
+      "distance": 1.004589319229126,
+      "file_path": "examples/model_selection/plot_grid_search_text_feature_extraction.py",
+      "start_line": 110,
+      "end_line": 219,
+      "tokens": 845,
+      "context_length": 72191
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_29_",
+      "distance": 1.0046741962432861,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 120,
+      "end_line": 234,
+      "tokens": 761,
+      "context_length": 72952
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_data.py_warnings___all__.1",
+      "distance": 1.0075243711471558,
+      "file_path": "sklearn/preprocessing/_data.py",
+      "start_line": 11,
+      "end_line": 71,
+      "tokens": 317,
+      "context_length": 73269
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/calibration.py",
+      "position": 1,
+      "tokens": 10987,
+      "context_length": 10987
+    },
+    {
+      "file_path": "examples/calibration/plot_calibration_curve.py",
+      "position": 2,
+      "tokens": 2978,
+      "context_length": 13965
+    },
+    {
+      "file_path": "examples/calibration/plot_calibration.py",
+      "position": 3,
+      "tokens": 1264,
+      "context_length": 15229
+    },
+    {
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "position": 4,
+      "tokens": 2863,
+      "context_length": 18092
+    },
+    {
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "position": 5,
+      "tokens": 2037,
+      "context_length": 20129
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_1_0_0.py",
+      "position": 6,
+      "tokens": 2335,
+      "context_length": 22464
+    },
+    {
+      "file_path": "examples/miscellaneous/plot_set_output.py",
+      "position": 7,
+      "tokens": 1065,
+      "context_length": 23529
+    },
+    {
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "position": 8,
+      "tokens": 19589,
+      "context_length": 43118
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "position": 9,
+      "tokens": 1782,
+      "context_length": 44900
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 10,
+      "tokens": 36315,
+      "context_length": 81215
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 11,
+      "tokens": 1797,
+      "context_length": 83012
+    },
+    {
+      "file_path": "examples/linear_model/plot_poisson_regression_non_normal_loss.py",
+      "position": 12,
+      "tokens": 5333,
+      "context_length": 88345
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "position": 13,
+      "tokens": 2410,
+      "context_length": 90755
+    },
+    {
+      "file_path": "sklearn/linear_model/_coordinate_descent.py",
+      "position": 14,
+      "tokens": 25015,
+      "context_length": 115770
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "position": 15,
+      "tokens": 2438,
+      "context_length": 118208
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_categorical.py",
+      "position": 16,
+      "tokens": 2287,
+      "context_length": 120495
+    },
+    {
+      "file_path": "setup.py",
+      "position": 17,
+      "tokens": 5967,
+      "context_length": 126462
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_1_1_0.py",
+      "position": 18,
+      "tokens": 2137,
+      "context_length": 128599
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_1_2_0.py",
+      "position": 19,
+      "tokens": 1485,
+      "context_length": 130084
+    },
+    {
+      "file_path": "benchmarks/bench_20newsgroups.py",
+      "position": 20,
+      "tokens": 754,
+      "context_length": 130838
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_quantile.py",
+      "position": 21,
+      "tokens": 3107,
+      "context_length": 133945
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 22,
+      "tokens": 1801,
+      "context_length": 135746
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "position": 23,
+      "tokens": 651,
+      "context_length": 136397
+    },
+    {
+      "file_path": "examples/ensemble/plot_stack_predictors.py",
+      "position": 24,
+      "tokens": 1875,
+      "context_length": 138272
+    },
+    {
+      "file_path": "sklearn/model_selection/__init__.py",
+      "position": 25,
+      "tokens": 632,
+      "context_length": 138904
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 26,
+      "tokens": 2316,
+      "context_length": 141220
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 27,
+      "tokens": 15952,
+      "context_length": 157172
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "position": 28,
+      "tokens": 2738,
+      "context_length": 159910
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "position": 29,
+      "tokens": 1060,
+      "context_length": 160970
+    },
+    {
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "position": 30,
+      "tokens": 986,
+      "context_length": 161956
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 31,
+      "tokens": 1918,
+      "context_length": 163874
+    },
+    {
+      "file_path": "sklearn/conftest.py",
+      "position": 32,
+      "tokens": 1815,
+      "context_length": 165689
+    },
+    {
+      "file_path": "examples/model_selection/plot_cv_predict.py",
+      "position": 33,
+      "tokens": 602,
+      "context_length": 166291
+    },
+    {
+      "file_path": "examples/applications/plot_cyclical_feature_engineering.py",
+      "position": 34,
+      "tokens": 7142,
+      "context_length": 173433
+    },
+    {
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "position": 35,
+      "tokens": 6305,
+      "context_length": 179738
+    },
+    {
+      "file_path": "examples/model_selection/plot_grid_search_text_feature_extraction.py",
+      "position": 36,
+      "tokens": 2221,
+      "context_length": 181959
+    },
+    {
+      "file_path": "sklearn/preprocessing/_data.py",
+      "position": 37,
+      "tokens": 27559,
+      "context_length": 209518
+    }
+  ]
+}

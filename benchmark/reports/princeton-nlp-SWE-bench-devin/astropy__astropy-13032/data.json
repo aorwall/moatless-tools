@@ -1,0 +1,1276 @@
+{
+  "instance_id": "astropy__astropy-13032",
+  "model_patch": "diff --git a/astropy/modeling/bounding_box.py b/astropy/modeling/bounding_box.py\nindex 3f93775f75..1b3fb2658f 100644\n--- a/astropy/modeling/bounding_box.py\n+++ b/astropy/modeling/bounding_box.py\n@@ -186,7 +186,7 @@ class _BoundingDomain(abc.ABC):\n         on the inputs and returns a complete output.\n     \"\"\"\n \n-    def __init__(self, model, ignored: List[int] = None, order: str = 'C'):\n+    def __init__(self, model, ignored: List[int] = [], order: str = 'C'):\n         self._model = model\n         self._ignored = self._validate_ignored(ignored)\n         self._order = self._get_order(order)\n@@ -203,14 +203,11 @@ class _BoundingDomain(abc.ABC):\n     def ignored(self) -> List[int]:\n         return self._ignored\n \n-    def _get_order(self, order: str = None) -> str:\n+    def _get_order(self, order: str = 'C') -> str:\n         \"\"\"\n         Get if bounding_box is C/python ordered or Fortran/mathematically\n         ordered\n         \"\"\"\n-        if order is None:\n-            order = self._order\n-\n         if order not in ('C', 'F'):\n             raise ValueError(\"order must be either 'C' (C/python order) or \"\n                              f\"'F' (Fortran/mathematical order), got: {order}.\")\n@@ -577,7 +574,7 @@ class ModelBoundingBox(_BoundingDomain):\n     \"\"\"\n \n     def __init__(self, intervals: Dict[int, _Interval], model,\n-                 ignored: List[int] = None, order: str = 'C'):\n+                 ignored: List[int] = [], order: str = 'C'):\n         super().__init__(model, ignored, order)\n \n         self._intervals = {}\n@@ -644,7 +641,7 @@ class ModelBoundingBox(_BoundingDomain):\n         else:\n             return self._intervals[self._get_index(key)]\n \n-    def bounding_box(self, order: str = None):\n+    def bounding_box(self, order: str = 'C'):\n         \"\"\"\n         Return the old tuple of tuples representation of the bounding_box\n             order='C' corresponds to the old bounding_box ordering\n@@ -694,7 +691,7 @@ class ModelBoundingBox(_BoundingDomain):\n         for key, value in bounding_box.items():\n             self[key] = value\n \n-    def _validate_sequence(self, bounding_box, order: str = None):\n+    def _validate_sequence(self, bounding_box, order: str = 'C'):\n         \"\"\"Validate passing tuple of tuples representation (or related) and setting them.\"\"\"\n         order = self._get_order(order)\n         if order == 'C':\n@@ -713,7 +710,7 @@ class ModelBoundingBox(_BoundingDomain):\n         else:\n             return 0\n \n-    def _validate_iterable(self, bounding_box, order: str = None):\n+    def _validate_iterable(self, bounding_box, order: str = 'C'):\n         \"\"\"Validate and set any iterable representation\"\"\"\n         if len(bounding_box) != self._n_inputs:\n             raise ValueError(f\"Found {len(bounding_box)} intervals, \"\n@@ -724,7 +721,7 @@ class ModelBoundingBox(_BoundingDomain):\n         else:\n             self._validate_sequence(bounding_box, order)\n \n-    def _validate(self, bounding_box, order: str = None):\n+    def _validate(self, bounding_box, order: str = 'C'):\n         \"\"\"Validate and set any representation\"\"\"\n         if self._n_inputs == 1 and not isinstance(bounding_box, dict):\n             self[0] = bounding_box\n@@ -732,8 +729,7 @@ class ModelBoundingBox(_BoundingDomain):\n             self._validate_iterable(bounding_box, order)\n \n     @classmethod\n-    def validate(cls, model, bounding_box,\n-                 ignored: list = None, order: str = 'C', _preserve_ignore: bool = False, **kwargs):\n+    def validate(cls, model, bounding_box, ignored: list = [], order: str = 'C', _preserve_ignore: bool = False, **kwargs):\n         \"\"\"\n         Construct a valid bounding box for a model.\n \n@@ -753,6 +749,9 @@ class ModelBoundingBox(_BoundingDomain):\n                 ignored = bounding_box.ignored\n             bounding_box = bounding_box.intervals\n \n+        if ignored is None:\n+            ignored = []\n+\n         new = cls({}, model, ignored=ignored, order=order)\n         new._validate(bounding_box)\n \n@@ -789,7 +788,7 @@ class ModelBoundingBox(_BoundingDomain):\n     def dimension(self):\n         return len(self)\n \n-    def domain(self, resolution, order: str = None):\n+    def domain(self, resolution, order: str = 'C'):\n         inputs = self._model.inputs\n         order = self._get_order(order)\n         if order == 'C':\n@@ -815,8 +814,6 @@ class ModelBoundingBox(_BoundingDomain):\n         outside_index : bool-numpy array\n             True  -> position outside bounding_box\n             False -> position inside  bounding_box\n-        all_out : bool\n-            if all of the inputs are outside the bounding_box\n         \"\"\"\n         all_out = False\n \n@@ -1062,7 +1059,7 @@ class _SelectorArguments(tuple):\n \n     _kept_ignore = None\n \n-    def __new__(cls, input_: Tuple[_SelectorArgument], kept_ignore: List = None):\n+    def __new__(cls, input_: Tuple[_SelectorArgument], kept_ignore: List = []):\n         self = super().__new__(cls, input_)\n \n         if kept_ignore is None:\n@@ -1094,17 +1091,12 @@ class _SelectorArguments(tuple):\n     def ignore(self):\n         \"\"\"Get the list of ignored inputs\"\"\"\n         ignore = [argument.index for argument in self if argument.ignore]\n-        ignore.extend(self._kept_ignore)\n-\n+        if self._kept_ignore is not None:\n+            ignore.extend(self._kept_ignore)\n         return ignore\n \n-    @property\n-    def kept_ignore(self):\n-        \"\"\"The arguments to persist in ignoring\"\"\"\n-        return self._kept_ignore\n-\n     @classmethod\n-    def validate(cls, model, arguments, kept_ignore: List=None):\n+    def validate(cls, model, arguments, kept_ignore: List = []):\n         \"\"\"\n         Construct a valid Selector description for a CompoundBoundingBox.\n \n@@ -1291,7 +1283,7 @@ class CompoundBoundingBox(_BoundingDomain):\n     \"\"\"\n     def __init__(self, bounding_boxes: Dict[Any, ModelBoundingBox], model,\n                  selector_args: _SelectorArguments, create_selector: Callable = None,\n-                 ignored: List[int] = None, order: str = 'C'):\n+                 ignored: List[int] = [], order: str = 'C'):\n         super().__init__(model, ignored, order)\n \n         self._create_selector = create_selector\n@@ -1300,35 +1292,19 @@ class CompoundBoundingBox(_BoundingDomain):\n         self._bounding_boxes = {}\n         self._validate(bounding_boxes)\n \n-    def copy(self):\n+    def copy(self, ignored=None):\n         bounding_boxes = {selector: bbox.copy(self.selector_args.ignore)\n                           for selector, bbox in self._bounding_boxes.items()}\n \n+        if ignored is None:\n+            ignored = self._ignored.copy()\n+\n         return CompoundBoundingBox(bounding_boxes, self._model,\n                                    selector_args=self._selector_args,\n                                    create_selector=copy.deepcopy(self._create_selector),\n+                                   ignored=ignored,\n                                    order=self._order)\n \n-    def __repr__(self):\n-        parts = ['CompoundBoundingBox(',\n-                 '    bounding_boxes={']\n-        # bounding_boxes\n-        for _selector, bbox in self._bounding_boxes.items():\n-            bbox_repr = bbox.__repr__().split('\\n')\n-            parts.append(f\"        {_selector} = {bbox_repr.pop(0)}\")\n-            for part in bbox_repr:\n-                parts.append(f\"            {part}\")\n-        parts.append('    }')\n-\n-        # selector_args\n-        selector_args_repr = self.selector_args.pretty_repr(self._model).split('\\n')\n-        parts.append(f\"    selector_args = {selector_args_repr.pop(0)}\")\n-        for part in selector_args_repr:\n-            parts.append(f\"        {part}\")\n-        parts.append(')')\n-\n-        return '\\n'.join(parts)\n-\n     @property\n     def bounding_boxes(self) -> Dict[Any, ModelBoundingBox]:\n         return self._bounding_boxes\n@@ -1383,7 +1359,7 @@ class CompoundBoundingBox(_BoundingDomain):\n \n     @classmethod\n     def validate(cls, model, bounding_box: dict, selector_args=None, create_selector=None,\n-                 ignored: list = None, order: str = 'C', _preserve_ignore: bool = False, **kwarg):\n+                 ignored: list = [], order: str = 'C', _preserve_ignore: bool = False, **kwarg):\n         \"\"\"\n         Construct a valid compound bounding box for a model.\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/modeling/bounding_box.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "d707b792d3ca45518a53b4a395c81ee86bd7b451",
+  "patch": "diff --git a/astropy/modeling/bounding_box.py b/astropy/modeling/bounding_box.py\n--- a/astropy/modeling/bounding_box.py\n+++ b/astropy/modeling/bounding_box.py\n@@ -694,6 +694,12 @@ def _validate_dict(self, bounding_box: dict):\n         for key, value in bounding_box.items():\n             self[key] = value\n \n+    @property\n+    def _available_input_index(self):\n+        model_input_index = [self._get_index(_input) for _input in self._model.inputs]\n+\n+        return [_input for _input in model_input_index if _input not in self._ignored]\n+\n     def _validate_sequence(self, bounding_box, order: str = None):\n         \"\"\"Validate passing tuple of tuples representation (or related) and setting them.\"\"\"\n         order = self._get_order(order)\n@@ -703,7 +709,7 @@ def _validate_sequence(self, bounding_box, order: str = None):\n             bounding_box = bounding_box[::-1]\n \n         for index, value in enumerate(bounding_box):\n-            self[index] = value\n+            self[self._available_input_index[index]] = value\n \n     @property\n     def _n_inputs(self) -> int:\n@@ -727,7 +733,7 @@ def _validate_iterable(self, bounding_box, order: str = None):\n     def _validate(self, bounding_box, order: str = None):\n         \"\"\"Validate and set any representation\"\"\"\n         if self._n_inputs == 1 and not isinstance(bounding_box, dict):\n-            self[0] = bounding_box\n+            self[self._available_input_index[0]] = bounding_box\n         else:\n             self._validate_iterable(bounding_box, order)\n \n@@ -751,7 +757,7 @@ def validate(cls, model, bounding_box,\n             order = bounding_box.order\n             if _preserve_ignore:\n                 ignored = bounding_box.ignored\n-            bounding_box = bounding_box.intervals\n+            bounding_box = bounding_box.named_intervals\n \n         new = cls({}, model, ignored=ignored, order=order)\n         new._validate(bounding_box)\n",
+  "test_patch": "diff --git a/astropy/modeling/tests/test_bounding_box.py b/astropy/modeling/tests/test_bounding_box.py\n--- a/astropy/modeling/tests/test_bounding_box.py\n+++ b/astropy/modeling/tests/test_bounding_box.py\n@@ -12,7 +12,7 @@\n                                            _ignored_interval, _Interval, _SelectorArgument,\n                                            _SelectorArguments)\n from astropy.modeling.core import Model, fix_inputs\n-from astropy.modeling.models import Gaussian1D, Gaussian2D, Identity, Scale, Shift\n+from astropy.modeling.models import Gaussian1D, Gaussian2D, Identity, Polynomial2D, Scale, Shift\n \n \n class Test_Interval:\n@@ -1633,6 +1633,15 @@ def test_prepare_inputs(self):\n         assert (valid_index[0] == []).all()\n         assert all_out and isinstance(all_out, bool)\n \n+    def test_bounding_box_ignore(self):\n+        \"\"\"Regression test for #13028\"\"\"\n+\n+        bbox_x = ModelBoundingBox((9, 10), Polynomial2D(1), ignored=[\"x\"])\n+        assert bbox_x.ignored_inputs == ['x']\n+\n+        bbox_y = ModelBoundingBox((11, 12), Polynomial2D(1), ignored=[\"y\"])\n+        assert bbox_y.ignored_inputs == ['y']\n+\n \n class Test_SelectorArgument:\n     def test_create(self):\n@@ -2098,15 +2107,17 @@ def test___repr__(self):\n             \"    bounding_boxes={\\n\" + \\\n             \"        (1,) = ModelBoundingBox(\\n\" + \\\n             \"                intervals={\\n\" + \\\n-            \"                    x: Interval(lower=-1, upper=1)\\n\" + \\\n+            \"                    y: Interval(lower=-1, upper=1)\\n\" + \\\n             \"                }\\n\" + \\\n+            \"                ignored=['x']\\n\" + \\\n             \"                model=Gaussian2D(inputs=('x', 'y'))\\n\" + \\\n             \"                order='C'\\n\" + \\\n             \"            )\\n\" + \\\n             \"        (2,) = ModelBoundingBox(\\n\" + \\\n             \"                intervals={\\n\" + \\\n-            \"                    x: Interval(lower=-2, upper=2)\\n\" + \\\n+            \"                    y: Interval(lower=-2, upper=2)\\n\" + \\\n             \"                }\\n\" + \\\n+            \"                ignored=['x']\\n\" + \\\n             \"                model=Gaussian2D(inputs=('x', 'y'))\\n\" + \\\n             \"                order='C'\\n\" + \\\n             \"            )\\n\" + \\\n@@ -2650,3 +2661,12 @@ def test_fix_inputs(self):\n         assert bbox._bounding_boxes[(1,)] == (-np.inf, np.inf)\n         assert bbox._bounding_boxes[(1,)].order == 'F'\n         assert len(bbox._bounding_boxes) == 2\n+\n+    def test_complex_compound_bounding_box(self):\n+        model = Identity(4)\n+        bounding_boxes = {(2.5, 1.3): ((-1, 1), (-3, 3)), (2.5, 2.71): ((-3, 3), (-1, 1))}\n+        selector_args = (('x0', True), ('x1', True))\n+\n+        bbox = CompoundBoundingBox.validate(model, bounding_boxes, selector_args)\n+        assert bbox[(2.5, 1.3)] == ModelBoundingBox(((-1, 1), (-3, 3)), model, ignored=['x0', 'x1'])\n+        assert bbox[(2.5, 2.71)] == ModelBoundingBox(((-3, 3), (-1, 1)), model, ignored=['x0', 'x1'])\n",
+  "problem_statement": "Incorrect ignored usage in `ModelBoundingBox`\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check out our contributing guidelines,\r\nhttps://github.com/astropy/astropy/blob/main/CONTRIBUTING.md .\r\nPlease be sure to check out our code of conduct,\r\nhttps://github.com/astropy/astropy/blob/main/CODE_OF_CONDUCT.md . -->\r\n\r\n<!-- Please have a search on our GitHub repository to see if a similar\r\nissue has already been posted.\r\nIf a similar issue is closed, have a quick look to see if you are satisfied\r\nby the resolution.\r\nIf not please go ahead and open an issue! -->\r\n\r\n<!-- Please check that the development version still produces the same bug.\r\nYou can install development version with\r\npip install git+https://github.com/astropy/astropy\r\ncommand. -->\r\n\r\n### Description\r\n<!-- Provide a general description of the bug. -->\r\n\r\nProviding `ignored` inputs to `ModelBoundingBox` does not always work as expected.\r\n\r\nRunning the following code:\r\n```python\r\nfrom astropy.modeling.bounding_box import ModelBoundingBox\r\nfrom astropy.modeling import models as astropy_models\r\n\r\nbbox = ModelBoundingBox((9, 10), astropy_models.Polynomial2D(1), ignored=[\"x\"])\r\nprint(bbox)\r\nprint(bbox.ignored_inputs)\r\n```\r\nProduces:\r\n```\r\nModelBoundingBox(\r\n    intervals={\r\n        x: Interval(lower=9, upper=10)\r\n    }\r\n    model=Polynomial2D(inputs=('x', 'y'))\r\n    order='C'\r\n)\r\n[]\r\n```\r\nThis is incorrect. It instead should produce:\r\n```\r\nModelBoundingBox(\r\n    intervals={\r\n        y: Interval(lower=9, upper=10)\r\n    }\r\n    model=Polynomial2D(inputs=('x', 'y'))\r\n    order='C'\r\n)\r\n['x']\r\n```\r\n\r\nSomehow the `ignored` status of the `x` input is being accounted for during the validation which occurs during the construction of the bounding box; however, it is getting \"lost\" somehow resulting in the weird behavior we see above.\r\n\r\nOddly enough ignoring `y` does not have an issue. E.G. this code:\r\n```python\r\nfrom astropy.modeling.bounding_box import ModelBoundingBox\r\nfrom astropy.modeling import models as astropy_models\r\n\r\nbbox = ModelBoundingBox((11, 12), astropy_models.Polynomial2D(1), ignored=[\"y\"])\r\nprint(bbox)\r\nprint(bbox.ignored_inputs)\r\n```\r\nProduces:\r\n```\r\nModelBoundingBox(\r\n    intervals={\r\n        x: Interval(lower=11, upper=12)\r\n    }\r\n    ignored=['y']\r\n    model=Polynomial2D(inputs=('x', 'y'))\r\n    order='C'\r\n)\r\n['y']\r\n```\r\nas expected.\r\n\r\n### System Details\r\nThis is present in both astropy 5.03 and astropy develop\r\n\n",
+  "hints_text": "You just can't differentiate between a robot and the very best of humans.\n\n*(A special day message.)*",
+  "created_at": "2022-03-31T16:32:46Z",
+  "version": "4.3",
+  "FAIL_TO_PASS": "[\"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test___repr__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_bounding_box_ignore\"]",
+  "PASS_TO_PASS": "[\"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test___contains__\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test___eq__\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test___getitem__\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test___setitem__\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__create_bounding_box\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__fix_input_bbox_arg\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__fix_input_selector_arg\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__get_selector_key\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__matching_bounding_boxes\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__select_bounding_box\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test__validate\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_bounding_boxes\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_complex_compound_bounding_box\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_copy\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_create\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_create_selector\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_fix_inputs\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_prepare_inputs\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_selector_args\", \"astropy/modeling/tests/test_bounding_box.py::TestCompoundBoundingBox::test_validate\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___contains__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___delitem__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___eq__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___getitem__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___len__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test___repr__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__n_inputs\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__outside\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__setitem__\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__valid_index\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__validate\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__validate_dict\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__validate_iterable\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test__validate_sequence\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_bounding_box\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_copy\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_create\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_dimension\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_domain\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_fix_inputs\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_intervals\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_named_intervals\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_prepare_inputs\", \"astropy/modeling/tests/test_bounding_box.py::TestModelBoundingBox::test_validate\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test__ignored_interval\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test__validate_bounds\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test__validate_shape\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_copy\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_create\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_domain\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_outside\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_validate\", \"astropy/modeling/tests/test_bounding_box.py::Test_Interval::test_validate_with_SpectralCoord\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_create\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_get_fixed_value\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_get_selector\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_is_argument\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_name\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_named_tuple\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_pretty_repr\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArgument::test_validate\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_add_ignore\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_create\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_get_fixed_values\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_get_selector\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_ignore\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_is_argument\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_is_selector\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_named_tuple\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_pretty_repr\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_reduce\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_selector_index\", \"astropy/modeling/tests/test_bounding_box.py::Test_SelectorArguments::test_validate\"]",
+  "environment_setup_commit": "298ccb478e6bf092953bca67a3d29dc6c35f6752",
+  "patch_files": [
+    "astropy/modeling/bounding_box.py"
+  ],
+  "test_patch_files": [
+    "astropy/modeling/tests/test_bounding_box.py"
+  ],
+  "patch_diff_details": {
+    "astropy/modeling/bounding_box.py": {
+      "diffs": [
+        {
+          "start_line_old": 697,
+          "end_line_old": 697,
+          "file_pos": 1,
+          "file_context_length": 10114,
+          "pos": 1,
+          "context_length": 569
+        },
+        {
+          "start_line_old": 706,
+          "end_line_old": 706,
+          "file_pos": 1,
+          "file_context_length": 10114,
+          "pos": 1,
+          "context_length": 569
+        },
+        {
+          "start_line_old": 730,
+          "end_line_old": 730,
+          "file_pos": 1,
+          "file_context_length": 10114,
+          "pos": 1,
+          "context_length": 569
+        },
+        {
+          "start_line_old": 754,
+          "end_line_old": 754,
+          "file_pos": 1,
+          "file_context_length": 10114,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.fix_inputs_ModelBoundingBox.domain.4.1",
+          "closest_snippet_line_distance": 7,
+          "pos": 4,
+          "context_length": 1414
+        }
+      ]
+    }
+  },
+  "vectors": 4484,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.__eq___ModelBoundingBox._validate.2.2.1",
+      "distance": 0.8345072269439697,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 667,
+      "end_line": 732,
+      "tokens": 569,
+      "context_length": 569,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox_ModelBoundingBox.named_intervals.2.1",
+      "distance": 0.8397402763366699,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 555,
+      "end_line": 606,
+      "tokens": 396,
+      "context_length": 965,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.fix_inputs_ModelBoundingBox.domain.4.1",
+      "distance": 0.895511269569397,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 761,
+      "end_line": 798,
+      "tokens": 252,
+      "context_length": 1217,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.validate_ModelBoundingBox.validate.5.1",
+      "distance": 0.8966844081878662,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 734,
+      "end_line": 759,
+      "tokens": 197,
+      "context_length": 1414,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox._fix_input_selector_arg_CompoundBoundingBox._fix_input_bbox_arg.3.1",
+      "distance": 0.9047702550888062,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1488,
+      "end_line": 1504,
+      "tokens": 165,
+      "context_length": 1579,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.__repr___ModelBoundingBox.__repr__.8.1",
+      "distance": 0.914657473564148,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 608,
+      "end_line": 625,
+      "tokens": 138,
+      "context_length": 1717,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.__len___ModelBoundingBox.__getitem__.3.2.1.1",
+      "distance": 0.9237513542175293,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 627,
+      "end_line": 645,
+      "tokens": 147,
+      "context_length": 1864,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.fix_inputs_",
+      "distance": 0.943567156791687,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1506,
+      "end_line": 1542,
+      "tokens": 265,
+      "context_length": 2129,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.bounding_boxes_CompoundBoundingBox.__eq__.1.2.1.1",
+      "distance": 0.9501647353172302,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1332,
+      "end_line": 1382,
+      "tokens": 365,
+      "context_length": 2494,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BaseSelectorArgument__SelectorArgument.__new__.2.1",
+      "distance": 0.9588198661804199,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 899,
+      "end_line": 930,
+      "tokens": 162,
+      "context_length": 2656,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox._outside_ModelBoundingBox._outside.5.1",
+      "distance": 0.9684248566627502,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 800,
+      "end_line": 834,
+      "tokens": 230,
+      "context_length": 2886,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments.add_ignore__SelectorArguments.named_tuple.2.1",
+      "distance": 0.9685657024383545,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1233,
+      "end_line": 1262,
+      "tokens": 185,
+      "context_length": 3071,
+      "file_pos": 1
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArgument.validate__SelectorArgument.validate.2.1",
+      "distance": 0.9695022106170654,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 932,
+      "end_line": 950,
+      "tokens": 130,
+      "context_length": 3201,
+      "file_pos": 1
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.prepare_inputs_ModelBoundingBox.prepare_inputs.5.1",
+      "distance": 0.9731540679931641,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 862,
+      "end_line": 896,
+      "tokens": 255,
+      "context_length": 3456,
+      "file_pos": 1
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments__SelectorArguments.kept_ignore.2.1",
+      "distance": 0.9881752729415894,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1039,
+      "end_line": 1104,
+      "tokens": 330,
+      "context_length": 3786,
+      "file_pos": 1
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain__BoundingDomain.fix_inputs.2",
+      "distance": 0.9990036487579346,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 162,
+      "end_line": 262,
+      "tokens": 693,
+      "context_length": 4479,
+      "file_pos": 1
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox._valid_index_ModelBoundingBox._valid_index.5.1",
+      "distance": 0.9996227025985718,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 836,
+      "end_line": 860,
+      "tokens": 175,
+      "context_length": 4654,
+      "file_pos": 1
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox._matching_bounding_boxes_CompoundBoundingBox._matching_bounding_boxes.5.1",
+      "distance": 1.0016740560531616,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1466,
+      "end_line": 1486,
+      "tokens": 181,
+      "context_length": 4835,
+      "file_pos": 1
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.__contains___CompoundBoundingBox._select_bounding_box.2.1",
+      "distance": 1.0051970481872559,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1420,
+      "end_line": 1440,
+      "tokens": 170,
+      "context_length": 5005,
+      "file_pos": 1
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.prepare_inputs_CompoundBoundingBox.prepare_inputs.3.1",
+      "distance": 1.0082347393035889,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1442,
+      "end_line": 1464,
+      "tokens": 170,
+      "context_length": 5175,
+      "file_pos": 1
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Box2D.bounding_box_Box2D._parameter_units_for_data_units.1.1",
+      "distance": 1.0127317905426025,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2354,
+      "end_line": 2380,
+      "tokens": 235,
+      "context_length": 5410
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_14_get_name.2.1",
+      "distance": 1.0187101364135742,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 130,
+      "end_line": 159,
+      "tokens": 222,
+      "context_length": 5632,
+      "file_pos": 2
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__Interval._validate_bounds__Interval.domain.1.1",
+      "distance": 1.0279114246368408,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 79,
+      "end_line": 127,
+      "tokens": 298,
+      "context_length": 5930,
+      "file_pos": 2
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__Interval._validate_shape__Interval._validate_shape.6.1",
+      "distance": 1.0326461791992188,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 55,
+      "end_line": 77,
+      "tokens": 205,
+      "context_length": 6135,
+      "file_pos": 2
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments.get_selector__SelectorArguments.is_argument.2.2.1.1",
+      "distance": 1.0334737300872803,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1140,
+      "end_line": 1193,
+      "tokens": 296,
+      "context_length": 6431,
+      "file_pos": 2
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Gaussian2D.bounding_box_Gaussian2D.bounding_box.5.1",
+      "distance": 1.0338175296783447,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 344,
+      "end_line": 393,
+      "tokens": 436,
+      "context_length": 6867
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_abc__Interval.copy.1.1",
+      "distance": 1.0389325618743896,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 8,
+      "end_line": 53,
+      "tokens": 206,
+      "context_length": 7073,
+      "file_pos": 2
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments.validate__SelectorArguments.validate.6.1",
+      "distance": 1.0408110618591309,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1106,
+      "end_line": 1138,
+      "tokens": 210,
+      "context_length": 7283,
+      "file_pos": 2
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Ellipse2D.bounding_box_Ellipse2D.input_units.2.1",
+      "distance": 1.0491036176681519,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 1968,
+      "end_line": 1989,
+      "tokens": 168,
+      "context_length": 7451
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain.prepare_inputs__BoundingDomain.prepare_inputs.2",
+      "distance": 1.0542881488800049,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 264,
+      "end_line": 286,
+      "tokens": 169,
+      "context_length": 7620,
+      "file_pos": 2
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.__repr___CompoundBoundingBox.__repr__.10.1",
+      "distance": 1.0545878410339355,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1312,
+      "end_line": 1330,
+      "tokens": 173,
+      "context_length": 7793,
+      "file_pos": 2
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Trapezoid1D.bounding_box_Trapezoid1D._parameter_units_for_data_units.1.1",
+      "distance": 1.05530846118927,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2454,
+      "end_line": 2476,
+      "tokens": 192,
+      "context_length": 7985
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox.validate_CompoundBoundingBox.validate.4.1",
+      "distance": 1.0553827285766602,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1384,
+      "end_line": 1418,
+      "tokens": 297,
+      "context_length": 8282,
+      "file_pos": 2
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain.prepare_outputs__BoundingDomain._get_valid_outputs_unit.2.1.1",
+      "distance": 1.05817711353302,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 390,
+      "end_line": 429,
+      "tokens": 296,
+      "context_length": 8578,
+      "file_pos": 2
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._prepare_outputs__BoundingDomain._prepare_outputs.4.1",
+      "distance": 1.0596457719802856,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 362,
+      "end_line": 388,
+      "tokens": 194,
+      "context_length": 8772,
+      "file_pos": 2
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_ModelBoundingBox.bounding_box_ModelBoundingBox.bounding_box.2.2.6.1",
+      "distance": 1.06476891040802,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 647,
+      "end_line": 665,
+      "tokens": 156,
+      "context_length": 8928,
+      "file_pos": 2
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Gaussian1D.bounding_box_Gaussian1D.bounding_box.4.1",
+      "distance": 1.0675232410430908,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 125,
+      "end_line": 167,
+      "tokens": 308,
+      "context_length": 9236
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/modeling/physical_models.py_Drude1D.input_units_Drude1D.bounding_box.4.1",
+      "distance": 1.0703821182250977,
+      "file_path": "astropy/modeling/physical_models.py",
+      "start_line": 323,
+      "end_line": 360,
+      "tokens": 289,
+      "context_length": 9525
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/modeling/core.py_fix_inputs_",
+      "distance": 1.0745140314102173,
+      "file_path": "astropy/modeling/core.py",
+      "start_line": 4068,
+      "end_line": 4471,
+      "tokens": 3343,
+      "context_length": 12868
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py_CompoundBoundingBox_CompoundBoundingBox.copy.2.1",
+      "distance": 1.074733018875122,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1265,
+      "end_line": 1310,
+      "tokens": 353,
+      "context_length": 13221,
+      "file_pos": 4
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/modeling/core.py__ModelMeta.__new___Model._strip_ones.1.1",
+      "distance": 1.0775511264801025,
+      "file_path": "astropy/modeling/core.py",
+      "start_line": 85,
+      "end_line": 880,
+      "tokens": 6529,
+      "context_length": 19750
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._modify_output__BoundingDomain._modify_output.5.1",
+      "distance": 1.0807991027832031,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 328,
+      "end_line": 360,
+      "tokens": 232,
+      "context_length": 19982,
+      "file_pos": 4
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Moffat2D.input_units_Moffat2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.0809990167617798,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2976,
+      "end_line": 2993,
+      "tokens": 205,
+      "context_length": 20187
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._all_out_output__BoundingDomain._all_out_output.2.1",
+      "distance": 1.0858556032180786,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 308,
+      "end_line": 326,
+      "tokens": 133,
+      "context_length": 20320,
+      "file_pos": 4
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Ring2D.bounding_box_Ring2D.input_units.2.1",
+      "distance": 1.0922966003417969,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2169,
+      "end_line": 2187,
+      "tokens": 145,
+      "context_length": 20465
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_TrapezoidDisk2D.bounding_box_TrapezoidDisk2D.input_units.2.1",
+      "distance": 1.0926334857940674,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2522,
+      "end_line": 2540,
+      "tokens": 162,
+      "context_length": 20627
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._evaluate__BoundingDomain._evaluate.3.2.1.1",
+      "distance": 1.0956379175186157,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 466,
+      "end_line": 502,
+      "tokens": 276,
+      "context_length": 20903,
+      "file_pos": 4
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/timeseries/periodograms/bls/core.py_BoxLeastSquares._validate_inputs_BoxLeastSquares._validate_inputs.7.1",
+      "distance": 1.097702980041504,
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "start_line": 605,
+      "end_line": 642,
+      "tokens": 313,
+      "context_length": 21216
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/stats/bayesian_blocks.py_FitnessFunc.validate_input_FitnessFunc.validate_input.12.1",
+      "distance": 1.0990232229232788,
+      "file_path": "astropy/stats/bayesian_blocks.py",
+      "start_line": 216,
+      "end_line": 280,
+      "tokens": 462,
+      "context_length": 21678
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/modeling/tabular.py__Tabular.bounding_box__Tabular.bounding_box.4.1",
+      "distance": 1.0996596813201904,
+      "file_path": "astropy/modeling/tabular.py",
+      "start_line": 173,
+      "end_line": 207,
+      "tokens": 294,
+      "context_length": 21972
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArgument.get_fixed_value__SelectorArgument.get_fixed_value.2.2.1.2.1",
+      "distance": 1.100034475326538,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 991,
+      "end_line": 1009,
+      "tokens": 125,
+      "context_length": 22097,
+      "file_pos": 7
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/modeling/models.py_4_",
+      "distance": 1.100545048713684,
+      "file_path": "astropy/modeling/models.py",
+      "start_line": 9,
+      "end_line": 72,
+      "tokens": 668,
+      "context_length": 22765
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Ellipse2D._parameter_units_for_data_units_Ellipse2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.10268235206604,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 1991,
+      "end_line": 2002,
+      "tokens": 170,
+      "context_length": 22935
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._base_output__BoundingDomain._base_output.2.1",
+      "distance": 1.1031683683395386,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 288,
+      "end_line": 306,
+      "tokens": 124,
+      "context_length": 23059,
+      "file_pos": 8
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/astropy/astropy/modeling/fitting.py_FittingWithOutlierRemoval.__call__.28_FittingWithOutlierRemoval.__call__.31.1",
+      "distance": 1.1034759283065796,
+      "file_path": "astropy/modeling/fitting.py",
+      "start_line": 940,
+      "end_line": 1027,
+      "tokens": 744,
+      "context_length": 23803
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain.evaluate__BoundingDomain.evaluate.7.1",
+      "distance": 1.1039451360702515,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 527,
+      "end_line": 552,
+      "tokens": 226,
+      "context_length": 24029,
+      "file_pos": 9
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._set_outputs_unit__BoundingDomain._set_outputs_unit.3.1",
+      "distance": 1.1082239151000977,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 504,
+      "end_line": 525,
+      "tokens": 121,
+      "context_length": 24150,
+      "file_pos": 9
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Box2DType.assert_equal_Box2DType.assert_equal.2",
+      "distance": 1.1160118579864502,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 105,
+      "end_line": 115,
+      "tokens": 133,
+      "context_length": 24283
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_KingProjectedAnalytic1D.bounding_box_KingProjectedAnalytic1D._parameter_units_for_data_units.1.1",
+      "distance": 1.116060733795166,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 3229,
+      "end_line": 3250,
+      "tokens": 170,
+      "context_length": 24453
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Lorentz1D.bounding_box_Lorentz1D._parameter_units_for_data_units.1.1",
+      "distance": 1.116490364074707,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 1534,
+      "end_line": 1561,
+      "tokens": 226,
+      "context_length": 24679
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArgument.is_argument__SelectorArgument.named_tuple.2.1",
+      "distance": 1.1172254085540771,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1011,
+      "end_line": 1036,
+      "tokens": 157,
+      "context_length": 24836,
+      "file_pos": 10
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__BoundingDomain._evaluate_model__BoundingDomain._evaluate_model.4.1",
+      "distance": 1.1243964433670044,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 431,
+      "end_line": 464,
+      "tokens": 258,
+      "context_length": 25094,
+      "file_pos": 10
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/astropy/astropy/convolution/utils.py_discretize_model.6_discretize_model.10.5.1",
+      "distance": 1.1262109279632568,
+      "file_path": "astropy/convolution/utils.py",
+      "start_line": 162,
+      "end_line": 196,
+      "tokens": 402,
+      "context_length": 25496
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Box2D.evaluate_Box2D.evaluate.6.1",
+      "distance": 1.1363605260849,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2339,
+      "end_line": 2352,
+      "tokens": 157,
+      "context_length": 25653
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments.reduce__SelectorArguments.reduce.5.1",
+      "distance": 1.1375951766967773,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1214,
+      "end_line": 1231,
+      "tokens": 116,
+      "context_length": 25769,
+      "file_pos": 11
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/astropy/astropy/modeling/core.py_Model.render_Model._initialize_parameters.18.1.1",
+      "distance": 1.1393578052520752,
+      "file_path": "astropy/modeling/core.py",
+      "start_line": 1700,
+      "end_line": 2461,
+      "tokens": 6325,
+      "context_length": 32094
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Box1DType_Box1DType.assert_equal.2",
+      "distance": 1.1404681205749512,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 54,
+      "end_line": 80,
+      "tokens": 244,
+      "context_length": 32338
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Box1D_Box1D._parameter_units_for_data_units.1.1",
+      "distance": 1.1435985565185547,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2202,
+      "end_line": 2293,
+      "tokens": 595,
+      "context_length": 32933
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArgument.get_selector__SelectorArgument.pretty_repr.2.1",
+      "distance": 1.1453133821487427,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 952,
+      "end_line": 989,
+      "tokens": 222,
+      "context_length": 33155,
+      "file_pos": 11
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Disk2D._parameter_units_for_data_units_Disk2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.1509824991226196,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2072,
+      "end_line": 2081,
+      "tokens": 153,
+      "context_length": 33308
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/astropy/astropy/modeling/mappings.py_Identity_Identity.inverse.2.1",
+      "distance": 1.1513116359710693,
+      "file_path": "astropy/modeling/mappings.py",
+      "start_line": 128,
+      "end_line": 178,
+      "tokens": 380,
+      "context_length": 33688
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Gaussian2D.input_units_Gaussian2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.1531152725219727,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 459,
+      "end_line": 477,
+      "tokens": 225,
+      "context_length": 33913
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/astropy/astropy/modeling/fitting.py_FittingWithOutlierRemoval.__call___FittingWithOutlierRemoval.__call__.27",
+      "distance": 1.154850959777832,
+      "file_path": "astropy/modeling/fitting.py",
+      "start_line": 857,
+      "end_line": 939,
+      "tokens": 779,
+      "context_length": 34692
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Ring2D._parameter_units_for_data_units_Ring2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.1554605960845947,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2189,
+      "end_line": 2199,
+      "tokens": 163,
+      "context_length": 34855
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/basic.py_np_TransformType.from_tree.2.1",
+      "distance": 1.1579182147979736,
+      "file_path": "astropy/io/misc/asdf/tags/transform/basic.py",
+      "start_line": 3,
+      "end_line": 67,
+      "tokens": 476,
+      "context_length": 35331
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Gaussian2D.amplitude_Gaussian2D.y_fwhm.2.1",
+      "distance": 1.164555549621582,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 288,
+      "end_line": 342,
+      "tokens": 632,
+      "context_length": 35963
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/astropy/astropy/modeling/core.py_Model.__setattr___Model.sum_of_implicit_terms.1",
+      "distance": 1.1742799282073975,
+      "file_path": "astropy/modeling/core.py",
+      "start_line": 882,
+      "end_line": 1698,
+      "tokens": 6380,
+      "context_length": 42343
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_AiryDisk2D.input_units_AiryDisk2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.1763277053833008,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2795,
+      "end_line": 2811,
+      "tokens": 203,
+      "context_length": 42546
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/astropy/astropy/nddata/utils.py_Cutout2D.origin_original_",
+      "distance": 1.1772947311401367,
+      "file_path": "astropy/nddata/utils.py",
+      "start_line": 713,
+      "end_line": 798,
+      "tokens": 726,
+      "context_length": 43272
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Box2D_Box2D.y_width.1",
+      "distance": 1.1789090633392334,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2296,
+      "end_line": 2337,
+      "tokens": 331,
+      "context_length": 43603
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/astropy/astropy/extern/configobj/validate.py_ValidateError_VdtValueTooBigError.__init__.2",
+      "distance": 1.1792349815368652,
+      "file_path": "astropy/extern/configobj/validate.py",
+      "start_line": 356,
+      "end_line": 443,
+      "tokens": 679,
+      "context_length": 44282
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Gaussian2DType.assert_equal_Gaussian2DType.assert_equal.2",
+      "distance": 1.179462194442749,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 270,
+      "end_line": 281,
+      "tokens": 145,
+      "context_length": 44427
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/astropy/astropy/modeling/bounding_box.py__SelectorArguments.selector_index__SelectorArguments.selector_index.2.2.1",
+      "distance": 1.183045744895935,
+      "file_path": "astropy/modeling/bounding_box.py",
+      "start_line": 1195,
+      "end_line": 1212,
+      "tokens": 117,
+      "context_length": 44544,
+      "file_pos": 15
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_TrapezoidDisk2D._parameter_units_for_data_units_TrapezoidDisk2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.1863481998443604,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 2542,
+      "end_line": 2552,
+      "tokens": 171,
+      "context_length": 44715
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Ellipse2DType.assert_equal_Ellipse2DType.assert_equal.2",
+      "distance": 1.1870362758636475,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 176,
+      "end_line": 187,
+      "tokens": 144,
+      "context_length": 44859
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Moffat2DType.assert_equal_Moffat2DType.assert_equal.2",
+      "distance": 1.1876890659332275,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 424,
+      "end_line": 434,
+      "tokens": 134,
+      "context_length": 44993
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/astropy/astropy/modeling/fitting.py__model_to_fit_params__validate_constraints.7.1",
+      "distance": 1.1882820129394531,
+      "file_path": "astropy/modeling/fitting.py",
+      "start_line": 1703,
+      "end_line": 1731,
+      "tokens": 236,
+      "context_length": 45229
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/astropy/astropy/timeseries/periodograms/bls/core.py_BoxLeastSquares_BoxLeastSquares.1",
+      "distance": 1.1925151348114014,
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "start_line": 26,
+      "end_line": 88,
+      "tokens": 639,
+      "context_length": 45868
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/astropy/astropy/units/core.py_UnrecognizedUnit_UnrecognizedUnit.is_unity.1.1",
+      "distance": 1.2036025524139404,
+      "file_path": "astropy/units/core.py",
+      "start_line": 1894,
+      "end_line": 1955,
+      "tokens": 454,
+      "context_length": 46322
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Moffat1DType.assert_equal_Moffat1DType.assert_equal.2",
+      "distance": 1.2036939859390259,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 390,
+      "end_line": 399,
+      "tokens": 120,
+      "context_length": 46442
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_20_31",
+      "distance": 1.204113245010376,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 80,
+      "end_line": 155,
+      "tokens": 774,
+      "context_length": 47216
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/astropy/astropy/convolution/utils.py_ctypes_raise_even_kernel_exception.1",
+      "distance": 1.2047603130340576,
+      "file_path": "astropy/convolution/utils.py",
+      "start_line": 2,
+      "end_line": 31,
+      "tokens": 143,
+      "context_length": 47359
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/astropy/astropy/modeling/fitting.py_LinearLSQFitter.__call__.16_LinearLSQFitter.__call__.16.8.7.3.2.weights.1",
+      "distance": 1.2057220935821533,
+      "file_path": "astropy/modeling/fitting.py",
+      "start_line": 575,
+      "end_line": 661,
+      "tokens": 847,
+      "context_length": 48206
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Trapezoid1DType.assert_equal_Trapezoid1DType.assert_equal.2",
+      "distance": 1.2058604955673218,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 752,
+      "end_line": 761,
+      "tokens": 125,
+      "context_length": 48331
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/astropy/astropy/modeling/fitting.py__convert_input__convert_input.9.1",
+      "distance": 1.2075458765029907,
+      "file_path": "astropy/modeling/fitting.py",
+      "start_line": 1555,
+      "end_line": 1601,
+      "tokens": 488,
+      "context_length": 48819
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_Sersic2D.input_units_Sersic2D._parameter_units_for_data_units.4.2.1",
+      "distance": 1.207654356956482,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 3099,
+      "end_line": 3116,
+      "tokens": 211,
+      "context_length": 49030
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_3___all__.1",
+      "distance": 1.2078375816345215,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 3,
+      "end_line": 19,
+      "tokens": 270,
+      "context_length": 49300
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/astropy/astropy/modeling/functional_models.py_np_GAUSSIAN_SIGMA_TO_FWHM.1",
+      "distance": 1.2084367275238037,
+      "file_path": "astropy/modeling/functional_models.py",
+      "start_line": 5,
+      "end_line": 30,
+      "tokens": 374,
+      "context_length": 49674
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/astropy/astropy/modeling/tabular.py__Tabular.inverse__Tabular.inverse.2",
+      "distance": 1.209883451461792,
+      "file_path": "astropy/modeling/tabular.py",
+      "start_line": 241,
+      "end_line": 261,
+      "tokens": 211,
+      "context_length": 49885
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/astropy/astropy/units/quantity_helper/function_helpers.py_32_45",
+      "distance": 1.2119030952453613,
+      "file_path": "astropy/units/quantity_helper/function_helpers.py",
+      "start_line": 102,
+      "end_line": 142,
+      "tokens": 482,
+      "context_length": 50367
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_masked_AllType.1",
+      "distance": 1.2157551050186157,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 183,
+      "end_line": 267,
+      "tokens": 404,
+      "context_length": 50771
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/astropy/astropy/convolution/utils.py_discretize_model_discretize_model.5.1",
+      "distance": 1.2167727947235107,
+      "file_path": "astropy/convolution/utils.py",
+      "start_line": 84,
+      "end_line": 160,
+      "tokens": 741,
+      "context_length": 51512
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/astropy/astropy/modeling/mappings.py_1_Mapping.evaluate.4.1",
+      "distance": 1.2176679372787476,
+      "file_path": "astropy/modeling/mappings.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 796,
+      "context_length": 52308
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/astropy/astropy/stats/funcs.py_binned_binom_proportion.1_binned_binom_proportion.1",
+      "distance": 1.2192943096160889,
+      "file_path": "astropy/stats/funcs.py",
+      "start_line": 319,
+      "end_line": 470,
+      "tokens": 1672,
+      "context_length": 53980
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/modeling/bounding_box.py",
+      "position": 1,
+      "tokens": 10114,
+      "context_length": 10114
+    },
+    {
+      "file_path": "astropy/modeling/functional_models.py",
+      "position": 2,
+      "tokens": 27993,
+      "context_length": 38107
+    },
+    {
+      "file_path": "astropy/modeling/physical_models.py",
+      "position": 3,
+      "tokens": 6476,
+      "context_length": 44583
+    },
+    {
+      "file_path": "astropy/modeling/core.py",
+      "position": 4,
+      "tokens": 36385,
+      "context_length": 80968
+    },
+    {
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "position": 5,
+      "tokens": 7605,
+      "context_length": 88573
+    },
+    {
+      "file_path": "astropy/stats/bayesian_blocks.py",
+      "position": 6,
+      "tokens": 4742,
+      "context_length": 93315
+    },
+    {
+      "file_path": "astropy/modeling/tabular.py",
+      "position": 7,
+      "tokens": 2890,
+      "context_length": 96205
+    },
+    {
+      "file_path": "astropy/modeling/models.py",
+      "position": 8,
+      "tokens": 715,
+      "context_length": 96920
+    },
+    {
+      "file_path": "astropy/modeling/fitting.py",
+      "position": 9,
+      "tokens": 15231,
+      "context_length": 112151
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "position": 10,
+      "tokens": 7467,
+      "context_length": 119618
+    },
+    {
+      "file_path": "astropy/convolution/utils.py",
+      "position": 11,
+      "tokens": 2937,
+      "context_length": 122555
+    },
+    {
+      "file_path": "astropy/modeling/mappings.py",
+      "position": 12,
+      "tokens": 2569,
+      "context_length": 125124
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/transform/basic.py",
+      "position": 13,
+      "tokens": 2222,
+      "context_length": 127346
+    },
+    {
+      "file_path": "astropy/nddata/utils.py",
+      "position": 14,
+      "tokens": 7429,
+      "context_length": 134775
+    },
+    {
+      "file_path": "astropy/extern/configobj/validate.py",
+      "position": 15,
+      "tokens": 12632,
+      "context_length": 147407
+    },
+    {
+      "file_path": "astropy/units/core.py",
+      "position": 16,
+      "tokens": 18787,
+      "context_length": 166194
+    },
+    {
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "position": 17,
+      "tokens": 8773,
+      "context_length": 174967
+    },
+    {
+      "file_path": "astropy/units/quantity_helper/function_helpers.py",
+      "position": 18,
+      "tokens": 9441,
+      "context_length": 184408
+    },
+    {
+      "file_path": "astropy/io/ascii/core.py",
+      "position": 19,
+      "tokens": 13470,
+      "context_length": 197878
+    },
+    {
+      "file_path": "astropy/stats/funcs.py",
+      "position": 20,
+      "tokens": 16713,
+      "context_length": 214591
+    }
+  ]
+}

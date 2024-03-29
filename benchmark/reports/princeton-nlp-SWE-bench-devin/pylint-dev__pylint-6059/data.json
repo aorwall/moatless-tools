@@ -1,0 +1,2042 @@
+{
+  "instance_id": "pylint-dev__pylint-6059",
+  "model_patch": "",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [],
+  "repo": "pylint-dev/pylint",
+  "base_commit": "789a3818fec81754cf95bef2a0b591678142c227",
+  "patch": "diff --git a/pylint/checkers/base_checker.py b/pylint/checkers/base_checker.py\n--- a/pylint/checkers/base_checker.py\n+++ b/pylint/checkers/base_checker.py\n@@ -61,7 +61,15 @@ def __init__(\n \n     def __gt__(self, other):\n         \"\"\"Permit to sort a list of Checker by name.\"\"\"\n-        return f\"{self.name}{self.msgs}\" > (f\"{other.name}{other.msgs}\")\n+        return f\"{self.name}{self.msgs}\" > f\"{other.name}{other.msgs}\"\n+\n+    def __eq__(self, other):\n+        \"\"\"Permit to assert Checkers are equal.\"\"\"\n+        return f\"{self.name}{self.msgs}\" == f\"{other.name}{other.msgs}\"\n+\n+    def __hash__(self):\n+        \"\"\"Make Checker hashable.\"\"\"\n+        return hash(f\"{self.name}{self.msgs}\")\n \n     def __repr__(self):\n         status = \"Checker\" if self.enabled else \"Disabled checker\"\n",
+  "test_patch": "diff --git a/tests/checkers/unittest_base_checker.py b/tests/checkers/unittest_base_checker.py\n--- a/tests/checkers/unittest_base_checker.py\n+++ b/tests/checkers/unittest_base_checker.py\n@@ -33,6 +33,17 @@ class LessBasicChecker(OtherBasicChecker):\n     )\n \n \n+class DifferentBasicChecker(BaseChecker):\n+    name = \"different\"\n+    msgs = {\n+        \"W0002\": (\n+            \"Blah blah example.\",\n+            \"blah-blah-example\",\n+            \"I only exist to be different to OtherBasicChecker :(\",\n+        )\n+    }\n+\n+\n def test_base_checker_doc() -> None:\n     basic = OtherBasicChecker()\n     expected_beginning = \"\"\"\\\n@@ -65,3 +76,13 @@ def test_base_checker_doc() -> None:\n \n     assert str(less_basic) == expected_beginning + expected_middle + expected_end\n     assert repr(less_basic) == repr(basic)\n+\n+\n+def test_base_checker_ordering() -> None:\n+    \"\"\"Test ordering of checkers based on their __gt__ method.\"\"\"\n+    fake_checker_1 = OtherBasicChecker()\n+    fake_checker_2 = LessBasicChecker()\n+    fake_checker_3 = DifferentBasicChecker()\n+    assert fake_checker_1 < fake_checker_3\n+    assert fake_checker_2 < fake_checker_3\n+    assert fake_checker_1 == fake_checker_2\n",
+  "problem_statement": "Is `BaseChecker.__gt__` required\n### Bug description\n\nAs noted by @DanielNoord [here](https://github.com/PyCQA/pylint/pull/5938#discussion_r837867526), [`BaseCheck.__gt__`](https://github.com/PyCQA/pylint/blob/742e60dc07077cdd3338dffc3bb809cd4c27085f/pylint/checkers/base_checker.py#L62-L64) is not currently covered. If this required then we should add a unit test, otherwise we can remove this method.\n\n### Configuration\n\n```ini\nN/A\n```\n\n\n### Command used\n\n```shell\nN/A\n```\n\n\n### Pylint output\n\n```shell\nN/A\n```\n\n\n### Expected behavior\n\nN/A\n\n### Pylint version\n\n```shell\nN/A\n```\n\n\n### OS / Environment\n\n_No response_\n\n### Additional dependencies\n\n_No response_\n",
+  "hints_text": "I think this was used originally to be able to assert that  a list of checker is equal to another one in tests. If it's not covered it means we do not do that anymore.\nIt's used in Sphinx and maybe downstream libraries see #6047 .\nShall we add a no coverage param then?\nIt's pretty easy to add a unit test for this so will make a quick PR",
+  "created_at": "2022-03-30T18:23:36Z",
+  "version": "2.14",
+  "FAIL_TO_PASS": "[\"tests/checkers/unittest_base_checker.py::test_base_checker_ordering\"]",
+  "PASS_TO_PASS": "[\"tests/checkers/unittest_base_checker.py::test_base_checker_doc\"]",
+  "environment_setup_commit": "680edebc686cad664bbed934a490aeafa775f163",
+  "patch_files": [
+    "pylint/checkers/base_checker.py"
+  ],
+  "test_patch_files": [
+    "tests/checkers/unittest_base_checker.py"
+  ],
+  "patch_diff_details": {
+    "pylint/checkers/base_checker.py": {
+      "diffs": [
+        {
+          "start_line_old": 64,
+          "end_line_old": 64,
+          "file_pos": 6,
+          "file_context_length": 25239,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/checkers/base_checker.py_functools_16.2.1",
+          "closest_snippet_line_distance": 41
+        }
+      ]
+    }
+  },
+  "vectors": 1035,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker_BasicChecker.msgs.1",
+      "distance": 0.8563085794448853,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 105,
+      "end_line": 249,
+      "tokens": 1332,
+      "context_length": 1332
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_using_constant_test_BasicChecker.visit_classdef.2",
+      "distance": 0.8579909205436707,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 278,
+      "end_line": 339,
+      "tokens": 477,
+      "context_length": 1809
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker_ComparisonChecker.msgs.1",
+      "distance": 0.872635006904602,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 24,
+      "end_line": 74,
+      "tokens": 464,
+      "context_length": 2273
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker_ImportsChecker.options.1",
+      "distance": 0.9018466472625732,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 259,
+      "end_line": 385,
+      "tokens": 801,
+      "context_length": 3074
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker._check_callable_comparison_ComparisonChecker._check_callable_comparison.9.1",
+      "distance": 0.9103204011917114,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 215,
+      "end_line": 236,
+      "tokens": 235,
+      "context_length": 3309
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker.visit_compare_ComparisonChecker.visit_compare.11.1",
+      "distance": 0.9197529554367065,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 238,
+      "end_line": 267,
+      "tokens": 257,
+      "context_length": 3566
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker._check_literal_comparison_ComparisonChecker._check_literal_comparison.5.1",
+      "distance": 0.9224538803100586,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 175,
+      "end_line": 186,
+      "tokens": 143,
+      "context_length": 3709
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_4_ImplicitBooleanessChecker.options.1",
+      "distance": 0.9230514764785767,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 5,
+      "end_line": 78,
+      "tokens": 516,
+      "context_length": 4225
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_misplaced_format_function_BasicChecker._check_misplaced_format_function.5.call_expr.3.1",
+      "distance": 0.9260486364364624,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 567,
+      "end_line": 586,
+      "tokens": 165,
+      "context_length": 4390
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_asyncfunctiondef_BasicErrorChecker._check_name_used_prior_global.3.6.1",
+      "distance": 0.9285669326782227,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 297,
+      "end_line": 324,
+      "tokens": 173,
+      "context_length": 4563
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_yield_outside_func_BasicErrorChecker._check_else_on_loop.2.1",
+      "distance": 0.9301744699478149,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 464,
+      "end_line": 478,
+      "tokens": 164,
+      "context_length": 4727
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pylint/pylint/checkers/base_checker.py_functools_16.2.1",
+      "distance": 0.9313196539878845,
+      "file_path": "pylint/checkers/base_checker.py",
+      "start_line": 5,
+      "end_line": 23,
+      "tokens": 127,
+      "context_length": 4854,
+      "file_pos": 6
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pylint/pylint/checkers/misc.py_EncodingChecker_EncodingChecker.open.self._fixme_pattern.1",
+      "distance": 0.9444823265075684,
+      "file_path": "pylint/checkers/misc.py",
+      "start_line": 54,
+      "end_line": 107,
+      "tokens": 321,
+      "context_length": 5175
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_nonlocal_without_binding_BasicErrorChecker._check_nonlocal_without_binding.3.1",
+      "distance": 0.9446722865104675,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 394,
+      "end_line": 412,
+      "tokens": 141,
+      "context_length": 5316
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker.visit_assert_BasicChecker.visit_assert.3.2",
+      "distance": 0.9472893476486206,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 608,
+      "end_line": 623,
+      "tokens": 157,
+      "context_length": 5473
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/pass_checker.py_4_",
+      "distance": 0.9496797323226929,
+      "file_path": "pylint/checkers/base/pass_checker.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 160,
+      "context_length": 5633
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/docstring_checker.py_DocStringChecker_DocStringChecker.visit_classdef.1.1",
+      "distance": 0.9523113965988159,
+      "file_path": "pylint/checkers/base/docstring_checker.py",
+      "start_line": 46,
+      "end_line": 114,
+      "tokens": 534,
+      "context_length": 6167
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_collections__ParameterSignature.1",
+      "distance": 0.9539748430252075,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 6,
+      "end_line": 65,
+      "tokens": 433,
+      "context_length": 6600
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/docstring_checker.py_re__infer_dunder_doc_attribute.2.6.1",
+      "distance": 0.9549610614776611,
+      "file_path": "pylint/checkers/base/docstring_checker.py",
+      "start_line": 7,
+      "end_line": 43,
+      "tokens": 203,
+      "context_length": 6803
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/__init__.py___all___",
+      "distance": 0.9564567804336548,
+      "file_path": "pylint/checkers/base/__init__.py",
+      "start_line": 6,
+      "end_line": 46,
+      "tokens": 275,
+      "context_length": 7078
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparison_placement.py_MisplacedComparisonConstantChecker.visit_compare_",
+      "distance": 0.959203839302063,
+      "file_path": "pylint/extensions/comparison_placement.py",
+      "start_line": 57,
+      "end_line": 72,
+      "tokens": 155,
+      "context_length": 7233
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker._check_nan_comparison_ComparisonChecker._check_nan_comparison",
+      "distance": 0.9604441523551941,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 134,
+      "end_line": 173,
+      "tokens": 319,
+      "context_length": 7552
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pylint/pylint/testutils/checker_test_case.py_contextlib_CheckerTestCase.assertNoMessages.2.1",
+      "distance": 0.962014377117157,
+      "file_path": "pylint/testutils/checker_test_case.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 207,
+      "context_length": 7759
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_50_VariablesChecker.options.1",
+      "distance": 0.9631146192550659,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 971,
+      "end_line": 1076,
+      "tokens": 676,
+      "context_length": 8435
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker.visit_functiondef_NameChecker.visit_global.1.1",
+      "distance": 0.9641910791397095,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 326,
+      "end_line": 357,
+      "tokens": 265,
+      "context_length": 8700
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/__init__.py___all___",
+      "distance": 0.9659743309020996,
+      "file_path": "pylint/checkers/base/name_checker/__init__.py",
+      "start_line": 5,
+      "end_line": 26,
+      "tokens": 116,
+      "context_length": 8816
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/docstring_checker.py_DocStringChecker.visit_functiondef_DocStringChecker.visit_asyncfunctiondef.1",
+      "distance": 0.967477023601532,
+      "file_path": "pylint/checkers/base/docstring_checker.py",
+      "start_line": 116,
+      "end_line": 151,
+      "tokens": 306,
+      "context_length": 9122
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_functiondef_BasicErrorChecker.visit_functiondef.12.1.1.1",
+      "distance": 0.9685915112495422,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 251,
+      "end_line": 295,
+      "tokens": 406,
+      "context_length": 9528
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker_NameChecker.msgs.1",
+      "distance": 0.9709101915359497,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 125,
+      "end_line": 159,
+      "tokens": 317,
+      "context_length": 9845
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_unreachable_BasicChecker._check_unreachable.3.2",
+      "distance": 0.9709316492080688,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 648,
+      "end_line": 662,
+      "tokens": 139,
+      "context_length": 9984
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_classdef_BasicErrorChecker._too_many_starred_for_tuple.3.1",
+      "distance": 0.9716929197311401,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 207,
+      "end_line": 218,
+      "tokens": 120,
+      "context_length": 10104
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.__init___StdlibChecker._check_shallow_copy_environ.3.1.2",
+      "distance": 0.9774158000946045,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 441,
+      "end_line": 491,
+      "tokens": 539,
+      "context_length": 10643
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_dict_cond_",
+      "distance": 0.9798369407653809,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 129,
+      "end_line": 157,
+      "tokens": 253,
+      "context_length": 10896
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_redeclared_assign_name_",
+      "distance": 0.9801546335220337,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 798,
+      "end_line": 831,
+      "tokens": 286,
+      "context_length": 11182
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_return_BasicErrorChecker.visit_while.1",
+      "distance": 0.9802541136741638,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 354,
+      "end_line": 381,
+      "tokens": 284,
+      "context_length": 11466
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py__is_invalid_base_class__has_data_descriptor.3.1",
+      "distance": 0.9802806377410889,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 321,
+      "end_line": 341,
+      "tokens": 132,
+      "context_length": 11598
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.open_TypeChecker.visit_asyncfunctiondef.1",
+      "distance": 0.9805161952972412,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 887,
+      "end_line": 917,
+      "tokens": 350,
+      "context_length": 11948
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparison_placement.py_5_MisplacedComparisonConstantChecker._check_misplaced_constant.4",
+      "distance": 0.9805341958999634,
+      "file_path": "pylint/extensions/comparison_placement.py",
+      "start_line": 10,
+      "end_line": 55,
+      "tokens": 340,
+      "context_length": 12288
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_slots_elt_ClassChecker._check_slots_elt.1.6.2.3",
+      "distance": 0.9810435771942139,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1404,
+      "end_line": 1430,
+      "tokens": 227,
+      "context_length": 12515
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker._is_ignored_function_TypeChecker._is_list_sort_method.1.1",
+      "distance": 0.9811438322067261,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1155,
+      "end_line": 1172,
+      "tokens": 135,
+      "context_length": 12650
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_consistent_mro_ClassChecker._check_consistent_mro.2.4.2",
+      "distance": 0.9815417528152466,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 809,
+      "end_line": 819,
+      "tokens": 117,
+      "context_length": 12767
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._filter_vararg_BasicChecker._has_variadic_argument.3.1",
+      "distance": 0.9828639030456543,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 387,
+      "end_line": 411,
+      "tokens": 160,
+      "context_length": 12927
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_unaryop_BasicErrorChecker.visit_unaryop.2.1",
+      "distance": 0.9833292961120605,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 383,
+      "end_line": 392,
+      "tokens": 120,
+      "context_length": 13047
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker.open_NameChecker.open.self._bad_names_rgxs_compiled.1",
+      "distance": 0.9839409589767456,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 250,
+      "end_line": 264,
+      "tokens": 147,
+      "context_length": 13194
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker.options_NameChecker.__init__.self._bad_names_rgxs_compiled.1",
+      "distance": 0.9854632616043091,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 161,
+      "end_line": 248,
+      "tokens": 618,
+      "context_length": 13812
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker.visit_expr_BasicChecker.visit_expr.12.2.1",
+      "distance": 0.9862334728240967,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 341,
+      "end_line": 385,
+      "tokens": 435,
+      "context_length": 14247
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_collections_DEFAULT_ARGUMENT_SYMBOLS.1",
+      "distance": 0.9866830110549927,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 7,
+      "end_line": 61,
+      "tokens": 344,
+      "context_length": 14591
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_nonlocal_and_global_BasicErrorChecker._check_nonlocal_and_global.7.1",
+      "distance": 0.9886021018028259,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 326,
+      "end_line": 352,
+      "tokens": 164,
+      "context_length": 14755
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_astroid__is_one_arg_pos_call.2.1",
+      "distance": 0.9893915057182312,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 7,
+      "end_line": 21,
+      "tokens": 146,
+      "context_length": 14901
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker_StdlibChecker.msgs.1",
+      "distance": 0.9903498888015747,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 323,
+      "end_line": 439,
+      "tokens": 1195,
+      "context_length": 16096
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/not_checker.py_NotChecker.visit_unaryop_",
+      "distance": 0.9905815720558167,
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "start_line": 44,
+      "end_line": 84,
+      "tokens": 317,
+      "context_length": 16413
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_inferred_class_is_abstract_BasicErrorChecker._check_inferred_class_is_abstract.9.1",
+      "distance": 0.9911216497421265,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 427,
+      "end_line": 462,
+      "tokens": 270,
+      "context_length": 16683
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker.visit_module_NameChecker.leave_module.1.7.1",
+      "distance": 0.9926677942276001,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 292,
+      "end_line": 316,
+      "tokens": 243,
+      "context_length": 16926
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_ImplicitBooleanessChecker.visit_call_ImplicitBooleanessChecker.visit_call.4.15.1",
+      "distance": 0.9963597059249878,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 80,
+      "end_line": 119,
+      "tokens": 395,
+      "context_length": 17321
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker._check_iter_SpecialMethodsChecker._check_getnewargs.1.1",
+      "distance": 0.9967859983444214,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 315,
+      "end_line": 361,
+      "tokens": 454,
+      "context_length": 17775
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_sys_DEPRECATED_MODULES.1",
+      "distance": 0.9969480037689209,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 7,
+      "end_line": 50,
+      "tokens": 461,
+      "context_length": 18236
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pylint/pylint/extensions/eq_without_hash.py_5_",
+      "distance": 0.9974040985107422,
+      "file_path": "pylint/extensions/eq_without_hash.py",
+      "start_line": 12,
+      "end_line": 42,
+      "tokens": 243,
+      "context_length": 18479
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker._check_unidiomatic_typecheck_",
+      "distance": 0.9986071586608887,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 269,
+      "end_line": 296,
+      "tokens": 264,
+      "context_length": 18743
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_first_arg_config_ClassChecker._check_bases_classes.6.6",
+      "distance": 0.9991604089736938,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1901,
+      "end_line": 1935,
+      "tokens": 289,
+      "context_length": 19032
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker_SpecialMethodsChecker.priority.1",
+      "distance": 1.0000581741333008,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 46,
+      "end_line": 135,
+      "tokens": 763,
+      "context_length": 19795
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_STDLIB_CLASSES_IGNORE_ANCESTOR_STDLIB_CLASSES_IGNORE_ANCESTOR.1",
+      "distance": 1.00111722946167,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 94,
+      "end_line": 172,
+      "tokens": 510,
+      "context_length": 20305
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker_BadBuiltinChecker.options.1",
+      "distance": 1.0015183687210083,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 23,
+      "end_line": 49,
+      "tokens": 177,
+      "context_length": 20482
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_collections_TYPING_FORWARD_REF_QNAME.1",
+      "distance": 1.0021421909332275,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 7,
+      "end_line": 22,
+      "tokens": 128,
+      "context_length": 20610
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker_BasicErrorChecker.msgs.1",
+      "distance": 1.002200961112976,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 97,
+      "end_line": 205,
+      "tokens": 952,
+      "context_length": 21562
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pylint/pylint/checkers/ellipsis_checker.py_5_EllipsisChecker.msgs.1",
+      "distance": 1.005142331123352,
+      "file_path": "pylint/checkers/ellipsis_checker.py",
+      "start_line": 6,
+      "end_line": 30,
+      "tokens": 167,
+      "context_length": 21729
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_property_with_parameters_ClassChecker._check_invalid_overridden_method.7.1",
+      "distance": 1.00616455078125,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1284,
+      "end_line": 1337,
+      "tokens": 416,
+      "context_length": 22145
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker.__init___SpecialMethodsChecker.__init__.self._protocol_map.1",
+      "distance": 1.0063377618789673,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 137,
+      "end_line": 152,
+      "tokens": 167,
+      "context_length": 22312
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_proper_bases_ClassChecker._check_proper_bases.2.5.1",
+      "distance": 1.0080597400665283,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 821,
+      "end_line": 842,
+      "tokens": 162,
+      "context_length": 22474
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_attribute_defined_outside_init_ClassChecker._check_attribute_defined_outside_init.2.11.2.11.5.2.2.1.1.4.2",
+      "distance": 1.0091495513916016,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1009,
+      "end_line": 1078,
+      "tokens": 612,
+      "context_length": 23086
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker.visit_classdef_NameChecker.visit_classdef.3.1.1",
+      "distance": 1.0140583515167236,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 318,
+      "end_line": 324,
+      "tokens": 113,
+      "context_length": 23199
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/docstring_checker.py_DocStringChecker._check_docstring_",
+      "distance": 1.015906572341919,
+      "file_path": "pylint/checkers/base/docstring_checker.py",
+      "start_line": 153,
+      "end_line": 210,
+      "tokens": 488,
+      "context_length": 23687
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pylint/pylint/checkers/dunder_methods.py_4_DunderCallChecker.__implements__.1",
+      "distance": 1.0170694589614868,
+      "file_path": "pylint/checkers/dunder_methods.py",
+      "start_line": 5,
+      "end_line": 28,
+      "tokens": 191,
+      "context_length": 23878
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker.visit_call_",
+      "distance": 1.0184308290481567,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 51,
+      "end_line": 66,
+      "tokens": 170,
+      "context_length": 24048
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparetozero.py_CompareToZeroChecker.visit_compare_",
+      "distance": 1.018449068069458,
+      "file_path": "pylint/extensions/comparetozero.py",
+      "start_line": 47,
+      "end_line": 78,
+      "tokens": 310,
+      "context_length": 24358
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/not_checker.py_astroid_NotChecker.skipped_classnames.1",
+      "distance": 1.0187883377075195,
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "start_line": 5,
+      "end_line": 42,
+      "tokens": 292,
+      "context_length": 24650
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_redundant_assert_StdlibChecker._check_datetime.3.1",
+      "distance": 1.019182801246643,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 602,
+      "end_line": 625,
+      "tokens": 192,
+      "context_length": 24842
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/comparison_checker.py_ComparisonChecker._check_singleton_comparison_ComparisonChecker._check_singleton_comparison.9",
+      "distance": 1.0193572044372559,
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "start_line": 76,
+      "end_line": 132,
+      "tokens": 459,
+      "context_length": 25301
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_slots_ClassChecker._check_slots.2.2.8",
+      "distance": 1.0197676420211792,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1339,
+      "end_line": 1369,
+      "tokens": 263,
+      "context_length": 25564
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker_TypeChecker.options.1",
+      "distance": 1.0218875408172607,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 735,
+      "end_line": 885,
+      "tokens": 1094,
+      "context_length": 26658
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.visit_unaryop_StdlibChecker.visit_functiondef.1.1",
+      "distance": 1.0231781005859375,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 546,
+      "end_line": 567,
+      "tokens": 218,
+      "context_length": 26876
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pylint/pylint/checkers/newstyle.py_5_MSGS.1",
+      "distance": 1.0254054069519043,
+      "file_path": "pylint/checkers/newstyle.py",
+      "start_line": 6,
+      "end_line": 25,
+      "tokens": 122,
+      "context_length": 26998
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker._check_unsupported_alternative_union_syntax_TypeChecker.visit_compare.3.1",
+      "distance": 1.0264379978179932,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1818,
+      "end_line": 1867,
+      "tokens": 439,
+      "context_length": 27437
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pylint/pylint/checkers/dunder_methods.py_DunderCallChecker.includedict_DunderCallChecker.includedict.1",
+      "distance": 1.0265859365463257,
+      "file_path": "pylint/checkers/dunder_methods.py",
+      "start_line": 30,
+      "end_line": 123,
+      "tokens": 1095,
+      "context_length": 28532
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.options_RefactoringChecker._is_bool_const.1.1",
+      "distance": 1.0267002582550049,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 449,
+      "end_line": 501,
+      "tokens": 382,
+      "context_length": 28914
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._is_node_expr_that_calls_attribute_name_ModifiedIterationChecker._is_node_assigns_subscript_name.1.1",
+      "distance": 1.027986764907837,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 90,
+      "end_line": 114,
+      "tokens": 206,
+      "context_length": 29120
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pylint/pylint/checkers/non_ascii_names.py_NonAsciiNameChecker.visit_classdef_",
+      "distance": 1.0299255847930908,
+      "file_path": "pylint/checkers/non_ascii_names.py",
+      "start_line": 173,
+      "end_line": 202,
+      "tokens": 293,
+      "context_length": 29413
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker_ClassChecker._ignore_mixin.1.1",
+      "distance": 1.0299361944198608,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 683,
+      "end_line": 780,
+      "tokens": 629,
+      "context_length": 30042
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_ImplicitBooleanessChecker.instance_has_bool_ImplicitBooleanessChecker.visit_compare.1",
+      "distance": 1.0324761867523193,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 121,
+      "end_line": 144,
+      "tokens": 232,
+      "context_length": 30274
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.visit_with_TypeChecker.visit_with.1.4.4.1.3.2",
+      "distance": 1.0326814651489258,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1699,
+      "end_line": 1762,
+      "tokens": 524,
+      "context_length": 30798
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pylint/pylint/extensions/emptystring.py_CompareToEmptyStringChecker.visit_compare_",
+      "distance": 1.034010887145996,
+      "file_path": "pylint/extensions/emptystring.py",
+      "start_line": 42,
+      "end_line": 73,
+      "tokens": 313,
+      "context_length": 31111
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pylint/pylint/extensions/code_style.py_sys_12.2.1",
+      "distance": 1.0354763269424438,
+      "file_path": "pylint/extensions/code_style.py",
+      "start_line": 5,
+      "end_line": 21,
+      "tokens": 113,
+      "context_length": 31224
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker._check_getnewargs_ex_",
+      "distance": 1.0374993085861206,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 363,
+      "end_line": 392,
+      "tokens": 211,
+      "context_length": 31435
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pylint/pylint/constants.py_DELETED_MESSAGES_45",
+      "distance": 1.0382516384124756,
+      "file_path": "pylint/constants.py",
+      "start_line": 90,
+      "end_line": 187,
+      "tokens": 1251,
+      "context_length": 32686
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker.visit_lambda_BasicChecker.visit_lambda.19",
+      "distance": 1.0383714437484741,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 413,
+      "end_line": 471,
+      "tokens": 534,
+      "context_length": 33220
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pylint/pylint/extensions/empty_comment.py_CommentChecker_",
+      "distance": 1.0424730777740479,
+      "file_path": "pylint/extensions/empty_comment.py",
+      "start_line": 41,
+      "end_line": 68,
+      "tokens": 182,
+      "context_length": 33402
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker._create_naming_rules_NameChecker._create_naming_rules.4.1",
+      "distance": 1.0428425073623657,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 266,
+      "end_line": 290,
+      "tokens": 240,
+      "context_length": 33642
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_self_assigning_variable_BasicChecker._check_self_assigning_variable.scope.7.6.1",
+      "distance": 1.0451996326446533,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 757,
+      "end_line": 796,
+      "tokens": 315,
+      "context_length": 33957
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker.visit_with_BasicChecker.visit_with.pairs.2.1.1.5",
+      "distance": 1.0460965633392334,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 741,
+      "end_line": 755,
+      "tokens": 182,
+      "context_length": 34139
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_check_ModifiedIterationChecker._modified_iterating_check.3.1",
+      "distance": 1.046593427658081,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 72,
+      "end_line": 88,
+      "tokens": 155,
+      "context_length": 34294
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker._check_reversed_BasicChecker._check_reversed.2.3.8.3.1",
+      "distance": 1.0472581386566162,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 684,
+      "end_line": 739,
+      "tokens": 430,
+      "context_length": 34724
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_ExceptionsChecker_ExceptionsChecker.open.2",
+      "distance": 1.0474417209625244,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 227,
+      "end_line": 251,
+      "tokens": 159,
+      "context_length": 34883
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_nonlocal_BasicErrorChecker.visit_call.2.1",
+      "distance": 1.0506417751312256,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 414,
+      "end_line": 425,
+      "tokens": 124,
+      "context_length": 35007
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_boolop_RefactoringChecker._is_simple_assignment.1.1",
+      "distance": 1.050916314125061,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1368,
+      "end_line": 1388,
+      "tokens": 168,
+      "context_length": 35175
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_5_14",
+      "distance": 1.0510350465774536,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 6,
+      "end_line": 20,
+      "tokens": 107,
+      "context_length": 35282
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_env_function_StdlibChecker._check_env_function.7.1",
+      "distance": 1.0521214008331299,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 695,
+      "end_line": 732,
+      "tokens": 273,
+      "context_length": 35555
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker.__init___ImportsChecker.__init__.self.reports.1",
+      "distance": 1.0527217388153076,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 387,
+      "end_line": 399,
+      "tokens": 167,
+      "context_length": 35722
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_VariablesChecker._check_all_VariablesChecker._check_globals.2.1.1",
+      "distance": 1.052898645401001,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 2631,
+      "end_line": 2687,
+      "tokens": 468,
+      "context_length": 36190
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/recommendation_checker.py_4_RecommendationChecker.visit_call.2",
+      "distance": 1.052990436553955,
+      "file_path": "pylint/checkers/refactoring/recommendation_checker.py",
+      "start_line": 5,
+      "end_line": 81,
+      "tokens": 697,
+      "context_length": 36887
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker._check_not_callable_TypeChecker.visit_extslice.4.1",
+      "distance": 1.05324387550354,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1606,
+      "end_line": 1643,
+      "tokens": 338,
+      "context_length": 37225
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker._is_iterator_SpecialMethodsChecker._is_iterator.7.1",
+      "distance": 1.0536178350448608,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 285,
+      "end_line": 313,
+      "tokens": 220,
+      "context_length": 37445
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_list_cond_ModifiedIterationChecker._modified_iterating_list_cond.4.1",
+      "distance": 1.053898811340332,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 116,
+      "end_line": 127,
+      "tokens": 120,
+      "context_length": 37565
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_MisdesignChecker_MisdesignChecker.__init__.self._stmts.1",
+      "distance": 1.056222915649414,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 273,
+      "end_line": 410,
+      "tokens": 821,
+      "context_length": 38386
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/pylint/pylint/checkers/non_ascii_names.py_NonAsciiNameChecker.visit_module_NonAsciiNameChecker.visit_global.1.1",
+      "distance": 1.0568065643310547,
+      "file_path": "pylint/checkers/non_ascii_names.py",
+      "start_line": 113,
+      "end_line": 146,
+      "tokens": 286,
+      "context_length": 38672
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_redefinition_",
+      "distance": 1.0571672916412354,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 498,
+      "end_line": 573,
+      "tokens": 585,
+      "context_length": 39257
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_consider_using_generator_RefactoringChecker._check_consider_using_generator.checked_call.2.3.inside_comp.3.2.1",
+      "distance": 1.0576881170272827,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 984,
+      "end_line": 1011,
+      "tokens": 266,
+      "context_length": 39523
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_superfluous_else_return_RefactoringChecker._type_and_name_are_equal.3.1",
+      "distance": 1.0591216087341309,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 693,
+      "end_line": 720,
+      "tokens": 283,
+      "context_length": 39806
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_METHODS_DEPRECATED_METHODS.1",
+      "distance": 1.0594559907913208,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 101,
+      "end_line": 245,
+      "tokens": 1089,
+      "context_length": 40895
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/pylint/pylint/checkers/non_ascii_names.py_sys_NON_ASCII_HELP.1",
+      "distance": 1.060196876525879,
+      "file_path": "pylint/checkers/non_ascii_names.py",
+      "start_line": 13,
+      "end_line": 40,
+      "tokens": 239,
+      "context_length": 41134
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.visit_subscript_TypeChecker.visit_subscript.11.1",
+      "distance": 1.0603060722351074,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1869,
+      "end_line": 1927,
+      "tokens": 464,
+      "context_length": 41598
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker.visit_call_BasicChecker.visit_call.3.4.1.3.1",
+      "distance": 1.0603148937225342,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 588,
+      "end_line": 606,
+      "tokens": 204,
+      "context_length": 41802
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker._is_wrapped_type_SpecialMethodsChecker._is_dict.2.1",
+      "distance": 1.0619715452194214,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 235,
+      "end_line": 283,
+      "tokens": 329,
+      "context_length": 42131
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/pylint/pylint/checkers/utils.py_infer_all_has_known_bases.5.1",
+      "distance": 1.0625383853912354,
+      "file_path": "pylint/checkers/utils.py",
+      "start_line": 1237,
+      "end_line": 1263,
+      "tokens": 183,
+      "context_length": 42314
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/__init__.py_5_",
+      "distance": 1.063070297241211,
+      "file_path": "pylint/checkers/refactoring/__init__.py",
+      "start_line": 8,
+      "end_line": 33,
+      "tokens": 174,
+      "context_length": 42488
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker._check_assign_to_new_keyword_violation_NameChecker._assigns_typevar.3.1",
+      "distance": 1.0632200241088867,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 517,
+      "end_line": 546,
+      "tokens": 240,
+      "context_length": 42728
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_ARGUMENTS_DEPRECATED_DECORATORS.1",
+      "distance": 1.0633349418640137,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 52,
+      "end_line": 98,
+      "tokens": 556,
+      "context_length": 43284
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.visit_classdef_TypeChecker.visit_delattr.1",
+      "distance": 1.0634080171585083,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 919,
+      "end_line": 957,
+      "tokens": 344,
+      "context_length": 43628
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/pylint/pylint/utils/utils.py_get_global_option_get_global_option_43.1",
+      "distance": 1.0640513896942139,
+      "file_path": "pylint/utils/utils.py",
+      "start_line": 203,
+      "end_line": 250,
+      "tokens": 252,
+      "context_length": 43880
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker.visit_assignattr_ClassChecker._check_invalid_class_object.4",
+      "distance": 1.0643024444580078,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1478,
+      "end_line": 1498,
+      "tokens": 192,
+      "context_length": 44072
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_fnmatch__flatten_container.2.1.2.1",
+      "distance": 1.066923975944519,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 7,
+      "end_line": 100,
+      "tokens": 485,
+      "context_length": 44557
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_MisdesignChecker.visit_asyncfunctiondef_MisdesignChecker.leave_functiondef.8.1",
+      "distance": 1.0678892135620117,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 544,
+      "end_line": 578,
+      "tokens": 254,
+      "context_length": 44811
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_if_RefactoringChecker.visit_if.8",
+      "distance": 1.068935751914978,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 768,
+      "end_line": 785,
+      "tokens": 169,
+      "context_length": 44980
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker._check_in_loop_BasicErrorChecker._check_in_loop.3",
+      "distance": 1.0695910453796387,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 480,
+      "end_line": 496,
+      "tokens": 147,
+      "context_length": 45127
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_VariablesChecker._check_imports_VariablesChecker._check_imports.7",
+      "distance": 1.0699706077575684,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 2689,
+      "end_line": 2769,
+      "tokens": 673,
+      "context_length": 45800
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.visit_call.33_TypeChecker.visit_call.44.2.1",
+      "distance": 1.0703293085098267,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1389,
+      "end_line": 1490,
+      "tokens": 827,
+      "context_length": 46627
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/pylint/pylint/checkers/dunder_methods.py_DunderCallChecker.name_",
+      "distance": 1.0704004764556885,
+      "file_path": "pylint/checkers/dunder_methods.py",
+      "start_line": 124,
+      "end_line": 152,
+      "tokens": 208,
+      "context_length": 46835
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_collections_TYPING_TYPE_VAR_QNAME.1",
+      "distance": 1.0712653398513794,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 6,
+      "end_line": 34,
+      "tokens": 218,
+      "context_length": 47053
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py__has_bare_super_call__scope_default.1.1",
+      "distance": 1.0713310241699219,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 409,
+      "end_line": 660,
+      "tokens": 166,
+      "context_length": 47219
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_unused_private_functions_ClassChecker._check_unused_private_functions.1.4.3.7",
+      "distance": 1.071678638458252,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 879,
+      "end_line": 933,
+      "tokens": 410,
+      "context_length": 47629
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/pylint/pylint/extensions/code_style.py_CodeStyleChecker_CodeStyleChecker.visit_if.1.1",
+      "distance": 1.073826789855957,
+      "file_path": "pylint/extensions/code_style.py",
+      "start_line": 24,
+      "end_line": 110,
+      "tokens": 752,
+      "context_length": 48381
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_re_23",
+      "distance": 1.0751453638076782,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 7,
+      "end_line": 93,
+      "tokens": 724,
+      "context_length": 49105
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker.leave_classdef_ClassChecker.leave_classdef.5",
+      "distance": 1.075461506843567,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 863,
+      "end_line": 877,
+      "tokens": 118,
+      "context_length": 49223
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/pylint/pylint/extensions/typing.py_TypingChecker.visit_attribute_TypingChecker.visit_attribute.4.1",
+      "distance": 1.0763359069824219,
+      "file_path": "pylint/extensions/typing.py",
+      "start_line": 212,
+      "end_line": 227,
+      "tokens": 183,
+      "context_length": 49406
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.leave_classdef_RefactoringChecker.visit_raise.1",
+      "distance": 1.0767933130264282,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 917,
+      "end_line": 927,
+      "tokens": 118,
+      "context_length": 49524
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_redefined_argument_from_local_RefactoringChecker._check_redefined_argument_from_local.5.1.1",
+      "distance": 1.0771639347076416,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 621,
+      "end_line": 640,
+      "tokens": 153,
+      "context_length": 49677
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/pylint/pylint/extensions/consider_ternary_expression.py_5_",
+      "distance": 1.0773409605026245,
+      "file_path": "pylint/extensions/consider_ternary_expression.py",
+      "start_line": 7,
+      "end_line": 58,
+      "tokens": 326,
+      "context_length": 50003
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_starred_BasicErrorChecker.visit_starred.6.1",
+      "distance": 1.0777498483657837,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 233,
+      "end_line": 249,
+      "tokens": 172,
+      "context_length": 50175
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/pylint/pylint/extensions/check_elif.py_4_ElseifUsedChecker.leave_module.1",
+      "distance": 1.077817440032959,
+      "file_path": "pylint/extensions/check_elif.py",
+      "start_line": 5,
+      "end_line": 46,
+      "tokens": 297,
+      "context_length": 50472
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/pylint/pylint/checkers/threading_checker.py_4_ThreadingChecker.msgs.1",
+      "distance": 1.0787038803100586,
+      "file_path": "pylint/checkers/threading_checker.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 229,
+      "context_length": 50701
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_init_ClassChecker._check_init.7.3.9",
+      "distance": 1.0814275741577148,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1937,
+      "end_line": 2018,
+      "tokens": 667,
+      "context_length": 51368
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparetozero.py_itertools_CompareToZeroChecker.options.1",
+      "distance": 1.0817363262176514,
+      "file_path": "pylint/extensions/comparetozero.py",
+      "start_line": 7,
+      "end_line": 45,
+      "tokens": 224,
+      "context_length": 51592
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker.visit_assign_BasicErrorChecker.visit_assign.assign_target.5.1",
+      "distance": 1.0819754600524902,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 220,
+      "end_line": 231,
+      "tokens": 136,
+      "context_length": 51728
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py__is_c_extension__is_invalid_isinstance_type.inferred.6.1",
+      "distance": 1.0821034908294678,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 713,
+      "end_line": 732,
+      "tokens": 157,
+      "context_length": 51885
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_ExceptionsChecker.visit_binop_ExceptionsChecker.visit_compare.1.suggestion.2",
+      "distance": 1.0832643508911133,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 452,
+      "end_line": 464,
+      "tokens": 196,
+      "context_length": 52081
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_chained_comparison.uses_RefactoringChecker._check_chained_comparison.6.4.2",
+      "distance": 1.0833373069763184,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1276,
+      "end_line": 1289,
+      "tokens": 158,
+      "context_length": 52239
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/pylint/pylint/extensions/typing.py_TYPING_NORETURN_TypingChecker.10",
+      "distance": 1.0834310054779053,
+      "file_path": "pylint/extensions/typing.py",
+      "start_line": 77,
+      "end_line": 163,
+      "tokens": 782,
+      "context_length": 53021
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.visit_await_TypeChecker._check_await_outside_coroutine.3",
+      "distance": 1.0842161178588867,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1956,
+      "end_line": 1968,
+      "tokens": 133,
+      "context_length": 53154
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/pylint/doc/data/messages/r/redundant-unittest-assert/good.py__",
+      "distance": 1.0842907428741455,
+      "file_path": "doc/data/messages/r/redundant-unittest-assert/good.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 53154
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_IterableChecker._check_iterable_",
+      "distance": 1.0845119953155518,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 2020,
+      "end_line": 2085,
+      "tokens": 606,
+      "context_length": 53760
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/pylint/pylint/extensions/empty_comment.py_4_is_line_commented.5.1",
+      "distance": 1.0860133171081543,
+      "file_path": "pylint/extensions/empty_comment.py",
+      "start_line": 5,
+      "end_line": 24,
+      "tokens": 127,
+      "context_length": 53887
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_unused_private_attributes_ClassChecker._check_unused_private_attributes.1.8.6.2",
+      "distance": 1.0862555503845215,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 958,
+      "end_line": 1007,
+      "tokens": 394,
+      "context_length": 54281
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/name_checker/checker.py_NameChecker._name_allowed_by_regex_NameChecker._check_name.10.1",
+      "distance": 1.0875227451324463,
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "start_line": 475,
+      "end_line": 515,
+      "tokens": 383,
+      "context_length": 54664
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_FormatChecker_FormatChecker.__init__.self._bracket_stack.1",
+      "distance": 1.0878565311431885,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 196,
+      "end_line": 307,
+      "tokens": 655,
+      "context_length": 55319
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/pylint/pylint/extensions/typing.py_TypingChecker._check_for_alternative_union_syntax_TypingChecker._check_for_alternative_union_syntax.5",
+      "distance": 1.0884767770767212,
+      "file_path": "pylint/extensions/typing.py",
+      "start_line": 229,
+      "end_line": 256,
+      "tokens": 216,
+      "context_length": 55535
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.leave_module_RefactoringChecker.visit_while.1",
+      "distance": 1.0890593528747559,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 606,
+      "end_line": 619,
+      "tokens": 128,
+      "context_length": 55663
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_builtins__builtin_exceptions",
+      "distance": 1.0898032188415527,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 6,
+      "end_line": 25,
+      "tokens": 113,
+      "context_length": 55776
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_call_RefactoringChecker.visit_call.7",
+      "distance": 1.091599702835083,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1013,
+      "end_line": 1031,
+      "tokens": 177,
+      "context_length": 55953
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/pylint/pylint/extensions/check_elif.py_ElseifUsedChecker.visit_if_",
+      "distance": 1.0925788879394531,
+      "file_path": "pylint/extensions/check_elif.py",
+      "start_line": 48,
+      "end_line": 62,
+      "tokens": 147,
+      "context_length": 56100
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/pylint/pylint/extensions/while_used.py_5_",
+      "distance": 1.0926647186279297,
+      "file_path": "pylint/extensions/while_used.py",
+      "start_line": 6,
+      "end_line": 37,
+      "tokens": 182,
+      "context_length": 56282
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/special_methods_checker.py_SpecialMethodsChecker.visit_functiondef_SpecialMethodsChecker.visit_asyncfunctiondef.1",
+      "distance": 1.0932977199554443,
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "start_line": 154,
+      "end_line": 185,
+      "tokens": 238,
+      "context_length": 56520
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/pylint/pylint/checkers/strings.py_StringFormatChecker.visit_binop.8_StringFormatChecker.visit_binop.8.5.args_elts.3.2.3.1",
+      "distance": 1.0942225456237793,
+      "file_path": "pylint/checkers/strings.py",
+      "start_line": 280,
+      "end_line": 379,
+      "tokens": 946,
+      "context_length": 57466
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_36_PyLinter.make_options.1",
+      "distance": 1.0943374633789062,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 191,
+      "end_line": 541,
+      "tokens": 304,
+      "context_length": 57770
+    }
+  ],
+  "files": [
+    {
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "position": 1,
+      "tokens": 7057,
+      "context_length": 7057
+    },
+    {
+      "file_path": "pylint/checkers/base/comparison_checker.py",
+      "position": 2,
+      "tokens": 2527,
+      "context_length": 9584
+    },
+    {
+      "file_path": "pylint/checkers/imports.py",
+      "position": 3,
+      "tokens": 7600,
+      "context_length": 17184
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "position": 4,
+      "tokens": 1807,
+      "context_length": 18991
+    },
+    {
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "position": 5,
+      "tokens": 4520,
+      "context_length": 23511
+    },
+    {
+      "file_path": "pylint/checkers/base_checker.py",
+      "position": 6,
+      "tokens": 1728,
+      "context_length": 25239
+    },
+    {
+      "file_path": "pylint/checkers/misc.py",
+      "position": 7,
+      "tokens": 1291,
+      "context_length": 26530
+    },
+    {
+      "file_path": "pylint/checkers/base/pass_checker.py",
+      "position": 8,
+      "tokens": 225,
+      "context_length": 26755
+    },
+    {
+      "file_path": "pylint/checkers/base/docstring_checker.py",
+      "position": 9,
+      "tokens": 1591,
+      "context_length": 28346
+    },
+    {
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "position": 10,
+      "tokens": 16451,
+      "context_length": 44797
+    },
+    {
+      "file_path": "pylint/checkers/base/__init__.py",
+      "position": 11,
+      "tokens": 340,
+      "context_length": 45137
+    },
+    {
+      "file_path": "pylint/extensions/comparison_placement.py",
+      "position": 12,
+      "tokens": 574,
+      "context_length": 45711
+    },
+    {
+      "file_path": "pylint/testutils/checker_test_case.py",
+      "position": 13,
+      "tokens": 865,
+      "context_length": 46576
+    },
+    {
+      "file_path": "pylint/checkers/variables.py",
+      "position": 14,
+      "tokens": 22518,
+      "context_length": 69094
+    },
+    {
+      "file_path": "pylint/checkers/base/name_checker/checker.py",
+      "position": 15,
+      "tokens": 4805,
+      "context_length": 73899
+    },
+    {
+      "file_path": "pylint/checkers/base/name_checker/__init__.py",
+      "position": 16,
+      "tokens": 181,
+      "context_length": 74080
+    },
+    {
+      "file_path": "pylint/checkers/stdlib.py",
+      "position": 17,
+      "tokens": 6384,
+      "context_length": 80464
+    },
+    {
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "position": 18,
+      "tokens": 1302,
+      "context_length": 81766
+    },
+    {
+      "file_path": "pylint/checkers/typecheck.py",
+      "position": 19,
+      "tokens": 16425,
+      "context_length": 98191
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "position": 20,
+      "tokens": 666,
+      "context_length": 98857
+    },
+    {
+      "file_path": "pylint/checkers/classes/special_methods_checker.py",
+      "position": 21,
+      "tokens": 3039,
+      "context_length": 101896
+    },
+    {
+      "file_path": "pylint/extensions/eq_without_hash.py",
+      "position": 22,
+      "tokens": 368,
+      "context_length": 102264
+    },
+    {
+      "file_path": "pylint/checkers/design_analysis.py",
+      "position": 23,
+      "tokens": 4794,
+      "context_length": 107058
+    },
+    {
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "position": 24,
+      "tokens": 519,
+      "context_length": 107577
+    },
+    {
+      "file_path": "pylint/checkers/ellipsis_checker.py",
+      "position": 25,
+      "tokens": 485,
+      "context_length": 108062
+    },
+    {
+      "file_path": "pylint/checkers/dunder_methods.py",
+      "position": 26,
+      "tokens": 1544,
+      "context_length": 109606
+    },
+    {
+      "file_path": "pylint/extensions/comparetozero.py",
+      "position": 27,
+      "tokens": 596,
+      "context_length": 110202
+    },
+    {
+      "file_path": "pylint/checkers/newstyle.py",
+      "position": 28,
+      "tokens": 885,
+      "context_length": 111087
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "position": 29,
+      "tokens": 17250,
+      "context_length": 128337
+    },
+    {
+      "file_path": "pylint/checkers/non_ascii_names.py",
+      "position": 30,
+      "tokens": 1812,
+      "context_length": 130149
+    },
+    {
+      "file_path": "pylint/extensions/emptystring.py",
+      "position": 31,
+      "tokens": 574,
+      "context_length": 130723
+    },
+    {
+      "file_path": "pylint/extensions/code_style.py",
+      "position": 32,
+      "tokens": 2574,
+      "context_length": 133297
+    },
+    {
+      "file_path": "pylint/constants.py",
+      "position": 33,
+      "tokens": 2047,
+      "context_length": 135344
+    },
+    {
+      "file_path": "pylint/extensions/empty_comment.py",
+      "position": 34,
+      "tokens": 487,
+      "context_length": 135831
+    },
+    {
+      "file_path": "pylint/checkers/exceptions.py",
+      "position": 35,
+      "tokens": 4490,
+      "context_length": 140321
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/recommendation_checker.py",
+      "position": 36,
+      "tokens": 3443,
+      "context_length": 143764
+    },
+    {
+      "file_path": "pylint/checkers/utils.py",
+      "position": 37,
+      "tokens": 12680,
+      "context_length": 156444
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/__init__.py",
+      "position": 38,
+      "tokens": 251,
+      "context_length": 156695
+    },
+    {
+      "file_path": "pylint/utils/utils.py",
+      "position": 39,
+      "tokens": 2900,
+      "context_length": 159595
+    },
+    {
+      "file_path": "pylint/extensions/typing.py",
+      "position": 40,
+      "tokens": 3956,
+      "context_length": 163551
+    },
+    {
+      "file_path": "pylint/extensions/consider_ternary_expression.py",
+      "position": 41,
+      "tokens": 407,
+      "context_length": 163958
+    },
+    {
+      "file_path": "pylint/extensions/check_elif.py",
+      "position": 42,
+      "tokens": 500,
+      "context_length": 164458
+    },
+    {
+      "file_path": "pylint/checkers/threading_checker.py",
+      "position": 43,
+      "tokens": 442,
+      "context_length": 164900
+    },
+    {
+      "file_path": "doc/data/messages/r/redundant-unittest-assert/good.py",
+      "position": 44,
+      "tokens": 30,
+      "context_length": 164930
+    },
+    {
+      "file_path": "pylint/checkers/format.py",
+      "position": 45,
+      "tokens": 6198,
+      "context_length": 171128
+    },
+    {
+      "file_path": "pylint/extensions/while_used.py",
+      "position": 46,
+      "tokens": 255,
+      "context_length": 171383
+    },
+    {
+      "file_path": "pylint/checkers/strings.py",
+      "position": 47,
+      "tokens": 8068,
+      "context_length": 179451
+    },
+    {
+      "file_path": "pylint/lint/pylinter.py",
+      "position": 48,
+      "tokens": 14133,
+      "context_length": 193584
+    }
+  ]
+}

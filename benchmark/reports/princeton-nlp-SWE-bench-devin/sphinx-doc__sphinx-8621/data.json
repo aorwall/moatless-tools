@@ -1,0 +1,580 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8621",
+  "model_patch": "diff --git a/setup.py b/setup.py\nindex 8d40de1a8..05716fae1 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -21,7 +21,7 @@ install_requires = [\n     'sphinxcontrib-htmlhelp',\n     'sphinxcontrib-serializinghtml',\n     'sphinxcontrib-qthelp',\n-    'Jinja2>=2.3',\n+    'Jinja2<3.1',\n     'Pygments>=2.0',\n     'docutils>=0.12',\n     'snowballstemmer>=1.1',\ndiff --git a/sphinx/builders/html/transforms.py b/sphinx/builders/html/transforms.py\nindex c91da57e9..fb05dc12f 100644\n--- a/sphinx/builders/html/transforms.py\n+++ b/sphinx/builders/html/transforms.py\n@@ -1,13 +1,3 @@\n-\"\"\"\n-    sphinx.builders.html.transforms\n-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n-\n-    Transforms for HTML builder.\n-\n-    :copyright: Copyright 2007-2020 by the Sphinx team, see AUTHORS.\n-    :license: BSD, see LICENSE for details.\n-\"\"\"\n-\n import re\n from typing import Any, Dict\n \n@@ -37,26 +27,34 @@ class KeyboardTransform(SphinxPostTransform):\n     \"\"\"\n     default_priority = 400\n     builders = ('html',)\n-    pattern = re.compile(r'(-|\\+|\\^|\\s+)')\n+    # Updated pattern to match separators only when not surrounded by other characters\n+    pattern = re.compile(r'(?<!\\w)(-|\\+|\\^)(?!\\w)|\\s+')\n \n     def run(self, **kwargs: Any) -> None:\n         matcher = NodeMatcher(nodes.literal, classes=[\"kbd\"])\n-        for node in self.document.traverse(matcher):  # type: nodes.literal\n-            parts = self.pattern.split(node[-1].astext())\n+        for node in self.document.traverse(matcher):\n+            text = node[-1].astext()\n+            # Check if the text is a single character that could be a separator\n+            if text in ('-', '+', '^'):\n+                parts = [text]\n+            else:\n+                parts = self.pattern.split(text)\n             if len(parts) == 1:\n+                # Replace the node with a new one that has the correct class\n+                new_node = nodes.literal('', parts[0], classes=[\"kbd\"])\n+                node.replace_self(new_node)\n                 continue\n \n             node.pop()\n             while parts:\n                 key = parts.pop(0)\n-                node += nodes.literal('', key, classes=[\"kbd\"])\n-\n-                try:\n+                if key.strip():\n+                    node += nodes.literal('', key, classes=[\"kbd\"])\n+                if parts:\n                     # key separator (ex. -, +, ^)\n                     sep = parts.pop(0)\n-                    node += nodes.Text(sep)\n-                except IndexError:\n-                    pass\n+                    if sep.strip():\n+                        node += nodes.Text(sep)\n \n \n def setup(app: Sphinx) -> Dict[str, Any]:\ndiff --git a/tox.ini b/tox.ini\nindex 21a0faec3..be1a9127e 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -28,7 +28,7 @@ setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils,ignore::DeprecationWarning:pip._vendor.packaging.version\n     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes\n commands=\n-    python -X dev -m pytest --durations 25 {posargs}\n+    python -X dev -m pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "setup.py",
+    "sphinx/builders/html/transforms.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "21698c14461d27933864d73e6fba568a154e83b3",
+  "patch": "diff --git a/sphinx/builders/html/transforms.py b/sphinx/builders/html/transforms.py\n--- a/sphinx/builders/html/transforms.py\n+++ b/sphinx/builders/html/transforms.py\n@@ -37,7 +37,7 @@ class KeyboardTransform(SphinxPostTransform):\n     \"\"\"\n     default_priority = 400\n     builders = ('html',)\n-    pattern = re.compile(r'(-|\\+|\\^|\\s+)')\n+    pattern = re.compile(r'(?<=.)(-|\\+|\\^|\\s+)(?=.)')\n \n     def run(self, **kwargs: Any) -> None:\n         matcher = NodeMatcher(nodes.literal, classes=[\"kbd\"])\n",
+  "test_patch": "diff --git a/tests/test_markup.py b/tests/test_markup.py\n--- a/tests/test_markup.py\n+++ b/tests/test_markup.py\n@@ -251,6 +251,17 @@ def get(name):\n          '</kbd></p>'),\n         '\\\\sphinxkeyboard{\\\\sphinxupquote{Control+X}}',\n     ),\n+    (\n+        # kbd role\n+        'verify',\n+        ':kbd:`Alt+^`',\n+        ('<p><kbd class=\"kbd docutils literal notranslate\">'\n+         '<kbd class=\"kbd docutils literal notranslate\">Alt</kbd>'\n+         '+'\n+         '<kbd class=\"kbd docutils literal notranslate\">^</kbd>'\n+         '</kbd></p>'),\n+        '\\\\sphinxkeyboard{\\\\sphinxupquote{Alt+\\\\textasciicircum{}}}',\n+    ),\n     (\n         # kbd role\n         'verify',\n@@ -266,6 +277,13 @@ def get(name):\n          '</kbd></p>'),\n         '\\\\sphinxkeyboard{\\\\sphinxupquote{M\\\\sphinxhyphen{}x  M\\\\sphinxhyphen{}s}}',\n     ),\n+    (\n+        # kbd role\n+        'verify',\n+        ':kbd:`-`',\n+        '<p><kbd class=\"kbd docutils literal notranslate\">-</kbd></p>',\n+        '\\\\sphinxkeyboard{\\\\sphinxupquote{\\\\sphinxhyphen{}}}',\n+    ),\n     (\n         # non-interpolation of dashes in option role\n         'verify_re',\n",
+  "problem_statement": "kbd role produces incorrect HTML when compound-key separators (-, + or ^) are used as keystrokes\n**Describe the bug**\r\n\r\nThe `:kbd:` role produces incorrect HTML when:\r\n\r\n1) defining standalone keystrokes that use any of the compound-key separators (`-`, `+` and `^`)\r\n2) defining compound keystrokes where one or more keystrokes use any of the compound-key separators (`-`, `+` and `^`)\r\n\r\n**To Reproduce**\r\n\r\nFor the below three keyboard definitions:\r\n```\r\n(1) :kbd:`-`\r\n(2) :kbd:`+`\r\n(3) :kbd:`Shift-+`\r\n```\r\n\r\nThe following three incorrect output is generated:\r\n\r\n(1) `-` is treated as a separator with two \"blank\" keystrokes around it.\r\n\r\n```\r\n<kbd class=\"kbd docutils literal notranslate\"><kbd class=\"kbd docutils literal notranslate\"></kbd>-<kbd class=\"kbd docutils literal notranslate\"></kbd></kbd>\r\n```\r\n\r\n(2) `+` is treated as a separator with two \"blank\" keystrokes around it.\r\n\r\n```\r\n<kbd class=\"kbd docutils literal notranslate\"><kbd class=\"kbd docutils literal notranslate\"></kbd>+<kbd class=\"kbd docutils literal notranslate\"></kbd></kbd>\r\n```\r\n\r\n(3) `+` is treated as a separator within a compound-keystroke, with two \"blank\" keystrokes around it.\r\n\r\n```\r\n<kbd class=\"kbd docutils literal notranslate\"><kbd class=\"kbd docutils literal notranslate\">Shift</kbd>-<kbd class=\"kbd docutils literal notranslate\"></kbd>+<kbd class=\"kbd docutils literal notranslate\"></kbd></kbd>\r\n```\r\n\r\n**Expected behavior**\r\n\r\nFor single keystrokes that use `-`, `+` or`^`, just a single `kbd` element should be created.\r\n\r\nFor compound-keystrokes, the algorithm should differentiate between `-`, `+` and `^` characters appearing in separator vs keystroke positions (currently, it's very simplistic, it just treats all these characters as separators using a simple regexp).\r\n\r\n**Screenshot**\r\n\r\n![image](https://user-images.githubusercontent.com/698770/103331652-a2268680-4ab2-11eb-953a-2f50c8cb7a00.png)\r\n\r\n\r\n**Environment info**\r\n- OS: Windows\r\n- Python version: 3.9.1\r\n- Sphinx version: 3.4.0\r\n- Sphinx extensions:  -\r\n- Extra tools: -\r\n\n",
+  "hints_text": "",
+  "created_at": "2020-12-30T12:13:09Z",
+  "version": "3.5",
+  "FAIL_TO_PASS": "[\"tests/test_markup.py::test_inline[verify-:kbd:`-`-<p><kbd\", \"tests/test_markup.py::test_inline[verify-:kbd:`Alt+^`-<p><kbd\"]",
+  "PASS_TO_PASS": "[\"tests/test_markup.py::test_XRefRole\", \"tests/test_markup.py::test_compact_refonly_bullet_list\", \"tests/test_markup.py::test_default_role1\", \"tests/test_markup.py::test_default_role2\", \"tests/test_markup.py::test_download_role\", \"tests/test_markup.py::test_inline[verify-\\\"John\\\"-<p>\\\\u201cJohn\\\\u201d</p>-\\\\u201cJohn\\\\u201d]\", \"tests/test_markup.py::test_inline[verify-..\", \"tests/test_markup.py::test_inline[verify-::\\\\n\\\\n\", \"tests/test_markup.py::test_inline[verify-:guilabel:`&Foo\", \"tests/test_markup.py::test_inline[verify-:guilabel:`Foo`-<p><span\", \"tests/test_markup.py::test_inline[verify-:kbd:`Control+X`-<p><kbd\", \"tests/test_markup.py::test_inline[verify-:kbd:`M-x\", \"tests/test_markup.py::test_inline[verify-:kbd:`space`-<p><kbd\", \"tests/test_markup.py::test_inline[verify-:manpage:`mp(1)`-<p><em\", \"tests/test_markup.py::test_inline[verify-:menuselection:`&Foo\", \"tests/test_markup.py::test_inline[verify-:menuselection:`a\", \"tests/test_markup.py::test_inline[verify-:rfc:`2324#id1`-<p><span\", \"tests/test_markup.py::test_inline[verify-:rfc:`2324`-<p><span\", \"tests/test_markup.py::test_inline[verify-\\\\u0393\\\\\\\\\\\\\\\\\\\\u221e$-None-\\\\u0393\\\\\\\\textbackslash{}\\\\\\\\(\\\\\\\\infty\\\\\\\\)\\\\\\\\$]\", \"tests/test_markup.py::test_inline[verify-``\\\"John\\\"``-<p><code\", \"tests/test_markup.py::test_inline[verify-term\", \"tests/test_markup.py::test_inline[verify-term\\\\n\", \"tests/test_markup.py::test_inline[verify_re-:option:`--with-option`-<p><code(\", \"tests/test_markup.py::test_inline[verify_re-``code\", \"tests/test_markup.py::test_inline[verify_re-`test\", \"tests/test_markup.py::test_inline_docutils16[verify-4\", \"tests/test_markup.py::test_inline_for_unicode_latex_engine[verify-::\\\\n\\\\n\", \"tests/test_markup.py::test_keep_warnings_is_False\", \"tests/test_markup.py::test_keep_warnings_is_True\", \"tests/test_markup.py::test_rst_prolog\", \"tests/test_markup.py::test_samp_role\"]",
+  "environment_setup_commit": "4f8cb861e3b29186b38248fe81e4944fd987fcce",
+  "patch_files": [
+    "sphinx/builders/html/transforms.py"
+  ],
+  "test_patch_files": [
+    "tests/test_markup.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/builders/html/transforms.py": {
+      "diffs": [
+        {
+          "start_line_old": 40,
+          "end_line_old": 40,
+          "file_pos": 1,
+          "file_context_length": 377,
+          "pos": 1,
+          "context_length": 324
+        }
+      ]
+    }
+  },
+  "vectors": 1536,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/transforms.py_re_",
+      "distance": 0.8373870849609375,
+      "file_path": "sphinx/builders/html/transforms.py",
+      "start_line": 11,
+      "end_line": 70,
+      "tokens": 324,
+      "context_length": 324,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_emph_literal_role_emph_literal_role.9.1",
+      "distance": 1.0582184791564941,
+      "file_path": "sphinx/roles.py",
+      "start_line": 406,
+      "end_line": 456,
+      "tokens": 492,
+      "context_length": 816
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_EmphasizedLiteral_EmphasizedLiteral.parse.6.1",
+      "distance": 1.0704795122146606,
+      "file_path": "sphinx/roles.py",
+      "start_line": 459,
+      "end_line": 506,
+      "tokens": 400,
+      "context_length": 1216
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/util/texescape.py_re_10",
+      "distance": 1.070824384689331,
+      "file_path": "sphinx/util/texescape.py",
+      "start_line": 11,
+      "end_line": 63,
+      "tokens": 623,
+      "context_length": 1839
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py__abbr_re_abbr_role.9.1",
+      "distance": 1.087937831878662,
+      "file_path": "sphinx/roles.py",
+      "start_line": 509,
+      "end_line": 525,
+      "tokens": 188,
+      "context_length": 2027
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_indexmarkup_role_indexmarkup_role.12.13.1",
+      "distance": 1.0998907089233398,
+      "file_path": "sphinx/roles.py",
+      "start_line": 197,
+      "end_line": 263,
+      "tokens": 701,
+      "context_length": 2728
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_re_generic_docroles.1",
+      "distance": 1.1045267581939697,
+      "file_path": "sphinx/roles.py",
+      "start_line": 11,
+      "end_line": 46,
+      "tokens": 282,
+      "context_length": 3010
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/util/docutils.py_SphinxRole.__call___SphinxRole.__call__.9.1",
+      "distance": 1.1076452732086182,
+      "file_path": "sphinx/util/docutils.py",
+      "start_line": 360,
+      "end_line": 380,
+      "tokens": 173,
+      "context_length": 3183
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/util/smartypants.py_re_langquotes.1",
+      "distance": 1.1090011596679688,
+      "file_path": "sphinx/util/smartypants.py",
+      "start_line": 28,
+      "end_line": 122,
+      "tokens": 1414,
+      "context_length": 4597
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py__non_id_chars__non_id_translate_digraphs.1",
+      "distance": 1.1122791767120361,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 469,
+      "end_line": 512,
+      "tokens": 672,
+      "context_length": 5269
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/constants.py_ADDITIONAL_SETTINGS_",
+      "distance": 1.1158840656280518,
+      "file_path": "sphinx/builders/latex/constants.py",
+      "start_line": 120,
+      "end_line": 202,
+      "tokens": 925,
+      "context_length": 6194
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/util/docutils.py_ReferenceRole.__call___ReferenceRole.__call__.self.disabled.4.1",
+      "distance": 1.1166800260543823,
+      "file_path": "sphinx/util/docutils.py",
+      "start_line": 419,
+      "end_line": 435,
+      "tokens": 186,
+      "context_length": 6380
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_XRefRole._fix_parens_XRefRole._fix_parens.5.1",
+      "distance": 1.1184855699539185,
+      "file_path": "sphinx/roles.py",
+      "start_line": 91,
+      "end_line": 105,
+      "tokens": 156,
+      "context_length": 6536
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_GUILabel_parens_re.1",
+      "distance": 1.1207680702209473,
+      "file_path": "sphinx/roles.py",
+      "start_line": 376,
+      "end_line": 403,
+      "tokens": 225,
+      "context_length": 6761
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_Abbreviation_Abbreviation.run.4.1",
+      "distance": 1.1257843971252441,
+      "file_path": "sphinx/roles.py",
+      "start_line": 528,
+      "end_line": 540,
+      "tokens": 111,
+      "context_length": 6872
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/util/rst.py_re_default_role.3",
+      "distance": 1.1294792890548706,
+      "file_path": "sphinx/util/rst.py",
+      "start_line": 11,
+      "end_line": 76,
+      "tokens": 541,
+      "context_length": 7413
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py__amp_re_menusel_role.10.1",
+      "distance": 1.1347448825836182,
+      "file_path": "sphinx/roles.py",
+      "start_line": 335,
+      "end_line": 373,
+      "tokens": 330,
+      "context_length": 7743
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_char_literal_re.1",
+      "distance": 1.1351380348205566,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 78,
+      "tokens": 763,
+      "context_length": 8506
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/ext/napoleon/docstring.py_collections__SINGLETONS.1",
+      "distance": 1.1449339389801025,
+      "file_path": "sphinx/ext/napoleon/docstring.py",
+      "start_line": 13,
+      "end_line": 59,
+      "tokens": 515,
+      "context_length": 9021
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_fnmatch_path_stabilize.3.1",
+      "distance": 1.1495366096496582,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 11,
+      "end_line": 71,
+      "tokens": 506,
+      "context_length": 9527
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyXRefRole_PyXRefRole.process_link.7.1",
+      "distance": 1.1498925685882568,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 1032,
+      "end_line": 1052,
+      "tokens": 248,
+      "context_length": 9775
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/highlighting.py_2__LATEX_ADD_STYLES.1",
+      "distance": 1.1505709886550903,
+      "file_path": "sphinx/highlighting.py",
+      "start_line": 11,
+      "end_line": 52,
+      "tokens": 373,
+      "context_length": 10148
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_note_HTMLTranslator.visit_row.5",
+      "distance": 1.1525673866271973,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 697,
+      "end_line": 796,
+      "tokens": 803,
+      "context_length": 10951
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_DefinitionParser._simple_fundemental_types._check_template_consistency_CPPExprRole.run.12.1",
+      "distance": 1.1601595878601074,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 6499,
+      "end_line": 7236,
+      "tokens": 6339,
+      "context_length": 17290
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/search/ja.py_DefaultSplitter_DefaultSplitter.BQ3__.1",
+      "distance": 1.160562515258789,
+      "file_path": "sphinx/search/ja.py",
+      "start_line": 140,
+      "end_line": 166,
+      "tokens": 755,
+      "context_length": 18045
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/domains/javascript.py_JSXRefRole_JSXRefRole.process_link.2",
+      "distance": 1.1610651016235352,
+      "file_path": "sphinx/domains/javascript.py",
+      "start_line": 299,
+      "end_line": 316,
+      "tokens": 196,
+      "context_length": 18241
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtins_ModuleEntry.1",
+      "distance": 1.1624696254730225,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 11,
+      "end_line": 78,
+      "tokens": 526,
+      "context_length": 18767
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/util/texescape.py_init_",
+      "distance": 1.1639723777770996,
+      "file_path": "sphinx/util/texescape.py",
+      "start_line": 142,
+      "end_line": 169,
+      "tokens": 259,
+      "context_length": 19026
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/highlighting.py_PygmentsBridge_",
+      "distance": 1.1641662120819092,
+      "file_path": "sphinx/highlighting.py",
+      "start_line": 55,
+      "end_line": 164,
+      "tokens": 876,
+      "context_length": 19902
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/util/docutils.py_SphinxRole_SphinxRole.17",
+      "distance": 1.1654751300811768,
+      "file_path": "sphinx/util/docutils.py",
+      "start_line": 342,
+      "end_line": 358,
+      "tokens": 178,
+      "context_length": 20080
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_PEP_PEP.build_uri.3.2.1.1",
+      "distance": 1.1674948930740356,
+      "file_path": "sphinx/roles.py",
+      "start_line": 266,
+      "end_line": 298,
+      "tokens": 337,
+      "context_length": 20417
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.visit_emphasis_TextTranslator.visit_meta.2",
+      "distance": 1.168420433998108,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 1044,
+      "end_line": 1156,
+      "tokens": 813,
+      "context_length": 21230
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/ext/extlinks.py_2_",
+      "distance": 1.1687698364257812,
+      "file_path": "sphinx/ext/extlinks.py",
+      "start_line": 26,
+      "end_line": 71,
+      "tokens": 400,
+      "context_length": 21630
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_XRefRole.update_title_and_target_XRefRole.create_non_xref_node.4.1",
+      "distance": 1.168906331062317,
+      "file_path": "sphinx/roles.py",
+      "start_line": 107,
+      "end_line": 140,
+      "tokens": 338,
+      "context_length": 21968
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_index_role_index_role.16.1",
+      "distance": 1.1703524589538574,
+      "file_path": "sphinx/roles.py",
+      "start_line": 543,
+      "end_line": 572,
+      "tokens": 328,
+      "context_length": 22296
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_17_XRefRole.__init__.6",
+      "distance": 1.175049066543579,
+      "file_path": "sphinx/roles.py",
+      "start_line": 49,
+      "end_line": 89,
+      "tokens": 373,
+      "context_length": 22669
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_CNamespacePopObject_",
+      "distance": 1.1767301559448242,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 3412,
+      "end_line": 3836,
+      "tokens": 3706,
+      "context_length": 26375
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_note_HTML5Translator.134",
+      "distance": 1.1772665977478027,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 633,
+      "end_line": 719,
+      "tokens": 686,
+      "context_length": 27061
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.54_HTMLTranslator.visit_title.4.1",
+      "distance": 1.1786327362060547,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 354,
+      "end_line": 409,
+      "tokens": 472,
+      "context_length": 27533
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_re_token_re.1",
+      "distance": 1.1791801452636719,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 11,
+      "end_line": 48,
+      "tokens": 320,
+      "context_length": 27853
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/builders/html/transforms.py",
+      "position": 1,
+      "tokens": 377,
+      "context_length": 377
+    },
+    {
+      "file_path": "sphinx/roles.py",
+      "position": 2,
+      "tokens": 5652,
+      "context_length": 6029
+    },
+    {
+      "file_path": "sphinx/util/texescape.py",
+      "position": 3,
+      "tokens": 1769,
+      "context_length": 7798
+    },
+    {
+      "file_path": "sphinx/util/docutils.py",
+      "position": 4,
+      "tokens": 4123,
+      "context_length": 11921
+    },
+    {
+      "file_path": "sphinx/util/smartypants.py",
+      "position": 5,
+      "tokens": 4111,
+      "context_length": 16032
+    },
+    {
+      "file_path": "sphinx/util/nodes.py",
+      "position": 6,
+      "tokens": 5406,
+      "context_length": 21438
+    },
+    {
+      "file_path": "sphinx/builders/latex/constants.py",
+      "position": 7,
+      "tokens": 2080,
+      "context_length": 23518
+    },
+    {
+      "file_path": "sphinx/util/rst.py",
+      "position": 8,
+      "tokens": 853,
+      "context_length": 24371
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 9,
+      "tokens": 3502,
+      "context_length": 27873
+    },
+    {
+      "file_path": "sphinx/ext/napoleon/docstring.py",
+      "position": 10,
+      "tokens": 10667,
+      "context_length": 38540
+    },
+    {
+      "file_path": "sphinx/util/__init__.py",
+      "position": 11,
+      "tokens": 6302,
+      "context_length": 44842
+    },
+    {
+      "file_path": "sphinx/domains/python.py",
+      "position": 12,
+      "tokens": 11937,
+      "context_length": 56779
+    },
+    {
+      "file_path": "sphinx/highlighting.py",
+      "position": 13,
+      "tokens": 1302,
+      "context_length": 58081
+    },
+    {
+      "file_path": "sphinx/writers/html.py",
+      "position": 14,
+      "tokens": 7396,
+      "context_length": 65477
+    },
+    {
+      "file_path": "sphinx/domains/cpp.py",
+      "position": 15,
+      "tokens": 63093,
+      "context_length": 128570
+    },
+    {
+      "file_path": "sphinx/search/ja.py",
+      "position": 16,
+      "tokens": 12640,
+      "context_length": 141210
+    },
+    {
+      "file_path": "sphinx/domains/javascript.py",
+      "position": 17,
+      "tokens": 4047,
+      "context_length": 145257
+    },
+    {
+      "file_path": "sphinx/writers/text.py",
+      "position": 18,
+      "tokens": 8973,
+      "context_length": 154230
+    },
+    {
+      "file_path": "sphinx/ext/extlinks.py",
+      "position": 19,
+      "tokens": 619,
+      "context_length": 154849
+    },
+    {
+      "file_path": "sphinx/domains/c.py",
+      "position": 20,
+      "tokens": 31195,
+      "context_length": 186044
+    },
+    {
+      "file_path": "sphinx/writers/html5.py",
+      "position": 21,
+      "tokens": 6923,
+      "context_length": 192967
+    },
+    {
+      "file_path": "sphinx/domains/std.py",
+      "position": 22,
+      "tokens": 10504,
+      "context_length": 203471
+    }
+  ]
+}

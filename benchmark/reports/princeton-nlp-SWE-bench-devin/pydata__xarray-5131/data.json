@@ -1,0 +1,538 @@
+{
+  "instance_id": "pydata__xarray-5131",
+  "model_patch": "diff --git a/xarray/core/groupby.py b/xarray/core/groupby.py\nindex 8a097251..af5abd9a 100644\n--- a/xarray/core/groupby.py\n+++ b/xarray/core/groupby.py\n@@ -436,7 +436,7 @@ class GroupBy(SupportsArithmetic):\n         return zip(self._unique_coord.values, self._iter_grouped())\n \n     def __repr__(self):\n-        return \"{}, grouped over {!r} \\n{!r} groups with labels {}.\".format(\n+        return \"{}, grouped over {!r}\\n{!r} groups with labels {}.\".format(\n             self.__class__.__name__,\n             self._unique_coord.name,\n             self._unique_coord.size,\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/groupby.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "e56905889c836c736152b11a7e6117a229715975",
+  "patch": "diff --git a/xarray/core/groupby.py b/xarray/core/groupby.py\n--- a/xarray/core/groupby.py\n+++ b/xarray/core/groupby.py\n@@ -436,7 +436,7 @@ def __iter__(self):\n         return zip(self._unique_coord.values, self._iter_grouped())\n \n     def __repr__(self):\n-        return \"{}, grouped over {!r} \\n{!r} groups with labels {}.\".format(\n+        return \"{}, grouped over {!r}\\n{!r} groups with labels {}.\".format(\n             self.__class__.__name__,\n             self._unique_coord.name,\n             self._unique_coord.size,\n",
+  "test_patch": "diff --git a/xarray/tests/test_groupby.py b/xarray/tests/test_groupby.py\n--- a/xarray/tests/test_groupby.py\n+++ b/xarray/tests/test_groupby.py\n@@ -388,7 +388,7 @@ def test_da_groupby_assign_coords():\n def test_groupby_repr(obj, dim):\n     actual = repr(obj.groupby(dim))\n     expected = \"%sGroupBy\" % obj.__class__.__name__\n-    expected += \", grouped over %r \" % dim\n+    expected += \", grouped over %r\" % dim\n     expected += \"\\n%r groups with labels \" % (len(np.unique(obj[dim])))\n     if dim == \"x\":\n         expected += \"1, 2, 3, 4, 5.\"\n@@ -405,7 +405,7 @@ def test_groupby_repr(obj, dim):\n def test_groupby_repr_datetime(obj):\n     actual = repr(obj.groupby(\"t.month\"))\n     expected = \"%sGroupBy\" % obj.__class__.__name__\n-    expected += \", grouped over 'month' \"\n+    expected += \", grouped over 'month'\"\n     expected += \"\\n%r groups with labels \" % (len(np.unique(obj.t.dt.month)))\n     expected += \"1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12.\"\n     assert actual == expected\n",
+  "problem_statement": "Trailing whitespace in DatasetGroupBy text representation\nWhen displaying a DatasetGroupBy in an interactive Python session, the first line of output contains a trailing whitespace. The first example in the documentation demonstrate this:\r\n\r\n```pycon\r\n>>> import xarray as xr, numpy as np\r\n>>> ds = xr.Dataset(\r\n...     {\"foo\": ((\"x\", \"y\"), np.random.rand(4, 3))},\r\n...     coords={\"x\": [10, 20, 30, 40], \"letters\": (\"x\", list(\"abba\"))},\r\n... )\r\n>>> ds.groupby(\"letters\")\r\nDatasetGroupBy, grouped over 'letters' \r\n2 groups with labels 'a', 'b'.\r\n```\r\n\r\nThere is a trailing whitespace in the first line of output which is \"DatasetGroupBy, grouped over 'letters' \". This can be seen more clearly by converting the object to a string (note the whitespace before `\\n`):\r\n\r\n```pycon\r\n>>> str(ds.groupby(\"letters\"))\r\n\"DatasetGroupBy, grouped over 'letters' \\n2 groups with labels 'a', 'b'.\"\r\n```\r\n\r\n\r\nWhile this isn't a problem in itself, it causes an issue for us because we use flake8 in continuous integration to verify that our code is correctly formatted and we also have doctests that rely on DatasetGroupBy textual representation. Flake8 reports a violation on the trailing whitespaces in our docstrings. If we remove the trailing whitespaces, our doctests fail because the expected output doesn't match the actual output. So we have conflicting constraints coming from our tools which both seem reasonable. Trailing whitespaces are forbidden by flake8 because, among other reasons, they lead to noisy git diffs. Doctest want the expected output to be exactly the same as the actual output and considers a trailing whitespace to be a significant difference. We could configure flake8 to ignore this particular violation for the files in which we have these doctests, but this may cause other trailing whitespaces to creep in our code, which we don't want. Unfortunately it's not possible to just add `# NoQA` comments to get flake8 to ignore the violation only for specific lines because that creates a difference between expected and actual output from doctest point of view. Flake8 doesn't allow to disable checks for blocks of code either.\r\n\r\nIs there a reason for having this trailing whitespace in DatasetGroupBy representation? Whould it be OK to remove it? If so please let me know and I can make a pull request.\n",
+  "hints_text": "I don't think this is intentional and we are happy to take a PR. The problem seems to be here:\r\n\r\nhttps://github.com/pydata/xarray/blob/c7c4aae1fa2bcb9417e498e7dcb4acc0792c402d/xarray/core/groupby.py#L439\r\n\r\nYou will also have to fix the tests (maybe other places):\r\n\r\nhttps://github.com/pydata/xarray/blob/c7c4aae1fa2bcb9417e498e7dcb4acc0792c402d/xarray/tests/test_groupby.py#L391\r\nhttps://github.com/pydata/xarray/blob/c7c4aae1fa2bcb9417e498e7dcb4acc0792c402d/xarray/tests/test_groupby.py#L408\r\n",
+  "created_at": "2021-04-08T09:19:30Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_groupby.py::test_groupby_repr[obj0-month]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj0-x]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj0-y]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj0-z]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj1-month]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj1-x]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj1-y]\", \"xarray/tests/test_groupby.py::test_groupby_repr[obj1-z]\", \"xarray/tests/test_groupby.py::test_groupby_repr_datetime[obj0]\", \"xarray/tests/test_groupby.py::test_groupby_repr_datetime[obj1]\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_groupby.py::test_consolidate_slices\", \"xarray/tests/test_groupby.py::test_da_groupby_empty\", \"xarray/tests/test_groupby.py::test_da_groupby_quantile\", \"xarray/tests/test_groupby.py::test_ds_groupby_quantile\", \"xarray/tests/test_groupby.py::test_groupby_bins_timeseries\", \"xarray/tests/test_groupby.py::test_groupby_da_datetime\", \"xarray/tests/test_groupby.py::test_groupby_drops_nans\", \"xarray/tests/test_groupby.py::test_groupby_duplicate_coordinate_labels\", \"xarray/tests/test_groupby.py::test_groupby_grouping_errors\", \"xarray/tests/test_groupby.py::test_groupby_input_mutation\", \"xarray/tests/test_groupby.py::test_groupby_map_change_group_size[obj0]\", \"xarray/tests/test_groupby.py::test_groupby_map_change_group_size[obj1]\", \"xarray/tests/test_groupby.py::test_groupby_map_shrink_groups[obj0]\", \"xarray/tests/test_groupby.py::test_groupby_map_shrink_groups[obj1]\", \"xarray/tests/test_groupby.py::test_groupby_multiple_string_args\", \"xarray/tests/test_groupby.py::test_groupby_none_group_name\"]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "xarray/core/groupby.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_groupby.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/groupby.py": {
+      "diffs": [
+        {
+          "start_line_old": 439,
+          "end_line_old": 439,
+          "file_pos": 5,
+          "file_context_length": 98309,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/groupby.py_29_DatasetGroupBy.map.4.1",
+          "closest_snippet_line_distance": 455
+        }
+      ]
+    }
+  },
+  "vectors": 1088,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_dataset_repr_diff_dim_summary.1.2.1.1",
+      "distance": 1.0854332447052002,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 515,
+      "end_line": 544,
+      "tokens": 206,
+      "context_length": 206
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py__assert_empty__check_chunks_compatibility.1.5.1",
+      "distance": 1.1243600845336914,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 358,
+      "end_line": 383,
+      "tokens": 191,
+      "context_length": 397
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_data_vars_repr_limit_lines.4.1",
+      "distance": 1.1414293050765991,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 398,
+      "end_line": 455,
+      "tokens": 387,
+      "context_length": 784
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/accessor_str.py_StringAccessor.rstrip_StringAccessor.rstrip.2.1",
+      "distance": 1.1546885967254639,
+      "file_path": "xarray/core/accessor_str.py",
+      "start_line": 1295,
+      "end_line": 1319,
+      "tokens": 188,
+      "context_length": 972
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/doc/conf.py_1_nbsphinx_execute.1",
+      "distance": 1.1580543518066406,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 670,
+      "context_length": 1642
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py__maybe_chunk__maybe_chunk.3.5.1.1",
+      "distance": 1.1615595817565918,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 419,
+      "end_line": 444,
+      "tokens": 207,
+      "context_length": 1849
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.quantile_Dataset.map_blocks.3.1",
+      "distance": 1.1656681299209595,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 5788,
+      "end_line": 6393,
+      "tokens": 5685,
+      "context_length": 7534
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_GroupBy._yield_binary_applied_GroupBy._yield_binary_applied.2.3",
+      "distance": 1.1685199737548828,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 488,
+      "end_line": 512,
+      "tokens": 186,
+      "context_length": 7720,
+      "file_pos": 5
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/doc/conf.py_ogp_custom_meta_tags_114",
+      "distance": 1.1738033294677734,
+      "file_path": "doc/conf.py",
+      "start_line": 260,
+      "end_line": 309,
+      "tokens": 586,
+      "context_length": 8306
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_diff_dataset_repr_",
+      "distance": 1.177170753479004,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 671,
+      "end_line": 692,
+      "tokens": 158,
+      "context_length": 8464
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/rolling.py_DatasetRolling._counts_DatasetRolling._numpy_or_bottleneck_reduce.1.1",
+      "distance": 1.180635690689087,
+      "file_path": "xarray/core/rolling.py",
+      "start_line": 665,
+      "end_line": 687,
+      "tokens": 146,
+      "context_length": 8610
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/accessor_str.py_StringAccessor.strip_StringAccessor.strip.4.1",
+      "distance": 1.1819729804992676,
+      "file_path": "xarray/core/accessor_str.py",
+      "start_line": 1228,
+      "end_line": 1267,
+      "tokens": 322,
+      "context_length": 8932
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.__copy___Dataset._get_indexers_coords_and_indexes.13.1",
+      "distance": 1.1821484565734863,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1395,
+      "end_line": 2094,
+      "tokens": 5833,
+      "context_length": 14765
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.curvefit._wrapper_",
+      "distance": 1.188193440437317,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 7260,
+      "end_line": 7314,
+      "tokens": 563,
+      "context_length": 15328
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/conventions.py_warnings_CF_RELATED_DATA_NEEDS_PARSING.1",
+      "distance": 1.1911792755126953,
+      "file_path": "xarray/conventions.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 168,
+      "context_length": 15496
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/rolling.py_DatasetRolling._dataset_implementation_DatasetRolling._dataset_implementation.6.1",
+      "distance": 1.1932952404022217,
+      "file_path": "xarray/core/rolling.py",
+      "start_line": 619,
+      "end_line": 635,
+      "tokens": 161,
+      "context_length": 15657
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py__KNOWN_TYPE_REPRS_inline_dask_repr.5.1",
+      "distance": 1.2001467943191528,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 219,
+      "end_line": 245,
+      "tokens": 203,
+      "context_length": 15860
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py__ensure_1d__ensure_1d.2.1",
+      "distance": 1.2018342018127441,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 185,
+      "end_line": 199,
+      "tokens": 174,
+      "context_length": 16034,
+      "file_pos": 7
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/accessor_str.py_StringAccessor.lstrip_StringAccessor.lstrip.2.1",
+      "distance": 1.2056701183319092,
+      "file_path": "xarray/core/accessor_str.py",
+      "start_line": 1269,
+      "end_line": 1293,
+      "tokens": 188,
+      "context_length": 16222
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_DatasetGroupBy.apply_DatasetGroupBy._combine.10.1",
+      "distance": 1.2080026865005493,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 933,
+      "end_line": 960,
+      "tokens": 240,
+      "context_length": 16462,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_DatasetCoordinates.__delitem___DatasetCoordinates._ipython_key_completions_.2.1",
+      "distance": 1.211792230606079,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 291,
+      "end_line": 303,
+      "tokens": 116,
+      "context_length": 16578
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/formatting_html.py_array_repr_",
+      "distance": 1.21543550491333,
+      "file_path": "xarray/core/formatting_html.py",
+      "start_line": 253,
+      "end_line": 289,
+      "tokens": 257,
+      "context_length": 16835
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.drop_isel_Dataset.apply.3.1",
+      "distance": 1.2176012992858887,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 4217,
+      "end_line": 4887,
+      "tokens": 6027,
+      "context_length": 22862
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_datetime_check_reduce_dims.1.2.1",
+      "distance": 1.2176268100738525,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 229,
+      "context_length": 23091,
+      "file_pos": 9
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/testing.py__format_message__format_message.10.1",
+      "distance": 1.2177947759628296,
+      "file_path": "xarray/testing.py",
+      "start_line": 177,
+      "end_line": 201,
+      "tokens": 175,
+      "context_length": 23266
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/ops.py__SKIPNA_DOCSTRING__COARSEN_REDUCE_DOCSTRING_TEMPLATE.1",
+      "distance": 1.2180407047271729,
+      "file_path": "xarray/core/ops.py",
+      "start_line": 108,
+      "end_line": 136,
+      "tokens": 269,
+      "context_length": 23535
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/backends/common.py_logging_find_root_and_group.5.1",
+      "distance": 1.2180728912353516,
+      "file_path": "xarray/backends/common.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 225,
+      "context_length": 23760
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_29_DatasetGroupBy.map.4.1",
+      "distance": 1.2231260538101196,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 894,
+      "end_line": 931,
+      "tokens": 319,
+      "context_length": 24079,
+      "file_pos": 12
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py_scatter_scatter.13.1",
+      "distance": 1.2258720397949219,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 465,
+      "end_line": 517,
+      "tokens": 437,
+      "context_length": 24516
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_copy__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 1.2258954048156738,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 137,
+      "tokens": 658,
+      "context_length": 25174
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.isel_Dataset.reindex.2.1",
+      "distance": 1.227890968322754,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 2096,
+      "end_line": 2744,
+      "tokens": 6101,
+      "context_length": 31275
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/concat.py__dataset_concat.ensure_common_dims__dataset_concat.ensure_common_dims.common_dims.3.2",
+      "distance": 1.2284297943115234,
+      "file_path": "xarray/core/concat.py",
+      "start_line": 490,
+      "end_line": 501,
+      "tokens": 239,
+      "context_length": 31514
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__dsplot.2__dsplot.newplotfunc.15.3",
+      "distance": 1.2310082912445068,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 277,
+      "end_line": 389,
+      "tokens": 828,
+      "context_length": 32342
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 1.231621503829956,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 654,
+      "end_line": 863,
+      "tokens": 2773,
+      "context_length": 35115
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__dsplot__dsplot.commondoc.1",
+      "distance": 1.234490156173706,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 192,
+      "end_line": 275,
+      "tokens": 977,
+      "context_length": 36092
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_23.4.2.iris_Cube.1",
+      "distance": 1.2346179485321045,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 442,
+      "context_length": 36534
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_warnings_T.1",
+      "distance": 1.2371444702148438,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 249,
+      "context_length": 36783
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/xarray/xarray/backends/api.py__validate_append_dim_and_encoding__validate_append_dim_and_encoding.4.1.7.1",
+      "distance": 1.2372188568115234,
+      "file_path": "xarray/backends/api.py",
+      "start_line": 1273,
+      "end_line": 1362,
+      "tokens": 789,
+      "context_length": 37572
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/formatting.py",
+      "position": 1,
+      "tokens": 5477,
+      "context_length": 5477
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 2,
+      "tokens": 61695,
+      "context_length": 67172
+    },
+    {
+      "file_path": "xarray/core/accessor_str.py",
+      "position": 3,
+      "tokens": 19877,
+      "context_length": 87049
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 4,
+      "tokens": 3330,
+      "context_length": 90379
+    },
+    {
+      "file_path": "xarray/core/groupby.py",
+      "position": 5,
+      "tokens": 7930,
+      "context_length": 98309
+    },
+    {
+      "file_path": "xarray/core/rolling.py",
+      "position": 6,
+      "tokens": 7541,
+      "context_length": 105850
+    },
+    {
+      "file_path": "xarray/conventions.py",
+      "position": 7,
+      "tokens": 6401,
+      "context_length": 112251
+    },
+    {
+      "file_path": "xarray/core/coordinates.py",
+      "position": 8,
+      "tokens": 3137,
+      "context_length": 115388
+    },
+    {
+      "file_path": "xarray/core/formatting_html.py",
+      "position": 9,
+      "tokens": 2192,
+      "context_length": 117580
+    },
+    {
+      "file_path": "xarray/testing.py",
+      "position": 10,
+      "tokens": 3094,
+      "context_length": 120674
+    },
+    {
+      "file_path": "xarray/core/ops.py",
+      "position": 11,
+      "tokens": 2653,
+      "context_length": 123327
+    },
+    {
+      "file_path": "xarray/backends/common.py",
+      "position": 12,
+      "tokens": 2475,
+      "context_length": 125802
+    },
+    {
+      "file_path": "xarray/plot/dataset_plot.py",
+      "position": 13,
+      "tokens": 4686,
+      "context_length": 130488
+    },
+    {
+      "file_path": "xarray/core/concat.py",
+      "position": 14,
+      "tokens": 4878,
+      "context_length": 135366
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 15,
+      "tokens": 8078,
+      "context_length": 143444
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 16,
+      "tokens": 38877,
+      "context_length": 182321
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 17,
+      "tokens": 15702,
+      "context_length": 198023
+    },
+    {
+      "file_path": "xarray/backends/api.py",
+      "position": 18,
+      "tokens": 12068,
+      "context_length": 210091
+    }
+  ]
+}

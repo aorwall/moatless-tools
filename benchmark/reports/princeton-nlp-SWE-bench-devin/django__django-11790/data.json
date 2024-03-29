@@ -1,0 +1,2672 @@
+{
+  "instance_id": "django__django-11790",
+  "model_patch": "diff --git a/django/contrib/auth/forms.py b/django/contrib/auth/forms.py\nindex a0cfed0995..1b40c5dd22 100644\n--- a/django/contrib/auth/forms.py\n+++ b/django/contrib/auth/forms.py\n@@ -165,7 +165,7 @@ class AuthenticationForm(forms.Form):\n     Base class for authenticating users. Extend this to get a form that accepts\n     username/password logins.\n     \"\"\"\n-    username = UsernameField(widget=forms.TextInput(attrs={'autofocus': True}))\n+    username = UsernameField(widget=forms.TextInput(attrs={'autofocus': True, 'maxlength': self.username_field.max_length}))\n     password = forms.CharField(\n         label=_(\"Password\"),\n         strip=False,\n@@ -194,6 +194,7 @@ class AuthenticationForm(forms.Form):\n         self.fields['username'].max_length = self.username_field.max_length or 254\n         if self.fields['username'].label is None:\n             self.fields['username'].label = capfirst(self.username_field.verbose_name)\n+        self.fields['username'].widget.attrs['maxlength'] = self.username_field.max_length\n \n     def clean(self):\n         username = self.cleaned_data.get('username')\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/contrib/auth/forms.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "b1d6b35e146aea83b171c1b921178bbaae2795ed",
+  "patch": "diff --git a/django/contrib/auth/forms.py b/django/contrib/auth/forms.py\n--- a/django/contrib/auth/forms.py\n+++ b/django/contrib/auth/forms.py\n@@ -191,7 +191,9 @@ def __init__(self, request=None, *args, **kwargs):\n \n         # Set the max length and label for the \"username\" field.\n         self.username_field = UserModel._meta.get_field(UserModel.USERNAME_FIELD)\n-        self.fields['username'].max_length = self.username_field.max_length or 254\n+        username_max_length = self.username_field.max_length or 254\n+        self.fields['username'].max_length = username_max_length\n+        self.fields['username'].widget.attrs['maxlength'] = username_max_length\n         if self.fields['username'].label is None:\n             self.fields['username'].label = capfirst(self.username_field.verbose_name)\n \n",
+  "test_patch": "diff --git a/tests/auth_tests/test_forms.py b/tests/auth_tests/test_forms.py\n--- a/tests/auth_tests/test_forms.py\n+++ b/tests/auth_tests/test_forms.py\n@@ -423,6 +423,7 @@ def test_username_field_max_length_matches_user_model(self):\n         CustomEmailField.objects.create_user(**data)\n         form = AuthenticationForm(None, data)\n         self.assertEqual(form.fields['username'].max_length, 255)\n+        self.assertEqual(form.fields['username'].widget.attrs.get('maxlength'), 255)\n         self.assertEqual(form.errors, {})\n \n     @override_settings(AUTH_USER_MODEL='auth_tests.IntegerUsernameUser')\n@@ -435,6 +436,7 @@ def test_username_field_max_length_defaults_to_254(self):\n         IntegerUsernameUser.objects.create_user(**data)\n         form = AuthenticationForm(None, data)\n         self.assertEqual(form.fields['username'].max_length, 254)\n+        self.assertEqual(form.fields['username'].widget.attrs.get('maxlength'), 254)\n         self.assertEqual(form.errors, {})\n \n     def test_username_field_label(self):\n",
+  "problem_statement": "AuthenticationForm's username field doesn't set maxlength HTML attribute.\nDescription\n\t\nAuthenticationForm's username field doesn't render with maxlength HTML attribute anymore.\nRegression introduced in #27515 and 5ceaf14686ce626404afb6a5fbd3d8286410bf13.\n\u200bhttps://groups.google.com/forum/?utm_source=digest&utm_medium=email#!topic/django-developers/qnfSqro0DlA\n\u200bhttps://forum.djangoproject.com/t/possible-authenticationform-max-length-regression-in-django-2-1/241\n",
+  "hints_text": "Regression test.",
+  "created_at": "2019-09-17T14:33:44Z",
+  "version": "3.1",
+  "FAIL_TO_PASS": "[\"test_username_field_max_length_defaults_to_254 (auth_tests.test_forms.AuthenticationFormTest)\", \"test_username_field_max_length_matches_user_model (auth_tests.test_forms.AuthenticationFormTest)\"]",
+  "PASS_TO_PASS": "[\"An invalid login doesn't leak the inactive status of a user.\", \"The change form does not return the password value\", \"UserCreationForm password validation uses all of the form's data.\", \"test_both_passwords (auth_tests.test_forms.UserCreationFormTest)\", \"test_bug_14242 (auth_tests.test_forms.UserChangeFormTest)\", \"test_bug_17944_empty_password (auth_tests.test_forms.UserChangeFormTest)\", \"test_bug_17944_unknown_password_algorithm (auth_tests.test_forms.UserChangeFormTest)\", \"test_bug_17944_unmanageable_password (auth_tests.test_forms.UserChangeFormTest)\", \"test_bug_19349_bound_password_field (auth_tests.test_forms.UserChangeFormTest)\", \"test_bug_19349_render_with_none_value (auth_tests.test_forms.ReadOnlyPasswordHashTest)\", \"test_cleaned_data (auth_tests.test_forms.PasswordResetFormTest)\", \"test_custom_email_constructor (auth_tests.test_forms.PasswordResetFormTest)\", \"test_custom_email_field (auth_tests.test_forms.PasswordResetFormTest)\", \"test_custom_email_subject (auth_tests.test_forms.PasswordResetFormTest)\", \"test_custom_form (auth_tests.test_forms.UserChangeFormTest)\", \"test_custom_form (auth_tests.test_forms.UserCreationFormTest)\", \"test_custom_form_hidden_username_field (auth_tests.test_forms.UserCreationFormTest)\", \"test_custom_form_with_different_username_field (auth_tests.test_forms.UserCreationFormTest)\", \"test_custom_login_allowed_policy (auth_tests.test_forms.AuthenticationFormTest)\", \"test_duplicate_normalized_unicode (auth_tests.test_forms.UserCreationFormTest)\", \"test_field_order (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_get_invalid_login_error (auth_tests.test_forms.AuthenticationFormTest)\", \"test_help_text_translation (auth_tests.test_forms.SetPasswordFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.AuthenticationFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.PasswordResetFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.SetPasswordFormTest)\", \"test_html_autocomplete_attributes (auth_tests.test_forms.UserCreationFormTest)\", \"test_inactive_user (auth_tests.test_forms.AuthenticationFormTest)\", \"test_inactive_user (auth_tests.test_forms.PasswordResetFormTest)\", \"test_inactive_user_i18n (auth_tests.test_forms.AuthenticationFormTest)\", \"test_incorrect_password (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_integer_username (auth_tests.test_forms.AuthenticationFormTest)\", \"test_invalid_data (auth_tests.test_forms.UserCreationFormTest)\", \"test_invalid_email (auth_tests.test_forms.PasswordResetFormTest)\", \"test_invalid_username (auth_tests.test_forms.AuthenticationFormTest)\", \"test_login_failed (auth_tests.test_forms.AuthenticationFormTest)\", \"test_missing_passwords (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_non_matching_passwords (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_nonexistent_email (auth_tests.test_forms.PasswordResetFormTest)\", \"test_normalize_username (auth_tests.test_forms.UserCreationFormTest)\", \"test_one_password (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_password_excluded (auth_tests.test_forms.UserChangeFormTest)\", \"test_password_help_text (auth_tests.test_forms.UserCreationFormTest)\", \"test_password_verification (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_password_verification (auth_tests.test_forms.SetPasswordFormTest)\", \"test_password_verification (auth_tests.test_forms.UserCreationFormTest)\", \"test_password_whitespace_not_stripped (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_password_whitespace_not_stripped (auth_tests.test_forms.AuthenticationFormTest)\", \"test_password_whitespace_not_stripped (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_password_whitespace_not_stripped (auth_tests.test_forms.SetPasswordFormTest)\", \"test_password_whitespace_not_stripped (auth_tests.test_forms.UserCreationFormTest)\", \"test_preserve_username_case (auth_tests.test_forms.PasswordResetFormTest)\", \"test_readonly_field_has_changed (auth_tests.test_forms.ReadOnlyPasswordHashTest)\", \"test_render (auth_tests.test_forms.ReadOnlyPasswordHashTest)\", \"test_save_html_email_template_name (auth_tests.test_forms.PasswordResetFormTest)\", \"test_save_plaintext_email (auth_tests.test_forms.PasswordResetFormTest)\", \"test_success (auth_tests.test_forms.AdminPasswordChangeFormTest)\", \"test_success (auth_tests.test_forms.AuthenticationFormTest)\", \"test_success (auth_tests.test_forms.PasswordChangeFormTest)\", \"test_success (auth_tests.test_forms.SetPasswordFormTest)\", \"test_success (auth_tests.test_forms.UserCreationFormTest)\", \"test_unicode_username (auth_tests.test_forms.AuthenticationFormTest)\", \"test_unicode_username (auth_tests.test_forms.UserCreationFormTest)\", \"test_unusable_password (auth_tests.test_forms.PasswordResetFormTest)\", \"test_unusable_password (auth_tests.test_forms.UserChangeFormTest)\", \"test_user_already_exists (auth_tests.test_forms.UserCreationFormTest)\", \"test_username_field_autocapitalize_none (auth_tests.test_forms.AuthenticationFormTest)\", \"test_username_field_autocapitalize_none (auth_tests.test_forms.UserChangeFormTest)\", \"test_username_field_autocapitalize_none (auth_tests.test_forms.UserCreationFormTest)\", \"test_username_field_label (auth_tests.test_forms.AuthenticationFormTest)\", \"test_username_field_label_empty_string (auth_tests.test_forms.AuthenticationFormTest)\", \"test_username_field_label_not_set (auth_tests.test_forms.AuthenticationFormTest)\", \"test_username_validity (auth_tests.test_forms.UserChangeFormTest)\", \"test_validates_password (auth_tests.test_forms.SetPasswordFormTest)\", \"test_validates_password (auth_tests.test_forms.UserCreationFormTest)\"]",
+  "environment_setup_commit": "0668164b4ac93a5be79f5b87fae83c657124d9ab",
+  "patch_files": [
+    "django/contrib/auth/forms.py"
+  ],
+  "test_patch_files": [
+    "tests/auth_tests/test_forms.py"
+  ],
+  "patch_diff_details": {
+    "django/contrib/auth/forms.py": {
+      "diffs": [
+        {
+          "start_line_old": 194,
+          "end_line_old": 194,
+          "file_pos": 3,
+          "file_context_length": 3334,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/auth/forms.py_unicodedata_UserModel.1",
+          "closest_snippet_line_distance": 174,
+          "pos": 9,
+          "context_length": 1371
+        }
+      ]
+    }
+  },
+  "vectors": 3409,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0008_alter_user_username_max_length.py_1_",
+      "distance": 0.8488578796386719,
+      "file_path": "django/contrib/auth/migrations/0008_alter_user_username_max_length.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 138,
+      "context_length": 138
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0004_alter_user_username_opts.py_1_",
+      "distance": 0.9373506307601929,
+      "file_path": "django/contrib/auth/migrations/0004_alter_user_username_opts.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 150,
+      "context_length": 288
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_ReadOnlyPasswordHashField_UsernameField.widget_attrs.1.1",
+      "distance": 0.9482226967811584,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 44,
+      "end_line": 69,
+      "tokens": 162,
+      "context_length": 450,
+      "file_pos": 3
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0009_alter_user_last_name_max_length.py__",
+      "distance": 0.9835923314094543,
+      "file_path": "django/contrib/auth/migrations/0009_alter_user_last_name_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 450
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_MinimumLengthValidator_MinimumLengthValidator.get_help_text.1.1",
+      "distance": 0.9956367015838623,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 91,
+      "end_line": 115,
+      "tokens": 189,
+      "context_length": 639
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_UserChangeForm_UserChangeForm.clean_password.4.1",
+      "distance": 0.9968734383583069,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 132,
+      "end_line": 160,
+      "tokens": 235,
+      "context_length": 874,
+      "file_pos": 5
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0003_alter_user_email_max_length.py__",
+      "distance": 1.0131711959838867,
+      "file_path": "django/contrib/auth/migrations/0003_alter_user_email_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 874
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_unicodedata_UserModel.1",
+      "distance": 1.044805884361267,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 137,
+      "context_length": 1011,
+      "file_pos": 6
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_AuthenticationForm_AuthenticationForm.clean.4.1",
+      "distance": 1.0460013151168823,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 163,
+      "end_line": 209,
+      "tokens": 360,
+      "context_length": 1371,
+      "file_pos": 6
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/forms/fields.py_CharField_CharField.widget_attrs.4.1",
+      "distance": 1.0487346649169922,
+      "file_path": "django/forms/fields.py",
+      "start_line": 208,
+      "end_line": 239,
+      "tokens": 274,
+      "context_length": 1645
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/contrib/auth/validators.py_re_",
+      "distance": 1.052973985671997,
+      "file_path": "django/contrib/auth/validators.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 165,
+      "context_length": 1810
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_EmailField_EmailField.formfield.3.1",
+      "distance": 1.058969259262085,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1577,
+      "end_line": 1598,
+      "tokens": 183,
+      "context_length": 1993
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/contrib/admin/forms.py_1_",
+      "distance": 1.0610425472259521,
+      "file_path": "django/contrib/admin/forms.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 184,
+      "context_length": 2177
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CharField_CharField._check_max_length_attribute.1.3.1.1",
+      "distance": 1.0693466663360596,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 972,
+      "end_line": 1004,
+      "tokens": 208,
+      "context_length": 2385
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0002_alter_permission_name_max_length.py__",
+      "distance": 1.069507360458374,
+      "file_path": "django/contrib/auth/migrations/0002_alter_permission_name_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 2385
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_AuthenticationForm.confirm_login_allowed_AuthenticationForm.get_invalid_login_error.1.1",
+      "distance": 1.0704480409622192,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 211,
+      "end_line": 236,
+      "tokens": 176,
+      "context_length": 2561,
+      "file_pos": 11
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py_1_",
+      "distance": 1.0719058513641357,
+      "file_path": "django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 137,
+      "context_length": 2698
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0010_alter_group_name_max_length.py__",
+      "distance": 1.0798534154891968,
+      "file_path": "django/contrib/auth/migrations/0010_alter_group_name_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 2698
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_UserCreationForm_UserCreationForm.save.4.1",
+      "distance": 1.090012550354004,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 72,
+      "end_line": 129,
+      "tokens": 415,
+      "context_length": 3113,
+      "file_pos": 13
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_SetPasswordForm_SetPasswordForm.save.4.1",
+      "distance": 1.0900599956512451,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 310,
+      "end_line": 351,
+      "tokens": 290,
+      "context_length": 3403,
+      "file_pos": 13
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/contrib/auth/base_user.py_AbstractBaseUser_",
+      "distance": 1.0941184759140015,
+      "file_path": "django/contrib/auth/base_user.py",
+      "start_line": 47,
+      "end_line": 140,
+      "tokens": 585,
+      "context_length": 3988
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_PasswordChangeForm_PasswordChangeForm.clean_old_password.4.1",
+      "distance": 1.0941334962844849,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 354,
+      "end_line": 381,
+      "tokens": 190,
+      "context_length": 4178,
+      "file_pos": 14
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_AdminPasswordChangeForm_",
+      "distance": 1.1051437854766846,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 384,
+      "end_line": 436,
+      "tokens": 359,
+      "context_length": 4537,
+      "file_pos": 14
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_UserAttributeSimilarityValidator.validate_UserAttributeSimilarityValidator.get_help_text.1.1",
+      "distance": 1.112879753112793,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 135,
+      "end_line": 157,
+      "tokens": 197,
+      "context_length": 4734
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin.user_change_password_UserAdmin.user_change_password.9.1",
+      "distance": 1.1143438816070557,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 128,
+      "end_line": 189,
+      "tokens": 465,
+      "context_length": 5199
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordChangeView_",
+      "distance": 1.1229220628738403,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 330,
+      "end_line": 362,
+      "tokens": 239,
+      "context_length": 5438
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_UserAttributeSimilarityValidator_UserAttributeSimilarityValidator.__init__.self.max_similarity.1",
+      "distance": 1.1246089935302734,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 118,
+      "end_line": 133,
+      "tokens": 154,
+      "context_length": 5592
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_ReadOnlyPasswordHashWidget_ReadOnlyPasswordHashWidget.get_context.5.1",
+      "distance": 1.1269550323486328,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 23,
+      "end_line": 41,
+      "tokens": 161,
+      "context_length": 5753,
+      "file_pos": 16
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_PasswordResetForm_PasswordResetForm.send_mail.8",
+      "distance": 1.1298828125,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 239,
+      "end_line": 261,
+      "tokens": 196,
+      "context_length": 5949,
+      "file_pos": 16
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/forms/fields.py_DurationField_DurationField.to_python.5.1",
+      "distance": 1.1481189727783203,
+      "file_path": "django/forms/fields.py",
+      "start_line": 469,
+      "end_line": 494,
+      "tokens": 174,
+      "context_length": 6123
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin_UserAdmin.add_view.1.1.1",
+      "distance": 1.1485339403152466,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 40,
+      "end_line": 99,
+      "tokens": 504,
+      "context_length": 6627
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetView_PasswordResetView.dispatch.1.1",
+      "distance": 1.1552248001098633,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 208,
+      "end_line": 222,
+      "tokens": 133,
+      "context_length": 6760
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_URLField_URLField.formfield.3.1",
+      "distance": 1.155794620513916,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2181,
+      "end_line": 2201,
+      "tokens": 163,
+      "context_length": 6923
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetConfirmView_PasswordResetConfirmView.dispatch.6.1",
+      "distance": 1.1611427068710327,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 247,
+      "end_line": 284,
+      "tokens": 348,
+      "context_length": 7271
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/forms/fields.py_FileField_FileField.__init__.3",
+      "distance": 1.166747808456421,
+      "file_path": "django/forms/fields.py",
+      "start_line": 529,
+      "end_line": 545,
+      "tokens": 180,
+      "context_length": 7451
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/forms/fields.py_SlugField_",
+      "distance": 1.1677203178405762,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1173,
+      "end_line": 1203,
+      "tokens": 182,
+      "context_length": 7633
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.__str___BaseForm.__iter__.1.1",
+      "distance": 1.1695818901062012,
+      "file_path": "django/forms/forms.py",
+      "start_line": 136,
+      "end_line": 153,
+      "tokens": 142,
+      "context_length": 7775
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetConfirmView.get_user_PasswordResetCompleteView.get_context_data.3.1",
+      "distance": 1.1730992794036865,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 286,
+      "end_line": 327,
+      "tokens": 314,
+      "context_length": 8089
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.changed_data_BaseForm.changed_data.3.1",
+      "distance": 1.175491452217102,
+      "file_path": "django/forms/forms.py",
+      "start_line": 431,
+      "end_line": 453,
+      "tokens": 195,
+      "context_length": 8284
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_functools_get_password_validators.3.1",
+      "distance": 1.1775778532028198,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 206,
+      "context_length": 8490
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/forms/fields.py_IntegerField_IntegerField.__init__.5.1",
+      "distance": 1.1814196109771729,
+      "file_path": "django/forms/fields.py",
+      "start_line": 242,
+      "end_line": 259,
+      "tokens": 162,
+      "context_length": 8652
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware.clean_username_RemoteUserMiddleware._remove_invalid_user.2.3.1.1",
+      "distance": 1.184188723564148,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 85,
+      "end_line": 110,
+      "tokens": 192,
+      "context_length": 8844
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._post_clean_BaseModelForm._post_clean.14.1",
+      "distance": 1.1850535869598389,
+      "file_path": "django/forms/models.py",
+      "start_line": 382,
+      "end_line": 410,
+      "tokens": 240,
+      "context_length": 9084
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_LoginView_LoginView.dispatch.2.1",
+      "distance": 1.1898688077926636,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 40,
+      "end_line": 63,
+      "tokens": 197,
+      "context_length": 9281
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/forms/formsets.py_1_DEFAULT_MAX_NUM.1",
+      "distance": 1.1924426555633545,
+      "file_path": "django/forms/formsets.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 203,
+      "context_length": 9484
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm.clean_BaseModelForm._update_errors.opts.6",
+      "distance": 1.193692684173584,
+      "file_path": "django/forms/models.py",
+      "start_line": 350,
+      "end_line": 380,
+      "tokens": 233,
+      "context_length": 9717
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/postgres/validators.py_1_ArrayMinLengthValidator.message.1",
+      "distance": 1.193813681602478,
+      "file_path": "django/contrib/postgres/validators.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 181,
+      "context_length": 9898
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.pk_field_InlineAdminForm.ordering_field.2.1",
+      "distance": 1.1968106031417847,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 366,
+      "end_line": 382,
+      "tokens": 138,
+      "context_length": 10036
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/createsuperuser.py_Command._validate_username_",
+      "distance": 1.1989309787750244,
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "start_line": 230,
+      "end_line": 245,
+      "tokens": 139,
+      "context_length": 10175
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/forms/widgets.py_TextInput_HiddenInput.template_name.1",
+      "distance": 1.1999096870422363,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 298,
+      "end_line": 334,
+      "tokens": 204,
+      "context_length": 10379
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetView.form_valid_PasswordResetDoneView.title.1",
+      "distance": 1.1999647617340088,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 224,
+      "end_line": 244,
+      "tokens": 163,
+      "context_length": 10542
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_copy_SimpleArrayField.prepare_value.2.1",
+      "distance": 1.202530860900879,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 258,
+      "context_length": 10800
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/forms/utils.py_ErrorList.__reduce_ex___ErrorList.__reduce_ex__.info.2.1",
+      "distance": 1.2060623168945312,
+      "file_path": "django/forms/utils.py",
+      "start_line": 139,
+      "end_line": 146,
+      "tokens": 132,
+      "context_length": 10932
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm_BaseModelForm.__init__.11.1",
+      "distance": 1.2062586545944214,
+      "file_path": "django/forms/models.py",
+      "start_line": 279,
+      "end_line": 307,
+      "tokens": 288,
+      "context_length": 11220
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_PasswordResetForm.save_PasswordResetForm.save.3.3",
+      "distance": 1.2070896625518799,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 276,
+      "end_line": 307,
+      "tokens": 264,
+      "context_length": 11484,
+      "file_pos": 26
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.as_ul_BaseForm.as_ul.2.1",
+      "distance": 1.2095274925231934,
+      "file_path": "django/forms/forms.py",
+      "start_line": 282,
+      "end_line": 290,
+      "tokens": 113,
+      "context_length": 11597
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_PasswordResetForm.get_users_PasswordResetForm.get_users.3.1",
+      "distance": 1.2098058462142944,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 263,
+      "end_line": 274,
+      "tokens": 116,
+      "context_length": 11713,
+      "file_pos": 26
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CharField.cast_db_type_CharField.formfield.defaults.5.1",
+      "distance": 1.2137689590454102,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1006,
+      "end_line": 1032,
+      "tokens": 229,
+      "context_length": 11942
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/changepassword.py_Command.handle_",
+      "distance": 1.2149698734283447,
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "start_line": 34,
+      "end_line": 76,
+      "tokens": 337,
+      "context_length": 12279
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm._clean_fields_BaseForm._clean_fields.1.4.3.4.1",
+      "distance": 1.2152972221374512,
+      "file_path": "django/forms/forms.py",
+      "start_line": 380,
+      "end_line": 400,
+      "tokens": 210,
+      "context_length": 12489
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/jsonb.py_json_",
+      "distance": 1.2161154747009277,
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 345,
+      "context_length": 12834
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_DatabaseValidation.check_field_type_",
+      "distance": 1.2164325714111328,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 29,
+      "end_line": 61,
+      "tokens": 246,
+      "context_length": 13080
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/contrib/auth/backends.py_RemoteUserBackend.authenticate_",
+      "distance": 1.2171651124954224,
+      "file_path": "django/contrib/auth/backends.py",
+      "start_line": 183,
+      "end_line": 234,
+      "tokens": 369,
+      "context_length": 13449
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_1_sensitive_post_parameters_m.1",
+      "distance": 1.217395305633545,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 188,
+      "context_length": 13637
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware.process_request_RemoteUserMiddleware.process_request.2.10.request.user.2",
+      "distance": 1.2177340984344482,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 47,
+      "end_line": 83,
+      "tokens": 360,
+      "context_length": 13997
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin._add_view_UserAdmin._add_view.7.7.1",
+      "distance": 1.2183538675308228,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 101,
+      "end_line": 126,
+      "tokens": 286,
+      "context_length": 14283
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminTextareaWidget_AdminEmailInputWidget.__init__.1",
+      "distance": 1.2188611030578613,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 316,
+      "end_line": 328,
+      "tokens": 114,
+      "context_length": 14397
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view_ModelAdmin._changeform_view.15.3.title.1",
+      "distance": 1.2196009159088135,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1517,
+      "end_line": 1596,
+      "tokens": 719,
+      "context_length": 15116
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_json_checkbox.1",
+      "distance": 1.220017910003662,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 198,
+      "context_length": 15314
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0005_alter_user_last_login_null.py__",
+      "distance": 1.221024990081787,
+      "file_path": "django/contrib/auth/migrations/0005_alter_user_last_login_null.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 15314
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/views/csrf.py_CSRF_FAILURE_TEMPLATE_CSRF_FAILURE_TEMPLATE.1",
+      "distance": 1.2221684455871582,
+      "file_path": "django/views/csrf.py",
+      "start_line": 15,
+      "end_line": 100,
+      "tokens": 835,
+      "context_length": 16149
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminForm_AdminForm.media.3.1",
+      "distance": 1.2222520112991333,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 33,
+      "end_line": 67,
+      "tokens": 230,
+      "context_length": 16379
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_SlugField_SlugField.formfield.1.1",
+      "distance": 1.2237389087677002,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1983,
+      "end_line": 2013,
+      "tokens": 252,
+      "context_length": 16631
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_datetime_BoundField.__str__.3.1",
+      "distance": 1.2249506711959839,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 239,
+      "context_length": 16870
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/core/validators.py_EmailValidator.__call___EmailValidator.__call__.4.2.4",
+      "distance": 1.2264962196350098,
+      "file_path": "django/core/validators.py",
+      "start_line": 190,
+      "end_line": 209,
+      "tokens": 152,
+      "context_length": 17022
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.get_formset.DeleteProtectedModelForm_InlineModelAdmin.get_formset.18.1",
+      "distance": 1.22703218460083,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2054,
+      "end_line": 2106,
+      "tokens": 451,
+      "context_length": 17473
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/auth/models.py_User_",
+      "distance": 1.2270820140838623,
+      "file_path": "django/contrib/auth/models.py",
+      "start_line": 384,
+      "end_line": 465,
+      "tokens": 484,
+      "context_length": 17957
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm._html_output_BaseForm._html_output.8.1",
+      "distance": 1.2273693084716797,
+      "file_path": "django/forms/forms.py",
+      "start_line": 195,
+      "end_line": 270,
+      "tokens": 634,
+      "context_length": 18591
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher.verify_BCryptSHA256PasswordHasher.harden_runtime.7.2",
+      "distance": 1.2283976078033447,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 418,
+      "end_line": 447,
+      "tokens": 290,
+      "context_length": 18881
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/core/validators.py_integer_validator_EmailValidator.__init__.3.self.domain_whitelist.1",
+      "distance": 1.2317163944244385,
+      "file_path": "django/core/validators.py",
+      "start_line": 153,
+      "end_line": 188,
+      "tokens": 388,
+      "context_length": 19269
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/forms/fields.py_FileField.to_python_FileField.to_python.7.1",
+      "distance": 1.2332377433776855,
+      "file_path": "django/forms/fields.py",
+      "start_line": 547,
+      "end_line": 566,
+      "tokens": 171,
+      "context_length": 19440
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.as_table_BaseForm.as_table.2.1",
+      "distance": 1.2370493412017822,
+      "file_path": "django/forms/forms.py",
+      "start_line": 272,
+      "end_line": 280,
+      "tokens": 132,
+      "context_length": 19572
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._get_validation_exclusions_BaseModelForm._get_validation_exclusions.6.1",
+      "distance": 1.2371948957443237,
+      "file_path": "django/forms/models.py",
+      "start_line": 309,
+      "end_line": 348,
+      "tokens": 387,
+      "context_length": 19959
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/auth/models.py_AbstractUser_AbstractUser.email_user.2",
+      "distance": 1.2373305559158325,
+      "file_path": "django/contrib/auth/models.py",
+      "start_line": 316,
+      "end_line": 381,
+      "tokens": 463,
+      "context_length": 20422
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_Argon2PasswordHasher.must_update_Argon2PasswordHasher.harden_runtime.3",
+      "distance": 1.2383677959442139,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 343,
+      "end_line": 358,
+      "tokens": 146,
+      "context_length": 20568
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/core/validators.py_MaxValueValidator_MaxLengthValidator.clean.1.1",
+      "distance": 1.238843560218811,
+      "file_path": "django/core/validators.py",
+      "start_line": 341,
+      "end_line": 386,
+      "tokens": 308,
+      "context_length": 20876
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/forms/fields.py_DateTimeField_DateTimeField.strptime.1.1",
+      "distance": 1.2405513525009155,
+      "file_path": "django/forms/fields.py",
+      "start_line": 438,
+      "end_line": 466,
+      "tokens": 199,
+      "context_length": 21075
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminField_AdminField.errors.1.1",
+      "distance": 1.2406532764434814,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 123,
+      "end_line": 149,
+      "tokens": 220,
+      "context_length": 21295
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/forms/fields.py_TimeField_TimeField.strptime.1.1",
+      "distance": 1.241123914718628,
+      "file_path": "django/forms/fields.py",
+      "start_line": 416,
+      "end_line": 435,
+      "tokens": 131,
+      "context_length": 21426
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.needs_explicit_pk_field_InlineAdminForm.needs_explicit_pk_field.1.1",
+      "distance": 1.241530179977417,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 355,
+      "end_line": 364,
+      "tokens": 134,
+      "context_length": 21560
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_change_form_ModelAdmin.render_change_form.11.1",
+      "distance": 1.242593765258789,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1111,
+      "end_line": 1156,
+      "tokens": 482,
+      "context_length": 22042
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/forms/fields.py_DecimalField_DecimalField.to_python.6.1",
+      "distance": 1.2432584762573242,
+      "file_path": "django/forms/fields.py",
+      "start_line": 323,
+      "end_line": 349,
+      "tokens": 227,
+      "context_length": 22269
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_1_AuthenticationMiddleware.process_request.request.user.1",
+      "distance": 1.2442095279693604,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 193,
+      "context_length": 22462
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/contrib/auth/models.py_UserManager_UserManager.create_superuser.5.1",
+      "distance": 1.2445411682128906,
+      "file_path": "django/contrib/auth/models.py",
+      "start_line": 128,
+      "end_line": 158,
+      "tokens": 275,
+      "context_length": 22737
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/core/validators.py_validate_email_ip_address_validator_map.1",
+      "distance": 1.2447290420532227,
+      "file_path": "django/core/validators.py",
+      "start_line": 234,
+      "end_line": 278,
+      "tokens": 330,
+      "context_length": 23067
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/forms/formsets.py_ManagementForm_ManagementForm.__init__.8",
+      "distance": 1.2454880475997925,
+      "file_path": "django/forms/formsets.py",
+      "start_line": 28,
+      "end_line": 42,
+      "tokens": 195,
+      "context_length": 23262
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.password_change_AdminSite.password_change.8.1",
+      "distance": 1.245553970336914,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 314,
+      "end_line": 329,
+      "tokens": 158,
+      "context_length": 23420
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/forms/widgets.py_CheckboxSelectMultiple_CheckboxSelectMultiple.id_for_label.3.1",
+      "distance": 1.247626543045044,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 765,
+      "end_line": 788,
+      "tokens": 204,
+      "context_length": 23624
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/forms/fields.py_Field_Field.validate.1.1",
+      "distance": 1.2483394145965576,
+      "file_path": "django/forms/fields.py",
+      "start_line": 46,
+      "end_line": 127,
+      "tokens": 773,
+      "context_length": 24397
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_base64_is_password_usable.2.1",
+      "distance": 1.249241828918457,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 187,
+      "context_length": 24584
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/forms/fields.py_DateField_DateField.strptime.1.1",
+      "distance": 1.2498373985290527,
+      "file_path": "django/forms/fields.py",
+      "start_line": 392,
+      "end_line": 413,
+      "tokens": 144,
+      "context_length": 24728
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_1_SuccessURLAllowedHostsMixin.get_success_url_allowed_hosts.1.1",
+      "distance": 1.2512036561965942,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 278,
+      "context_length": 25006
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.2514921426773071,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 769,
+      "context_length": 25775
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/forms/fields.py_DecimalField.validate_DecimalField.widget_attrs.3.1",
+      "distance": 1.2521004676818848,
+      "file_path": "django/forms/fields.py",
+      "start_line": 351,
+      "end_line": 368,
+      "tokens": 160,
+      "context_length": 25935
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/conf/locale/hr/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.252262830734253,
+      "file_path": "django/conf/locale/hr/formats.py",
+      "start_line": 22,
+      "end_line": 48,
+      "tokens": 620,
+      "context_length": 26555
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_GroupAdmin_GroupAdmin.formfield_for_manytomany.2.1",
+      "distance": 1.2530500888824463,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 25,
+      "end_line": 37,
+      "tokens": 128,
+      "context_length": 26683
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.validate_unique_BaseModelFormSet.validate_unique.all_unique_checks.11.1",
+      "distance": 1.2540183067321777,
+      "file_path": "django/forms/models.py",
+      "start_line": 679,
+      "end_line": 750,
+      "tokens": 732,
+      "context_length": 27415
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ForeignKeyRawIdWidget.base_url_parameters_ForeignKeyRawIdWidget.label_and_url_for_value.4.1",
+      "distance": 1.2542634010314941,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 166,
+      "end_line": 197,
+      "tokens": 243,
+      "context_length": 27658
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/conf/locale/en_AU/formats.py_DATE_FORMAT_",
+      "distance": 1.2561060190200806,
+      "file_path": "django/conf/locale/en_AU/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 708,
+      "context_length": 28366
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/conf/locale/en_GB/formats.py_DATE_FORMAT_",
+      "distance": 1.2566919326782227,
+      "file_path": "django/conf/locale/en_GB/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 708,
+      "context_length": 29074
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher.encode_BCryptSHA256PasswordHasher.encode.7.1",
+      "distance": 1.2569726705551147,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 406,
+      "end_line": 416,
+      "tokens": 127,
+      "context_length": 29201
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_password_changed_password_validators_help_text_html.1",
+      "distance": 1.2577972412109375,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 54,
+      "end_line": 88,
+      "tokens": 277,
+      "context_length": 29478
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/contrib/auth/tokens.py_PasswordResetTokenGenerator._make_token_with_timestamp_PasswordResetTokenGenerator._make_token_with_timestamp.ts_b36.4.1",
+      "distance": 1.2579853534698486,
+      "file_path": "django/contrib/auth/tokens.py",
+      "start_line": 54,
+      "end_line": 63,
+      "tokens": 134,
+      "context_length": 29612
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/auth/models.py_1_PermissionManager.get_by_natural_key.1.1",
+      "distance": 1.2585328817367554,
+      "file_path": "django/contrib/auth/models.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 200,
+      "context_length": 29812
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_long_column_names_Model._check_long_column_names.10.1",
+      "distance": 1.2589085102081299,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1747,
+      "end_line": 1818,
+      "tokens": 565,
+      "context_length": 30377
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField._check_max_digits_DecimalField._check_max_digits.1.5.1.1",
+      "distance": 1.2589831352233887,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1431,
+      "end_line": 1453,
+      "tokens": 119,
+      "context_length": 30496
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view.context_ModelAdmin._changeform_view.21.1",
+      "distance": 1.2606370449066162,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1597,
+      "end_line": 1621,
+      "tokens": 279,
+      "context_length": 30775
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm_BaseForm.__init__.self.renderer.1",
+      "distance": 1.2607731819152832,
+      "file_path": "django/forms/forms.py",
+      "start_line": 56,
+      "end_line": 112,
+      "tokens": 525,
+      "context_length": 31300
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/contrib/auth/backends.py_ModelBackend_ModelBackend.authenticate.3.3.1.1.1",
+      "distance": 1.260979175567627,
+      "file_path": "django/contrib/auth/backends.py",
+      "start_line": 31,
+      "end_line": 49,
+      "tokens": 142,
+      "context_length": 31442
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/auth/handlers/modwsgi.py_1_",
+      "distance": 1.2621076107025146,
+      "file_path": "django/contrib/auth/handlers/modwsgi.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 247,
+      "context_length": 31689
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/conf/locale/id/formats.py_DATE_FORMAT_",
+      "distance": 1.2621288299560547,
+      "file_path": "django/conf/locale/id/formats.py",
+      "start_line": 5,
+      "end_line": 50,
+      "tokens": 708,
+      "context_length": 32397
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/conf/locale/da/formats.py_DATE_FORMAT_",
+      "distance": 1.2625160217285156,
+      "file_path": "django/conf/locale/da/formats.py",
+      "start_line": 5,
+      "end_line": 27,
+      "tokens": 250,
+      "context_length": 32647
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.get_unique_error_message_BaseModelFormSet.get_form_error.1.1",
+      "distance": 1.2627416849136353,
+      "file_path": "django/forms/models.py",
+      "start_line": 752,
+      "end_line": 773,
+      "tokens": 194,
+      "context_length": 32841
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelFormMetaclass_ModelFormMetaclass.__new__.13.1",
+      "distance": 1.2647724151611328,
+      "file_path": "django/forms/models.py",
+      "start_line": 207,
+      "end_line": 276,
+      "tokens": 623,
+      "context_length": 33464
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/conf/locale/bn/formats.py_DATE_FORMAT_",
+      "distance": 1.2654454708099365,
+      "file_path": "django/conf/locale/bn/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 294,
+      "context_length": 33758
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_IntegerRangeField_",
+      "distance": 1.266690731048584,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 81,
+      "end_line": 103,
+      "tokens": 149,
+      "context_length": 33907
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/forms/fields.py_MultipleChoiceField_MultipleChoiceField.has_changed.7.1",
+      "distance": 1.26702880859375,
+      "file_path": "django/forms/fields.py",
+      "start_line": 848,
+      "end_line": 887,
+      "tokens": 298,
+      "context_length": 34205
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldline_Fieldline.errors.1.1",
+      "distance": 1.267526388168335,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 92,
+      "end_line": 120,
+      "tokens": 249,
+      "context_length": 34454
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_choices_Field._check_choices.7.1",
+      "distance": 1.2681010961532593,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 244,
+      "end_line": 309,
+      "tokens": 467,
+      "context_length": 34921
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/conf/locale/ka/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.2683848142623901,
+      "file_path": "django/conf/locale/ka/formats.py",
+      "start_line": 23,
+      "end_line": 48,
+      "tokens": 564,
+      "context_length": 35485
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/forms/fields.py_GenericIPAddressField_GenericIPAddressField.to_python.4.1",
+      "distance": 1.2692668437957764,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1158,
+      "end_line": 1170,
+      "tokens": 113,
+      "context_length": 35598
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/conf/locale/ml/formats.py_DATE_FORMAT_",
+      "distance": 1.270145058631897,
+      "file_path": "django/conf/locale/ml/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 663,
+      "context_length": 36261
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/conf/locale/mk/formats.py_DATE_FORMAT_",
+      "distance": 1.2703578472137451,
+      "file_path": "django/conf/locale/mk/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 672,
+      "context_length": 36933
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/conf/locale/sl/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.271135926246643,
+      "file_path": "django/conf/locale/sl/formats.py",
+      "start_line": 22,
+      "end_line": 48,
+      "tokens": 596,
+      "context_length": 37529
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_IntegerField_IntegerField._check_max_length_warning.2.1",
+      "distance": 1.2715721130371094,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1705,
+      "end_line": 1728,
+      "tokens": 146,
+      "context_length": 37675
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/forms/fields.py_RegexField_EmailField.__init__.1",
+      "distance": 1.2716329097747803,
+      "file_path": "django/forms/fields.py",
+      "start_line": 497,
+      "end_line": 526,
+      "tokens": 207,
+      "context_length": 37882
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/conf/locale/ru/formats.py_DATE_FORMAT_",
+      "distance": 1.2735278606414795,
+      "file_path": "django/conf/locale/ru/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 402,
+      "context_length": 38284
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/conf/locale/mn/formats.py_DATE_FORMAT_",
+      "distance": 1.2737922668457031,
+      "file_path": "django/conf/locale/mn/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 120,
+      "context_length": 38404
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/conf/locale/ar/formats.py_DATE_FORMAT_",
+      "distance": 1.2738549709320068,
+      "file_path": "django/conf/locale/ar/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 135,
+      "context_length": 38539
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet._construct_form_BaseModelFormSet._construct_form.5.1",
+      "distance": 1.2758804559707642,
+      "file_path": "django/forms/models.py",
+      "start_line": 594,
+      "end_line": 626,
+      "tokens": 270,
+      "context_length": 38809
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.media_InlineModelAdmin.get_max_num.2.1",
+      "distance": 1.2758910655975342,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1996,
+      "end_line": 2017,
+      "tokens": 221,
+      "context_length": 39030
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm._clean_form_BaseForm.has_changed.2.1",
+      "distance": 1.2760908603668213,
+      "file_path": "django/forms/forms.py",
+      "start_line": 402,
+      "end_line": 429,
+      "tokens": 190,
+      "context_length": 39220
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/conf/locale/sr_Latn/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.2763060331344604,
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "start_line": 23,
+      "end_line": 44,
+      "tokens": 511,
+      "context_length": 39731
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_UUIDField_UUIDField.formfield.1.1",
+      "distance": 1.2766380310058594,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2268,
+      "end_line": 2318,
+      "tokens": 339,
+      "context_length": 40070
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/conf/locale/uk/formats.py_DATE_FORMAT_",
+      "distance": 1.2767904996871948,
+      "file_path": "django/conf/locale/uk/formats.py",
+      "start_line": 5,
+      "end_line": 38,
+      "tokens": 460,
+      "context_length": 40530
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_CommonPasswordValidator_",
+      "distance": 1.2785605192184448,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 160,
+      "end_line": 204,
+      "tokens": 351,
+      "context_length": 40881
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_LoginView.get_success_url_LoginView.get_context_data.4.1",
+      "distance": 1.2809443473815918,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 65,
+      "end_line": 104,
+      "tokens": 295,
+      "context_length": 41176
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_BaseRangeField_BaseRangeField.compress.4.3.1.1",
+      "distance": 1.2818878889083862,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 31,
+      "end_line": 78,
+      "tokens": 325,
+      "context_length": 41501
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/conf/locale/az/formats.py_DATE_FORMAT_",
+      "distance": 1.2819958925247192,
+      "file_path": "django/conf/locale/az/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 399,
+      "context_length": 41900
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_Argon2PasswordHasher.safe_summary_Argon2PasswordHasher.safe_summary.3.1",
+      "distance": 1.282071828842163,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 328,
+      "end_line": 341,
+      "tokens": 120,
+      "context_length": 42020
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware_RemoteUserMiddleware.force_logout_if_no_header.1",
+      "distance": 1.2825419902801514,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 27,
+      "end_line": 45,
+      "tokens": 178,
+      "context_length": 42198
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelFormOptions_ModelFormOptions.__init__.self.field_classes.1",
+      "distance": 1.2830939292907715,
+      "file_path": "django/forms/models.py",
+      "start_line": 194,
+      "end_line": 204,
+      "tokens": 131,
+      "context_length": 42329
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/conf/locale/lt/formats.py_DATE_FORMAT_",
+      "distance": 1.2835087776184082,
+      "file_path": "django/conf/locale/lt/formats.py",
+      "start_line": 5,
+      "end_line": 46,
+      "tokens": 711,
+      "context_length": 43040
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_make_password_make_password.5.1",
+      "distance": 1.2846134901046753,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 64,
+      "end_line": 77,
+      "tokens": 147,
+      "context_length": 43187
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/conf/locale/nb/formats.py_DATE_FORMAT_",
+      "distance": 1.2847150564193726,
+      "file_path": "django/conf/locale/nb/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 646,
+      "context_length": 43833
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/conf/locale/nn/formats.py_DATE_FORMAT_",
+      "distance": 1.2847659587860107,
+      "file_path": "django/conf/locale/nn/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 664,
+      "context_length": 44497
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/conf/locale/sl/formats.py_DATE_FORMAT_DATE_INPUT_FORMATS.1",
+      "distance": 1.2848536968231201,
+      "file_path": "django/conf/locale/sl/formats.py",
+      "start_line": 5,
+      "end_line": 20,
+      "tokens": 208,
+      "context_length": 44705
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/contrib/flatpages/forms.py_1_FlatpageForm.clean_url.4.1",
+      "distance": 1.2852330207824707,
+      "file_path": "django/contrib/flatpages/forms.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 346,
+      "context_length": 45051
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/conf/locale/ko/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.2854608297348022,
+      "file_path": "django/conf/locale/ko/formats.py",
+      "start_line": 32,
+      "end_line": 53,
+      "tokens": 438,
+      "context_length": 45489
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/core/validators.py_URLValidator.__call___URLValidator.__call__.scheme.9.1",
+      "distance": 1.2860827445983887,
+      "file_path": "django/core/validators.py",
+      "start_line": 111,
+      "end_line": 150,
+      "tokens": 398,
+      "context_length": 45887
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/conf/locale/bs/formats.py_DATE_FORMAT_",
+      "distance": 1.2875041961669922,
+      "file_path": "django/conf/locale/bs/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 139,
+      "context_length": 46026
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Textarea_boolean_check.1.1",
+      "distance": 1.288193941116333,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 464,
+      "end_line": 504,
+      "tokens": 275,
+      "context_length": 46301
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/contrib/auth/checks.py_check_models_permissions_",
+      "distance": 1.2882994413375854,
+      "file_path": "django/contrib/auth/checks.py",
+      "start_line": 97,
+      "end_line": 167,
+      "tokens": 525,
+      "context_length": 46826
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/conf/locale/en/formats.py_DATE_FORMAT_",
+      "distance": 1.2884275913238525,
+      "file_path": "django/conf/locale/en/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 663,
+      "context_length": 47489
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BasePasswordHasher.harden_runtime_BasePasswordHasher.harden_runtime.2",
+      "distance": 1.2885111570358276,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 215,
+      "end_line": 226,
+      "tokens": 150,
+      "context_length": 47639
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.as_p_BaseForm.non_field_errors.2.1",
+      "distance": 1.288933515548706,
+      "file_path": "django/forms/forms.py",
+      "start_line": 292,
+      "end_line": 308,
+      "tokens": 165,
+      "context_length": 47804
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/conf/locale/sr/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.2895433902740479,
+      "file_path": "django/conf/locale/sr/formats.py",
+      "start_line": 23,
+      "end_line": 44,
+      "tokens": 511,
+      "context_length": 48315
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.has_error_BaseForm.full_clean.10",
+      "distance": 1.2901935577392578,
+      "file_path": "django/forms/forms.py",
+      "start_line": 357,
+      "end_line": 378,
+      "tokens": 172,
+      "context_length": 48487
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/auth/base_user.py_1_BaseUserManager.get_by_natural_key.1.1",
+      "distance": 1.2902929782867432,
+      "file_path": "django/contrib/auth/base_user.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 298,
+      "context_length": 48785
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField._check_decimal_places_and_max_digits_DecimalField.formfield.1.1",
+      "distance": 1.2904376983642578,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1455,
+      "end_line": 1514,
+      "tokens": 398,
+      "context_length": 49183
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/conf/locale/pt_BR/formats.py_DATE_FORMAT_",
+      "distance": 1.2905529737472534,
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "start_line": 5,
+      "end_line": 34,
+      "tokens": 494,
+      "context_length": 49677
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldset_Fieldset.__iter__.1.1",
+      "distance": 1.290658712387085,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 70,
+      "end_line": 89,
+      "tokens": 167,
+      "context_length": 49844
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.errors_BaseForm.add_initial_prefix.2.1",
+      "distance": 1.2909576892852783,
+      "file_path": "django/forms/forms.py",
+      "start_line": 171,
+      "end_line": 193,
+      "tokens": 182,
+      "context_length": 50026
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_check_dependencies_check_dependencies.11.1",
+      "distance": 1.290968418121338,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 57,
+      "end_line": 126,
+      "tokens": 588,
+      "context_length": 50614
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/conf/locale/pl/formats.py_DATE_FORMAT_",
+      "distance": 1.2910206317901611,
+      "file_path": "django/conf/locale/pl/formats.py",
+      "start_line": 5,
+      "end_line": 30,
+      "tokens": 339,
+      "context_length": 50953
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/conf/locale/it/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.2910444736480713,
+      "file_path": "django/conf/locale/it/formats.py",
+      "start_line": 21,
+      "end_line": 46,
+      "tokens": 564,
+      "context_length": 51517
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/conf/locale/ro/formats.py_DATE_FORMAT_",
+      "distance": 1.2913494110107422,
+      "file_path": "django/conf/locale/ro/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 262,
+      "context_length": 51779
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/conf/locale/pt/formats.py_DATE_FORMAT_",
+      "distance": 1.29180908203125,
+      "file_path": "django/conf/locale/pt/formats.py",
+      "start_line": 5,
+      "end_line": 39,
+      "tokens": 630,
+      "context_length": 52409
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/forms/utils.py_json_flatatt.5.1",
+      "distance": 1.2919663190841675,
+      "file_path": "django/forms/utils.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 291,
+      "context_length": 52700
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hant/formats.py_DATE_FORMAT_",
+      "distance": 1.2927011251449585,
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 53335
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SimpleArrayField.validate_SimpleArrayField.has_changed.2.1",
+      "distance": 1.2930262088775635,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 62,
+      "end_line": 102,
+      "tokens": 248,
+      "context_length": 53583
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/contrib/auth/mixins.py_LoginRequiredMixin_PermissionRequiredMixin.dispatch.2.1",
+      "distance": 1.2933627367019653,
+      "file_path": "django/contrib/auth/mixins.py",
+      "start_line": 47,
+      "end_line": 85,
+      "tokens": 277,
+      "context_length": 53860
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm.validate_unique_BaseModelForm._save_m2m.9.4.1",
+      "distance": 1.2936286926269531,
+      "file_path": "django/forms/models.py",
+      "start_line": 412,
+      "end_line": 442,
+      "tokens": 243,
+      "context_length": 54103
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/conf/locale/bg/formats.py_DATE_FORMAT_",
+      "distance": 1.293654441833496,
+      "file_path": "django/conf/locale/bg/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 131,
+      "context_length": 54234
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/forms/widgets.py_FileInput_FILE_INPUT_CONTRADICTION.1",
+      "distance": 1.2944281101226807,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 374,
+      "end_line": 391,
+      "tokens": 116,
+      "context_length": 54350
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/conf/locale/hr/formats.py_DATE_FORMAT_DATE_INPUT_FORMATS.1",
+      "distance": 1.2944588661193848,
+      "file_path": "django/conf/locale/hr/formats.py",
+      "start_line": 5,
+      "end_line": 21,
+      "tokens": 218,
+      "context_length": 54568
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/conf/locale/gl/formats.py_DATE_FORMAT_",
+      "distance": 1.294637680053711,
+      "file_path": "django/conf/locale/gl/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 170,
+      "context_length": 54738
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/core/validators.py_DecimalValidator_DecimalValidator.__init__.self.decimal_places.1",
+      "distance": 1.2947297096252441,
+      "file_path": "django/core/validators.py",
+      "start_line": 389,
+      "end_line": 416,
+      "tokens": 224,
+      "context_length": 54962
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/conf/locale/de/formats.py_DATE_FORMAT_",
+      "distance": 1.2949128150939941,
+      "file_path": "django/conf/locale/de/formats.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 323,
+      "context_length": 55285
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_deprecation_details_Field._check_deprecation_details.2.1",
+      "distance": 1.2949204444885254,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 367,
+      "end_line": 393,
+      "tokens": 199,
+      "context_length": 55484
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/forms/__init__.py__",
+      "distance": 1.2949998378753662,
+      "file_path": "django/forms/__init__.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 55484
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/changepassword.py_getpass_Command.add_arguments.2",
+      "distance": 1.2953689098358154,
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 206,
+      "context_length": 55690
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_form_BaseModelAdminChecks._check_filter_horizontal.2.2.1.1",
+      "distance": 1.2967063188552856,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 371,
+      "end_line": 397,
+      "tokens": 281,
+      "context_length": 55971
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_UnsaltedMD5PasswordHasher_UnsaltedMD5PasswordHasher.harden_runtime.1",
+      "distance": 1.296765685081482,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 564,
+      "end_line": 597,
+      "tokens": 242,
+      "context_length": 56213
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/core/validators.py_URLValidator_URLValidator.__init__.2.self.schemes.1",
+      "distance": 1.2970391511917114,
+      "file_path": "django/core/validators.py",
+      "start_line": 74,
+      "end_line": 109,
+      "tokens": 554,
+      "context_length": 56767
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/conf/locale/ga/formats.py_DATE_FORMAT_",
+      "distance": 1.2974021434783936,
+      "file_path": "django/conf/locale/ga/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 124,
+      "context_length": 56891
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/django/django/conf/locale/cy/formats.py_DATE_FORMAT_",
+      "distance": 1.2975999116897583,
+      "file_path": "django/conf/locale/cy/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 582,
+      "context_length": 57473
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CommaSeparatedIntegerField_CommaSeparatedIntegerField.system_check_removed_details.1",
+      "distance": 1.2976607084274292,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1035,
+      "end_line": 1048,
+      "tokens": 104,
+      "context_length": 57577
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/django/django/conf/locale/fi/formats.py_DATE_FORMAT_",
+      "distance": 1.298121690750122,
+      "file_path": "django/conf/locale/fi/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 470,
+      "context_length": 58047
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/django/django/conf/locale/te/formats.py_DATE_FORMAT_",
+      "distance": 1.2984271049499512,
+      "file_path": "django/conf/locale/te/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 123,
+      "context_length": 58170
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select_Select.use_required_attribute.6.1",
+      "distance": 1.2992099523544312,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 671,
+      "end_line": 702,
+      "tokens": 261,
+      "context_length": 58431
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/django/django/conf/locale/sk/formats.py_DATE_FORMAT_",
+      "distance": 1.3004140853881836,
+      "file_path": "django/conf/locale/sk/formats.py",
+      "start_line": 5,
+      "end_line": 30,
+      "tokens": 348,
+      "context_length": 58779
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseInlineFormSet._construct_form_BaseInlineFormSet.save_new.4",
+      "distance": 1.3004536628723145,
+      "file_path": "django/forms/models.py",
+      "start_line": 918,
+      "end_line": 950,
+      "tokens": 353,
+      "context_length": 59132
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_SmallIntegerField_TextField.formfield.4.1",
+      "distance": 1.3007678985595703,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2016,
+      "end_line": 2046,
+      "tokens": 199,
+      "context_length": 59331
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/django/django/forms/fields.py_FloatField_FloatField.widget_attrs.3.1",
+      "distance": 1.3008393049240112,
+      "file_path": "django/forms/fields.py",
+      "start_line": 288,
+      "end_line": 320,
+      "tokens": 228,
+      "context_length": 59559
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/django/django/contrib/auth/backends.py_AllowAllUsersModelBackend_RemoteUserBackend.create_unknown_user.1",
+      "distance": 1.300893783569336,
+      "file_path": "django/contrib/auth/backends.py",
+      "start_line": 163,
+      "end_line": 181,
+      "tokens": 146,
+      "context_length": 59705
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/django/django/conf/locale/is/formats.py_DATE_FORMAT_",
+      "distance": 1.3011677265167236,
+      "file_path": "django/conf/locale/is/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 130,
+      "context_length": 59835
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hans/formats.py_DATE_FORMAT_",
+      "distance": 1.3013808727264404,
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 60470
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseInlineFormSet.add_fields_BaseInlineFormSet.get_unique_error_message.2.1",
+      "distance": 1.3014885187149048,
+      "file_path": "django/forms/models.py",
+      "start_line": 952,
+      "end_line": 985,
+      "tokens": 367,
+      "context_length": 60837
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/contrib/auth/migrations/0008_alter_user_username_max_length.py",
+      "position": 1,
+      "tokens": 138,
+      "context_length": 138
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0004_alter_user_username_opts.py",
+      "position": 2,
+      "tokens": 150,
+      "context_length": 288
+    },
+    {
+      "file_path": "django/contrib/auth/forms.py",
+      "position": 3,
+      "tokens": 3046,
+      "context_length": 3334
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0009_alter_user_last_name_max_length.py",
+      "position": 4,
+      "tokens": 78,
+      "context_length": 3412
+    },
+    {
+      "file_path": "django/contrib/auth/password_validation.py",
+      "position": 5,
+      "tokens": 1484,
+      "context_length": 4896
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0003_alter_user_email_max_length.py",
+      "position": 6,
+      "tokens": 78,
+      "context_length": 4974
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 7,
+      "tokens": 8944,
+      "context_length": 13918
+    },
+    {
+      "file_path": "django/contrib/auth/validators.py",
+      "position": 8,
+      "tokens": 166,
+      "context_length": 14084
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 9,
+      "tokens": 17457,
+      "context_length": 31541
+    },
+    {
+      "file_path": "django/contrib/admin/forms.py",
+      "position": 10,
+      "tokens": 184,
+      "context_length": 31725
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0002_alter_permission_name_max_length.py",
+      "position": 11,
+      "tokens": 68,
+      "context_length": 31793
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py",
+      "position": 12,
+      "tokens": 137,
+      "context_length": 31930
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0010_alter_group_name_max_length.py",
+      "position": 13,
+      "tokens": 77,
+      "context_length": 32007
+    },
+    {
+      "file_path": "django/contrib/auth/base_user.py",
+      "position": 14,
+      "tokens": 884,
+      "context_length": 32891
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 15,
+      "tokens": 1726,
+      "context_length": 34617
+    },
+    {
+      "file_path": "django/contrib/auth/views.py",
+      "position": 16,
+      "tokens": 2664,
+      "context_length": 37281
+    },
+    {
+      "file_path": "django/forms/forms.py",
+      "position": 17,
+      "tokens": 4073,
+      "context_length": 41354
+    },
+    {
+      "file_path": "django/contrib/auth/middleware.py",
+      "position": 18,
+      "tokens": 1016,
+      "context_length": 42370
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 19,
+      "tokens": 11495,
+      "context_length": 53865
+    },
+    {
+      "file_path": "django/forms/formsets.py",
+      "position": 20,
+      "tokens": 3886,
+      "context_length": 57751
+    },
+    {
+      "file_path": "django/contrib/postgres/validators.py",
+      "position": 21,
+      "tokens": 551,
+      "context_length": 58302
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 22,
+      "tokens": 3193,
+      "context_length": 61495
+    },
+    {
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "position": 23,
+      "tokens": 2060,
+      "context_length": 63555
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 24,
+      "tokens": 8066,
+      "context_length": 71621
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "position": 25,
+      "tokens": 1485,
+      "context_length": 73106
+    },
+    {
+      "file_path": "django/forms/utils.py",
+      "position": 26,
+      "tokens": 1236,
+      "context_length": 74342
+    },
+    {
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "position": 27,
+      "tokens": 539,
+      "context_length": 74881
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "position": 28,
+      "tokens": 345,
+      "context_length": 75226
+    },
+    {
+      "file_path": "django/db/backends/mysql/validation.py",
+      "position": 29,
+      "tokens": 488,
+      "context_length": 75714
+    },
+    {
+      "file_path": "django/contrib/auth/backends.py",
+      "position": 30,
+      "tokens": 1762,
+      "context_length": 77476
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 31,
+      "tokens": 3866,
+      "context_length": 81342
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 32,
+      "tokens": 18366,
+      "context_length": 99708
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0005_alter_user_last_login_null.py",
+      "position": 33,
+      "tokens": 75,
+      "context_length": 99783
+    },
+    {
+      "file_path": "django/views/csrf.py",
+      "position": 34,
+      "tokens": 1544,
+      "context_length": 101327
+    },
+    {
+      "file_path": "django/forms/boundfield.py",
+      "position": 35,
+      "tokens": 2121,
+      "context_length": 103448
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 36,
+      "tokens": 4317,
+      "context_length": 107765
+    },
+    {
+      "file_path": "django/contrib/auth/models.py",
+      "position": 37,
+      "tokens": 3191,
+      "context_length": 110956
+    },
+    {
+      "file_path": "django/contrib/auth/hashers.py",
+      "position": 38,
+      "tokens": 4787,
+      "context_length": 115743
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 39,
+      "tokens": 4191,
+      "context_length": 119934
+    },
+    {
+      "file_path": "django/conf/locale/hr/formats.py",
+      "position": 40,
+      "tokens": 883,
+      "context_length": 120817
+    },
+    {
+      "file_path": "django/conf/locale/en_AU/formats.py",
+      "position": 41,
+      "tokens": 753,
+      "context_length": 121570
+    },
+    {
+      "file_path": "django/conf/locale/en_GB/formats.py",
+      "position": 42,
+      "tokens": 753,
+      "context_length": 122323
+    },
+    {
+      "file_path": "django/contrib/auth/tokens.py",
+      "position": 43,
+      "tokens": 784,
+      "context_length": 123107
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 44,
+      "tokens": 15190,
+      "context_length": 138297
+    },
+    {
+      "file_path": "django/contrib/auth/handlers/modwsgi.py",
+      "position": 45,
+      "tokens": 247,
+      "context_length": 138544
+    },
+    {
+      "file_path": "django/conf/locale/id/formats.py",
+      "position": 46,
+      "tokens": 753,
+      "context_length": 139297
+    },
+    {
+      "file_path": "django/conf/locale/da/formats.py",
+      "position": 47,
+      "tokens": 295,
+      "context_length": 139592
+    },
+    {
+      "file_path": "django/conf/locale/bn/formats.py",
+      "position": 48,
+      "tokens": 338,
+      "context_length": 139930
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 49,
+      "tokens": 677,
+      "context_length": 140607
+    },
+    {
+      "file_path": "django/conf/locale/ka/formats.py",
+      "position": 50,
+      "tokens": 907,
+      "context_length": 141514
+    },
+    {
+      "file_path": "django/conf/locale/ml/formats.py",
+      "position": 51,
+      "tokens": 708,
+      "context_length": 142222
+    },
+    {
+      "file_path": "django/conf/locale/mk/formats.py",
+      "position": 52,
+      "tokens": 717,
+      "context_length": 142939
+    },
+    {
+      "file_path": "django/conf/locale/sl/formats.py",
+      "position": 53,
+      "tokens": 849,
+      "context_length": 143788
+    },
+    {
+      "file_path": "django/conf/locale/ru/formats.py",
+      "position": 54,
+      "tokens": 447,
+      "context_length": 144235
+    },
+    {
+      "file_path": "django/conf/locale/mn/formats.py",
+      "position": 55,
+      "tokens": 164,
+      "context_length": 144399
+    },
+    {
+      "file_path": "django/conf/locale/ar/formats.py",
+      "position": 56,
+      "tokens": 179,
+      "context_length": 144578
+    },
+    {
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "position": 57,
+      "tokens": 849,
+      "context_length": 145427
+    },
+    {
+      "file_path": "django/conf/locale/uk/formats.py",
+      "position": 58,
+      "tokens": 505,
+      "context_length": 145932
+    },
+    {
+      "file_path": "django/conf/locale/az/formats.py",
+      "position": 59,
+      "tokens": 444,
+      "context_length": 146376
+    },
+    {
+      "file_path": "django/conf/locale/lt/formats.py",
+      "position": 60,
+      "tokens": 756,
+      "context_length": 147132
+    },
+    {
+      "file_path": "django/conf/locale/nb/formats.py",
+      "position": 61,
+      "tokens": 691,
+      "context_length": 147823
+    },
+    {
+      "file_path": "django/conf/locale/nn/formats.py",
+      "position": 62,
+      "tokens": 709,
+      "context_length": 148532
+    },
+    {
+      "file_path": "django/contrib/flatpages/forms.py",
+      "position": 63,
+      "tokens": 483,
+      "context_length": 149015
+    },
+    {
+      "file_path": "django/conf/locale/ko/formats.py",
+      "position": 64,
+      "tokens": 943,
+      "context_length": 149958
+    },
+    {
+      "file_path": "django/conf/locale/bs/formats.py",
+      "position": 65,
+      "tokens": 183,
+      "context_length": 150141
+    },
+    {
+      "file_path": "django/contrib/auth/checks.py",
+      "position": 66,
+      "tokens": 1173,
+      "context_length": 151314
+    },
+    {
+      "file_path": "django/conf/locale/en/formats.py",
+      "position": 67,
+      "tokens": 708,
+      "context_length": 152022
+    },
+    {
+      "file_path": "django/conf/locale/sr/formats.py",
+      "position": 68,
+      "tokens": 849,
+      "context_length": 152871
+    },
+    {
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "position": 69,
+      "tokens": 539,
+      "context_length": 153410
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 70,
+      "tokens": 9016,
+      "context_length": 162426
+    },
+    {
+      "file_path": "django/conf/locale/pl/formats.py",
+      "position": 71,
+      "tokens": 384,
+      "context_length": 162810
+    },
+    {
+      "file_path": "django/conf/locale/it/formats.py",
+      "position": 72,
+      "tokens": 897,
+      "context_length": 163707
+    },
+    {
+      "file_path": "django/conf/locale/ro/formats.py",
+      "position": 73,
+      "tokens": 307,
+      "context_length": 164014
+    },
+    {
+      "file_path": "django/conf/locale/pt/formats.py",
+      "position": 74,
+      "tokens": 675,
+      "context_length": 164689
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "position": 75,
+      "tokens": 680,
+      "context_length": 165369
+    },
+    {
+      "file_path": "django/contrib/auth/mixins.py",
+      "position": 76,
+      "tokens": 732,
+      "context_length": 166101
+    },
+    {
+      "file_path": "django/conf/locale/bg/formats.py",
+      "position": 77,
+      "tokens": 175,
+      "context_length": 166276
+    },
+    {
+      "file_path": "django/conf/locale/gl/formats.py",
+      "position": 78,
+      "tokens": 214,
+      "context_length": 166490
+    },
+    {
+      "file_path": "django/conf/locale/de/formats.py",
+      "position": 79,
+      "tokens": 368,
+      "context_length": 166858
+    },
+    {
+      "file_path": "django/forms/__init__.py",
+      "position": 80,
+      "tokens": 90,
+      "context_length": 166948
+    },
+    {
+      "file_path": "django/conf/locale/ga/formats.py",
+      "position": 81,
+      "tokens": 168,
+      "context_length": 167116
+    },
+    {
+      "file_path": "django/conf/locale/cy/formats.py",
+      "position": 82,
+      "tokens": 627,
+      "context_length": 167743
+    },
+    {
+      "file_path": "django/conf/locale/fi/formats.py",
+      "position": 83,
+      "tokens": 515,
+      "context_length": 168258
+    },
+    {
+      "file_path": "django/conf/locale/te/formats.py",
+      "position": 84,
+      "tokens": 167,
+      "context_length": 168425
+    },
+    {
+      "file_path": "django/conf/locale/sk/formats.py",
+      "position": 85,
+      "tokens": 393,
+      "context_length": 168818
+    },
+    {
+      "file_path": "django/conf/locale/is/formats.py",
+      "position": 86,
+      "tokens": 175,
+      "context_length": 168993
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "position": 87,
+      "tokens": 680,
+      "context_length": 169673
+    }
+  ]
+}

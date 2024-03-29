@@ -1,0 +1,1813 @@
+{
+  "instance_id": "psf__requests-1657",
+  "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex d8e040c8..7deefa44 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -9,7 +9,7 @@ requests (cookies, auth, proxies).\n \n \"\"\"\n import os\n-from collections import Mapping\n+from collections.abc import Mapping\n from datetime import datetime\n \n from .compat import cookielib, OrderedDict, urljoin, urlparse, urlunparse\n@@ -26,41 +26,40 @@ from .utils import requote_uri, get_environ_proxies, get_netrc_auth\n \n from .status_codes import codes\n REDIRECT_STATI = (\n-    codes.moved, # 301\n+    codes.moved_permanently, # 301\n     codes.found, # 302\n-    codes.other, # 303\n-    codes.temporary_moved, # 307\n+    codes.see_other, # 303\n+    codes.temporary_redirect, # 307\n )\n DEFAULT_REDIRECT_LIMIT = 30\n \n \n def merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n-    \"\"\"\n-    Determines appropriate setting for a given request, taking into account the\n-    explicit setting on that request, and the setting in the session. If a\n-    setting is a dictionary, they will be merged together using `dict_class`\n-    \"\"\"\n-\n+    # If either setting is None, return the other\n     if session_setting is None:\n         return request_setting\n-\n     if request_setting is None:\n         return session_setting\n \n-    # Bypass if not a dictionary (e.g. verify)\n-    if not (\n-            isinstance(session_setting, Mapping) and\n-            isinstance(request_setting, Mapping)\n-    ):\n+    # If settings are not dictionaries, return request_setting\n+    if not (isinstance(session_setting, Mapping) and isinstance(request_setting, Mapping)):\n         return request_setting\n \n-    merged_setting = dict_class(to_key_val_list(session_setting))\n-    merged_setting.update(to_key_val_list(request_setting))\n-\n-    # Remove keys that are set to None.\n-    for (k, v) in request_setting.items():\n-        if v is None:\n-            del merged_setting[k]\n+    # Initialize merged_setting with session_setting items\n+    merged_setting = dict_class()\n+    session_items = to_key_val_list(session_setting) if session_setting is not None else []\n+    request_items = to_key_val_list(request_setting) if request_setting is not None else []\n+    for key, value in session_items:\n+        if key in request_items:\n+            merged_setting[key] = value + request_items[key]\n+        else:\n+            merged_setting[key] = value\n+    for key, value in request_items:\n+        if key not in merged_setting:\n+            merged_setting[key] = value\n+\n+    # Remove keys that are set to None\n+    merged_setting = {k: v for k, v in merged_setting.items() if v is not None}\n \n     return merged_setting\n \n@@ -114,14 +113,14 @@ class SessionRedirectMixin(object):\n                 method = 'GET'\n \n             # Do what the browsers do, despite standards...\n-            if (resp.status_code in (codes.moved, codes.found) and\n+            if (resp.status_code in (codes.moved_permanently, codes.found) and\n                     method not in ('GET', 'HEAD')):\n                 method = 'GET'\n \n             prepared_request.method = method\n \n             # https://github.com/kennethreitz/requests/issues/1084\n-            if resp.status_code not in (codes.temporary, codes.resume):\n+            if resp.status_code not in (codes.temporary_redirect, codes.resume_incomplete):\n                 if 'Content-Length' in prepared_request.headers:\n                     del prepared_request.headers['Content-Length']\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "requests/sessions.py"
+  ],
+  "repo": "psf/requests",
+  "base_commit": "43477edc91a8f49de1e9d96117f9cc6d087e71d9",
+  "patch": "diff --git a/requests/sessions.py b/requests/sessions.py\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -65,6 +65,22 @@ def merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n     return merged_setting\n \n \n+def merge_hooks(request_hooks, session_hooks, dict_class=OrderedDict):\n+    \"\"\"\n+    Properly merges both requests and session hooks.\n+\n+    This is necessary because when request_hooks == {'response': []}, the\n+    merge breaks Session hooks entirely.\n+    \"\"\"\n+    if session_hooks is None or session_hooks.get('response') == []:\n+        return request_hooks\n+\n+    if request_hooks is None or request_hooks.get('response') == []:\n+        return session_hooks\n+\n+    return merge_setting(request_hooks, session_hooks, dict_class)\n+\n+\n class SessionRedirectMixin(object):\n     def resolve_redirects(self, resp, req, stream=False, timeout=None,\n                           verify=True, cert=None, proxies=None):\n@@ -261,7 +277,7 @@ def prepare_request(self, request):\n             params=merge_setting(request.params, self.params),\n             auth=merge_setting(auth, self.auth),\n             cookies=merged_cookies,\n-            hooks=merge_setting(request.hooks, self.hooks),\n+            hooks=merge_hooks(request.hooks, self.hooks),\n         )\n         return p\n \n",
+  "test_patch": "diff --git a/test_requests.py b/test_requests.py\n--- a/test_requests.py\n+++ b/test_requests.py\n@@ -449,6 +449,25 @@ def hook(resp, **kwargs):\n \n         requests.Request('GET', HTTPBIN, hooks={'response': hook})\n \n+    def test_session_hooks_are_used_with_no_request_hooks(self):\n+        hook = lambda x, *args, **kwargs: x\n+        s = requests.Session()\n+        s.hooks['response'].append(hook)\n+        r = requests.Request('GET', HTTPBIN)\n+        prep = s.prepare_request(r)\n+        assert prep.hooks['response'] != []\n+        assert prep.hooks['response'] == [hook]\n+\n+    def test_session_hooks_are_overriden_by_request_hooks(self):\n+        hook1 = lambda x, *args, **kwargs: x\n+        hook2 = lambda x, *args, **kwargs: x\n+        assert hook1 is not hook2\n+        s = requests.Session()\n+        s.hooks['response'].append(hook2)\n+        r = requests.Request('GET', HTTPBIN, hooks={'response': [hook1]})\n+        prep = s.prepare_request(r)\n+        assert prep.hooks['response'] == [hook1]\n+\n     def test_prepared_request_hook(self):\n         def hook(resp, **kwargs):\n             resp.hook_working = True\n",
+  "problem_statement": "Session hooks broken\nRequest hooks are being [merged](https://github.com/kennethreitz/requests/blob/master/requests/sessions.py#L264) with session hooks; since both hook dicts have a list as the value, one simply overwrites the other.\n\n",
+  "hints_text": "Great spot, thanks! We should improve our merging logic here.\n\nI might take a crack at this in an hour or so\n\nHm. This has always been the behaviour of how per-request hooks work with session hooks but it isn't exactly intuitive. My concern is whether people are relying on this behaviour since the logic in `merge_setting` hasn't really changed in over a year (at least).\n\nI have to wonder if this did the same thing on older versions of requests or if I'm just remembering incorrectly. Either way, the simplest solution would be to not try to special case this inside of `merge_setting` but to use a different function, e.g., `merge_hooks` (or more generally `merge_lists`) to create a merged list of both.\n\nThe simplest way to avoid duplication is: `set(session_setting).merge(request_setting)`.\n\nStill I'm not 100% certain this is the expected behaviour and I don't have the time to test it right now. I'll take a peak later tonight.\n\nLet me clarify: session hooks are completely ignored (in version 2.0.0) regardless of whether any per-request hooks were set. They used to work in Requests 1.2.3.\n\nAh that's a big help.\n",
+  "created_at": "2013-10-08T00:23:48Z",
+  "version": "2.0",
+  "FAIL_TO_PASS": "[\"test_requests.py::RequestsTestCase::test_prepared_from_session\", \"test_requests.py::RequestsTestCase::test_request_cookie_overrides_session_cookie\", \"test_requests.py::RequestsTestCase::test_session_hooks_are_used_with_no_request_hooks\"]",
+  "PASS_TO_PASS": "[\"test_requests.py::RequestsTestCase::test_BASICAUTH_TUPLE_HTTP_200_OK_GET\", \"test_requests.py::RequestsTestCase::test_DIGESTAUTH_WRONG_HTTP_401_GET\", \"test_requests.py::RequestsTestCase::test_DIGEST_AUTH_RETURNS_COOKIE\", \"test_requests.py::RequestsTestCase::test_DIGEST_AUTH_SETS_SESSION_COOKIES\", \"test_requests.py::RequestsTestCase::test_DIGEST_HTTP_200_OK_GET\", \"test_requests.py::RequestsTestCase::test_DIGEST_STREAM\", \"test_requests.py::RequestsTestCase::test_HTTP_200_OK_GET_ALTERNATIVE\", \"test_requests.py::RequestsTestCase::test_HTTP_200_OK_GET_WITH_MIXED_PARAMS\", \"test_requests.py::RequestsTestCase::test_HTTP_200_OK_GET_WITH_PARAMS\", \"test_requests.py::RequestsTestCase::test_HTTP_200_OK_HEAD\", \"test_requests.py::RequestsTestCase::test_HTTP_200_OK_PUT\", \"test_requests.py::RequestsTestCase::test_HTTP_302_ALLOW_REDIRECT_GET\", \"test_requests.py::RequestsTestCase::test_POSTBIN_GET_POST_FILES_WITH_DATA\", \"test_requests.py::RequestsTestCase::test_basic_building\", \"test_requests.py::RequestsTestCase::test_basicauth_with_netrc\", \"test_requests.py::RequestsTestCase::test_can_send_nonstring_objects_with_files\", \"test_requests.py::RequestsTestCase::test_cannot_send_unprepared_requests\", \"test_requests.py::RequestsTestCase::test_cookie_parameters\", \"test_requests.py::RequestsTestCase::test_cookie_persists_via_api\", \"test_requests.py::RequestsTestCase::test_cookie_quote_wrapped\", \"test_requests.py::RequestsTestCase::test_cookie_removed_on_expire\", \"test_requests.py::RequestsTestCase::test_cookie_sent_on_redirect\", \"test_requests.py::RequestsTestCase::test_custom_content_type\", \"test_requests.py::RequestsTestCase::test_decompress_gzip\", \"test_requests.py::RequestsTestCase::test_entry_points\", \"test_requests.py::RequestsTestCase::test_fixes_1329\", \"test_requests.py::RequestsTestCase::test_generic_cookiejar_works\", \"test_requests.py::RequestsTestCase::test_get_auth_from_url\", \"test_requests.py::RequestsTestCase::test_header_keys_are_native\", \"test_requests.py::RequestsTestCase::test_header_remove_is_case_insensitive\", \"test_requests.py::RequestsTestCase::test_hook_receives_request_arguments\", \"test_requests.py::RequestsTestCase::test_http_error\", \"test_requests.py::RequestsTestCase::test_invalid_url\", \"test_requests.py::RequestsTestCase::test_links\", \"test_requests.py::RequestsTestCase::test_long_authinfo_in_url\", \"test_requests.py::RequestsTestCase::test_mixed_case_scheme_acceptable\", \"test_requests.py::RequestsTestCase::test_no_content_length\", \"test_requests.py::RequestsTestCase::test_params_are_added_before_fragment\", \"test_requests.py::RequestsTestCase::test_params_are_merged_case_sensitive\", \"test_requests.py::RequestsTestCase::test_path_is_not_double_encoded\", \"test_requests.py::RequestsTestCase::test_prepared_request_hook\", \"test_requests.py::RequestsTestCase::test_request_ok_set\", \"test_requests.py::RequestsTestCase::test_requests_in_history_are_not_overridden\", \"test_requests.py::RequestsTestCase::test_response_is_iterable\", \"test_requests.py::RequestsTestCase::test_session_hooks_are_overriden_by_request_hooks\", \"test_requests.py::RequestsTestCase::test_session_pickling\", \"test_requests.py::RequestsTestCase::test_set_cookie_on_301\", \"test_requests.py::RequestsTestCase::test_status_raising\", \"test_requests.py::RequestsTestCase::test_time_elapsed_blank\", \"test_requests.py::RequestsTestCase::test_transport_adapter_ordering\", \"test_requests.py::RequestsTestCase::test_unicode_get\", \"test_requests.py::RequestsTestCase::test_unicode_header_name\", \"test_requests.py::RequestsTestCase::test_unicode_multipart_post\", \"test_requests.py::RequestsTestCase::test_unicode_multipart_post_fieldnames\", \"test_requests.py::RequestsTestCase::test_uppercase_scheme_redirect\", \"test_requests.py::RequestsTestCase::test_urlencoded_get_query_multivalued_param\", \"test_requests.py::RequestsTestCase::test_user_agent_transfers\", \"test_requests.py::TestCaseInsensitiveDict::test_contains\", \"test_requests.py::TestCaseInsensitiveDict::test_delitem\", \"test_requests.py::TestCaseInsensitiveDict::test_docstring_example\", \"test_requests.py::TestCaseInsensitiveDict::test_equality\", \"test_requests.py::TestCaseInsensitiveDict::test_fixes_649\", \"test_requests.py::TestCaseInsensitiveDict::test_get\", \"test_requests.py::TestCaseInsensitiveDict::test_getitem\", \"test_requests.py::TestCaseInsensitiveDict::test_iter\", \"test_requests.py::TestCaseInsensitiveDict::test_iterable_init\", \"test_requests.py::TestCaseInsensitiveDict::test_kwargs_init\", \"test_requests.py::TestCaseInsensitiveDict::test_len\", \"test_requests.py::TestCaseInsensitiveDict::test_lower_items\", \"test_requests.py::TestCaseInsensitiveDict::test_mapping_init\", \"test_requests.py::TestCaseInsensitiveDict::test_preserve_key_case\", \"test_requests.py::TestCaseInsensitiveDict::test_preserve_last_key_case\", \"test_requests.py::TestCaseInsensitiveDict::test_setdefault\", \"test_requests.py::TestCaseInsensitiveDict::test_update\", \"test_requests.py::TestCaseInsensitiveDict::test_update_retains_unchanged\", \"test_requests.py::TestContentEncodingDetection::test_html4_pragma\", \"test_requests.py::TestContentEncodingDetection::test_html_charset\", \"test_requests.py::TestContentEncodingDetection::test_none\", \"test_requests.py::TestContentEncodingDetection::test_precedence\", \"test_requests.py::TestContentEncodingDetection::test_xhtml_pragma\", \"test_requests.py::TestContentEncodingDetection::test_xml\"]",
+  "environment_setup_commit": "4bceb312f1b99d36a25f2985b5606e98b6f0d8cd",
+  "patch_files": [
+    "requests/sessions.py"
+  ],
+  "test_patch_files": [
+    "test_requests.py"
+  ],
+  "patch_diff_details": {
+    "requests/sessions.py": {
+      "diffs": [
+        {
+          "start_line_old": 68,
+          "end_line_old": 68,
+          "file_pos": 3,
+          "file_context_length": 9141,
+          "closest_snippet_id": "/tmp/repos/requests/requests/sessions.py_Session.get_adapter_",
+          "closest_snippet_line_distance": 428,
+          "pos": 15,
+          "context_length": 4691
+        },
+        {
+          "start_line_old": 264,
+          "end_line_old": 264,
+          "file_pos": 3,
+          "file_context_length": 9141,
+          "closest_snippet_id": "/tmp/repos/requests/requests/sessions.py_Session.post_Session.post.2.1",
+          "closest_snippet_line_distance": 131,
+          "pos": 25,
+          "context_length": 7523
+        }
+      ]
+    }
+  },
+  "vectors": 185,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/requests/requests/hooks.py_1_",
+      "distance": 0.9493980407714844,
+      "file_path": "requests/hooks.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 188,
+      "context_length": 188
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/requests/requests/models.py_RequestHooksMixin_RequestHooksMixin.deregister_hook.2.3.1.1",
+      "distance": 1.0227864980697632,
+      "file_path": "requests/models.py",
+      "start_line": 149,
+      "end_line": 170,
+      "tokens": 161,
+      "context_length": 349
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/requests/requests/sessions.py_1_DEFAULT_REDIRECT_LIMIT.1",
+      "distance": 1.0699127912521362,
+      "file_path": "requests/sessions.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 222,
+      "context_length": 571,
+      "file_pos": 3
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session_Session.__exit__.1",
+      "distance": 1.1352107524871826,
+      "file_path": "requests/sessions.py",
+      "start_line": 154,
+      "end_line": 227,
+      "tokens": 523,
+      "context_length": 1094,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/requests/requests/sessions.py_merge_setting_merge_setting.10.1",
+      "distance": 1.1584062576293945,
+      "file_path": "requests/sessions.py",
+      "start_line": 37,
+      "end_line": 65,
+      "tokens": 193,
+      "context_length": 1287,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.send_Session.send.39.1",
+      "distance": 1.19434654712677,
+      "file_path": "requests/sessions.py",
+      "start_line": 434,
+      "end_line": 494,
+      "tokens": 488,
+      "context_length": 1775,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/requests/requests/__init__.py_1_",
+      "distance": 1.2154171466827393,
+      "file_path": "requests/__init__.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 293,
+      "context_length": 2068
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest.prepare_cookies_PreparedRequest.prepare_hooks.2.1",
+      "distance": 1.2611851692199707,
+      "file_path": "requests/models.py",
+      "start_line": 467,
+      "end_line": 483,
+      "tokens": 132,
+      "context_length": 2200
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/requests/requests/auth.py_1_HTTPProxyAuth.__call__.2.1",
+      "distance": 1.2981863021850586,
+      "file_path": "requests/auth.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 310,
+      "context_length": 2510
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest.prepare_content_length_PreparedRequest.prepare_auth.4.7",
+      "distance": 1.3055192232131958,
+      "file_path": "requests/models.py",
+      "start_line": 433,
+      "end_line": 465,
+      "tokens": 271,
+      "context_length": 2781
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/requests/requests/models.py_1_log.1",
+      "distance": 1.3150705099105835,
+      "file_path": "requests/models.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 261,
+      "context_length": 3042
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/requests/requests/cookies.py_1_MockRequest.host.1.1",
+      "distance": 1.3207123279571533,
+      "file_path": "requests/cookies.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 509,
+      "context_length": 3551
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest.prepare_PreparedRequest.prepare_method.3.self.method.1",
+      "distance": 1.3342127799987793,
+      "file_path": "requests/models.py",
+      "start_line": 278,
+      "end_line": 310,
+      "tokens": 266,
+      "context_length": 3817
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.get_adapter_",
+      "distance": 1.3408658504486084,
+      "file_path": "requests/sessions.py",
+      "start_line": 496,
+      "end_line": 532,
+      "tokens": 257,
+      "context_length": 4074,
+      "file_pos": 6
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/requests/requests/sessions.py_SessionRedirectMixin_SessionRedirectMixin.resolve_redirects.4.33",
+      "distance": 1.3421965837478638,
+      "file_path": "requests/sessions.py",
+      "start_line": 68,
+      "end_line": 151,
+      "tokens": 617,
+      "context_length": 4691,
+      "file_pos": 6
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.put_Session.put.2.1",
+      "distance": 1.3498907089233398,
+      "file_path": "requests/sessions.py",
+      "start_line": 405,
+      "end_line": 413,
+      "tokens": 112,
+      "context_length": 4803,
+      "file_pos": 6
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.patch_Session.delete.2.1",
+      "distance": 1.350090503692627,
+      "file_path": "requests/sessions.py",
+      "start_line": 415,
+      "end_line": 432,
+      "tokens": 185,
+      "context_length": 4988,
+      "file_pos": 6
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.request_Session.request.18.1",
+      "distance": 1.3516461849212646,
+      "file_path": "requests/sessions.py",
+      "start_line": 269,
+      "end_line": 363,
+      "tokens": 759,
+      "context_length": 5747,
+      "file_pos": 6
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar.__getstate___RequestsCookieJar.copy.4.1",
+      "distance": 1.3552566766738892,
+      "file_path": "requests/cookies.py",
+      "start_line": 313,
+      "end_line": 330,
+      "tokens": 160,
+      "context_length": 5907
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.post_Session.post.2.1",
+      "distance": 1.3621398210525513,
+      "file_path": "requests/sessions.py",
+      "start_line": 395,
+      "end_line": 403,
+      "tokens": 112,
+      "context_length": 6019,
+      "file_pos": 6
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest.prepare_headers_PreparedRequest.prepare_body.self.body.1",
+      "distance": 1.363817811012268,
+      "file_path": "requests/models.py",
+      "start_line": 372,
+      "end_line": 431,
+      "tokens": 397,
+      "context_length": 6416
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/requests/requests/exceptions.py_1_",
+      "distance": 1.3730028867721558,
+      "file_path": "requests/exceptions.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 286,
+      "context_length": 6702
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_1_port_by_scheme.1",
+      "distance": 1.3745172023773193,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 373,
+      "context_length": 7075
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/_collections.py_RecentlyUsedContainer.__setitem___RecentlyUsedContainer.__setitem__.3.1",
+      "distance": 1.3767898082733154,
+      "file_path": "requests/packages/urllib3/_collections.py",
+      "start_line": 52,
+      "end_line": 65,
+      "tokens": 152,
+      "context_length": 7227
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.prepare_request_Session.prepare_request.14.1",
+      "distance": 1.3777154684066772,
+      "file_path": "requests/sessions.py",
+      "start_line": 229,
+      "end_line": 267,
+      "tokens": 296,
+      "context_length": 7523,
+      "file_pos": 9
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/requests/requests/adapters.py_1_BaseAdapter.close.1",
+      "distance": 1.3867743015289307,
+      "file_path": "requests/adapters.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 299,
+      "context_length": 7822
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/request.py_1_RequestMethods.urlopen.2",
+      "distance": 1.3918968439102173,
+      "file_path": "requests/packages/urllib3/request.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 377,
+      "context_length": 8199
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/_collections.py_RecentlyUsedContainer.__delitem___",
+      "distance": 1.3965511322021484,
+      "file_path": "requests/packages/urllib3/_collections.py",
+      "start_line": 67,
+      "end_line": 95,
+      "tokens": 174,
+      "context_length": 8373
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar.set_RequestsCookieJar.set.6.1",
+      "distance": 1.396657943725586,
+      "file_path": "requests/cookies.py",
+      "start_line": 174,
+      "end_line": 188,
+      "tokens": 151,
+      "context_length": 8524
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/requests/requests/auth.py_HTTPDigestAuth_HTTPDigestAuth.build_digest_header.27.1",
+      "distance": 1.3991889953613281,
+      "file_path": "requests/auth.py",
+      "start_line": 58,
+      "end_line": 143,
+      "tokens": 755,
+      "context_length": 9279
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/requests/requests/utils.py_1_super_len.3.1.1",
+      "distance": 1.4006626605987549,
+      "file_path": "requests/utils.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 282,
+      "context_length": 9561
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/exceptions.py_1_",
+      "distance": 1.4038517475128174,
+      "file_path": "requests/packages/urllib3/exceptions.py",
+      "start_line": 1,
+      "end_line": 122,
+      "tokens": 701,
+      "context_length": 10262
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool.urlopen.8_HTTPConnectionPool.urlopen.13.1",
+      "distance": 1.4044432640075684,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 534,
+      "end_line": 620,
+      "tokens": 771,
+      "context_length": 11033
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/requests/requests/sessions.py_Session.get_Session.head.3.1",
+      "distance": 1.4169825315475464,
+      "file_path": "requests/sessions.py",
+      "start_line": 365,
+      "end_line": 393,
+      "tokens": 252,
+      "context_length": 11285,
+      "file_pos": 13
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/requests/requests/packages/__init__.py__",
+      "distance": 1.4207239151000977,
+      "file_path": "requests/packages/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 11285
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/requests/requests/cookies.py_get_cookie_header_CookieConflictError.1",
+      "distance": 1.4265367984771729,
+      "file_path": "requests/cookies.py",
+      "start_line": 120,
+      "end_line": 145,
+      "tokens": 218,
+      "context_length": 11503
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar._find_no_duplicates_RequestsCookieJar._find_no_duplicates.5",
+      "distance": 1.428476095199585,
+      "file_path": "requests/cookies.py",
+      "start_line": 295,
+      "end_line": 311,
+      "tokens": 227,
+      "context_length": 11730
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.add_headers_HTTPAdapter.add_headers.2",
+      "distance": 1.432941198348999,
+      "file_path": "requests/adapters.py",
+      "start_line": 245,
+      "end_line": 257,
+      "tokens": 141,
+      "context_length": 11871
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/requests/requests/auth.py_HTTPDigestAuth.handle_401_",
+      "distance": 1.4336941242218018,
+      "file_path": "requests/auth.py",
+      "start_line": 145,
+      "end_line": 181,
+      "tokens": 311,
+      "context_length": 12182
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.__setitem___OrderedDict.__setitem__.5",
+      "distance": 1.4386188983917236,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 45,
+      "end_line": 53,
+      "tokens": 134,
+      "context_length": 12316
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool.close_HTTPConnectionPool.is_same_host.6.1",
+      "distance": 1.439354658126831,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 417,
+      "end_line": 448,
+      "tokens": 203,
+      "context_length": 12519
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/requests/requests/models.py_Request_Request.prepare.4.1",
+      "distance": 1.4399375915527344,
+      "file_path": "requests/models.py",
+      "start_line": 173,
+      "end_line": 244,
+      "tokens": 513,
+      "context_length": 13032
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_1_SSL_KEYWORDS.1",
+      "distance": 1.4425480365753174,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 155,
+      "context_length": 13187
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar_RequestsCookieJar.get.2.2.1.1",
+      "distance": 1.443295955657959,
+      "file_path": "requests/cookies.py",
+      "start_line": 148,
+      "end_line": 172,
+      "tokens": 249,
+      "context_length": 13436
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_PoolManager_PoolManager.__init__.self.pools.1",
+      "distance": 1.4439270496368408,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 35,
+      "end_line": 69,
+      "tokens": 249,
+      "context_length": 13685
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/requests/requests/cookies.py_extract_cookies_to_jar_extract_cookies_to_jar.7",
+      "distance": 1.4491733312606812,
+      "file_path": "requests/cookies.py",
+      "start_line": 103,
+      "end_line": 117,
+      "tokens": 150,
+      "context_length": 13835
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar.keys_RequestsCookieJar.update.2.2.1",
+      "distance": 1.45259428024292,
+      "file_path": "requests/cookies.py",
+      "start_line": 190,
+      "end_line": 280,
+      "tokens": 758,
+      "context_length": 14593
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/six.py_MovedAttribute_MovedAttribute._resolve.2.1",
+      "distance": 1.4526135921478271,
+      "file_path": "requests/packages/urllib3/packages/six.py",
+      "start_line": 106,
+      "end_line": 128,
+      "tokens": 158,
+      "context_length": 14751
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/requests/requests/status_codes.py_1_",
+      "distance": 1.4533541202545166,
+      "file_path": "requests/status_codes.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 899,
+      "context_length": 15650
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.__delitem___OrderedDict.clear.3",
+      "distance": 1.4559309482574463,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 55,
+      "end_line": 90,
+      "tokens": 293,
+      "context_length": 15943
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/__init__.py_1_19",
+      "distance": 1.457334041595459,
+      "file_path": "requests/packages/urllib3/__init__.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 180,
+      "context_length": 16123
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/requests/requests/compat.py_1_",
+      "distance": 1.4664227962493896,
+      "file_path": "requests/compat.py",
+      "start_line": 1,
+      "end_line": 116,
+      "tokens": 805,
+      "context_length": 16928
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool._make_request_HTTPConnectionPool._make_request.15.1",
+      "distance": 1.467319130897522,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 341,
+      "end_line": 415,
+      "tokens": 710,
+      "context_length": 17638
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/requests/requests/cookies.py_RequestsCookieJar._find_RequestsCookieJar._find.3",
+      "distance": 1.4691085815429688,
+      "file_path": "requests/cookies.py",
+      "start_line": 282,
+      "end_line": 293,
+      "tokens": 155,
+      "context_length": 17793
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/filepost.py_1_iter_field_objects.3.1.2.1",
+      "distance": 1.4713683128356934,
+      "file_path": "requests/packages/urllib3/filepost.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 183,
+      "context_length": 17976
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter_HTTPAdapter.__setstate__.2",
+      "distance": 1.482234001159668,
+      "file_path": "requests/adapters.py",
+      "start_line": 48,
+      "end_line": 95,
+      "tokens": 389,
+      "context_length": 18365
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/fields.py_RequestField.make_multipart_",
+      "distance": 1.4827314615249634,
+      "file_path": "requests/packages/urllib3/fields.py",
+      "start_line": 161,
+      "end_line": 178,
+      "tokens": 172,
+      "context_length": 18537
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/requests/setup.py_1_",
+      "distance": 1.4844928979873657,
+      "file_path": "setup.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 364,
+      "context_length": 18901
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.__update_",
+      "distance": 1.4851540327072144,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 174,
+      "end_line": 261,
+      "tokens": 665,
+      "context_length": 19566
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/requests/requests/structures.py_1_IteratorProxy.read.1.1",
+      "distance": 1.4857873916625977,
+      "file_path": "requests/structures.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 167,
+      "context_length": 19733
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.17_OrderedDict.iteritems.2.1",
+      "distance": 1.4886029958724976,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 115,
+      "end_line": 141,
+      "tokens": 200,
+      "context_length": 19933
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.close_HTTPAdapter.request_url.6.1",
+      "distance": 1.4907395839691162,
+      "file_path": "requests/adapters.py",
+      "start_line": 213,
+      "end_line": 243,
+      "tokens": 232,
+      "context_length": 20165
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/_collections.py_1_RecentlyUsedContainer.__getitem__.2.3.1",
+      "distance": 1.4922006130218506,
+      "file_path": "requests/packages/urllib3/_collections.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 266,
+      "context_length": 20431
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest.prepare_url_PreparedRequest.prepare_url.self.url.1",
+      "distance": 1.4929718971252441,
+      "file_path": "requests/models.py",
+      "start_line": 312,
+      "end_line": 370,
+      "tokens": 429,
+      "context_length": 20860
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool._put_conn_HTTPConnectionPool._get_timeout.3.2.3.1",
+      "distance": 1.4964770078659058,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 300,
+      "end_line": 339,
+      "tokens": 298,
+      "context_length": 21158
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/requests/requests/models.py_Response.iter_lines_Response.iter_lines.4.1",
+      "distance": 1.4980030059814453,
+      "file_path": "requests/models.py",
+      "start_line": 596,
+      "end_line": 620,
+      "tokens": 167,
+      "context_length": 21325
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool_HTTPConnectionPool.__init__.self.num_requests.1",
+      "distance": 1.499725580215454,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 167,
+      "end_line": 249,
+      "tokens": 695,
+      "context_length": 22020
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/requests/requests/models.py_PreparedRequest_PreparedRequest.__init__.self.method.self.hooks.1",
+      "distance": 1.5056788921356201,
+      "file_path": "requests/models.py",
+      "start_line": 247,
+      "end_line": 276,
+      "tokens": 208,
+      "context_length": 22228
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/requests/requests/api.py_patch_",
+      "distance": 1.5063899755477905,
+      "file_path": "requests/api.py",
+      "start_line": 102,
+      "end_line": 121,
+      "tokens": 171,
+      "context_length": 22399
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_HTTPResponse.11_",
+      "distance": 1.5067577362060547,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 264,
+      "end_line": 302,
+      "tokens": 257,
+      "context_length": 22656
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_Timeout.from_float_Timeout.from_float.2.1",
+      "distance": 1.5086429119110107,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 160,
+      "end_line": 174,
+      "tokens": 137,
+      "context_length": 22793
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.popitem_OrderedDict.popitem.8.1",
+      "distance": 1.517408013343811,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 92,
+      "end_line": 113,
+      "tokens": 178,
+      "context_length": 22971
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_1_extract_from_urllib3.util.HAS_SNI.1",
+      "distance": 1.51913321018219,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 544,
+      "context_length": 23515
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/filepost.py_iter_fields_iter_fields.3.1",
+      "distance": 1.5220637321472168,
+      "file_path": "requests/packages/urllib3/filepost.py",
+      "start_line": 47,
+      "end_line": 63,
+      "tokens": 116,
+      "context_length": 23631
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/requests/requests/utils.py_29_parse_dict_header.4.1",
+      "distance": 1.5223376750946045,
+      "file_path": "requests/utils.py",
+      "start_line": 177,
+      "end_line": 208,
+      "tokens": 266,
+      "context_length": 23897
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/ntlmpool.py_NTLMConnectionPool._new_conn_",
+      "distance": 1.5235363245010376,
+      "file_path": "requests/packages/urllib3/contrib/ntlmpool.py",
+      "start_line": 47,
+      "end_line": 121,
+      "tokens": 714,
+      "context_length": 24611
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_25__blocking_errnos.1",
+      "distance": 1.5249652862548828,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 142,
+      "end_line": 165,
+      "tokens": 183,
+      "context_length": 24794
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/requests/requests/utils.py_dict_from_cookiejar_add_dict_to_cookiejar.4.1",
+      "distance": 1.529463529586792,
+      "file_path": "requests/utils.py",
+      "start_line": 236,
+      "end_line": 259,
+      "tokens": 137,
+      "context_length": 24931
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_1_OrderedDict.__init__.4",
+      "distance": 1.5295333862304688,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 369,
+      "context_length": 25300
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/six.py__MovedItems_moves.1",
+      "distance": 1.530137062072754,
+      "file_path": "requests/packages/urllib3/packages/six.py",
+      "start_line": 132,
+      "end_line": 186,
+      "tokens": 739,
+      "context_length": 26039
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/requests/requests/cookies.py_MockResponse_MockResponse.getheaders.1",
+      "distance": 1.5313935279846191,
+      "file_path": "requests/cookies.py",
+      "start_line": 82,
+      "end_line": 100,
+      "tokens": 134,
+      "context_length": 26173
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/__init__.py__",
+      "distance": 1.5333080291748047,
+      "file_path": "requests/packages/urllib3/packages/__init__.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 26173
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_VerifiedHTTPSConnection.connect_VerifiedHTTPSConnection.connect.2.9.1.2.1",
+      "distance": 1.5360548496246338,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 105,
+      "end_line": 139,
+      "tokens": 285,
+      "context_length": 26458
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/requests/requests/cookies.py_morsel_to_cookie_morsel_to_cookie.5.1",
+      "distance": 1.5383903980255127,
+      "file_path": "requests/cookies.py",
+      "start_line": 368,
+      "end_line": 392,
+      "tokens": 230,
+      "context_length": 26688
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/fields.py_RequestField.render_headers_RequestField.render_headers.7.1",
+      "distance": 1.5397032499313354,
+      "file_path": "requests/packages/urllib3/fields.py",
+      "start_line": 142,
+      "end_line": 159,
+      "tokens": 142,
+      "context_length": 26830
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_1__get_decoder.2.1",
+      "distance": 1.5398874282836914,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 237,
+      "context_length": 27067
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_PoolManager.urlopen_PoolManager.urlopen.18.1",
+      "distance": 1.54058837890625,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 135,
+      "end_line": 171,
+      "tokens": 336,
+      "context_length": 27403
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_WrappedSocket_WrappedSocket.close.1.1",
+      "distance": 1.5415139198303223,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 268,
+      "end_line": 288,
+      "tokens": 121,
+      "context_length": 27524
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/fields.py_RequestField._render_part_RequestField._render_parts.6.1",
+      "distance": 1.5420405864715576,
+      "file_path": "requests/packages/urllib3/fields.py",
+      "start_line": 109,
+      "end_line": 140,
+      "tokens": 232,
+      "context_length": 27756
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_23_VerifiedHTTPSConnection.set_cert.self.assert_fingerprint.1",
+      "distance": 1.5424003601074219,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 83,
+      "end_line": 103,
+      "tokens": 147,
+      "context_length": 27903
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/requests/requests/cookies.py_cookiejar_from_dict_",
+      "distance": 1.5432629585266113,
+      "file_path": "requests/cookies.py",
+      "start_line": 395,
+      "end_line": 413,
+      "tokens": 163,
+      "context_length": 28066
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_ProxyManager.urlopen_",
+      "distance": 1.5440051555633545,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 243,
+      "end_line": 260,
+      "tokens": 162,
+      "context_length": 28228
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/requests/requests/packages/charade/gb2312freq.py_GB2312_TYPICAL_DISTRIBUTION_RATIO_",
+      "distance": 1.5494158267974854,
+      "file_path": "requests/packages/charade/gb2312freq.py",
+      "start_line": 42,
+      "end_line": 473,
+      "tokens": 44,
+      "context_length": 28272
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/requests/requests/utils.py_default_headers__null3.1",
+      "distance": 1.5508540868759155,
+      "file_path": "requests/utils.py",
+      "start_line": 459,
+      "end_line": 504,
+      "tokens": 271,
+      "context_length": 28543
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/requests/requests/models.py_RequestEncodingMixin._encode_files_RequestEncodingMixin._encode_files.9.1",
+      "distance": 1.5513794422149658,
+      "file_path": "requests/models.py",
+      "start_line": 89,
+      "end_line": 146,
+      "tokens": 450,
+      "context_length": 28993
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_HTTPResponse.read_HTTPResponse.read.9.6.1.1",
+      "distance": 1.5565922260284424,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 132,
+      "end_line": 206,
+      "tokens": 616,
+      "context_length": 29609
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_ProxyManager_ProxyManager._set_proxy_headers.6.1",
+      "distance": 1.5573220252990723,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 174,
+      "end_line": 241,
+      "tokens": 575,
+      "context_length": 30184
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/ordered_dict.py_OrderedDict.update_OrderedDict.update.8.1",
+      "distance": 1.5576138496398926,
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "start_line": 143,
+      "end_line": 172,
+      "tokens": 311,
+      "context_length": 30495
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.send_",
+      "distance": 1.55799400806427,
+      "file_path": "requests/adapters.py",
+      "start_line": 285,
+      "end_line": 375,
+      "tokens": 587,
+      "context_length": 31082
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/requests/requests/structures.py_CaseInsensitiveDict_CaseInsensitiveDict.__repr__.1.1",
+      "distance": 1.5619027614593506,
+      "file_path": "requests/structures.py",
+      "start_line": 37,
+      "end_line": 109,
+      "tokens": 558,
+      "context_length": 31640
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/requests/requests/api.py_get_put.2.1",
+      "distance": 1.562627911567688,
+      "file_path": "requests/api.py",
+      "start_line": 47,
+      "end_line": 99,
+      "tokens": 438,
+      "context_length": 32078
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/requests/requests/models.py_Response.links_",
+      "distance": 1.564838171005249,
+      "file_path": "requests/models.py",
+      "start_line": 695,
+      "end_line": 734,
+      "tokens": 248,
+      "context_length": 32326
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/__init__.py_add_stderr_logger_",
+      "distance": 1.5654741525650024,
+      "file_path": "requests/packages/urllib3/__init__.py",
+      "start_line": 40,
+      "end_line": 59,
+      "tokens": 145,
+      "context_length": 32471
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_1_current_time.2.1",
+      "distance": 1.5701146125793457,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 269,
+      "context_length": 32740
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/requests/requests/packages/charade/big5freq.py_BIG5_TYPICAL_DISTRIBUTION_RATIO_",
+      "distance": 1.570522427558899,
+      "file_path": "requests/packages/charade/big5freq.py",
+      "start_line": 43,
+      "end_line": 926,
+      "tokens": 52,
+      "context_length": 32792
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/requests/docs/_themes/flask_theme_support.py_1_",
+      "distance": 1.572514533996582,
+      "file_path": "docs/_themes/flask_theme_support.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 1276,
+      "context_length": 34068
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_HTTPResponse_HTTPResponse.data.2.2.1.1",
+      "distance": 1.5750513076782227,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 53,
+      "end_line": 130,
+      "tokens": 563,
+      "context_length": 34631
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPSConnectionPool._prepare_conn_HTTPSConnectionPool._prepare_conn.4.1",
+      "distance": 1.5777695178985596,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 661,
+      "end_line": 687,
+      "tokens": 216,
+      "context_length": 34847
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_is_connection_dropped_is_connection_dropped.2",
+      "distance": 1.5795540809631348,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 471,
+      "end_line": 500,
+      "tokens": 218,
+      "context_length": 35065
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/poolmanager.py_PoolManager._new_pool_PoolManager.clear.2",
+      "distance": 1.580284833908081,
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "start_line": 71,
+      "end_line": 95,
+      "tokens": 190,
+      "context_length": 35255
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/requests/requests/packages/charade/euckrfreq.py_EUCKR_TYPICAL_DISTRIBUTION_RATIO_",
+      "distance": 1.5824377536773682,
+      "file_path": "requests/packages/charade/euckrfreq.py",
+      "start_line": 41,
+      "end_line": 597,
+      "tokens": 53,
+      "context_length": 35308
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/requests/requests/packages/charade/compat.py_sys_",
+      "distance": 1.585400104522705,
+      "file_path": "requests/packages/charade/compat.py",
+      "start_line": 21,
+      "end_line": 35,
+      "tokens": 69,
+      "context_length": 35377
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/requests/requests/models.py_RequestEncodingMixin_RequestEncodingMixin._encode_params.2.4.1.1",
+      "distance": 1.5865777730941772,
+      "file_path": "requests/models.py",
+      "start_line": 40,
+      "end_line": 87,
+      "tokens": 294,
+      "context_length": 35671
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/requests/requests/utils.py_get_netrc_auth_get_netrc_auth.2.11.1",
+      "distance": 1.5872037410736084,
+      "file_path": "requests/utils.py",
+      "start_line": 55,
+      "end_line": 88,
+      "tokens": 250,
+      "context_length": 35921
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_HTTPResponse.from_httplib_HTTPResponse.from_httplib.7.1",
+      "distance": 1.5879604816436768,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 231,
+      "end_line": 262,
+      "tokens": 241,
+      "context_length": 36162
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_fileobject.readline_fileobject.readline.5.3.2",
+      "distance": 1.588449239730835,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 170,
+      "end_line": 265,
+      "tokens": 740,
+      "context_length": 36902
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.proxy_headers_HTTPAdapter.proxy_headers.5.1",
+      "distance": 1.5890731811523438,
+      "file_path": "requests/adapters.py",
+      "start_line": 259,
+      "end_line": 283,
+      "tokens": 209,
+      "context_length": 37111
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_Timeout.clone_Timeout.clone.5.1",
+      "distance": 1.5891773700714111,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 176,
+      "end_line": 189,
+      "tokens": 130,
+      "context_length": 37241
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/requests/docs/conf.py_1_102",
+      "distance": 1.590730905532837,
+      "file_path": "docs/conf.py",
+      "start_line": 1,
+      "end_line": 136,
+      "tokens": 1059,
+      "context_length": 38300
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/fields.py_RequestField_RequestField.__init__.5.self.headers.1",
+      "distance": 1.594151258468628,
+      "file_path": "requests/packages/urllib3/fields.py",
+      "start_line": 55,
+      "end_line": 74,
+      "tokens": 129,
+      "context_length": 38429
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_Timeout_Timeout.__str__.1.1",
+      "distance": 1.5957558155059814,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 51,
+      "end_line": 123,
+      "tokens": 707,
+      "context_length": 39136
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/six.py_1_MovedModule._resolve.1.1",
+      "distance": 1.5967154502868652,
+      "file_path": "requests/packages/urllib3/packages/six.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 512,
+      "context_length": 39648
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/request.py_RequestMethods.request_RequestMethods.request_encode_url.3.1",
+      "distance": 1.5969164371490479,
+      "file_path": "requests/packages/urllib3/request.py",
+      "start_line": 59,
+      "end_line": 88,
+      "tokens": 283,
+      "context_length": 39931
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/requests/requests/api.py_1_request.3.1",
+      "distance": 1.598395824432373,
+      "file_path": "requests/api.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 423,
+      "context_length": 40354
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_ssl_wrap_socket_",
+      "distance": 1.5988330841064453,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 316,
+      "end_line": 345,
+      "tokens": 244,
+      "context_length": 40598
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/requests/requests/packages/charade/charsetprober.py_constants_",
+      "distance": 1.6000936031341553,
+      "file_path": "requests/packages/charade/charsetprober.py",
+      "start_line": 29,
+      "end_line": 63,
+      "tokens": 184,
+      "context_length": 40782
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_fileobject_fileobject.read.rbufsize.8.3.buf_len.6.1",
+      "distance": 1.6017467975616455,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 102,
+      "end_line": 168,
+      "tokens": 585,
+      "context_length": 41367
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool._new_conn_HTTPConnectionPool._get_conn.6.1",
+      "distance": 1.6022034883499146,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 251,
+      "end_line": 298,
+      "tokens": 364,
+      "context_length": 41731
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.build_response_HTTPAdapter.build_response.17.1",
+      "distance": 1.6027019023895264,
+      "file_path": "requests/adapters.py",
+      "start_line": 151,
+      "end_line": 185,
+      "tokens": 273,
+      "context_length": 42004
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/requests/requests/utils.py_27_parse_list_header.4.1",
+      "distance": 1.6039135456085205,
+      "file_path": "requests/utils.py",
+      "start_line": 146,
+      "end_line": 174,
+      "tokens": 250,
+      "context_length": 42254
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/requests/requests/models.py_Response.iter_content_Response.iter_content.6.1",
+      "distance": 1.606040120124817,
+      "file_path": "requests/models.py",
+      "start_line": 559,
+      "end_line": 594,
+      "tokens": 244,
+      "context_length": 42498
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/ntlmpool.py_1_NTLMConnectionPool.__init__.self.pw.1",
+      "distance": 1.6069282293319702,
+      "file_path": "requests/packages/urllib3/contrib/ntlmpool.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 228,
+      "context_length": 42726
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/requests/requests/cookies.py_create_cookie_create_cookie.10.1",
+      "distance": 1.6074388027191162,
+      "file_path": "requests/cookies.py",
+      "start_line": 333,
+      "end_line": 365,
+      "tokens": 233,
+      "context_length": 42959
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPSConnectionPool._new_conn_HTTPSConnectionPool._new_conn.11.1",
+      "distance": 1.6089425086975098,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 689,
+      "end_line": 718,
+      "tokens": 233,
+      "context_length": 43192
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/fields.py_RequestField.from_tuples_RequestField.from_tuples.5.1",
+      "distance": 1.6090059280395508,
+      "file_path": "requests/packages/urllib3/fields.py",
+      "start_line": 76,
+      "end_line": 107,
+      "tokens": 274,
+      "context_length": 43466
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPSConnectionPool_HTTPSConnectionPool.__init__.self.assert_fingerprint.1",
+      "distance": 1.6101677417755127,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 623,
+      "end_line": 659,
+      "tokens": 362,
+      "context_length": 43828
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/response.py_HTTPResponse.stream_HTTPResponse.stream.2.2.1",
+      "distance": 1.6129401922225952,
+      "file_path": "requests/packages/urllib3/response.py",
+      "start_line": 208,
+      "end_line": 228,
+      "tokens": 178,
+      "context_length": 44006
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/contrib/pyopenssl.py_WrappedSocket.getpeercert__verify_callback.1.1",
+      "distance": 1.6184552907943726,
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "start_line": 290,
+      "end_line": 313,
+      "tokens": 141,
+      "context_length": 44147
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/requests/requests/utils.py_get_encoding_from_headers_iter_slices.3.2",
+      "distance": 1.6236765384674072,
+      "file_path": "requests/utils.py",
+      "start_line": 277,
+      "end_line": 320,
+      "tokens": 237,
+      "context_length": 44384
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/request.py_RequestMethods.request_encode_body_",
+      "distance": 1.6237707138061523,
+      "file_path": "requests/packages/urllib3/request.py",
+      "start_line": 90,
+      "end_line": 143,
+      "tokens": 508,
+      "context_length": 44892
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/requests/requests/packages/charade/jisfreq.py_JIS_TYPICAL_DISTRIBUTION_RATIO_",
+      "distance": 1.6253210306167603,
+      "file_path": "requests/packages/charade/jisfreq.py",
+      "start_line": 44,
+      "end_line": 570,
+      "tokens": 53,
+      "context_length": 44945
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/requests/docs/conf.py_html_sidebars_",
+      "distance": 1.6261799335479736,
+      "file_path": "docs/conf.py",
+      "start_line": 137,
+      "end_line": 244,
+      "tokens": 615,
+      "context_length": 45560
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/requests/requests/adapters.py_HTTPAdapter.init_poolmanager_HTTPAdapter.init_poolmanager.self.poolmanager.1",
+      "distance": 1.632537841796875,
+      "file_path": "requests/adapters.py",
+      "start_line": 97,
+      "end_line": 112,
+      "tokens": 175,
+      "context_length": 45735
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/packages/six.py_add_move_52",
+      "distance": 1.6338127851486206,
+      "file_path": "requests/packages/urllib3/packages/six.py",
+      "start_line": 189,
+      "end_line": 299,
+      "tokens": 669,
+      "context_length": 46404
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_Timeout.start_connect_Timeout.get_connect_duration.3.1",
+      "distance": 1.6349462270736694,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 191,
+      "end_line": 213,
+      "tokens": 196,
+      "context_length": 46600
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/connectionpool.py_HTTPConnectionPool.urlopen_HTTPConnectionPool.urlopen.conn.1",
+      "distance": 1.6369895935058594,
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "start_line": 450,
+      "end_line": 532,
+      "tokens": 727,
+      "context_length": 47327
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_get_host_make_headers.7.1",
+      "distance": 1.6401581764221191,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 411,
+      "end_line": 468,
+      "tokens": 195,
+      "context_length": 47522
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/requests/requests/structures.py_LookupDict_",
+      "distance": 1.6440927982330322,
+      "file_path": "requests/structures.py",
+      "start_line": 112,
+      "end_line": 129,
+      "tokens": 114,
+      "context_length": 47636
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/filepost.py_encode_multipart_formdata_",
+      "distance": 1.6483395099639893,
+      "file_path": "requests/packages/urllib3/filepost.py",
+      "start_line": 66,
+      "end_line": 102,
+      "tokens": 233,
+      "context_length": 47869
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/requests/requests/packages/urllib3/util.py_Url_Url.netloc.3.1",
+      "distance": 1.6541000604629517,
+      "file_path": "requests/packages/urllib3/util.py",
+      "start_line": 265,
+      "end_line": 295,
+      "tokens": 233,
+      "context_length": 48102
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/requests/requests/packages/charade/euctwfreq.py_EUCTW_TYPICAL_DISTRIBUTION_RATIO_",
+      "distance": 1.6553840637207031,
+      "file_path": "requests/packages/charade/euctwfreq.py",
+      "start_line": 44,
+      "end_line": 429,
+      "tokens": 56,
+      "context_length": 48158
+    }
+  ],
+  "files": [
+    {
+      "file_path": "requests/hooks.py",
+      "position": 1,
+      "tokens": 189,
+      "context_length": 189
+    },
+    {
+      "file_path": "requests/models.py",
+      "position": 2,
+      "tokens": 4978,
+      "context_length": 5167
+    },
+    {
+      "file_path": "requests/sessions.py",
+      "position": 3,
+      "tokens": 3974,
+      "context_length": 9141
+    },
+    {
+      "file_path": "requests/__init__.py",
+      "position": 4,
+      "tokens": 496,
+      "context_length": 9637
+    },
+    {
+      "file_path": "requests/auth.py",
+      "position": 5,
+      "tokens": 1371,
+      "context_length": 11008
+    },
+    {
+      "file_path": "requests/cookies.py",
+      "position": 6,
+      "tokens": 3268,
+      "context_length": 14276
+    },
+    {
+      "file_path": "requests/exceptions.py",
+      "position": 7,
+      "tokens": 286,
+      "context_length": 14562
+    },
+    {
+      "file_path": "requests/packages/urllib3/connectionpool.py",
+      "position": 8,
+      "tokens": 5686,
+      "context_length": 20248
+    },
+    {
+      "file_path": "requests/packages/urllib3/_collections.py",
+      "position": 9,
+      "tokens": 625,
+      "context_length": 20873
+    },
+    {
+      "file_path": "requests/adapters.py",
+      "position": 10,
+      "tokens": 2731,
+      "context_length": 23604
+    },
+    {
+      "file_path": "requests/packages/urllib3/request.py",
+      "position": 11,
+      "tokens": 1206,
+      "context_length": 24810
+    },
+    {
+      "file_path": "requests/utils.py",
+      "position": 12,
+      "tokens": 4052,
+      "context_length": 28862
+    },
+    {
+      "file_path": "requests/packages/urllib3/exceptions.py",
+      "position": 13,
+      "tokens": 754,
+      "context_length": 29616
+    },
+    {
+      "file_path": "requests/packages/__init__.py",
+      "position": 14,
+      "tokens": 14,
+      "context_length": 29630
+    },
+    {
+      "file_path": "requests/packages/urllib3/packages/ordered_dict.py",
+      "position": 15,
+      "tokens": 2157,
+      "context_length": 31787
+    },
+    {
+      "file_path": "requests/packages/urllib3/poolmanager.py",
+      "position": 16,
+      "tokens": 1988,
+      "context_length": 33775
+    },
+    {
+      "file_path": "requests/packages/urllib3/packages/six.py",
+      "position": 17,
+      "tokens": 2842,
+      "context_length": 36617
+    },
+    {
+      "file_path": "requests/status_codes.py",
+      "position": 18,
+      "tokens": 899,
+      "context_length": 37516
+    },
+    {
+      "file_path": "requests/packages/urllib3/__init__.py",
+      "position": 19,
+      "tokens": 388,
+      "context_length": 37904
+    },
+    {
+      "file_path": "requests/compat.py",
+      "position": 20,
+      "tokens": 805,
+      "context_length": 38709
+    },
+    {
+      "file_path": "requests/packages/urllib3/filepost.py",
+      "position": 21,
+      "tokens": 581,
+      "context_length": 39290
+    },
+    {
+      "file_path": "requests/packages/urllib3/fields.py",
+      "position": 22,
+      "tokens": 1312,
+      "context_length": 40602
+    },
+    {
+      "file_path": "setup.py",
+      "position": 23,
+      "tokens": 364,
+      "context_length": 40966
+    },
+    {
+      "file_path": "requests/structures.py",
+      "position": 24,
+      "tokens": 840,
+      "context_length": 41806
+    },
+    {
+      "file_path": "requests/api.py",
+      "position": 25,
+      "tokens": 1073,
+      "context_length": 42879
+    },
+    {
+      "file_path": "requests/packages/urllib3/response.py",
+      "position": 26,
+      "tokens": 2113,
+      "context_length": 44992
+    },
+    {
+      "file_path": "requests/packages/urllib3/util.py",
+      "position": 27,
+      "tokens": 4637,
+      "context_length": 49629
+    },
+    {
+      "file_path": "requests/packages/urllib3/contrib/pyopenssl.py",
+      "position": 28,
+      "tokens": 2573,
+      "context_length": 52202
+    },
+    {
+      "file_path": "requests/packages/urllib3/contrib/ntlmpool.py",
+      "position": 29,
+      "tokens": 1020,
+      "context_length": 53222
+    },
+    {
+      "file_path": "requests/packages/urllib3/packages/__init__.py",
+      "position": 30,
+      "tokens": 15,
+      "context_length": 53237
+    },
+    {
+      "file_path": "requests/packages/charade/gb2312freq.py",
+      "position": 31,
+      "tokens": 20868,
+      "context_length": 74105
+    },
+    {
+      "file_path": "requests/packages/charade/big5freq.py",
+      "position": 32,
+      "tokens": 46596,
+      "context_length": 120701
+    },
+    {
+      "file_path": "docs/_themes/flask_theme_support.py",
+      "position": 33,
+      "tokens": 1276,
+      "context_length": 121977
+    },
+    {
+      "file_path": "requests/packages/charade/euckrfreq.py",
+      "position": 34,
+      "tokens": 26774,
+      "context_length": 148751
+    },
+    {
+      "file_path": "requests/packages/charade/compat.py",
+      "position": 35,
+      "tokens": 266,
+      "context_length": 149017
+    },
+    {
+      "file_path": "docs/conf.py",
+      "position": 36,
+      "tokens": 1900,
+      "context_length": 150917
+    },
+    {
+      "file_path": "requests/packages/charade/charsetprober.py",
+      "position": 37,
+      "tokens": 446,
+      "context_length": 151363
+    },
+    {
+      "file_path": "requests/packages/charade/jisfreq.py",
+      "position": 38,
+      "tokens": 27973,
+      "context_length": 179336
+    },
+    {
+      "file_path": "requests/packages/charade/euctwfreq.py",
+      "position": 39,
+      "tokens": 20490,
+      "context_length": 199826
+    }
+  ]
+}

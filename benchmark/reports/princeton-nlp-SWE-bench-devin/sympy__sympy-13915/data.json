@@ -1,0 +1,465 @@
+{
+  "instance_id": "sympy__sympy-13915",
+  "model_patch": "diff --git a/sympy/core/expr.py b/sympy/core/expr.py\nindex c36d6f271d..e0399bfd53 100644\n--- a/sympy/core/expr.py\n+++ b/sympy/core/expr.py\n@@ -26,8 +26,6 @@ class Expr(Basic, EvalfMixin):\n     sympy.core.basic.Basic\n     \"\"\"\n \n-    __slots__ = []\n-\n     @property\n     def _diff_wrt(self):\n         \"\"\"Is it allowed to take derivative wrt to this instance.\n@@ -238,7 +236,7 @@ def __int__(self):\n             # (self - r).evalf(2) and the use of subs does; if the test that\n             # was added when this comment was added passes, it might be safe\n             # to simply use sign to compute this rather than doing this by hand:\n-            diff_sign = 1 if (self - x).evalf(2, subs={x: i}) > 0 else -1\n+            diff_sign = 1 if (self - x).evalf(2, subs={x: i}).is_real and (self - x).evalf(2, subs={x: i}) > 0 else -1\n             if diff_sign != isign:\n                 i -= isign\n         return i\n@@ -3297,8 +3295,40 @@ def round(self, p=0):\n         elif x in (S.NaN, S.Infinity, S.NegativeInfinity, S.ComplexInfinity):\n             return x\n         if not x.is_real:\n-            i, r = x.as_real_imag()\n-            return i.round(p) + S.ImaginaryUnit*r.round(p)\n+            if not x:\n+                return x\n+            p = int(p)\n+\n+            precs = [f._prec for f in x.atoms(Float)]\n+            dps = prec_to_dps(max(precs)) if precs else None\n+\n+            mag_first_dig = _mag(x)\n+            allow = digits_needed = mag_first_dig + p\n+            if dps is not None and allow > dps:\n+                allow = dps\n+            mag = Pow(10, p)  # magnitude needed to bring digit p to units place\n+            xwas = x\n+            x += 1/(2*mag)  # add the half for rounding\n+            i10 = 10*mag*x.n((dps if dps is not None else digits_needed) + 1)\n+            if i10.is_negative:\n+                x = xwas - 1/(2*mag)  # should have gone the other way\n+                i10 = 10*mag*x.n((dps if dps is not None else digits_needed) + 1)\n+                rv = -(Integer(-i10)//10)\n+            else:\n+                rv = Integer(i10)//10\n+            q = 1\n+            if p > 0:\n+                q = mag\n+            elif p < 0:\n+                rv /= mag\n+            rv = Rational(rv, q)\n+            if rv.is_Integer:\n+                # use str or else it won't be a float\n+                return Float(str(rv), digits_needed)\n+            else:\n+                if not allow and rv > self:\n+                    allow += 1\n+                return Float(rv, allow)\n         if not x:\n             return x\n         p = int(p)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/core/expr.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "5c1644ff85e15752f9f8721bc142bfbf975e7805",
+  "patch": "diff --git a/sympy/core/mul.py b/sympy/core/mul.py\n--- a/sympy/core/mul.py\n+++ b/sympy/core/mul.py\n@@ -423,6 +423,11 @@ def _gather(c_powers):\n             changed = False\n             for b, e in c_powers:\n                 if e.is_zero:\n+                    # canceling out infinities yields NaN\n+                    if (b.is_Add or b.is_Mul) and any(infty in b.args\n+                        for infty in (S.ComplexInfinity, S.Infinity,\n+                                      S.NegativeInfinity)):\n+                        return [S.NaN], [], None\n                     continue\n                 if e is S.One:\n                     if b.is_Number:\n",
+  "test_patch": "diff --git a/sympy/core/tests/test_arit.py b/sympy/core/tests/test_arit.py\n--- a/sympy/core/tests/test_arit.py\n+++ b/sympy/core/tests/test_arit.py\n@@ -1,7 +1,7 @@\n from __future__ import division\n \n from sympy import (Basic, Symbol, sin, cos, exp, sqrt, Rational, Float, re, pi,\n-        sympify, Add, Mul, Pow, Mod, I, log, S, Max, symbols, oo, Integer,\n+        sympify, Add, Mul, Pow, Mod, I, log, S, Max, symbols, oo, zoo, Integer,\n         sign, im, nan, Dummy, factorial, comp, refine\n )\n from sympy.core.compatibility import long, range\n@@ -1937,6 +1937,14 @@ def test_Mul_with_zero_infinite():\n     assert e.is_positive is None\n     assert e.is_hermitian is None\n \n+def test_Mul_does_not_cancel_infinities():\n+    a, b = symbols('a b')\n+    assert ((zoo + 3*a)/(3*a + zoo)) is nan\n+    assert ((b - oo)/(b - oo)) is nan\n+    # issue 13904\n+    expr = (1/(a+b) + 1/(a-b))/(1/(a+b) - 1/(a-b))\n+    assert expr.subs(b, a) is nan\n+\n def test_issue_8247_8354():\n     from sympy import tan\n     z = sqrt(1 + sqrt(3)) + sqrt(3 + 3*sqrt(3)) - sqrt(10 + 6*sqrt(3))\n",
+  "problem_statement": "Issue with a substitution that leads to an undefined expression\n```\r\nPython 3.6.4 |Anaconda custom (64-bit)| (default, Dec 21 2017, 15:39:08) \r\nType 'copyright', 'credits' or 'license' for more information\r\nIPython 6.2.1 -- An enhanced Interactive Python. Type '?' for help.\r\n\r\nIn [1]: from sympy import *\r\n\r\nIn [2]: a,b = symbols('a,b')\r\n\r\nIn [3]: r = (1/(a+b) + 1/(a-b))/(1/(a+b) - 1/(a-b))\r\n\r\nIn [4]: r.subs(b,a)\r\nOut[4]: 1\r\n\r\nIn [6]: import sympy\r\n\r\nIn [7]: sympy.__version__\r\nOut[7]: '1.1.1'\r\n```\r\n\r\nIf b is substituted by a, r is undefined. It is possible to calculate the limit\r\n`r.limit(b,a) # -1`\r\n\r\nBut whenever a subexpression of r is undefined, r itself is undefined.\n",
+  "hints_text": "In this regard, don't you think that `r.simplify()` is wrong? It returns `-a/b` which is not correct if b=a.\n`simplify` works for the generic case. SymPy would be hard to use if getting a+b from `simplify((a**2-b**2)/(a-b))` required an explicit declaration that a is not equal to b. (Besides, there is currently no way to express that declaration to `simplify`, anyway). This is part of reason we avoid `simplify` in code:  it can change the outcome in edge cases. \r\n\r\nThe fundamental issue here is: for what kind of expression `expr` do we want expr/expr to return 1? Current behavior:\r\n\r\nzoo / zoo   # nan\r\n(zoo + 3) / (zoo + 3)   # nan\r\n(zoo + a) / (zoo + a)    # 1  \r\n(zoo + a) / (a - zoo)   # 1 because -zoo is zoo  (zoo is complex infinity)  \r\n\r\nThe rules for combining an expression with its inverse in Mul appear to be too lax. \r\n\r\nThere is a check of the form `if something is S.ComplexInfinity`... which returns nan in the first two cases, but this condition is not met by `zoo + a`. \r\n\r\nBut using something like `numerator.is_finite` would not work either, because most of the time, we don't know if a symbolic expression is finite. E.g., `(a+b).is_finite` is None, unknown,  unless the symbols were explicitly declared to be finite.\r\n\r\nMy best idea so far is to have three cases for expr/expr: \r\n\r\n1. expr is infinite or 0: return nan\r\n2. Otherwise, if expr contains infinities (how to check this efficiently? Mul needs to be really fast), return expr/expr without combining \r\n3. Otherwise, return 1\n\"But using something like numerator.is_finite would not work either\"\r\n\r\nI had thought of something like denom.is_zero. If in expr_1/expr_2 the denominator is zero, the fraction is undefined. The only way to get a value from this is to use limits. At least i would think so.\r\n\r\nMy first idea was that sympy first simplifies and then substitutes. But then, the result should be -1. \r\n\r\n(zoo+a)/(a-zoo) # 1\r\nexplains what happens, but i had expected, that\r\nzoo/expr leads to nan and expr/zoo leads to nan as well.\r\n\r\nI agree, that Mul needs to be really fast, but this is about subst. But i confess, i don't know much about symbolic math.\nzoo/3 is zoo, and 4/zoo is 0. I think it's convenient, and not controversial, to have these. \r\n\r\nSubstitution is not to blame: it replaces b by a as requested, evaluating 1/(a-a) as zoo.  This is how `r` becomes `(1/(2*a) + zoo) / (1/(2*a) - zoo)`. So far nothing wrong has happened. The problem is that (because of -zoo being same as zoo) both parts are identified as the same and then the `_gather` helper of Mul method combines the powers 1 and -1 into power 0. And anything to power 0 returns 1 in SymPy, hence the result. \r\n\r\nI think we should prevent combining powers when base contains Infinity or ComplexInfinity. For example, (x+zoo) / (x+zoo)**2  returning 1 / (x+zoo) isn't right either. \nI dont really understand what happens. How can i get the result zoo? \r\n\r\nIn my example `r.subs(b,a)` returns ` 1`,  \r\nbut `r.subs(b,-a)` returns `(zoo + 1/(2*a))/(zoo - 1/(2*a))`\r\n\r\nSo how is zoo defined? Is it `(1/z).limit(z,0)`? I get `oo` as result, but how is this related to  `zoo`? As far as i know, `zoo` is ComplexInfinity. By playing around, i just found another confusing result:\r\n\r\n`(zoo+z)/(zoo-z)` returns `(z + zoo)/(-z + zoo)`, \r\nbut\r\n`(z + zoo)/(z-zoo)` returns 1\r\n\r\nI just found, `1/S.Zero` returns `zoo`, as well as `(1/S.Zero)**2`. To me, that would mean i should not divide by `zoo`.\nThere are three infinities: positive infinity oo, negative infinity -oo, and complex infinity zoo. Here is the difference:\r\n\r\n- If z is a positive number that tends to zero, then 1/z tends to oo\r\n- if z is a negative number than tends to zero, then 1/z tends to -oo\r\n- If z is a complex number that tends to zero, then 1/z tends to zoo\r\n\r\nThe complex infinity zoo does not have a determined sign, so -zoo is taken to  be the same as zoo. So when you put `(z + zoo)/(z-zoo)` two things happen: first, z-zoo returns z+zoo (you can check this directly) and second, the two identical expressions are cancelled, leaving 1.\r\n\r\nHowever, in (zoo+z)/(zoo-z) the terms are not identical, so they do not cancel. \r\n\r\nI am considering a solution that returns NaN when Mul cancels an expression with infinity of any kind. So for example (z+zoo)/(z+zoo) and (z-oo)/(z-oo) both return NaN. However, it changes the behavior in a couple of tests, so I have to investigate whether the tests are being wrong about infinities, or something else is. \nOk. I think i got it. Thank you for your patient explanation. \r\nMaybe one last question. Should `z + zoo` result in `zoo`? I think that would be natural.",
+  "created_at": "2018-01-13T20:41:07Z",
+  "version": "1.1",
+  "FAIL_TO_PASS": "[\"test_Mul_does_not_cancel_infinities\"]",
+  "PASS_TO_PASS": "[\"test_Add_Mul_is_finite\", \"test_Add_Mul_is_integer\", \"test_Add_as_coeff_mul\", \"test_Add_as_content_primitive\", \"test_Add_is_comparable\", \"test_Add_is_even_odd\", \"test_Add_is_irrational\", \"test_Add_is_positive_2\", \"test_Add_is_rational\", \"test_Mod_is_integer\", \"test_Mul_as_content_primitive\", \"test_Mul_doesnt_expand_exp\", \"test_Mul_hermitian_antihermitian\", \"test_Mul_is_comparable\", \"test_Mul_is_even_odd\", \"test_Mul_is_negative_positive\", \"test_Mul_is_negative_positive_2\", \"test_Mul_is_nonpositive_nonnegative\", \"test_Mul_is_rational\", \"test_Mul_with_zero_infinite\", \"test_Pow_as_coeff_mul_doesnt_expand\", \"test_Pow_as_content_primitive\", \"test_Pow_is_comparable\", \"test_Pow_is_zero\", \"test_Rational_as_content_primitive\", \"test_Symbol\", \"test_add_flatten\", \"test_arit0\", \"test_bug1\", \"test_bug3\", \"test_denest_add_mul\", \"test_evenness_in_ternary_integer_product_with_even\", \"test_float_int\", \"test_issue_3514\", \"test_issue_3531b\", \"test_issue_5126\", \"test_issue_5160_6087_6089_6090\", \"test_issue_5460\", \"test_issue_5919\", \"test_issue_6001\", \"test_issue_6040\", \"test_issue_6077\", \"test_issue_6082\", \"test_issue_6611a\", \"test_issue_8247_8354\", \"test_make_args\", \"test_mod_pow\", \"test_mul_flatten_oo\", \"test_mul_zero_detection\", \"test_ncmul\", \"test_ncpow\", \"test_oddness_in_ternary_integer_product_with_even\", \"test_polar\", \"test_pow2\", \"test_pow3\", \"test_pow_E\", \"test_pow_im\", \"test_pow_issue_3516\", \"test_powerbug\", \"test_product_irrational\", \"test_real_mul\", \"test_suppressed_evaluation\"]",
+  "environment_setup_commit": "ec9e3c0436fbff934fa84e22bf07f1b3ef5bfac3",
+  "patch_files": [
+    "sympy/core/mul.py"
+  ],
+  "test_patch_files": [
+    "sympy/core/tests/test_arit.py"
+  ],
+  "patch_diff_details": {
+    "sympy/core/mul.py": {
+      "diffs": [
+        {
+          "start_line_old": 426,
+          "end_line_old": 426
+        }
+      ]
+    }
+  },
+  "vectors": 8049,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/integrals/integrals.py_Integral.transform.2_Integral.transform._calc_limit_1.4.1",
+      "distance": 0.7908108234405518,
+      "file_path": "sympy/integrals/integrals.py",
+      "start_line": 243,
+      "end_line": 320,
+      "tokens": 780,
+      "context_length": 780
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits._eval_subs_ExprWithLimits._eval_subs.18.1",
+      "distance": 0.8150439262390137,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 292,
+      "end_line": 367,
+      "tokens": 728,
+      "context_length": 1508
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/integrals/integrals.py_Integral.transform._calc_limit_Integral.transform.22.1",
+      "distance": 0.8336994647979736,
+      "file_path": "sympy/integrals/integrals.py",
+      "start_line": 322,
+      "end_line": 353,
+      "tokens": 296,
+      "context_length": 1804
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs.__new___Subs.__new__.18.1",
+      "distance": 0.8392461538314819,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1755,
+      "end_line": 1805,
+      "tokens": 504,
+      "context_length": 2308
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.1_solve.1",
+      "distance": 0.8512798547744751,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 451,
+      "end_line": 901,
+      "tokens": 4430,
+      "context_length": 6738
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/core/basic.py_Basic.subs_Basic.subs.1",
+      "distance": 0.8567095994949341,
+      "file_path": "sympy/core/basic.py",
+      "start_line": 727,
+      "end_line": 839,
+      "tokens": 1037,
+      "context_length": 7775
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/strategies/rl.py_subs_",
+      "distance": 0.8689584732055664,
+      "file_path": "sympy/strategies/rl.py",
+      "start_line": 115,
+      "end_line": 161,
+      "tokens": 273,
+      "context_length": 8048
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_eval_sum_symbolic_eval_sum_symbolic.13.1",
+      "distance": 0.8804808855056763,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 910,
+      "end_line": 994,
+      "tokens": 683,
+      "context_length": 8731
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits.as_dummy_ExprWithLimits._eval_interval.3.1",
+      "distance": 0.8860878348350525,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 238,
+      "end_line": 290,
+      "tokens": 470,
+      "context_length": 9201
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs_Subs.1",
+      "distance": 0.888210654258728,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1712,
+      "end_line": 1754,
+      "tokens": 393,
+      "context_length": 9594
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs._eval_nseries_Subs._eval_as_leading_term.4.1",
+      "distance": 0.8891562819480896,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1884,
+      "end_line": 1908,
+      "tokens": 282,
+      "context_length": 9876
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/strategies/tools.py_1_subs.2.2.1.1",
+      "distance": 0.8919392824172974,
+      "file_path": "sympy/strategies/tools.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 192,
+      "context_length": 10068
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/core/sympify.py_sympify.1_sympify.1",
+      "distance": 0.8981350660324097,
+      "file_path": "sympy/core/sympify.py",
+      "start_line": 78,
+      "end_line": 259,
+      "tokens": 1755,
+      "context_length": 11823
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs._eval_derivative_Subs._eval_derivative.val.10.1",
+      "distance": 0.898474931716919,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1869,
+      "end_line": 1882,
+      "tokens": 216,
+      "context_length": 12039
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_eval_sum_eval_sum_direct.4.1",
+      "distance": 0.906001091003418,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 857,
+      "end_line": 907,
+      "tokens": 469,
+      "context_length": 12508
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/core/basic.py_Basic.subs.2_Basic.subs.11.3.3.1",
+      "distance": 0.9076634645462036,
+      "file_path": "sympy/core/basic.py",
+      "start_line": 840,
+      "end_line": 923,
+      "tokens": 691,
+      "context_length": 13199
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.as_numer_denom_Expr.normal.4.2.1.1",
+      "distance": 0.9275619983673096,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 1948,
+      "end_line": 1972,
+      "tokens": 159,
+      "context_length": 13358
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs._eval_is_commutative_Subs._eval_subs.1.2.1",
+      "distance": 0.9316366910934448,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1807,
+      "end_line": 1867,
+      "tokens": 405,
+      "context_length": 13763
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py_Piecewise._eval_interval_Piecewise._eval_interval.8.3.1",
+      "distance": 0.9373492002487183,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 538,
+      "end_line": 551,
+      "tokens": 212,
+      "context_length": 13975
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.27_substitution._check_exclude.5.1",
+      "distance": 0.941770076751709,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1628,
+      "end_line": 1652,
+      "tokens": 290,
+      "context_length": 14265
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/stats/rv.py_rv_subs_",
+      "distance": 0.9421600699424744,
+      "file_path": "sympy/stats/rv.py",
+      "start_line": 1078,
+      "end_line": 1109,
+      "tokens": 190,
+      "context_length": 14455
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_intlimits.py_1_ExprWithIntLimits.change_index.1",
+      "distance": 0.9443029165267944,
+      "file_path": "sympy/concrete/expr_with_intlimits.py",
+      "start_line": 1,
+      "end_line": 102,
+      "tokens": 1134,
+      "context_length": 15589
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_Limit.doit_",
+      "distance": 0.9495494365692139,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 159,
+      "end_line": 227,
+      "tokens": 546,
+      "context_length": 16135
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/core/basic.py_Basic._subs_Basic._subs.1",
+      "distance": 0.951024055480957,
+      "file_path": "sympy/core/basic.py",
+      "start_line": 925,
+      "end_line": 995,
+      "tokens": 637,
+      "context_length": 16772
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/simplify/gammasimp.py__rf_",
+      "distance": 0.9525430202484131,
+      "file_path": "sympy/simplify/gammasimp.py",
+      "start_line": 476,
+      "end_line": 513,
+      "tokens": 276,
+      "context_length": 17048
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/physics/mechanics/functions.py__smart_subs._recurser__smart_subs.4.1",
+      "distance": 0.9535380601882935,
+      "file_path": "sympy/physics/mechanics/functions.py",
+      "start_line": 549,
+      "end_line": 569,
+      "tokens": 248,
+      "context_length": 17296
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py__n2_",
+      "distance": 0.9552310109138489,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 3431,
+      "end_line": 3450,
+      "tokens": 165,
+      "context_length": 17461
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_Limit_Limit.free_symbols.5.1",
+      "distance": 0.9559913873672485,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 111,
+      "end_line": 156,
+      "tokens": 337,
+      "context_length": 17798
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_eval_sum_hyper_",
+      "distance": 0.9597763419151306,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 1051,
+      "end_line": 1103,
+      "tokens": 481,
+      "context_length": 18279
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_Pow._eval_expand_multinomial_Pow._eval_expand_multinomial.4.6.1.1",
+      "distance": 0.9615183472633362,
+      "file_path": "sympy/core/power.py",
+      "start_line": 884,
+      "end_line": 1004,
+      "tokens": 1059,
+      "context_length": 19338
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/integrals/manualintegrate.py_substitution_rule_substitution_rule.4.4.5.1.1",
+      "distance": 0.9616193175315857,
+      "file_path": "sympy/integrals/manualintegrate.py",
+      "start_line": 812,
+      "end_line": 868,
+      "tokens": 410,
+      "context_length": 19748
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/integrals/integrals.py",
+      "position": 1,
+      "tokens": 12172,
+      "context_length": 12172
+    },
+    {
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "position": 2,
+      "tokens": 3610,
+      "context_length": 15782
+    },
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 3,
+      "tokens": 24073,
+      "context_length": 39855
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 4,
+      "tokens": 31131,
+      "context_length": 70986
+    },
+    {
+      "file_path": "sympy/core/basic.py",
+      "position": 5,
+      "tokens": 14505,
+      "context_length": 85491
+    },
+    {
+      "file_path": "sympy/strategies/rl.py",
+      "position": 6,
+      "tokens": 1139,
+      "context_length": 86630
+    },
+    {
+      "file_path": "sympy/concrete/summations.py",
+      "position": 7,
+      "tokens": 9852,
+      "context_length": 96482
+    },
+    {
+      "file_path": "sympy/strategies/tools.py",
+      "position": 8,
+      "tokens": 367,
+      "context_length": 96849
+    },
+    {
+      "file_path": "sympy/core/sympify.py",
+      "position": 9,
+      "tokens": 3976,
+      "context_length": 100825
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 10,
+      "tokens": 28684,
+      "context_length": 129509
+    },
+    {
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "position": 11,
+      "tokens": 9398,
+      "context_length": 138907
+    },
+    {
+      "file_path": "sympy/solvers/solveset.py",
+      "position": 12,
+      "tokens": 20247,
+      "context_length": 159154
+    },
+    {
+      "file_path": "sympy/stats/rv.py",
+      "position": 13,
+      "tokens": 7472,
+      "context_length": 166626
+    },
+    {
+      "file_path": "sympy/concrete/expr_with_intlimits.py",
+      "position": 14,
+      "tokens": 2820,
+      "context_length": 169446
+    },
+    {
+      "file_path": "sympy/series/limits.py",
+      "position": 15,
+      "tokens": 1846,
+      "context_length": 171292
+    },
+    {
+      "file_path": "sympy/simplify/gammasimp.py",
+      "position": 16,
+      "tokens": 4242,
+      "context_length": 175534
+    },
+    {
+      "file_path": "sympy/physics/mechanics/functions.py",
+      "position": 17,
+      "tokens": 5330,
+      "context_length": 180864
+    },
+    {
+      "file_path": "sympy/core/power.py",
+      "position": 18,
+      "tokens": 13835,
+      "context_length": 194699
+    },
+    {
+      "file_path": "sympy/integrals/manualintegrate.py",
+      "position": 19,
+      "tokens": 11748,
+      "context_length": 206447
+    }
+  ]
+}

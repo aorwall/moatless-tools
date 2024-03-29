@@ -1,0 +1,656 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8969",
+  "model_patch": "diff --git a/setup.py b/setup.py\nindex 9258fded2..75cb0451a 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -21,7 +21,7 @@ install_requires = [\n     'sphinxcontrib-htmlhelp',\n     'sphinxcontrib-serializinghtml',\n     'sphinxcontrib-qthelp',\n-    'Jinja2>=2.3',\n+    'Jinja2<3.1',\n     'Pygments>=2.0',\n     'docutils>=0.14',\n     'snowballstemmer>=1.1',\ndiff --git a/tox.ini b/tox.ini\nindex bdf4c2ad3..b12166264 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -26,7 +26,7 @@ setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils,ignore::DeprecationWarning:pip._vendor.packaging.version\n     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes\n commands=\n-    python -X dev -m pytest --durations 25 {posargs}\n+    python -X dev -m pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "setup.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "ae413e95ed6fd2b3a9d579a3d802e38846906b54",
+  "patch": "diff --git a/sphinx/directives/patches.py b/sphinx/directives/patches.py\n--- a/sphinx/directives/patches.py\n+++ b/sphinx/directives/patches.py\n@@ -6,7 +6,9 @@\n     :license: BSD, see LICENSE for details.\n \"\"\"\n \n+import os\n import warnings\n+from os import path\n from typing import TYPE_CHECKING, Any, Dict, List, Tuple, cast\n \n from docutils import nodes\n@@ -18,13 +20,19 @@\n from sphinx.deprecation import RemovedInSphinx60Warning\n from sphinx.directives import optional_int\n from sphinx.domains.math import MathDomain\n+from sphinx.locale import __\n+from sphinx.util import logging\n from sphinx.util.docutils import SphinxDirective\n from sphinx.util.nodes import set_source_info\n+from sphinx.util.osutil import SEP, os_path, relpath\n \n if TYPE_CHECKING:\n     from sphinx.application import Sphinx\n \n \n+logger = logging.getLogger(__name__)\n+\n+\n class Figure(images.Figure):\n     \"\"\"The figure directive which applies `:name:` option to the figure node\n     instead of the image node.\n@@ -87,21 +95,25 @@ def make_title(self) -> Tuple[nodes.title, List[system_message]]:\n \n \n class CSVTable(tables.CSVTable):\n-    \"\"\"The csv-table directive which sets source and line information to its caption.\n-\n-    Only for docutils-0.13 or older version.\"\"\"\n+    \"\"\"The csv-table directive which searches a CSV file from Sphinx project's source\n+    directory when an absolute path is given via :file: option.\n+    \"\"\"\n \n     def run(self) -> List[Node]:\n-        warnings.warn('CSVTable is deprecated.',\n-                      RemovedInSphinx60Warning)\n-        return super().run()\n+        if 'file' in self.options and self.options['file'].startswith((SEP, os.sep)):\n+            env = self.state.document.settings.env\n+            filename = self.options['file']\n+            if path.exists(filename):\n+                logger.warning(__('\":file:\" option for csv-table directive now recognizes '\n+                                  'an absolute path as a relative path from source directory. '\n+                                  'Please update your document.'),\n+                               location=(env.docname, self.lineno))\n+            else:\n+                abspath = path.join(env.srcdir, os_path(self.options['file'][1:]))\n+                docdir = path.dirname(env.doc2path(env.docname))\n+                self.options['file'] = relpath(abspath, docdir)\n \n-    def make_title(self) -> Tuple[nodes.title, List[system_message]]:\n-        title, message = super().make_title()\n-        if title:\n-            set_source_info(self, title)\n-\n-        return title, message\n+        return super().run()\n \n \n class ListTable(tables.ListTable):\n@@ -224,6 +236,7 @@ def add_target(self, ret: List[Node]) -> None:\n def setup(app: \"Sphinx\") -> Dict[str, Any]:\n     directives.register_directive('figure', Figure)\n     directives.register_directive('meta', Meta)\n+    directives.register_directive('csv-table', CSVTable)\n     directives.register_directive('code', Code)\n     directives.register_directive('math', MathDirective)\n \n",
+  "test_patch": "diff --git a/tests/roots/test-directive-csv-table/conf.py b/tests/roots/test-directive-csv-table/conf.py\nnew file mode 100644\ndiff --git a/tests/roots/test-directive-csv-table/example.csv b/tests/roots/test-directive-csv-table/example.csv\nnew file mode 100644\n--- /dev/null\n+++ b/tests/roots/test-directive-csv-table/example.csv\n@@ -0,0 +1 @@\n+foo,bar,baz\ndiff --git a/tests/roots/test-directive-csv-table/subdir/example.csv b/tests/roots/test-directive-csv-table/subdir/example.csv\nnew file mode 100644\n--- /dev/null\n+++ b/tests/roots/test-directive-csv-table/subdir/example.csv\n@@ -0,0 +1 @@\n+FOO,BAR,BAZ\ndiff --git a/tests/test_directive_patch.py b/tests/test_directive_patch.py\n--- a/tests/test_directive_patch.py\n+++ b/tests/test_directive_patch.py\n@@ -8,6 +8,7 @@\n     :license: BSD, see LICENSE for details.\n \"\"\"\n \n+import pytest\n from docutils import nodes\n \n from sphinx.testing import restructuredtext\n@@ -54,6 +55,37 @@ def test_code_directive(app):\n     assert_node(doctree[0], language=\"python\", linenos=True, highlight_args={'linenostart': 5})\n \n \n+@pytest.mark.sphinx(testroot='directive-csv-table')\n+def test_csv_table_directive(app):\n+    # relative path from current document\n+    text = ('.. csv-table::\\n'\n+            '   :file: example.csv\\n')\n+    doctree = restructuredtext.parse(app, text, docname=\"subdir/index\")\n+    assert_node(doctree,\n+                ([nodes.table, nodes.tgroup, (nodes.colspec,\n+                                              nodes.colspec,\n+                                              nodes.colspec,\n+                                              [nodes.tbody, nodes.row])],))\n+    assert_node(doctree[0][0][3][0],\n+                ([nodes.entry, nodes.paragraph, \"FOO\"],\n+                 [nodes.entry, nodes.paragraph, \"BAR\"],\n+                 [nodes.entry, nodes.paragraph, \"BAZ\"]))\n+\n+    # absolute path from source directory\n+    text = ('.. csv-table::\\n'\n+            '   :file: /example.csv\\n')\n+    doctree = restructuredtext.parse(app, text, docname=\"subdir/index\")\n+    assert_node(doctree,\n+                ([nodes.table, nodes.tgroup, (nodes.colspec,\n+                                              nodes.colspec,\n+                                              nodes.colspec,\n+                                              [nodes.tbody, nodes.row])],))\n+    assert_node(doctree[0][0][3][0],\n+                ([nodes.entry, nodes.paragraph, \"foo\"],\n+                 [nodes.entry, nodes.paragraph, \"bar\"],\n+                 [nodes.entry, nodes.paragraph, \"baz\"]))\n+\n+\n def test_math_directive(app):\n     # normal case\n     text = '.. math:: E = mc^2'\n",
+  "problem_statement": "Absolute/\"source-relative\" imports for csv-table :file:\n**Describe the bug**\r\nTo be honest, I am not sure if this can be considered a bug, or if it is rather a feature request. Sorry about that.\r\n\r\nWhen using the `csv-table` directive, the use of `:file:` with absolute paths are really absolute, unlike with (eg) the `figure` directive, where absolute paths are treated relative to the source directory (herein called \"source-relative\").\r\n\r\nI do understand that there is a difference in the 2 cases, because with `figure` the path is not specified in `:file:`. Yet, I do not see a possibility to mimic this behavior in the `cvs-tables` directive.\r\n\r\n**To Reproduce**\r\nA `phone_list.rst` file in `source/resources`:\r\n\r\n- Relative imports:\r\n```rst\r\n.. csv-table:: The group's phone and room list\r\n   :align: center\r\n   :file: _tables/phone_list.csv\r\n   :header-rows: 1\r\n```\r\nare treated, as expected, relative to the `.rst` file:\r\n```\r\nC:\\Users\\lcnittl\\project\\docs\\source\\resources\\phone_list.rst:13: WARNING: Problems with \"csv-table\" directive path:\r\n[Errno 2] No such file or directory: 'source/resources/_tables/phone_list.csv'.\r\n\r\n.. csv-table:: The group's phone and room list\r\n   :align: center\r\n   :file: _tables/phone_list.csv\r\n   :header-rows: 1\r\n```\r\n\r\n- Absolute imports:\r\n```rst\r\n.. csv-table:: The group's phone and room list\r\n   :align: center\r\n   :file: /_tables/phone_list.csv\r\n   :header-rows: 1\r\n```\r\nare treated, opposed to my expectations, like real absolute paths:\r\n```\r\nC:\\Users\\lcnittl\\project\\docs\\source\\resources\\phone_list.rst:13: WARNING: Problems with \"csv-table\" directive path:\r\n[Errno 2] No such file or directory: 'C:/_tables/phone_list.csv'.\r\n\r\n.. csv-table:: The group's phone and room list\r\n   :align: center\r\n   :file: /_tables/phone_list.csv\r\n   :header-rows: 1\r\n```\r\nand not like relative-to-source paths.\r\n\r\n**Expected behavior**\r\nI would expect this to work like absolute paths in the (eg) `figure` directive.\r\n\r\nBut as stated in the beginning, probably I am wrong with my expectation, and this should be a feature request to add an option to use \"source-relative\" paths with the `csv-table` directive.\r\n\r\n**Environment info**\r\n- OS: Win\r\n- Python version: 3.8.5\r\n- Sphinx version: 3.2.1\r\n\n",
+  "hints_text": "+1: I agree this is inconsistent behavior. It should behave like the figure directive. But changing the behavior is an incompatible change. So we have to change it carefully...\nI'd greatly appreciate this change too. Changing the behavior of `:file:` flag for `csv-table` to mimic that of `figure` directive would be great. As it stands with `csv-table`, even when using an absolute path and the file fails to load, it fails silently.  ",
+  "created_at": "2021-03-06T17:04:30Z",
+  "version": "4.0",
+  "FAIL_TO_PASS": "[\"tests/test_directive_patch.py::test_csv_table_directive\"]",
+  "PASS_TO_PASS": "[\"tests/test_directive_patch.py::test_code_directive\", \"tests/test_directive_patch.py::test_math_directive\"]",
+  "environment_setup_commit": "8939a75efaa911a12dbe6edccedf261e88bf7eef",
+  "patch_files": [
+    "sphinx/directives/patches.py"
+  ],
+  "test_patch_files": [
+    "tests/roots/test-directive-csv-table/example.csv",
+    "tests/roots/test-directive-csv-table/subdir/example.csv",
+    "tests/test_directive_patch.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/directives/patches.py": {
+      "diffs": [
+        {
+          "start_line_old": 9,
+          "end_line_old": 9,
+          "file_pos": 1,
+          "file_context_length": 1690,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/directives/patches.py_Figure_Figure.run.9.1",
+          "closest_snippet_line_distance": 19
+        },
+        {
+          "start_line_old": 21,
+          "end_line_old": 21,
+          "file_pos": 1,
+          "file_context_length": 1690,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/directives/patches.py_Figure_Figure.run.9.1",
+          "closest_snippet_line_distance": 7
+        },
+        {
+          "start_line_old": 90,
+          "end_line_old": 104,
+          "file_pos": 1,
+          "file_context_length": 1690,
+          "pos": 1,
+          "context_length": 115
+        },
+        {
+          "start_line_old": 227,
+          "end_line_old": 227,
+          "file_pos": 1,
+          "file_context_length": 1690,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/directives/patches.py_Figure_Figure.run.9.1",
+          "closest_snippet_line_distance": 176
+        }
+      ]
+    }
+  },
+  "vectors": 1519,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/directives/patches.py_CSVTable_CSVTable.make_title.3.1",
+      "distance": 1.0073845386505127,
+      "file_path": "sphinx/directives/patches.py",
+      "start_line": 89,
+      "end_line": 104,
+      "tokens": 115,
+      "context_length": 115,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_Include_Include.run.5.1",
+      "distance": 1.030393123626709,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 351,
+      "end_line": 365,
+      "tokens": 136,
+      "context_length": 251
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/directives/patches.py_RSTTable_RSTTable.make_title.3.1",
+      "distance": 1.1215052604675293,
+      "file_path": "sphinx/directives/patches.py",
+      "start_line": 71,
+      "end_line": 86,
+      "tokens": 116,
+      "context_length": 367,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/util/osutil.py_ensuredir_cd.2.3.1",
+      "distance": 1.1223293542861938,
+      "file_path": "sphinx/util/osutil.py",
+      "start_line": 71,
+      "end_line": 171,
+      "tokens": 718,
+      "context_length": 1085
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralInclude.run_",
+      "distance": 1.1687662601470947,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 406,
+      "end_line": 469,
+      "tokens": 646,
+      "context_length": 1731
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/directives/patches.py_ListTable_ListTable.make_title.3.1",
+      "distance": 1.1741396188735962,
+      "file_path": "sphinx/directives/patches.py",
+      "start_line": 107,
+      "end_line": 122,
+      "tokens": 114,
+      "context_length": 1845,
+      "file_pos": 4
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_Table.__getitem___Table.cells.3.1.1.2",
+      "distance": 1.1874730587005615,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 131,
+      "end_line": 176,
+      "tokens": 425,
+      "context_length": 2270
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/testing/path.py_path_path.ismount.2.1",
+      "distance": 1.1974856853485107,
+      "file_path": "sphinx/testing/path.py",
+      "start_line": 32,
+      "end_line": 81,
+      "tokens": 269,
+      "context_length": 2539
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_setup_resource_paths_setup_resource_paths.8.2.1",
+      "distance": 1.2009880542755127,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 1175,
+      "end_line": 1192,
+      "tokens": 160,
+      "context_length": 2699
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_citation_TexinfoTranslator.depart_definition_list_item.1",
+      "distance": 1.2013249397277832,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 864,
+      "end_line": 968,
+      "tokens": 788,
+      "context_length": 3487
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.visit_table_TextTranslator.depart_field.1",
+      "distance": 1.203708529472351,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 766,
+      "end_line": 873,
+      "tokens": 830,
+      "context_length": 4317
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/directives/patches.py_Figure_Figure.run.9.1",
+      "distance": 1.2082115411758423,
+      "file_path": "sphinx/directives/patches.py",
+      "start_line": 28,
+      "end_line": 51,
+      "tokens": 187,
+      "context_length": 4504,
+      "file_pos": 8
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py_apply_source_workaround_apply_source_workaround.6.17.5",
+      "distance": 1.2083888053894043,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 121,
+      "end_line": 175,
+      "tokens": 683,
+      "context_length": 5187
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/__init__.py_process_generate_options_process_generate_options.8.1",
+      "distance": 1.2094881534576416,
+      "file_path": "sphinx/ext/autosummary/__init__.py",
+      "start_line": 717,
+      "end_line": 752,
+      "tokens": 325,
+      "context_length": 5512
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_SeeAlso_TabularColumns.run.4.1",
+      "distance": 1.2114927768707275,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 190,
+      "end_line": 211,
+      "tokens": 141,
+      "context_length": 5653
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/environment/__init__.py_BuildEnvironment.relfn2path_BuildEnvironment.found_docs.2.1",
+      "distance": 1.2124974727630615,
+      "file_path": "sphinx/environment/__init__.py",
+      "start_line": 330,
+      "end_line": 351,
+      "tokens": 192,
+      "context_length": 5845
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_functools_path_stabilize.3.1",
+      "distance": 1.2163338661193848,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 11,
+      "end_line": 64,
+      "tokens": 440,
+      "context_length": 6285
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/util/osutil.py_contextlib_canon_path.2.1",
+      "distance": 1.2166775465011597,
+      "file_path": "sphinx/util/osutil.py",
+      "start_line": 11,
+      "end_line": 45,
+      "tokens": 214,
+      "context_length": 6499
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_term_TexinfoTranslator.visit_admonition.2",
+      "distance": 1.2210181951522827,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 970,
+      "end_line": 1087,
+      "tokens": 846,
+      "context_length": 7345
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_CAliasObject_",
+      "distance": 1.2270967960357666,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 3552,
+      "end_line": 3867,
+      "tokens": 2965,
+      "context_length": 10310
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/testing/path.py_path.movetree_",
+      "distance": 1.2276718616485596,
+      "file_path": "sphinx/testing/path.py",
+      "start_line": 123,
+      "end_line": 236,
+      "tokens": 802,
+      "context_length": 11112
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/errors.py_BuildEnvironmentError_",
+      "distance": 1.2300608158111572,
+      "file_path": "sphinx/errors.py",
+      "start_line": 77,
+      "end_line": 134,
+      "tokens": 297,
+      "context_length": 11409
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_note_HTMLTranslator.visit_row.5",
+      "distance": 1.2305889129638672,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 694,
+      "end_line": 797,
+      "tokens": 827,
+      "context_length": 12236
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/builders/__init__.py_Builder.get_relative_uri_Builder.get_asset_paths.2.1",
+      "distance": 1.231335163116455,
+      "file_path": "sphinx/builders/__init__.py",
+      "start_line": 153,
+      "end_line": 173,
+      "tokens": 195,
+      "context_length": 12431
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader_LiteralIncludeReader.parse_options.1.1.1",
+      "distance": 1.231745958328247,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 179,
+      "end_line": 208,
+      "tokens": 248,
+      "context_length": 12679
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/i18n.py_Locale.apply.14_Locale.apply.14.66.1",
+      "distance": 1.2319256067276,
+      "file_path": "sphinx/transforms/i18n.py",
+      "start_line": 226,
+      "end_line": 380,
+      "tokens": 1653,
+      "context_length": 14332
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_char_literal_re.1",
+      "distance": 1.2342305183410645,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 76,
+      "tokens": 747,
+      "context_length": 15079
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_TocTree_TocTree.option_spec.1",
+      "distance": 1.2348681688308716,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 40,
+      "end_line": 59,
+      "tokens": 151,
+      "context_length": 15230
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_Table.__str__.4_Table.__str__.6.1",
+      "distance": 1.235694169998169,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 227,
+      "end_line": 252,
+      "tokens": 227,
+      "context_length": 15457
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/constants.py_DEFAULT_SETTINGS_9",
+      "distance": 1.236571192741394,
+      "file_path": "sphinx/builders/latex/constants.py",
+      "start_line": 74,
+      "end_line": 124,
+      "tokens": 540,
+      "context_length": 15997
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_setup_",
+      "distance": 1.238850474357605,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 368,
+      "end_line": 392,
+      "tokens": 228,
+      "context_length": 16225
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator._visit_named_admonition_TexinfoTranslator.visit_caption.1.2.1",
+      "distance": 1.2401596307754517,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 1089,
+      "end_line": 1188,
+      "tokens": 839,
+      "context_length": 17064
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/__init__.py_XINDY_LANG_OPTIONS_XINDY_LANG_OPTIONS.1",
+      "distance": 1.2447690963745117,
+      "file_path": "sphinx/builders/latex/__init__.py",
+      "start_line": 44,
+      "end_line": 99,
+      "tokens": 825,
+      "context_length": 17889
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.read_LiteralIncludeReader.show_diff.5.1",
+      "distance": 1.2466771602630615,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 226,
+      "end_line": 248,
+      "tokens": 196,
+      "context_length": 18085
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/io.py_codecs_logger.1",
+      "distance": 1.2472639083862305,
+      "file_path": "sphinx/io.py",
+      "start_line": 10,
+      "end_line": 39,
+      "tokens": 234,
+      "context_length": 18319
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.visit_attention_TextTranslator.depart_download_reference.1",
+      "distance": 1.2488491535186768,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 929,
+      "end_line": 1042,
+      "tokens": 873,
+      "context_length": 19192
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/util/smartypants.py_re_langquotes.1",
+      "distance": 1.2491228580474854,
+      "file_path": "sphinx/util/smartypants.py",
+      "start_line": 28,
+      "end_line": 127,
+      "tokens": 1450,
+      "context_length": 20642
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/environment/adapters/toctree.py_2_TocTree.note.6",
+      "distance": 1.2493095397949219,
+      "file_path": "sphinx/environment/adapters/toctree.py",
+      "start_line": 11,
+      "end_line": 47,
+      "tokens": 324,
+      "context_length": 20966
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_production_TexinfoTranslator.depart_desc.3",
+      "distance": 1.2512640953063965,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 1302,
+      "end_line": 1385,
+      "tokens": 678,
+      "context_length": 21644
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_Table_Table.set_separator.self.separator.1",
+      "distance": 1.2527629137039185,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 54,
+      "end_line": 118,
+      "tokens": 512,
+      "context_length": 22156
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/doc/development/tutorials/examples/todo.py_TodoDirective_TodoDirective.has_content.run.8.1",
+      "distance": 1.2551493644714355,
+      "file_path": "doc/development/tutorials/examples/todo.py",
+      "start_line": 30,
+      "end_line": 53,
+      "tokens": 175,
+      "context_length": 22331
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.depart_reference_TexinfoTranslator.visit_footnote_reference.6",
+      "distance": 1.2551493644714355,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 754,
+      "end_line": 862,
+      "tokens": 813,
+      "context_length": 23144
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_DefinitionParser._simple_fundemental_types._check_template_consistency_CPPXRefRole.process_link.6.1",
+      "distance": 1.2552504539489746,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 6519,
+      "end_line": 7289,
+      "tokens": 6556,
+      "context_length": 29700
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/directives/patches.py",
+      "position": 1,
+      "tokens": 1690,
+      "context_length": 1690
+    },
+    {
+      "file_path": "sphinx/directives/other.py",
+      "position": 2,
+      "tokens": 3149,
+      "context_length": 4839
+    },
+    {
+      "file_path": "sphinx/util/osutil.py",
+      "position": 3,
+      "tokens": 1637,
+      "context_length": 6476
+    },
+    {
+      "file_path": "sphinx/directives/code.py",
+      "position": 4,
+      "tokens": 3840,
+      "context_length": 10316
+    },
+    {
+      "file_path": "sphinx/writers/text.py",
+      "position": 5,
+      "tokens": 8975,
+      "context_length": 19291
+    },
+    {
+      "file_path": "sphinx/testing/path.py",
+      "position": 6,
+      "tokens": 1663,
+      "context_length": 20954
+    },
+    {
+      "file_path": "sphinx/builders/html/__init__.py",
+      "position": 7,
+      "tokens": 12241,
+      "context_length": 33195
+    },
+    {
+      "file_path": "sphinx/writers/texinfo.py",
+      "position": 8,
+      "tokens": 12313,
+      "context_length": 45508
+    },
+    {
+      "file_path": "sphinx/util/nodes.py",
+      "position": 9,
+      "tokens": 5471,
+      "context_length": 50979
+    },
+    {
+      "file_path": "sphinx/ext/autosummary/__init__.py",
+      "position": 10,
+      "tokens": 6457,
+      "context_length": 57436
+    },
+    {
+      "file_path": "sphinx/environment/__init__.py",
+      "position": 11,
+      "tokens": 5554,
+      "context_length": 62990
+    },
+    {
+      "file_path": "sphinx/util/__init__.py",
+      "position": 12,
+      "tokens": 4758,
+      "context_length": 67748
+    },
+    {
+      "file_path": "sphinx/domains/c.py",
+      "position": 13,
+      "tokens": 31602,
+      "context_length": 99350
+    },
+    {
+      "file_path": "sphinx/errors.py",
+      "position": 14,
+      "tokens": 796,
+      "context_length": 100146
+    },
+    {
+      "file_path": "sphinx/writers/html.py",
+      "position": 15,
+      "tokens": 7411,
+      "context_length": 107557
+    },
+    {
+      "file_path": "sphinx/builders/__init__.py",
+      "position": 16,
+      "tokens": 5378,
+      "context_length": 112935
+    },
+    {
+      "file_path": "sphinx/transforms/i18n.py",
+      "position": 17,
+      "tokens": 4644,
+      "context_length": 117579
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 18,
+      "tokens": 3320,
+      "context_length": 120899
+    },
+    {
+      "file_path": "sphinx/builders/latex/constants.py",
+      "position": 19,
+      "tokens": 2199,
+      "context_length": 123098
+    },
+    {
+      "file_path": "sphinx/builders/latex/__init__.py",
+      "position": 20,
+      "tokens": 5718,
+      "context_length": 128816
+    },
+    {
+      "file_path": "sphinx/io.py",
+      "position": 21,
+      "tokens": 1409,
+      "context_length": 130225
+    },
+    {
+      "file_path": "sphinx/util/smartypants.py",
+      "position": 22,
+      "tokens": 4147,
+      "context_length": 134372
+    },
+    {
+      "file_path": "sphinx/environment/adapters/toctree.py",
+      "position": 23,
+      "tokens": 3301,
+      "context_length": 137673
+    },
+    {
+      "file_path": "doc/development/tutorials/examples/todo.py",
+      "position": 24,
+      "tokens": 908,
+      "context_length": 138581
+    },
+    {
+      "file_path": "sphinx/domains/cpp.py",
+      "position": 25,
+      "tokens": 63801,
+      "context_length": 202382
+    }
+  ]
+}

@@ -1,0 +1,1318 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9931",
+  "model_patch": "diff --git a/sphinx/util/typing.py b/sphinx/util/typing.py\nindex e1972d86d..a4563e694 100644\n--- a/sphinx/util/typing.py\n+++ b/sphinx/util/typing.py\n@@ -299,7 +299,7 @@ def _restify_py36(cls: Optional[Type]) -> str:\n             return ':py:obj:`%s.%s`' % (cls.__module__, qualname)\n \n \n-def stringify(annotation: Any) -> str:\n+def stringify(annotation: Any, add_module_names: bool = True) -> str:\n     \"\"\"Stringify type annotation object.\"\"\"\n     from sphinx.util import inspect  # lazy loading\n \n@@ -310,14 +310,17 @@ def stringify(annotation: Any) -> str:\n         else:\n             return annotation\n     elif isinstance(annotation, TypeVar):\n-        if annotation.__module__ == 'typing':\n+        if annotation.__module__ == 'typing' or not add_module_names:\n             return annotation.__name__\n         else:\n             return '.'.join([annotation.__module__, annotation.__name__])\n     elif inspect.isNewType(annotation):\n         if sys.version_info > (3, 10):\n             # newtypes have correct module info since Python 3.10+\n-            return '%s.%s' % (annotation.__module__, annotation.__name__)\n+            if not add_module_names:\n+                return annotation.__name__\n+            else:\n+                return '%s.%s' % (annotation.__module__, annotation.__name__)\n         else:\n             return annotation.__name__\n     elif not annotation:\n@@ -333,17 +336,19 @@ def stringify(annotation: Any) -> str:\n         if hasattr(annotation, '__args__'):  # PEP 585 generic\n             return repr(annotation)\n         else:\n-            return annotation.__qualname__\n+            if not add_module_names:\n+                return annotation.__qualname__\n+            else:\n+                return '%s.%s' % (annotation.__module__, annotation.__qualname__)\n     elif annotation is Ellipsis:\n         return '...'\n-\n     if sys.version_info >= (3, 7):  # py37+\n-        return _stringify_py37(annotation)\n+        return _stringify_py37(annotation, add_module_names)\n     else:\n-        return _stringify_py36(annotation)\n+        return _stringify_py36(annotation, add_module_names)\n \n \n-def _stringify_py37(annotation: Any) -> str:\n+def _stringify_py37(annotation: Any, add_module_names: bool = True) -> str:\n     \"\"\"stringify() for py37+.\"\"\"\n     module = getattr(annotation, '__module__', None)\n     if module == 'typing':\n@@ -356,7 +361,10 @@ def _stringify_py37(annotation: Any) -> str:\n         else:\n             qualname = stringify(annotation.__origin__)  # ex. Union\n     elif hasattr(annotation, '__qualname__'):\n-        qualname = '%s.%s' % (module, annotation.__qualname__)\n+        if annotation.__module__ == 'typing' or not add_module_names:\n+            return annotation.__qualname__\n+        else:\n+            return '%s.%s' % (module, annotation.__qualname__)\n     elif hasattr(annotation, '__origin__'):\n         # instantiated generic provided by a user\n         qualname = stringify(annotation.__origin__)\n@@ -406,7 +414,7 @@ def _stringify_py37(annotation: Any) -> str:\n     return qualname\n \n \n-def _stringify_py36(annotation: Any) -> str:\n+def _stringify_py36(annotation: Any, add_module_names: bool = True) -> str:\n     \"\"\"stringify() for py36.\"\"\"\n     module = getattr(annotation, '__module__', None)\n     if module == 'typing':\n@@ -421,7 +429,10 @@ def _stringify_py36(annotation: Any) -> str:\n         else:\n             qualname = repr(annotation).replace('typing.', '')\n     elif hasattr(annotation, '__qualname__'):\n-        qualname = '%s.%s' % (module, annotation.__qualname__)\n+        if annotation.__module__ == 'typing' or not add_module_names:\n+            return annotation.__qualname__\n+        else:\n+            return '%s.%s' % (module, annotation.__qualname__)\n     else:\n         qualname = repr(annotation)\n \ndiff --git a/tox.ini b/tox.ini\nindex e703cd646..c6fcbc20a 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -28,7 +28,7 @@ setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils,ignore::DeprecationWarning:pip._vendor.packaging.version\n     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes\n commands=\n-    python -X dev -m pytest --durations 25 {posargs}\n+    python -X dev -m pytest -rA --durations 25 {posargs}\n \n [testenv:du-latest]\n commands =\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sphinx/util/typing.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "17dfa811078205bd415700361e97e945112b89eb",
+  "patch": "diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\n--- a/sphinx/domains/python.py\n+++ b/sphinx/domains/python.py\n@@ -80,7 +80,8 @@ class ModuleEntry(NamedTuple):\n     deprecated: bool\n \n \n-def type_to_xref(target: str, env: BuildEnvironment = None) -> addnodes.pending_xref:\n+def type_to_xref(target: str, env: BuildEnvironment = None, suppress_prefix: bool = False\n+                 ) -> addnodes.pending_xref:\n     \"\"\"Convert a type string to a cross reference node.\"\"\"\n     if target == 'None':\n         reftype = 'obj'\n@@ -101,6 +102,8 @@ def type_to_xref(target: str, env: BuildEnvironment = None) -> addnodes.pending_\n     elif target.startswith('~'):\n         target = target[1:]\n         text = target.split('.')[-1]\n+    elif suppress_prefix:\n+        text = target.split('.')[-1]\n     else:\n         text = target\n \n@@ -150,6 +153,8 @@ def unparse(node: ast.AST) -> List[Node]:\n             return unparse(node.value)\n         elif isinstance(node, ast.Index):\n             return unparse(node.value)\n+        elif isinstance(node, ast.Invert):\n+            return [addnodes.desc_sig_punctuation('', '~')]\n         elif isinstance(node, ast.List):\n             result = [addnodes.desc_sig_punctuation('', '[')]\n             if node.elts:\n@@ -180,6 +185,8 @@ def unparse(node: ast.AST) -> List[Node]:\n                     if isinstance(subnode, nodes.Text):\n                         result[i] = nodes.literal('', '', subnode)\n             return result\n+        elif isinstance(node, ast.UnaryOp):\n+            return unparse(node.op) + unparse(node.operand)\n         elif isinstance(node, ast.Tuple):\n             if node.elts:\n                 result = []\n@@ -209,12 +216,19 @@ def unparse(node: ast.AST) -> List[Node]:\n \n     try:\n         tree = ast_parse(annotation)\n-        result = unparse(tree)\n-        for i, node in enumerate(result):\n+        result: List[Node] = []\n+        for node in unparse(tree):\n             if isinstance(node, nodes.literal):\n-                result[i] = node[0]\n+                result.append(node[0])\n             elif isinstance(node, nodes.Text) and node.strip():\n-                result[i] = type_to_xref(str(node), env)\n+                if (result and isinstance(result[-1], addnodes.desc_sig_punctuation) and\n+                        result[-1].astext() == '~'):\n+                    result.pop()\n+                    result.append(type_to_xref(str(node), env, suppress_prefix=True))\n+                else:\n+                    result.append(type_to_xref(str(node), env))\n+            else:\n+                result.append(node)\n         return result\n     except SyntaxError:\n         return [type_to_xref(annotation, env)]\ndiff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py\n--- a/sphinx/ext/autodoc/__init__.py\n+++ b/sphinx/ext/autodoc/__init__.py\n@@ -1295,6 +1295,8 @@ def can_document_member(cls, member: Any, membername: str, isattr: bool, parent:\n     def format_args(self, **kwargs: Any) -> str:\n         if self.config.autodoc_typehints in ('none', 'description'):\n             kwargs.setdefault('show_annotation', False)\n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n \n         try:\n             self.env.app.emit('autodoc-before-process-signature', self.object, False)\n@@ -1323,6 +1325,9 @@ def add_directive_header(self, sig: str) -> None:\n             self.add_line('   :async:', sourcename)\n \n     def format_signature(self, **kwargs: Any) -> str:\n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n+\n         sigs = []\n         if (self.analyzer and\n                 '.'.join(self.objpath) in self.analyzer.overloads and\n@@ -1561,6 +1566,8 @@ def get_user_defined_function_or_method(obj: Any, attr: str) -> Any:\n     def format_args(self, **kwargs: Any) -> str:\n         if self.config.autodoc_typehints in ('none', 'description'):\n             kwargs.setdefault('show_annotation', False)\n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n \n         try:\n             self._signature_class, self._signature_method_name, sig = self._get_signature()\n@@ -1582,6 +1589,9 @@ def format_signature(self, **kwargs: Any) -> str:\n             # do not show signatures\n             return ''\n \n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n+\n         sig = super().format_signature()\n         sigs = []\n \n@@ -2110,6 +2120,8 @@ def import_object(self, raiseerror: bool = False) -> bool:\n     def format_args(self, **kwargs: Any) -> str:\n         if self.config.autodoc_typehints in ('none', 'description'):\n             kwargs.setdefault('show_annotation', False)\n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n \n         try:\n             if self.object == object.__init__ and self.parent != object:\n@@ -2160,6 +2172,9 @@ def document_members(self, all_members: bool = False) -> None:\n         pass\n \n     def format_signature(self, **kwargs: Any) -> str:\n+        if self.config.autodoc_unqualified_typehints:\n+            kwargs.setdefault('unqualified_typehints', True)\n+\n         sigs = []\n         if (self.analyzer and\n                 '.'.join(self.objpath) in self.analyzer.overloads and\n@@ -2833,6 +2848,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:\n     app.add_config_value('autodoc_typehints_description_target', 'all', True,\n                          ENUM('all', 'documented'))\n     app.add_config_value('autodoc_type_aliases', {}, True)\n+    app.add_config_value('autodoc_unqualified_typehints', False, 'env')\n     app.add_config_value('autodoc_warningiserror', True, True)\n     app.add_config_value('autodoc_inherit_docstrings', True, True)\n     app.add_event('autodoc-before-process-signature')\ndiff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py\n--- a/sphinx/util/inspect.py\n+++ b/sphinx/util/inspect.py\n@@ -744,10 +744,13 @@ def evaluate(annotation: Any, globalns: Dict, localns: Dict) -> Any:\n \n \n def stringify_signature(sig: inspect.Signature, show_annotation: bool = True,\n-                        show_return_annotation: bool = True) -> str:\n+                        show_return_annotation: bool = True,\n+                        unqualified_typehints: bool = False) -> str:\n     \"\"\"Stringify a Signature object.\n \n     :param show_annotation: Show annotation in result\n+    :param unqualified_typehints: Show annotations as unqualified\n+                                  (ex. io.StringIO -> StringIO)\n     \"\"\"\n     args = []\n     last_kind = None\n@@ -771,7 +774,7 @@ def stringify_signature(sig: inspect.Signature, show_annotation: bool = True,\n \n         if show_annotation and param.annotation is not param.empty:\n             arg.write(': ')\n-            arg.write(stringify_annotation(param.annotation))\n+            arg.write(stringify_annotation(param.annotation, unqualified_typehints))\n         if param.default is not param.empty:\n             if show_annotation and param.annotation is not param.empty:\n                 arg.write(' = ')\n@@ -791,7 +794,7 @@ def stringify_signature(sig: inspect.Signature, show_annotation: bool = True,\n             show_return_annotation is False):\n         return '(%s)' % ', '.join(args)\n     else:\n-        annotation = stringify_annotation(sig.return_annotation)\n+        annotation = stringify_annotation(sig.return_annotation, unqualified_typehints)\n         return '(%s) -> %s' % (', '.join(args), annotation)\n \n \ndiff --git a/sphinx/util/typing.py b/sphinx/util/typing.py\n--- a/sphinx/util/typing.py\n+++ b/sphinx/util/typing.py\n@@ -299,10 +299,19 @@ def _restify_py36(cls: Optional[Type]) -> str:\n             return ':py:obj:`%s.%s`' % (cls.__module__, qualname)\n \n \n-def stringify(annotation: Any) -> str:\n-    \"\"\"Stringify type annotation object.\"\"\"\n+def stringify(annotation: Any, smartref: bool = False) -> str:\n+    \"\"\"Stringify type annotation object.\n+\n+    :param smartref: If true, add \"~\" prefix to the result to remove the leading\n+                     module and class names from the reference text\n+    \"\"\"\n     from sphinx.util import inspect  # lazy loading\n \n+    if smartref:\n+        prefix = '~'\n+    else:\n+        prefix = ''\n+\n     if isinstance(annotation, str):\n         if annotation.startswith(\"'\") and annotation.endswith(\"'\"):\n             # might be a double Forward-ref'ed type.  Go unquoting.\n@@ -313,11 +322,11 @@ def stringify(annotation: Any) -> str:\n         if annotation.__module__ == 'typing':\n             return annotation.__name__\n         else:\n-            return '.'.join([annotation.__module__, annotation.__name__])\n+            return prefix + '.'.join([annotation.__module__, annotation.__name__])\n     elif inspect.isNewType(annotation):\n         if sys.version_info > (3, 10):\n             # newtypes have correct module info since Python 3.10+\n-            return '%s.%s' % (annotation.__module__, annotation.__name__)\n+            return prefix + '%s.%s' % (annotation.__module__, annotation.__name__)\n         else:\n             return annotation.__name__\n     elif not annotation:\n@@ -325,7 +334,7 @@ def stringify(annotation: Any) -> str:\n     elif annotation is NoneType:\n         return 'None'\n     elif annotation in INVALID_BUILTIN_CLASSES:\n-        return INVALID_BUILTIN_CLASSES[annotation]\n+        return prefix + INVALID_BUILTIN_CLASSES[annotation]\n     elif str(annotation).startswith('typing.Annotated'):  # for py310+\n         pass\n     elif (getattr(annotation, '__module__', None) == 'builtins' and\n@@ -338,28 +347,36 @@ def stringify(annotation: Any) -> str:\n         return '...'\n \n     if sys.version_info >= (3, 7):  # py37+\n-        return _stringify_py37(annotation)\n+        return _stringify_py37(annotation, smartref)\n     else:\n-        return _stringify_py36(annotation)\n+        return _stringify_py36(annotation, smartref)\n \n \n-def _stringify_py37(annotation: Any) -> str:\n+def _stringify_py37(annotation: Any, smartref: bool = False) -> str:\n     \"\"\"stringify() for py37+.\"\"\"\n     module = getattr(annotation, '__module__', None)\n-    if module == 'typing':\n+    modprefix = ''\n+    if module == 'typing' and getattr(annotation, '__forward_arg__', None):\n+        qualname = annotation.__forward_arg__\n+    elif module == 'typing':\n         if getattr(annotation, '_name', None):\n             qualname = annotation._name\n         elif getattr(annotation, '__qualname__', None):\n             qualname = annotation.__qualname__\n-        elif getattr(annotation, '__forward_arg__', None):\n-            qualname = annotation.__forward_arg__\n         else:\n             qualname = stringify(annotation.__origin__)  # ex. Union\n+\n+        if smartref:\n+            modprefix = '~%s.' % module\n     elif hasattr(annotation, '__qualname__'):\n-        qualname = '%s.%s' % (module, annotation.__qualname__)\n+        if smartref:\n+            modprefix = '~%s.' % module\n+        else:\n+            modprefix = '%s.' % module\n+        qualname = annotation.__qualname__\n     elif hasattr(annotation, '__origin__'):\n         # instantiated generic provided by a user\n-        qualname = stringify(annotation.__origin__)\n+        qualname = stringify(annotation.__origin__, smartref)\n     elif UnionType and isinstance(annotation, UnionType):  # types.Union (for py3.10+)\n         qualname = 'types.Union'\n     else:\n@@ -374,54 +391,63 @@ def _stringify_py37(annotation: Any) -> str:\n         elif qualname in ('Optional', 'Union'):\n             if len(annotation.__args__) > 1 and annotation.__args__[-1] is NoneType:\n                 if len(annotation.__args__) > 2:\n-                    args = ', '.join(stringify(a) for a in annotation.__args__[:-1])\n-                    return 'Optional[Union[%s]]' % args\n+                    args = ', '.join(stringify(a, smartref) for a in annotation.__args__[:-1])\n+                    return '%sOptional[%sUnion[%s]]' % (modprefix, modprefix, args)\n                 else:\n-                    return 'Optional[%s]' % stringify(annotation.__args__[0])\n+                    return '%sOptional[%s]' % (modprefix,\n+                                               stringify(annotation.__args__[0], smartref))\n             else:\n-                args = ', '.join(stringify(a) for a in annotation.__args__)\n-                return 'Union[%s]' % args\n+                args = ', '.join(stringify(a, smartref) for a in annotation.__args__)\n+                return '%sUnion[%s]' % (modprefix, args)\n         elif qualname == 'types.Union':\n             if len(annotation.__args__) > 1 and None in annotation.__args__:\n                 args = ' | '.join(stringify(a) for a in annotation.__args__ if a)\n-                return 'Optional[%s]' % args\n+                return '%sOptional[%s]' % (modprefix, args)\n             else:\n                 return ' | '.join(stringify(a) for a in annotation.__args__)\n         elif qualname == 'Callable':\n-            args = ', '.join(stringify(a) for a in annotation.__args__[:-1])\n-            returns = stringify(annotation.__args__[-1])\n-            return '%s[[%s], %s]' % (qualname, args, returns)\n+            args = ', '.join(stringify(a, smartref) for a in annotation.__args__[:-1])\n+            returns = stringify(annotation.__args__[-1], smartref)\n+            return '%s%s[[%s], %s]' % (modprefix, qualname, args, returns)\n         elif qualname == 'Literal':\n             args = ', '.join(repr(a) for a in annotation.__args__)\n-            return '%s[%s]' % (qualname, args)\n+            return '%s%s[%s]' % (modprefix, qualname, args)\n         elif str(annotation).startswith('typing.Annotated'):  # for py39+\n-            return stringify(annotation.__args__[0])\n+            return stringify(annotation.__args__[0], smartref)\n         elif all(is_system_TypeVar(a) for a in annotation.__args__):\n             # Suppress arguments if all system defined TypeVars (ex. Dict[KT, VT])\n-            return qualname\n+            return modprefix + qualname\n         else:\n-            args = ', '.join(stringify(a) for a in annotation.__args__)\n-            return '%s[%s]' % (qualname, args)\n+            args = ', '.join(stringify(a, smartref) for a in annotation.__args__)\n+            return '%s%s[%s]' % (modprefix, qualname, args)\n \n-    return qualname\n+    return modprefix + qualname\n \n \n-def _stringify_py36(annotation: Any) -> str:\n+def _stringify_py36(annotation: Any, smartref: bool = False) -> str:\n     \"\"\"stringify() for py36.\"\"\"\n     module = getattr(annotation, '__module__', None)\n-    if module == 'typing':\n+    modprefix = ''\n+    if module == 'typing' and getattr(annotation, '__forward_arg__', None):\n+        qualname = annotation.__forward_arg__\n+    elif module == 'typing':\n         if getattr(annotation, '_name', None):\n             qualname = annotation._name\n         elif getattr(annotation, '__qualname__', None):\n             qualname = annotation.__qualname__\n-        elif getattr(annotation, '__forward_arg__', None):\n-            qualname = annotation.__forward_arg__\n         elif getattr(annotation, '__origin__', None):\n             qualname = stringify(annotation.__origin__)  # ex. Union\n         else:\n             qualname = repr(annotation).replace('typing.', '')\n+\n+        if smartref:\n+            modprefix = '~%s.' % module\n     elif hasattr(annotation, '__qualname__'):\n-        qualname = '%s.%s' % (module, annotation.__qualname__)\n+        if smartref:\n+            modprefix = '~%s.' % module\n+        else:\n+            modprefix = '%s.' % module\n+        qualname = annotation.__qualname__\n     else:\n         qualname = repr(annotation)\n \n@@ -429,10 +455,10 @@ def _stringify_py36(annotation: Any) -> str:\n             not hasattr(annotation, '__tuple_params__')):  # for Python 3.6\n         params = annotation.__args__\n         if params:\n-            param_str = ', '.join(stringify(p) for p in params)\n-            return '%s[%s]' % (qualname, param_str)\n+            param_str = ', '.join(stringify(p, smartref) for p in params)\n+            return '%s%s[%s]' % (modprefix, qualname, param_str)\n         else:\n-            return qualname\n+            return modprefix + qualname\n     elif isinstance(annotation, typing.GenericMeta):\n         params = None\n         if annotation.__args__ is None or len(annotation.__args__) <= 2:  # type: ignore  # NOQA\n@@ -440,28 +466,28 @@ def _stringify_py36(annotation: Any) -> str:\n         elif annotation.__origin__ == Generator:  # type: ignore\n             params = annotation.__args__  # type: ignore\n         else:  # typing.Callable\n-            args = ', '.join(stringify(arg) for arg\n+            args = ', '.join(stringify(arg, smartref) for arg\n                              in annotation.__args__[:-1])  # type: ignore\n             result = stringify(annotation.__args__[-1])  # type: ignore\n-            return '%s[[%s], %s]' % (qualname, args, result)\n+            return '%s%s[[%s], %s]' % (modprefix, qualname, args, result)\n         if params is not None:\n-            param_str = ', '.join(stringify(p) for p in params)\n-            return '%s[%s]' % (qualname, param_str)\n+            param_str = ', '.join(stringify(p, smartref) for p in params)\n+            return '%s%s[%s]' % (modprefix, qualname, param_str)\n     elif (hasattr(annotation, '__origin__') and\n           annotation.__origin__ is typing.Union):\n         params = annotation.__args__\n         if params is not None:\n             if len(params) > 1 and params[-1] is NoneType:\n                 if len(params) > 2:\n-                    param_str = \", \".join(stringify(p) for p in params[:-1])\n-                    return 'Optional[Union[%s]]' % param_str\n+                    param_str = \", \".join(stringify(p, smartref) for p in params[:-1])\n+                    return '%sOptional[%sUnion[%s]]' % (modprefix, modprefix, param_str)\n                 else:\n-                    return 'Optional[%s]' % stringify(params[0])\n+                    return '%sOptional[%s]' % (modprefix, stringify(params[0]))\n             else:\n-                param_str = ', '.join(stringify(p) for p in params)\n-                return 'Union[%s]' % param_str\n+                param_str = ', '.join(stringify(p, smartref) for p in params)\n+                return '%sUnion[%s]' % (modprefix, param_str)\n \n-    return qualname\n+    return modprefix + qualname\n \n \n deprecated_alias('sphinx.util.typing',\n",
+  "test_patch": "diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py\n--- a/tests/test_domain_py.py\n+++ b/tests/test_domain_py.py\n@@ -350,6 +350,18 @@ def test_parse_annotation(app):\n     assert_node(doctree[0], pending_xref, refdomain=\"py\", reftype=\"obj\", reftarget=\"None\")\n \n \n+def test_parse_annotation_suppress(app):\n+    doctree = _parse_annotation(\"~typing.Dict[str, str]\", app.env)\n+    assert_node(doctree, ([pending_xref, \"Dict\"],\n+                          [desc_sig_punctuation, \"[\"],\n+                          [pending_xref, \"str\"],\n+                          [desc_sig_punctuation, \",\"],\n+                          desc_sig_space,\n+                          [pending_xref, \"str\"],\n+                          [desc_sig_punctuation, \"]\"]))\n+    assert_node(doctree[0], pending_xref, refdomain=\"py\", reftype=\"class\", reftarget=\"typing.Dict\")\n+\n+\n @pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\n def test_parse_annotation_Literal(app):\n     doctree = _parse_annotation(\"Literal[True, False]\", app.env)\ndiff --git a/tests/test_ext_autodoc_configs.py b/tests/test_ext_autodoc_configs.py\n--- a/tests/test_ext_autodoc_configs.py\n+++ b/tests/test_ext_autodoc_configs.py\n@@ -1142,6 +1142,99 @@ def test_autodoc_typehints_description_and_type_aliases(app):\n             '      myint\\n' == context)\n \n \n+@pytest.mark.sphinx('html', testroot='ext-autodoc',\n+                    confoverrides={'autodoc_unqualified_typehints': True})\n+def test_autodoc_unqualified_typehints(app):\n+    if sys.version_info < (3, 7):\n+        Any = 'Any'\n+    else:\n+        Any = '~typing.Any'\n+\n+    options = {\"members\": None,\n+               \"undoc-members\": None}\n+    actual = do_autodoc(app, 'module', 'target.typehints', options)\n+    assert list(actual) == [\n+        '',\n+        '.. py:module:: target.typehints',\n+        '',\n+        '',\n+        '.. py:data:: CONST1',\n+        '   :module: target.typehints',\n+        '   :type: int',\n+        '',\n+        '',\n+        '.. py:class:: Math(s: str, o: ~typing.Optional[%s] = None)' % Any,\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '   .. py:attribute:: Math.CONST1',\n+        '      :module: target.typehints',\n+        '      :type: int',\n+        '',\n+        '',\n+        '   .. py:attribute:: Math.CONST2',\n+        '      :module: target.typehints',\n+        '      :type: int',\n+        '      :value: 1',\n+        '',\n+        '',\n+        '   .. py:method:: Math.decr(a: int, b: int = 1) -> int',\n+        '      :module: target.typehints',\n+        '',\n+        '',\n+        '   .. py:method:: Math.horse(a: str, b: int) -> None',\n+        '      :module: target.typehints',\n+        '',\n+        '',\n+        '   .. py:method:: Math.incr(a: int, b: int = 1) -> int',\n+        '      :module: target.typehints',\n+        '',\n+        '',\n+        '   .. py:method:: Math.nothing() -> None',\n+        '      :module: target.typehints',\n+        '',\n+        '',\n+        '   .. py:property:: Math.prop',\n+        '      :module: target.typehints',\n+        '      :type: int',\n+        '',\n+        '',\n+        '.. py:class:: NewAnnotation(i: int)',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:class:: NewComment(i: int)',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:class:: SignatureFromMetaclass(a: int)',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:function:: complex_func(arg1: str, arg2: List[int], arg3: Tuple[int, '\n+        'Union[str, Unknown]] = None, *args: str, **kwargs: str) -> None',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:function:: decr(a: int, b: int = 1) -> int',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:function:: incr(a: int, b: int = 1) -> int',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:function:: missing_attr(c, a: str, b: Optional[str] = None) -> str',\n+        '   :module: target.typehints',\n+        '',\n+        '',\n+        '.. py:function:: tuple_args(x: ~typing.Tuple[int, ~typing.Union[int, str]]) '\n+        '-> ~typing.Tuple[int, int]',\n+        '   :module: target.typehints',\n+        '',\n+    ]\n+\n+\n @pytest.mark.sphinx('html', testroot='ext-autodoc')\n def test_autodoc_default_options(app):\n     # no settings\ndiff --git a/tests/test_util_inspect.py b/tests/test_util_inspect.py\n--- a/tests/test_util_inspect.py\n+++ b/tests/test_util_inspect.py\n@@ -259,6 +259,10 @@ def test_signature_annotations():\n     sig = inspect.signature(f7)\n     assert stringify_signature(sig, show_return_annotation=False) == '(x: Optional[int] = None, y: dict = {})'\n \n+    # unqualified_typehints is True\n+    sig = inspect.signature(f7)\n+    assert stringify_signature(sig, unqualified_typehints=True) == '(x: ~typing.Optional[int] = None, y: dict = {}) -> None'\n+\n \n @pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\n @pytest.mark.sphinx(testroot='ext-autodoc')\ndiff --git a/tests/test_util_typing.py b/tests/test_util_typing.py\n--- a/tests/test_util_typing.py\n+++ b/tests/test_util_typing.py\n@@ -178,78 +178,156 @@ def test_restify_mock():\n \n \n def test_stringify():\n-    assert stringify(int) == \"int\"\n-    assert stringify(str) == \"str\"\n-    assert stringify(None) == \"None\"\n-    assert stringify(Integral) == \"numbers.Integral\"\n-    assert stringify(Struct) == \"struct.Struct\"\n-    assert stringify(TracebackType) == \"types.TracebackType\"\n-    assert stringify(Any) == \"Any\"\n+    assert stringify(int, False) == \"int\"\n+    assert stringify(int, True) == \"int\"\n+\n+    assert stringify(str, False) == \"str\"\n+    assert stringify(str, True) == \"str\"\n+\n+    assert stringify(None, False) == \"None\"\n+    assert stringify(None, True) == \"None\"\n+\n+    assert stringify(Integral, False) == \"numbers.Integral\"\n+    assert stringify(Integral, True) == \"~numbers.Integral\"\n+\n+    assert stringify(Struct, False) == \"struct.Struct\"\n+    assert stringify(Struct, True) == \"~struct.Struct\"\n+\n+    assert stringify(TracebackType, False) == \"types.TracebackType\"\n+    assert stringify(TracebackType, True) == \"~types.TracebackType\"\n+\n+    assert stringify(Any, False) == \"Any\"\n+    assert stringify(Any, True) == \"~typing.Any\"\n \n \n def test_stringify_type_hints_containers():\n-    assert stringify(List) == \"List\"\n-    assert stringify(Dict) == \"Dict\"\n-    assert stringify(List[int]) == \"List[int]\"\n-    assert stringify(List[str]) == \"List[str]\"\n-    assert stringify(Dict[str, float]) == \"Dict[str, float]\"\n-    assert stringify(Tuple[str, str, str]) == \"Tuple[str, str, str]\"\n-    assert stringify(Tuple[str, ...]) == \"Tuple[str, ...]\"\n-    assert stringify(Tuple[()]) == \"Tuple[()]\"\n-    assert stringify(List[Dict[str, Tuple]]) == \"List[Dict[str, Tuple]]\"\n-    assert stringify(MyList[Tuple[int, int]]) == \"tests.test_util_typing.MyList[Tuple[int, int]]\"\n-    assert stringify(Generator[None, None, None]) == \"Generator[None, None, None]\"\n+    assert stringify(List, False) == \"List\"\n+    assert stringify(List, True) == \"~typing.List\"\n+\n+    assert stringify(Dict, False) == \"Dict\"\n+    assert stringify(Dict, True) == \"~typing.Dict\"\n+\n+    assert stringify(List[int], False) == \"List[int]\"\n+    assert stringify(List[int], True) == \"~typing.List[int]\"\n+\n+    assert stringify(List[str], False) == \"List[str]\"\n+    assert stringify(List[str], True) == \"~typing.List[str]\"\n+\n+    assert stringify(Dict[str, float], False) == \"Dict[str, float]\"\n+    assert stringify(Dict[str, float], True) == \"~typing.Dict[str, float]\"\n+\n+    assert stringify(Tuple[str, str, str], False) == \"Tuple[str, str, str]\"\n+    assert stringify(Tuple[str, str, str], True) == \"~typing.Tuple[str, str, str]\"\n+\n+    assert stringify(Tuple[str, ...], False) == \"Tuple[str, ...]\"\n+    assert stringify(Tuple[str, ...], True) == \"~typing.Tuple[str, ...]\"\n+\n+    assert stringify(Tuple[()], False) == \"Tuple[()]\"\n+    assert stringify(Tuple[()], True) == \"~typing.Tuple[()]\"\n+\n+    assert stringify(List[Dict[str, Tuple]], False) == \"List[Dict[str, Tuple]]\"\n+    assert stringify(List[Dict[str, Tuple]], True) == \"~typing.List[~typing.Dict[str, ~typing.Tuple]]\"\n+\n+    assert stringify(MyList[Tuple[int, int]], False) == \"tests.test_util_typing.MyList[Tuple[int, int]]\"\n+    assert stringify(MyList[Tuple[int, int]], True) == \"~tests.test_util_typing.MyList[~typing.Tuple[int, int]]\"\n+\n+    assert stringify(Generator[None, None, None], False) == \"Generator[None, None, None]\"\n+    assert stringify(Generator[None, None, None], True) == \"~typing.Generator[None, None, None]\"\n \n \n @pytest.mark.skipif(sys.version_info < (3, 9), reason='python 3.9+ is required.')\n def test_stringify_type_hints_pep_585():\n-    assert stringify(list[int]) == \"list[int]\"\n-    assert stringify(list[str]) == \"list[str]\"\n-    assert stringify(dict[str, float]) == \"dict[str, float]\"\n-    assert stringify(tuple[str, str, str]) == \"tuple[str, str, str]\"\n-    assert stringify(tuple[str, ...]) == \"tuple[str, ...]\"\n-    assert stringify(tuple[()]) == \"tuple[()]\"\n-    assert stringify(list[dict[str, tuple]]) == \"list[dict[str, tuple]]\"\n-    assert stringify(type[int]) == \"type[int]\"\n+    assert stringify(list[int], False) == \"list[int]\"\n+    assert stringify(list[int], True) == \"list[int]\"\n+\n+    assert stringify(list[str], False) == \"list[str]\"\n+    assert stringify(list[str], True) == \"list[str]\"\n+\n+    assert stringify(dict[str, float], False) == \"dict[str, float]\"\n+    assert stringify(dict[str, float], True) == \"dict[str, float]\"\n+\n+    assert stringify(tuple[str, str, str], False) == \"tuple[str, str, str]\"\n+    assert stringify(tuple[str, str, str], True) == \"tuple[str, str, str]\"\n+\n+    assert stringify(tuple[str, ...], False) == \"tuple[str, ...]\"\n+    assert stringify(tuple[str, ...], True) == \"tuple[str, ...]\"\n+\n+    assert stringify(tuple[()], False) == \"tuple[()]\"\n+    assert stringify(tuple[()], True) == \"tuple[()]\"\n+\n+    assert stringify(list[dict[str, tuple]], False) == \"list[dict[str, tuple]]\"\n+    assert stringify(list[dict[str, tuple]], True) == \"list[dict[str, tuple]]\"\n+\n+    assert stringify(type[int], False) == \"type[int]\"\n+    assert stringify(type[int], True) == \"type[int]\"\n \n \n @pytest.mark.skipif(sys.version_info < (3, 9), reason='python 3.9+ is required.')\n def test_stringify_Annotated():\n     from typing import Annotated  # type: ignore\n-    assert stringify(Annotated[str, \"foo\", \"bar\"]) == \"str\"  # NOQA\n+    assert stringify(Annotated[str, \"foo\", \"bar\"], False) == \"str\"  # NOQA\n+    assert stringify(Annotated[str, \"foo\", \"bar\"], True) == \"str\"  # NOQA\n \n \n def test_stringify_type_hints_string():\n-    assert stringify(\"int\") == \"int\"\n-    assert stringify(\"str\") == \"str\"\n-    assert stringify(List[\"int\"]) == \"List[int]\"\n-    assert stringify(\"Tuple[str]\") == \"Tuple[str]\"\n-    assert stringify(\"unknown\") == \"unknown\"\n+    assert stringify(\"int\", False) == \"int\"\n+    assert stringify(\"int\", True) == \"int\"\n+\n+    assert stringify(\"str\", False) == \"str\"\n+    assert stringify(\"str\", True) == \"str\"\n+\n+    assert stringify(List[\"int\"], False) == \"List[int]\"\n+    assert stringify(List[\"int\"], True) == \"~typing.List[int]\"\n+\n+    assert stringify(\"Tuple[str]\", False) == \"Tuple[str]\"\n+    assert stringify(\"Tuple[str]\", True) == \"Tuple[str]\"\n+\n+    assert stringify(\"unknown\", False) == \"unknown\"\n+    assert stringify(\"unknown\", True) == \"unknown\"\n \n \n def test_stringify_type_hints_Callable():\n-    assert stringify(Callable) == \"Callable\"\n+    assert stringify(Callable, False) == \"Callable\"\n+    assert stringify(Callable, True) == \"~typing.Callable\"\n \n     if sys.version_info >= (3, 7):\n-        assert stringify(Callable[[str], int]) == \"Callable[[str], int]\"\n-        assert stringify(Callable[..., int]) == \"Callable[[...], int]\"\n+        assert stringify(Callable[[str], int], False) == \"Callable[[str], int]\"\n+        assert stringify(Callable[[str], int], True) == \"~typing.Callable[[str], int]\"\n+\n+        assert stringify(Callable[..., int], False) == \"Callable[[...], int]\"\n+        assert stringify(Callable[..., int], True) == \"~typing.Callable[[...], int]\"\n     else:\n-        assert stringify(Callable[[str], int]) == \"Callable[str, int]\"\n-        assert stringify(Callable[..., int]) == \"Callable[..., int]\"\n+        assert stringify(Callable[[str], int], False) == \"Callable[str, int]\"\n+        assert stringify(Callable[[str], int], True) == \"~typing.Callable[str, int]\"\n+\n+        assert stringify(Callable[..., int], False) == \"Callable[..., int]\"\n+        assert stringify(Callable[..., int], True) == \"~typing.Callable[..., int]\"\n \n \n def test_stringify_type_hints_Union():\n-    assert stringify(Optional[int]) == \"Optional[int]\"\n-    assert stringify(Union[str, None]) == \"Optional[str]\"\n-    assert stringify(Union[int, str]) == \"Union[int, str]\"\n+    assert stringify(Optional[int], False) == \"Optional[int]\"\n+    assert stringify(Optional[int], True) == \"~typing.Optional[int]\"\n+\n+    assert stringify(Union[str, None], False) == \"Optional[str]\"\n+    assert stringify(Union[str, None], True) == \"~typing.Optional[str]\"\n+\n+    assert stringify(Union[int, str], False) == \"Union[int, str]\"\n+    assert stringify(Union[int, str], True) == \"~typing.Union[int, str]\"\n \n     if sys.version_info >= (3, 7):\n-        assert stringify(Union[int, Integral]) == \"Union[int, numbers.Integral]\"\n-        assert (stringify(Union[MyClass1, MyClass2]) ==\n+        assert stringify(Union[int, Integral], False) == \"Union[int, numbers.Integral]\"\n+        assert stringify(Union[int, Integral], True) == \"~typing.Union[int, ~numbers.Integral]\"\n+\n+        assert (stringify(Union[MyClass1, MyClass2], False) ==\n                 \"Union[tests.test_util_typing.MyClass1, tests.test_util_typing.<MyClass2>]\")\n+        assert (stringify(Union[MyClass1, MyClass2], True) ==\n+                \"~typing.Union[~tests.test_util_typing.MyClass1, ~tests.test_util_typing.<MyClass2>]\")\n     else:\n-        assert stringify(Union[int, Integral]) == \"numbers.Integral\"\n-        assert stringify(Union[MyClass1, MyClass2]) == \"tests.test_util_typing.MyClass1\"\n+        assert stringify(Union[int, Integral], False) == \"numbers.Integral\"\n+        assert stringify(Union[int, Integral], True) == \"~numbers.Integral\"\n+\n+        assert stringify(Union[MyClass1, MyClass2], False) == \"tests.test_util_typing.MyClass1\"\n+        assert stringify(Union[MyClass1, MyClass2], True) == \"~tests.test_util_typing.MyClass1\"\n \n \n def test_stringify_type_hints_typevars():\n@@ -258,52 +336,83 @@ def test_stringify_type_hints_typevars():\n     T_contra = TypeVar('T_contra', contravariant=True)\n \n     if sys.version_info < (3, 7):\n-        assert stringify(T) == \"T\"\n-        assert stringify(T_co) == \"T_co\"\n-        assert stringify(T_contra) == \"T_contra\"\n-        assert stringify(List[T]) == \"List[T]\"\n+        assert stringify(T, False) == \"T\"\n+        assert stringify(T, True) == \"T\"\n+\n+        assert stringify(T_co, False) == \"T_co\"\n+        assert stringify(T_co, True) == \"T_co\"\n+\n+        assert stringify(T_contra, False) == \"T_contra\"\n+        assert stringify(T_contra, True) == \"T_contra\"\n+\n+        assert stringify(List[T], False) == \"List[T]\"\n+        assert stringify(List[T], True) == \"~typing.List[T]\"\n     else:\n-        assert stringify(T) == \"tests.test_util_typing.T\"\n-        assert stringify(T_co) == \"tests.test_util_typing.T_co\"\n-        assert stringify(T_contra) == \"tests.test_util_typing.T_contra\"\n-        assert stringify(List[T]) == \"List[tests.test_util_typing.T]\"\n+        assert stringify(T, False) == \"tests.test_util_typing.T\"\n+        assert stringify(T, True) == \"~tests.test_util_typing.T\"\n+\n+        assert stringify(T_co, False) == \"tests.test_util_typing.T_co\"\n+        assert stringify(T_co, True) == \"~tests.test_util_typing.T_co\"\n+\n+        assert stringify(T_contra, False) == \"tests.test_util_typing.T_contra\"\n+        assert stringify(T_contra, True) == \"~tests.test_util_typing.T_contra\"\n+\n+        assert stringify(List[T], False) == \"List[tests.test_util_typing.T]\"\n+        assert stringify(List[T], True) == \"~typing.List[~tests.test_util_typing.T]\"\n \n     if sys.version_info >= (3, 10):\n-        assert stringify(MyInt) == \"tests.test_util_typing.MyInt\"\n+        assert stringify(MyInt, False) == \"tests.test_util_typing.MyInt\"\n+        assert stringify(MyInt, True) == \"~tests.test_util_typing.MyInt\"\n     else:\n-        assert stringify(MyInt) == \"MyInt\"\n+        assert stringify(MyInt, False) == \"MyInt\"\n+        assert stringify(MyInt, True) == \"MyInt\"\n \n \n def test_stringify_type_hints_custom_class():\n-    assert stringify(MyClass1) == \"tests.test_util_typing.MyClass1\"\n-    assert stringify(MyClass2) == \"tests.test_util_typing.<MyClass2>\"\n+    assert stringify(MyClass1, False) == \"tests.test_util_typing.MyClass1\"\n+    assert stringify(MyClass1, True) == \"~tests.test_util_typing.MyClass1\"\n+\n+    assert stringify(MyClass2, False) == \"tests.test_util_typing.<MyClass2>\"\n+    assert stringify(MyClass2, True) == \"~tests.test_util_typing.<MyClass2>\"\n \n \n def test_stringify_type_hints_alias():\n     MyStr = str\n     MyTuple = Tuple[str, str]\n-    assert stringify(MyStr) == \"str\"\n-    assert stringify(MyTuple) == \"Tuple[str, str]\"  # type: ignore\n+\n+    assert stringify(MyStr, False) == \"str\"\n+    assert stringify(MyStr, True) == \"str\"\n+\n+    assert stringify(MyTuple, False) == \"Tuple[str, str]\"  # type: ignore\n+    assert stringify(MyTuple, True) == \"~typing.Tuple[str, str]\"  # type: ignore\n \n \n @pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\n def test_stringify_type_Literal():\n     from typing import Literal  # type: ignore\n-    assert stringify(Literal[1, \"2\", \"\\r\"]) == \"Literal[1, '2', '\\\\r']\"\n+    assert stringify(Literal[1, \"2\", \"\\r\"], False) == \"Literal[1, '2', '\\\\r']\"\n+    assert stringify(Literal[1, \"2\", \"\\r\"], True) == \"~typing.Literal[1, '2', '\\\\r']\"\n \n \n @pytest.mark.skipif(sys.version_info < (3, 10), reason='python 3.10+ is required.')\n def test_stringify_type_union_operator():\n-    assert stringify(int | None) == \"int | None\"  # type: ignore\n-    assert stringify(int | str) == \"int | str\"  # type: ignore\n-    assert stringify(int | str | None) == \"int | str | None\"  # type: ignore\n+    assert stringify(int | None, False) == \"int | None\"  # type: ignore\n+    assert stringify(int | None, True) == \"int | None\"  # type: ignore\n+\n+    assert stringify(int | str, False) == \"int | str\"  # type: ignore\n+    assert stringify(int | str, True) == \"int | str\"  # type: ignore\n+\n+    assert stringify(int | str | None, False) == \"int | str | None\"  # type: ignore\n+    assert stringify(int | str | None, True) == \"int | str | None\"  # type: ignore\n \n \n def test_stringify_broken_type_hints():\n-    assert stringify(BrokenType) == 'tests.test_util_typing.BrokenType'\n+    assert stringify(BrokenType, False) == 'tests.test_util_typing.BrokenType'\n+    assert stringify(BrokenType, True) == '~tests.test_util_typing.BrokenType'\n \n \n def test_stringify_mock():\n     with mock(['unknown']):\n         import unknown\n-        assert stringify(unknown.secret.Class) == 'unknown.secret.Class'\n+        assert stringify(unknown.secret.Class, False) == 'unknown.secret.Class'\n+        assert stringify(unknown.secret.Class, True) == 'unknown.secret.Class'\n",
+  "problem_statement": "autodoc add_module_names equivalent for arguments\nThe `add_module_names = False` configuration seems to only affect the class/function/attribute header names.\r\nThe type hints are still always rendered as fully qualified names.\r\n\r\n`mypackage/mymodule.py`:\r\n```python\r\nclass MyClass:\r\n    \"\"\"Whatever 1.\"\"\"\r\n    pass\r\n\r\n\r\ndef foo(arg: MyClass):\r\n    \"\"\"Whatever 2.\"\"\"\r\n    pass\r\n```\r\n\r\n`conf.py`:\r\n```python\r\n# ...\r\nadd_module_names = False\r\n# ...\r\n```\r\n\r\n`index.rst`:\r\n```rst\r\nmypackage.mymodule module\r\n=========================\r\n\r\n.. automodule:: mypackage.mymodule\r\n   :members:\r\n   :undoc-members:\r\n   :show-inheritance:\r\n```\r\n\r\nExpected documentation:\r\n```\r\nfoo(arg: MyClass)\r\n    Whatever 2.\r\n```\r\n\r\nActual documentation:\r\n```\r\nfoo(arg: mypackage.mymodule.MyClass)\r\n    Whatever 2.\r\n```\r\n\r\n## Describe the solution you'd like\r\n\r\nI would be OK with any of the following:\r\n```python\r\nadd_module_names = False # now affects type annotations too\r\n# or\r\nadd_type_module_names = False # new sphinx config option (name up for debate)\r\n# or\r\nautodoc_add_module_names = False # new autodoc config option (name up for debate)\r\n```\r\n\r\n## Describe alternatives you've considered\r\n\r\nThere's a [StackOverflow post](https://stackoverflow.com/questions/51394955/sphinx-remove-module-prefix-for-args-in-automodule) which suggests using the `autodoc_docstring_signature` option to manually specify the function signature. This is not really a viable solution in my opinion.\n",
+  "hints_text": "+1 for adding a new confval only for autodoc. It would be nice if we can give better name to it. I feel \"add_module_names\" is a bit ambiguous and difficult to understand its behavior from the name.\nTo be clear, the [`add_module_names` confval](https://www.sphinx-doc.org/en/master/usage/configuration.html?highlight=add_module_names#confval-add_module_names) already exists. It's just that it doesn't affect parameter types for some reason.\nSorry for confuse. I know that. I thought it's better to separate the confval for autodoc and python-domain.\nJust FYI: Sphinx-4.0 provides a new configuration `python_use_unqualified_type_names`. It suppresses the module name if hyperlinks can be resolved.\nSo does this mean that the proposed `add_module_names` configuration is completely unnecessary?\nMy understanding is that `python_use_unqualified_type_names` only works with resolved refs and only for the `python` domain. Although, I would personally consider this issue fixed if `python_use_unqualified_type_names` would also work for unresolved refs.\nOh that's a fair point! Yep.\nAlso, not sure if this deserves a separate issue/feature request, but one more place where sphinx currently produces fully qualified names is in the package/module headings generated with `apidoc`. So for example, if you have\r\n```\r\nfoo/__init__.py\r\nfoo/bar/__init__.py\r\nfoo/bar/baz.py\r\n```\r\nyou will get the documentation for\r\n```\r\nfoo package\r\n - foo.bar package\r\n    - foo.bar.baz module\r\n```\r\ninstead of\r\n```\r\nfoo package\r\n - bar package\r\n    - baz module\r\n```\r\n\r\nThe FQN version is kind of redundant, since the parent packages of `bar` and `baz` are already obvious from the ToC. And with longer package/module names, this can lead to really ugly wrapping in the sidebar ToC.",
+  "created_at": "2021-12-02T17:47:00Z",
+  "version": "4.4",
+  "FAIL_TO_PASS": "[\"tests/test_domain_py.py::test_parse_annotation_suppress\", \"tests/test_ext_autodoc_configs.py::test_autodoc_unqualified_typehints\", \"tests/test_util_inspect.py::test_signature_annotations\", \"tests/test_util_typing.py::test_stringify\", \"tests/test_util_typing.py::test_stringify_Annotated\", \"tests/test_util_typing.py::test_stringify_broken_type_hints\", \"tests/test_util_typing.py::test_stringify_mock\", \"tests/test_util_typing.py::test_stringify_type_Literal\", \"tests/test_util_typing.py::test_stringify_type_hints_Callable\", \"tests/test_util_typing.py::test_stringify_type_hints_Union\", \"tests/test_util_typing.py::test_stringify_type_hints_alias\", \"tests/test_util_typing.py::test_stringify_type_hints_containers\", \"tests/test_util_typing.py::test_stringify_type_hints_custom_class\", \"tests/test_util_typing.py::test_stringify_type_hints_pep_585\", \"tests/test_util_typing.py::test_stringify_type_hints_string\", \"tests/test_util_typing.py::test_stringify_type_hints_typevars\"]",
+  "PASS_TO_PASS": "[\"tests/test_domain_py.py::test_canonical\", \"tests/test_domain_py.py::test_canonical_definition_overrides\", \"tests/test_domain_py.py::test_canonical_definition_skip\", \"tests/test_domain_py.py::test_canonical_duplicated\", \"tests/test_domain_py.py::test_domain_py_canonical\", \"tests/test_domain_py.py::test_domain_py_find_obj\", \"tests/test_domain_py.py::test_domain_py_objects\", \"tests/test_domain_py.py::test_domain_py_xrefs\", \"tests/test_domain_py.py::test_domain_py_xrefs_abbreviations\", \"tests/test_domain_py.py::test_function_signatures\", \"tests/test_domain_py.py::test_get_full_qualified_name\", \"tests/test_domain_py.py::test_info_field_list\", \"tests/test_domain_py.py::test_info_field_list_Literal\", \"tests/test_domain_py.py::test_info_field_list_piped_type\", \"tests/test_domain_py.py::test_info_field_list_var\", \"tests/test_domain_py.py::test_modindex_common_prefix\", \"tests/test_domain_py.py::test_module_index\", \"tests/test_domain_py.py::test_module_index_not_collapsed\", \"tests/test_domain_py.py::test_module_index_submodule\", \"tests/test_domain_py.py::test_noindexentry\", \"tests/test_domain_py.py::test_optional_pyfunction_signature\", \"tests/test_domain_py.py::test_parse_annotation\", \"tests/test_domain_py.py::test_parse_annotation_Literal\", \"tests/test_domain_py.py::test_pyattribute\", \"tests/test_domain_py.py::test_pyclass_options\", \"tests/test_domain_py.py::test_pyclassmethod\", \"tests/test_domain_py.py::test_pydata\", \"tests/test_domain_py.py::test_pydata_signature\", \"tests/test_domain_py.py::test_pydata_signature_old\", \"tests/test_domain_py.py::test_pydata_with_union_type_operator\", \"tests/test_domain_py.py::test_pydecorator_signature\", \"tests/test_domain_py.py::test_pydecoratormethod_signature\", \"tests/test_domain_py.py::test_pyexception_signature\", \"tests/test_domain_py.py::test_pyfunction\", \"tests/test_domain_py.py::test_pyfunction_signature\", \"tests/test_domain_py.py::test_pyfunction_signature_full\", \"tests/test_domain_py.py::test_pyfunction_signature_full_py38\", \"tests/test_domain_py.py::test_pyfunction_with_number_literals\", \"tests/test_domain_py.py::test_pyfunction_with_union_type_operator\", \"tests/test_domain_py.py::test_pymethod_options\", \"tests/test_domain_py.py::test_pyobject_prefix\", \"tests/test_domain_py.py::test_pyproperty\", \"tests/test_domain_py.py::test_pystaticmethod\", \"tests/test_domain_py.py::test_python_python_use_unqualified_type_names\", \"tests/test_domain_py.py::test_python_python_use_unqualified_type_names_disabled\", \"tests/test_domain_py.py::test_resolve_xref_for_properties\", \"tests/test_domain_py.py::test_type_field\", \"tests/test_domain_py.py::test_warn_missing_reference\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_both\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_class\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_init\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_both\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_class\", \"tests/test_ext_autodoc_configs.py::test_autoclass_content_init\", \"tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_mixed\", \"tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_separated_init\", \"tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_separated_new\", \"tests/test_ext_autodoc_configs.py::test_autodoc_default_options\", \"tests/test_ext_autodoc_configs.py::test_autodoc_default_options_with_values\", \"tests/test_ext_autodoc_configs.py::test_autodoc_docstring_signature\", \"tests/test_ext_autodoc_configs.py::test_autodoc_inherit_docstrings\", \"tests/test_ext_autodoc_configs.py::test_autodoc_type_aliases\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_both\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_and_type_aliases\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_for_invalid_node\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_no_undoc\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init_no_undoc\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_none\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_none_for_overload\", \"tests/test_ext_autodoc_configs.py::test_autodoc_typehints_signature\", \"tests/test_ext_autodoc_configs.py::test_mocked_module_imports\", \"tests/test_util_inspect.py::test_TypeAliasNamespace\", \"tests/test_util_inspect.py::test_dict_customtype\", \"tests/test_util_inspect.py::test_dictionary_sorting\", \"tests/test_util_inspect.py::test_frozenset_sorting\", \"tests/test_util_inspect.py::test_frozenset_sorting_fallback\", \"tests/test_util_inspect.py::test_getdoc_inherited_classmethod\", \"tests/test_util_inspect.py::test_getdoc_inherited_decorated_method\", \"tests/test_util_inspect.py::test_getslots\", \"tests/test_util_inspect.py::test_is_builtin_class_method\", \"tests/test_util_inspect.py::test_isattributedescriptor\", \"tests/test_util_inspect.py::test_isbuiltin\", \"tests/test_util_inspect.py::test_isclassmethod\", \"tests/test_util_inspect.py::test_iscoroutinefunction\", \"tests/test_util_inspect.py::test_isdescriptor\", \"tests/test_util_inspect.py::test_isfunction\", \"tests/test_util_inspect.py::test_isgenericalias\", \"tests/test_util_inspect.py::test_isproperty\", \"tests/test_util_inspect.py::test_isstaticmethod\", \"tests/test_util_inspect.py::test_object_description_enum\", \"tests/test_util_inspect.py::test_safe_getattr_with___dict___override\", \"tests/test_util_inspect.py::test_safe_getattr_with_default\", \"tests/test_util_inspect.py::test_safe_getattr_with_exception\", \"tests/test_util_inspect.py::test_safe_getattr_with_property_exception\", \"tests/test_util_inspect.py::test_set_sorting\", \"tests/test_util_inspect.py::test_set_sorting_fallback\", \"tests/test_util_inspect.py::test_signature\", \"tests/test_util_inspect.py::test_signature_annotations_py38\", \"tests/test_util_inspect.py::test_signature_from_ast\", \"tests/test_util_inspect.py::test_signature_from_str_annotations\", \"tests/test_util_inspect.py::test_signature_from_str_basic\", \"tests/test_util_inspect.py::test_signature_from_str_complex_annotations\", \"tests/test_util_inspect.py::test_signature_from_str_default_values\", \"tests/test_util_inspect.py::test_signature_from_str_invalid\", \"tests/test_util_inspect.py::test_signature_from_str_kwonly_args\", \"tests/test_util_inspect.py::test_signature_from_str_positionaly_only_args\", \"tests/test_util_inspect.py::test_signature_methods\", \"tests/test_util_inspect.py::test_signature_partial\", \"tests/test_util_inspect.py::test_signature_partialmethod\", \"tests/test_util_inspect.py::test_unpartial\", \"tests/test_util_typing.py::test_restify\", \"tests/test_util_typing.py::test_restify_broken_type_hints\", \"tests/test_util_typing.py::test_restify_mock\", \"tests/test_util_typing.py::test_restify_pep_585\", \"tests/test_util_typing.py::test_restify_type_ForwardRef\", \"tests/test_util_typing.py::test_restify_type_Literal\", \"tests/test_util_typing.py::test_restify_type_hints_Callable\", \"tests/test_util_typing.py::test_restify_type_hints_Union\", \"tests/test_util_typing.py::test_restify_type_hints_alias\", \"tests/test_util_typing.py::test_restify_type_hints_containers\", \"tests/test_util_typing.py::test_restify_type_hints_custom_class\", \"tests/test_util_typing.py::test_restify_type_hints_typevars\"]",
+  "environment_setup_commit": "0938c193ea6f56dbb930bfb323602bc4e2b7b9c6",
+  "patch_files": [
+    "sphinx/domains/python.py",
+    "sphinx/ext/autodoc/__init__.py",
+    "sphinx/util/inspect.py",
+    "sphinx/util/typing.py"
+  ],
+  "test_patch_files": [
+    "tests/test_domain_py.py",
+    "tests/test_ext_autodoc_configs.py",
+    "tests/test_util_inspect.py",
+    "tests/test_util_typing.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/domains/python.py": {
+      "diffs": [
+        {
+          "start_line_old": 83,
+          "end_line_old": 83,
+          "file_pos": 8,
+          "file_context_length": 52018,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+          "closest_snippet_line_distance": 885
+        },
+        {
+          "start_line_old": 104,
+          "end_line_old": 104,
+          "file_pos": 8,
+          "file_context_length": 52018,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+          "closest_snippet_line_distance": 864
+        },
+        {
+          "start_line_old": 153,
+          "end_line_old": 153,
+          "file_pos": 8,
+          "file_context_length": 52018,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+          "closest_snippet_line_distance": 815
+        },
+        {
+          "start_line_old": 183,
+          "end_line_old": 183,
+          "file_pos": 8,
+          "file_context_length": 52018,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+          "closest_snippet_line_distance": 785
+        },
+        {
+          "start_line_old": 212,
+          "end_line_old": 217,
+          "file_pos": 8,
+          "file_context_length": 52018,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+          "closest_snippet_line_distance": 756
+        }
+      ]
+    },
+    "sphinx/ext/autodoc/__init__.py": {
+      "diffs": [
+        {
+          "start_line_old": 1298,
+          "end_line_old": 1298,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_105_",
+          "closest_snippet_line_distance": 1510,
+          "pos": 8,
+          "context_length": 6934
+        },
+        {
+          "start_line_old": 1326,
+          "end_line_old": 1326,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_105_",
+          "closest_snippet_line_distance": 1482,
+          "pos": 8,
+          "context_length": 6934
+        },
+        {
+          "start_line_old": 1564,
+          "end_line_old": 1564,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "pos": 37,
+          "context_length": 17877
+        },
+        {
+          "start_line_old": 1585,
+          "end_line_old": 1585,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "pos": 37,
+          "context_length": 17877
+        },
+        {
+          "start_line_old": 2113,
+          "end_line_old": 2113,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.import_object_ModuleDocumenter.import_object.3.1",
+          "closest_snippet_line_distance": 1070,
+          "pos": 14,
+          "context_length": 9789
+        },
+        {
+          "start_line_old": 2163,
+          "end_line_old": 2163,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.import_object_ModuleDocumenter.import_object.3.1",
+          "closest_snippet_line_distance": 1120,
+          "pos": 14,
+          "context_length": 9789
+        },
+        {
+          "start_line_old": 2836,
+          "end_line_old": 2836,
+          "file_pos": 1,
+          "file_context_length": 24008,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.add_directive_header_ModuleDocumenter.add_directive_header.6.1",
+          "closest_snippet_line_distance": 1780,
+          "pos": 6,
+          "context_length": 5198
+        }
+      ]
+    },
+    "sphinx/util/inspect.py": {
+      "diffs": [
+        {
+          "start_line_old": 747,
+          "end_line_old": 747,
+          "file_pos": 4,
+          "file_context_length": 33866,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/util/inspect.py_TypeAliasNamespace__should_unwrap.4.1",
+          "closest_snippet_line_distance": 124
+        },
+        {
+          "start_line_old": 774,
+          "end_line_old": 774,
+          "file_pos": 4,
+          "file_context_length": 33866,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/util/inspect.py_TypeAliasNamespace__should_unwrap.4.1",
+          "closest_snippet_line_distance": 151
+        },
+        {
+          "start_line_old": 794,
+          "end_line_old": 794,
+          "file_pos": 4,
+          "file_context_length": 33866,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/util/inspect.py_TypeAliasNamespace__should_unwrap.4.1",
+          "closest_snippet_line_distance": 171
+        }
+      ]
+    },
+    "sphinx/util/typing.py": {
+      "diffs": [
+        {
+          "start_line_old": 302,
+          "end_line_old": 303
+        },
+        {
+          "start_line_old": 316,
+          "end_line_old": 320
+        },
+        {
+          "start_line_old": 328,
+          "end_line_old": 328
+        },
+        {
+          "start_line_old": 341,
+          "end_line_old": 362
+        },
+        {
+          "start_line_old": 377,
+          "end_line_old": 424
+        },
+        {
+          "start_line_old": 432,
+          "end_line_old": 435
+        },
+        {
+          "start_line_old": 443,
+          "end_line_old": 464
+        }
+      ]
+    }
+  },
+  "vectors": 1536,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ClassDocumenter.1_ClassDocumenter.2",
+      "distance": 0.7335295677185059,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1434,
+      "end_line": 1784,
+      "tokens": 3180,
+      "context_length": 3180,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.get_real_modname_Documenter._call_format_args.3.1",
+      "distance": 0.7744625806808472,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 448,
+      "end_line": 496,
+      "tokens": 359,
+      "context_length": 3539,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_re_exclude_members_option.3.1",
+      "distance": 0.7833683490753174,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 13,
+      "end_line": 114,
+      "tokens": 788,
+      "context_length": 4327,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/mock.py__make_subclass__MockModule.__repr__.1.1",
+      "distance": 0.8218510150909424,
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "start_line": 73,
+      "end_line": 98,
+      "tokens": 217,
+      "context_length": 4544
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.add_directive_header_ModuleDocumenter.add_directive_header.6.1",
+      "distance": 0.8242499828338623,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1045,
+      "end_line": 1056,
+      "tokens": 126,
+      "context_length": 4670,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_105_",
+      "distance": 0.8265525102615356,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2808,
+      "end_line": 2851,
+      "tokens": 528,
+      "context_length": 5198,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/doc/conf.py_1_todo_include_todos.1",
+      "distance": 0.8278049826622009,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 732,
+      "context_length": 5930
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_FunctionDocumenter_FunctionDocumenter.2",
+      "distance": 0.8289957642555237,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1281,
+      "end_line": 1400,
+      "tokens": 1004,
+      "context_length": 6934,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DataDocumenter.add_directive_header_DataDocumenter.add_directive_header.3.3.2.2.1",
+      "distance": 0.8518128395080566,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1994,
+      "end_line": 2019,
+      "tokens": 268,
+      "context_length": 7202,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.resolve_name_Documenter.resolve_name.2",
+      "distance": 0.8568896055221558,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 377,
+      "end_line": 386,
+      "tokens": 121,
+      "context_length": 7323,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.import_object_AttributeDocumenter.should_suppress_value_header.2.1",
+      "distance": 0.862215518951416,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2587,
+      "end_line": 2610,
+      "tokens": 229,
+      "context_length": 7552,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.import_object_ModuleDocumenter.import_object.3.1",
+      "distance": 0.8625001907348633,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1031,
+      "end_line": 1043,
+      "tokens": 124,
+      "context_length": 7676,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/util/inspect.py_TypeAliasModule_TypeAliasModule.__getattr__.2.3.3.3.2.3.2.2.1",
+      "distance": 0.8753418922424316,
+      "file_path": "sphinx/util/inspect.py",
+      "start_line": 559,
+      "end_line": 589,
+      "tokens": 250,
+      "context_length": 7926,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_MethodDocumenter.1_MethodDocumenter.2",
+      "distance": 0.8758972883224487,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2079,
+      "end_line": 2284,
+      "tokens": 1863,
+      "context_length": 9789,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.get_object_members_ModuleDocumenter.get_object_members.2.2.4.1",
+      "distance": 0.8787147998809814,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1085,
+      "end_line": 1109,
+      "tokens": 209,
+      "context_length": 9998,
+      "file_pos": 4
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DataDocumenter.document_members_DataDocumenter.add_content.self.analyzer.4",
+      "distance": 0.8844000101089478,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2021,
+      "end_line": 2058,
+      "tokens": 320,
+      "context_length": 10318,
+      "file_pos": 4
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_importlib_mangle.3.1",
+      "distance": 0.8856490850448608,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 11,
+      "end_line": 40,
+      "tokens": 211,
+      "context_length": 10529
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.add_directive_header_AttributeDocumenter.add_directive_header.3.3.2.2.1",
+      "distance": 0.8911784291267395,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2612,
+      "end_line": 2636,
+      "tokens": 295,
+      "context_length": 10824,
+      "file_pos": 5
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_inherited_members_option_bool_option.2.1",
+      "distance": 0.8978357315063477,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 117,
+      "end_line": 158,
+      "tokens": 284,
+      "context_length": 11108,
+      "file_pos": 5
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DocstringSignatureMixin.get_doc_DocstringSignatureMixin.format_signature.4.2.1.1",
+      "distance": 0.9179186224937439,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1244,
+      "end_line": 1260,
+      "tokens": 184,
+      "context_length": 11292,
+      "file_pos": 5
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_import_object_import_object.2.10.5",
+      "distance": 0.9208154678344727,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 77,
+      "end_line": 147,
+      "tokens": 649,
+      "context_length": 11941
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/directive.py_warnings_DummyOptionSpec.__getitem__.1.1",
+      "distance": 0.9224475622177124,
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "start_line": 9,
+      "end_line": 47,
+      "tokens": 310,
+      "context_length": 12251
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleLevelDocumenter_ModuleLevelDocumenter.resolve_name.2.1",
+      "distance": 0.9228050112724304,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1131,
+      "end_line": 1149,
+      "tokens": 179,
+      "context_length": 12430,
+      "file_pos": 6
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.parse_name_Documenter.parse_name.13.1",
+      "distance": 0.9230393171310425,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 388,
+      "end_line": 423,
+      "tokens": 317,
+      "context_length": 12747,
+      "file_pos": 6
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter_Documenter.add_line.2.3.1",
+      "distance": 0.9254993200302124,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 299,
+      "end_line": 375,
+      "tokens": 751,
+      "context_length": 13498,
+      "file_pos": 6
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/typehints.py_augment_descriptions_with_types_",
+      "distance": 0.932989239692688,
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "start_line": 130,
+      "end_line": 185,
+      "tokens": 460,
+      "context_length": 13958
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter_ModuleDocumenter.parse_name.3.1",
+      "distance": 0.9334952235221863,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 987,
+      "end_line": 1029,
+      "tokens": 379,
+      "context_length": 14337,
+      "file_pos": 7
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_GenericAliasMixin_GenericAliasMixin.update_content.2",
+      "distance": 0.9350721836090088,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1825,
+      "end_line": 1840,
+      "tokens": 129,
+      "context_length": 14466,
+      "file_pos": 7
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.filter_members.9_Documenter.filter_members.10.1",
+      "distance": 0.9374736547470093,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 713,
+      "end_line": 821,
+      "tokens": 890,
+      "context_length": 15356,
+      "file_pos": 7
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.get_sourcename_Documenter.get_sourcename.2.2.1.1",
+      "distance": 0.9391744136810303,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 587,
+      "end_line": 599,
+      "tokens": 139,
+      "context_length": 15495,
+      "file_pos": 7
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyCurrentModule_PyCurrentModule.run.3.1",
+      "distance": 0.9415496587753296,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 1054,
+      "end_line": 1072,
+      "tokens": 140,
+      "context_length": 15635,
+      "file_pos": 8
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_generate_autosummary_content_generate_autosummary_content.get_all_members.2.1",
+      "distance": 0.9415993094444275,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 241,
+      "end_line": 276,
+      "tokens": 343,
+      "context_length": 15978
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.sort_members_ModuleDocumenter.sort_members.1.3.1.1",
+      "distance": 0.9479727745056152,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1111,
+      "end_line": 1128,
+      "tokens": 182,
+      "context_length": 16160,
+      "file_pos": 9
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.get_doc_AttributeDocumenter.add_content.self.analyzer.4",
+      "distance": 0.9484975337982178,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2655,
+      "end_line": 2680,
+      "tokens": 316,
+      "context_length": 16476,
+      "file_pos": 9
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/ext/apidoc.py_get_parser_get_parser.18",
+      "distance": 0.959006130695343,
+      "file_path": "sphinx/ext/apidoc.py",
+      "start_line": 303,
+      "end_line": 368,
+      "tokens": 752,
+      "context_length": 17228
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/mock.py_contextlib__MockObject.__repr__.1.1",
+      "distance": 0.9608175754547119,
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "start_line": 11,
+      "end_line": 70,
+      "tokens": 461,
+      "context_length": 17689
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DecoratorDocumenter_ClassDocumenter",
+      "distance": 0.9655357003211975,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1403,
+      "end_line": 1784,
+      "tokens": 188,
+      "context_length": 17877,
+      "file_pos": 10
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_get_documenters_104",
+      "distance": 0.9678271412849426,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2778,
+      "end_line": 2808,
+      "tokens": 363,
+      "context_length": 18240,
+      "file_pos": 10
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.update_annotations_AttributeDocumenter.update_annotations.2.4.2",
+      "distance": 0.9693290591239929,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2565,
+      "end_line": 2585,
+      "tokens": 231,
+      "context_length": 18471,
+      "file_pos": 10
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_find_autosummary_in_docstring_find_autosummary_in_docstring.4.1",
+      "distance": 0.9706194400787354,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 492,
+      "end_line": 513,
+      "tokens": 217,
+      "context_length": 18688
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.get_attribute_comment_AttributeDocumenter.get_attribute_comment.2.1",
+      "distance": 0.9726731181144714,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2638,
+      "end_line": 2653,
+      "tokens": 182,
+      "context_length": 18870,
+      "file_pos": 10
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_40_ModuleScanner.is_skipped.1.2.2.1",
+      "distance": 0.9733538031578064,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 173,
+      "end_line": 192,
+      "tokens": 176,
+      "context_length": 19046
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/sphinx/util/inspect.py_TypeAliasNamespace__should_unwrap.4.1",
+      "distance": 0.9734742641448975,
+      "file_path": "sphinx/util/inspect.py",
+      "start_line": 592,
+      "end_line": 623,
+      "tokens": 249,
+      "context_length": 19295,
+      "file_pos": 10
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_argparse_logger.1",
+      "distance": 0.9752258658409119,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 20,
+      "end_line": 53,
+      "tokens": 262,
+      "context_length": 19557
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.add_directive_header_Documenter.add_directive_header.10.3",
+      "distance": 0.9796861410140991,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 533,
+      "end_line": 553,
+      "tokens": 235,
+      "context_length": 19792,
+      "file_pos": 10
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_UninitializedGlobalVariableMixin_UninitializedGlobalVariableMixin.get_doc.1.2.2",
+      "distance": 0.979803204536438,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1904,
+      "end_line": 1942,
+      "tokens": 307,
+      "context_length": 20099,
+      "file_pos": 10
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_generate_autosummary_content.get_module_attrs_generate_autosummary_content.get_module_attrs.4.1",
+      "distance": 0.9865502119064331,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 303,
+      "end_line": 316,
+      "tokens": 202,
+      "context_length": 20301
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/deprecated.py_GenericAliasDocumenter_",
+      "distance": 0.9926995038986206,
+      "file_path": "sphinx/ext/autodoc/deprecated.py",
+      "start_line": 114,
+      "end_line": 127,
+      "tokens": 114,
+      "context_length": 20415
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_NonDataDescriptorMixin_NonDataDescriptorMixin.get_doc.1.4.2",
+      "distance": 0.9953523874282837,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2287,
+      "end_line": 2315,
+      "tokens": 248,
+      "context_length": 20663,
+      "file_pos": 11
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DocstringStripSignatureMixin_DocstringStripSignatureMixin.format_signature.2.1",
+      "distance": 0.9956520199775696,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1263,
+      "end_line": 1278,
+      "tokens": 166,
+      "context_length": 20829,
+      "file_pos": 11
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sphinx/sphinx/application.py_Sphinx.add_autodocumenter_Sphinx.add_autodocumenter.5",
+      "distance": 0.9961574673652649,
+      "file_path": "sphinx/application.py",
+      "start_line": 1106,
+      "end_line": 1127,
+      "tokens": 263,
+      "context_length": 21092
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sphinx/sphinx/application.py_Sphinx.add_autodoc_attrgetter_Sphinx.add_autodoc_attrgetter.3",
+      "distance": 0.9970296621322632,
+      "file_path": "sphinx/application.py",
+      "start_line": 1129,
+      "end_line": 1142,
+      "tokens": 173,
+      "context_length": 21265
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtins_ModuleEntry.deprecated",
+      "distance": 1.0046677589416504,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 525,
+      "context_length": 21790,
+      "file_pos": 12
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_SlotsMixin.get_doc_SlotsMixin._datadescriptor.2.2.1.1",
+      "distance": 1.0057532787322998,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2347,
+      "end_line": 2370,
+      "tokens": 210,
+      "context_length": 22000,
+      "file_pos": 12
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_NewTypeMixin_NewTypeMixin.update_content.2",
+      "distance": 1.0058361291885376,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1843,
+      "end_line": 1859,
+      "tokens": 137,
+      "context_length": 22137,
+      "file_pos": 12
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DocstringSignatureMixin_DocstringSignatureMixin._find_signature.valid_names.10.1",
+      "distance": 1.0070127248764038,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1185,
+      "end_line": 1242,
+      "tokens": 434,
+      "context_length": 22571,
+      "file_pos": 12
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ClassLevelDocumenter_ClassLevelDocumenter.resolve_name.2.1",
+      "distance": 1.009690523147583,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1152,
+      "end_line": 1182,
+      "tokens": 287,
+      "context_length": 22858,
+      "file_pos": 12
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.generate_Documenter.generate.34",
+      "distance": 1.010268211364746,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 893,
+      "end_line": 984,
+      "tokens": 857,
+      "context_length": 23715,
+      "file_pos": 12
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_TypeVarMixin.update_content_TypeVarMixin.update_content.2",
+      "distance": 1.016723871231079,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1886,
+      "end_line": 1901,
+      "tokens": 160,
+      "context_length": 23875,
+      "file_pos": 12
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DataDocumenter_DataDocumenter.should_suppress_value_header.2.1",
+      "distance": 1.0197749137878418,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1945,
+      "end_line": 1992,
+      "tokens": 365,
+      "context_length": 24240,
+      "file_pos": 12
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_re_ASTParameters.describe_signature.4.2",
+      "distance": 1.0229175090789795,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 11,
+      "end_line": 753,
+      "tokens": 6364,
+      "context_length": 30604
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_generate_autosummary_content.ns_generate_autosummary_content.21.2.1.1",
+      "distance": 1.0229915380477905,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 333,
+      "end_line": 381,
+      "tokens": 516,
+      "context_length": 31120
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_get_module_members_Attribute.value",
+      "distance": 1.0238792896270752,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 150,
+      "end_line": 176,
+      "tokens": 183,
+      "context_length": 31303
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_import_module_import_module.2.2.3",
+      "distance": 1.0260258913040161,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 62,
+      "end_line": 74,
+      "tokens": 123,
+      "context_length": 31426
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_Program_Program.run.3.1",
+      "distance": 1.0277994871139526,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 259,
+      "end_line": 276,
+      "tokens": 122,
+      "context_length": 31548
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_TypeVarMixin_TypeVarMixin.get_doc.2.2.2",
+      "distance": 1.0287158489227295,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1862,
+      "end_line": 1884,
+      "tokens": 197,
+      "context_length": 31745,
+      "file_pos": 14
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_generate_autosummary_content.get_modules_generate_autosummary_content.get_modules.4.1",
+      "distance": 1.0303776264190674,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 318,
+      "end_line": 331,
+      "tokens": 198,
+      "context_length": 31943
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sphinx/doc/conf.py_setup_",
+      "distance": 1.034867286682129,
+      "file_path": "doc/conf.py",
+      "start_line": 141,
+      "end_line": 162,
+      "tokens": 255,
+      "context_length": 32198
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyModule_PyModule.make_old_id.2.1",
+      "distance": 1.0364272594451904,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 991,
+      "end_line": 1051,
+      "tokens": 521,
+      "context_length": 32719,
+      "file_pos": 14
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/deprecated.py_warnings_SingledispatchFunctionDocumenter.__init__.2",
+      "distance": 1.03715181350708,
+      "file_path": "sphinx/ext/autodoc/deprecated.py",
+      "start_line": 11,
+      "end_line": 29,
+      "tokens": 155,
+      "context_length": 32874
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_unmangle_unmangle.3.1",
+      "distance": 1.0381965637207031,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 43,
+      "end_line": 59,
+      "tokens": 125,
+      "context_length": 32999
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sphinx/sphinx/deprecation.py_sys_deprecated_alias.2",
+      "distance": 1.0384314060211182,
+      "file_path": "sphinx/deprecation.py",
+      "start_line": 11,
+      "end_line": 32,
+      "tokens": 140,
+      "context_length": 33139
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyDecoratorMixin_PyDecoratorMixin.needs_arglist.1.1",
+      "distance": 1.039109230041504,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 968,
+      "end_line": 988,
+      "tokens": 178,
+      "context_length": 33317,
+      "file_pos": 15
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/deprecated.py_DataDeclarationDocumenter_DataDeclarationDocumenter.__init__.2",
+      "distance": 1.039891004562378,
+      "file_path": "sphinx/ext/autodoc/deprecated.py",
+      "start_line": 32,
+      "end_line": 47,
+      "tokens": 140,
+      "context_length": 33457
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.document_members_Documenter.document_members.16",
+      "distance": 1.041046380996704,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 823,
+      "end_line": 866,
+      "tokens": 451,
+      "context_length": 33908,
+      "file_pos": 15
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_CAliasObject_",
+      "distance": 1.0431458950042725,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 3606,
+      "end_line": 3919,
+      "tokens": 2940,
+      "context_length": 36848
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_ModuleScanner.scan_members_of.2.2.1.1",
+      "distance": 1.04334557056427,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 194,
+      "end_line": 238,
+      "tokens": 310,
+      "context_length": 37158
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.add_content_Documenter.add_content.9.1.1",
+      "distance": 1.0433645248413086,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 601,
+      "end_line": 642,
+      "tokens": 409,
+      "context_length": 37567,
+      "file_pos": 15
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ExceptionDocumenter_DataDocumenterMixinBase.config.update_content.2",
+      "distance": 1.0434181690216064,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1787,
+      "end_line": 1822,
+      "tokens": 245,
+      "context_length": 37812,
+      "file_pos": 15
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter_AttributeDocumenter.document_members.1",
+      "distance": 1.0447171926498413,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2508,
+      "end_line": 2542,
+      "tokens": 291,
+      "context_length": 38103,
+      "file_pos": 15
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/sphinx/doc/development/tutorials/examples/autodoc_intenum.py_1_IntEnumDocumenter.add_directive_header.2",
+      "distance": 1.0465351343154907,
+      "file_path": "doc/development/tutorials/examples/autodoc_intenum.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 183,
+      "context_length": 38286
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/sphinx/sphinx/domains/javascript.py_JSModule_JSModule.option_spec.1",
+      "distance": 1.0466632843017578,
+      "file_path": "sphinx/domains/javascript.py",
+      "start_line": 248,
+      "end_line": 273,
+      "tokens": 161,
+      "context_length": 38447
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_Documenter.import_object_Documenter.import_object.2.1.5.1.2.3.1",
+      "distance": 1.0474576950073242,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 425,
+      "end_line": 446,
+      "tokens": 199,
+      "context_length": 38646,
+      "file_pos": 17
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/sphinx/sphinx/deprecation.py__ModuleWrapper__ModuleWrapper.__getattr__.4.1",
+      "distance": 1.0477784872055054,
+      "file_path": "sphinx/deprecation.py",
+      "start_line": 35,
+      "end_line": 60,
+      "tokens": 236,
+      "context_length": 38882
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.get_module_members_ModuleDocumenter.get_module_members.7.1",
+      "distance": 1.0487011671066284,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1058,
+      "end_line": 1083,
+      "tokens": 207,
+      "context_length": 39089,
+      "file_pos": 17
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_re_int_or_nothing.2.1",
+      "distance": 1.050864338874817,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 9,
+      "end_line": 39,
+      "tokens": 240,
+      "context_length": 39329
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/sphinx/sphinx/directives/__init__.py_ObjectDescription_ObjectDescription._doc_field_type_map.1",
+      "distance": 1.0510761737823486,
+      "file_path": "sphinx/directives/__init__.py",
+      "start_line": 50,
+      "end_line": 72,
+      "tokens": 187,
+      "context_length": 39516
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_PropertyDocumenter_PropertyDocumenter.2",
+      "distance": 1.051740050315857,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2683,
+      "end_line": 2757,
+      "tokens": 624,
+      "context_length": 40140,
+      "file_pos": 19
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/directive.py_AutodocDirective_",
+      "distance": 1.0520882606506348,
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "start_line": 125,
+      "end_line": 175,
+      "tokens": 453,
+      "context_length": 40593
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_AliasTransform_",
+      "distance": 1.053263545036316,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 7328,
+      "end_line": 7915,
+      "tokens": 5169,
+      "context_length": 45762
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_setup_documenters_setup_documenters.3.1",
+      "distance": 1.0558011531829834,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 85,
+      "end_line": 97,
+      "tokens": 163,
+      "context_length": 45925
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/sphinx/sphinx/ext/apidoc.py_argparse_is_packagedir.4.1",
+      "distance": 1.058584451675415,
+      "file_path": "sphinx/ext/apidoc.py",
+      "start_line": 17,
+      "end_line": 73,
+      "tokens": 402,
+      "context_length": 46327
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_generate_autosummary_content.get_members_generate_autosummary_content.get_members.5.1",
+      "distance": 1.0594651699066162,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 278,
+      "end_line": 301,
+      "tokens": 284,
+      "context_length": 46611
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "position": 1,
+      "tokens": 24008,
+      "context_length": 24008
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "position": 2,
+      "tokens": 1385,
+      "context_length": 25393
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 3,
+      "tokens": 1465,
+      "context_length": 26858
+    },
+    {
+      "file_path": "sphinx/util/inspect.py",
+      "position": 4,
+      "tokens": 7008,
+      "context_length": 33866
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "position": 5,
+      "tokens": 2462,
+      "context_length": 36328
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "position": 6,
+      "tokens": 1451,
+      "context_length": 37779
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "position": 7,
+      "tokens": 1454,
+      "context_length": 39233
+    },
+    {
+      "file_path": "sphinx/domains/python.py",
+      "position": 8,
+      "tokens": 12785,
+      "context_length": 52018
+    },
+    {
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "position": 9,
+      "tokens": 5536,
+      "context_length": 57554
+    },
+    {
+      "file_path": "sphinx/ext/apidoc.py",
+      "position": 10,
+      "tokens": 4234,
+      "context_length": 61788
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/deprecated.py",
+      "position": 11,
+      "tokens": 960,
+      "context_length": 62748
+    },
+    {
+      "file_path": "sphinx/application.py",
+      "position": 12,
+      "tokens": 11768,
+      "context_length": 74516
+    },
+    {
+      "file_path": "sphinx/domains/c.py",
+      "position": 13,
+      "tokens": 32443,
+      "context_length": 106959
+    },
+    {
+      "file_path": "sphinx/domains/std.py",
+      "position": 14,
+      "tokens": 10297,
+      "context_length": 117256
+    },
+    {
+      "file_path": "sphinx/deprecation.py",
+      "position": 15,
+      "tokens": 686,
+      "context_length": 117942
+    },
+    {
+      "file_path": "doc/development/tutorials/examples/autodoc_intenum.py",
+      "position": 16,
+      "tokens": 374,
+      "context_length": 118316
+    },
+    {
+      "file_path": "sphinx/domains/javascript.py",
+      "position": 17,
+      "tokens": 4153,
+      "context_length": 122469
+    },
+    {
+      "file_path": "sphinx/directives/other.py",
+      "position": 18,
+      "tokens": 3133,
+      "context_length": 125602
+    },
+    {
+      "file_path": "sphinx/directives/__init__.py",
+      "position": 19,
+      "tokens": 2252,
+      "context_length": 127854
+    },
+    {
+      "file_path": "sphinx/domains/cpp.py",
+      "position": 20,
+      "tokens": 66903,
+      "context_length": 194757
+    }
+  ]
+}

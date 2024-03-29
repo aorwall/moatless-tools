@@ -1,0 +1,731 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-25744",
+  "model_patch": "diff --git a/sklearn/tree/_classes.py b/sklearn/tree/_classes.py\nindex e2e41f9ae..bb1a47028 100644\n--- a/sklearn/tree/_classes.py\n+++ b/sklearn/tree/_classes.py\n@@ -255,6 +255,8 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):\n             min_samples_leaf = int(ceil(self.min_samples_leaf * n_samples))\n \n         if isinstance(self.min_samples_split, numbers.Integral):\n+            if self.min_samples_split < 2:\n+                raise ValueError(\"min_samples_split must be greater than or equal to 2 when it is an integer.\")\n             min_samples_split = self.min_samples_split\n         else:  # float\n             min_samples_split = int(ceil(self.min_samples_split * n_samples))\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/tree/_classes.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "2c867b8f822eb7a684f0d5c4359e4426e1c9cfe0",
+  "patch": "diff --git a/sklearn/tree/_classes.py b/sklearn/tree/_classes.py\n--- a/sklearn/tree/_classes.py\n+++ b/sklearn/tree/_classes.py\n@@ -99,16 +99,16 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):\n         \"max_depth\": [Interval(Integral, 1, None, closed=\"left\"), None],\n         \"min_samples_split\": [\n             Interval(Integral, 2, None, closed=\"left\"),\n-            Interval(Real, 0.0, 1.0, closed=\"right\"),\n+            Interval(\"real_not_int\", 0.0, 1.0, closed=\"right\"),\n         ],\n         \"min_samples_leaf\": [\n             Interval(Integral, 1, None, closed=\"left\"),\n-            Interval(Real, 0.0, 1.0, closed=\"neither\"),\n+            Interval(\"real_not_int\", 0.0, 1.0, closed=\"neither\"),\n         ],\n         \"min_weight_fraction_leaf\": [Interval(Real, 0.0, 0.5, closed=\"both\")],\n         \"max_features\": [\n             Interval(Integral, 1, None, closed=\"left\"),\n-            Interval(Real, 0.0, 1.0, closed=\"right\"),\n+            Interval(\"real_not_int\", 0.0, 1.0, closed=\"right\"),\n             StrOptions({\"auto\", \"sqrt\", \"log2\"}, deprecated={\"auto\"}),\n             None,\n         ],\ndiff --git a/sklearn/utils/_param_validation.py b/sklearn/utils/_param_validation.py\n--- a/sklearn/utils/_param_validation.py\n+++ b/sklearn/utils/_param_validation.py\n@@ -364,9 +364,12 @@ class Interval(_Constraint):\n \n     Parameters\n     ----------\n-    type : {numbers.Integral, numbers.Real}\n+    type : {numbers.Integral, numbers.Real, \"real_not_int\"}\n         The set of numbers in which to set the interval.\n \n+        If \"real_not_int\", only reals that don't have the integer type\n+        are allowed. For example 1.0 is allowed but 1 is not.\n+\n     left : float or int or None\n         The left bound of the interval. None means left bound is -\u221e.\n \n@@ -392,14 +395,6 @@ class Interval(_Constraint):\n     `[0, +\u221e) U {+\u221e}`.\n     \"\"\"\n \n-    @validate_params(\n-        {\n-            \"type\": [type],\n-            \"left\": [Integral, Real, None],\n-            \"right\": [Integral, Real, None],\n-            \"closed\": [StrOptions({\"left\", \"right\", \"both\", \"neither\"})],\n-        }\n-    )\n     def __init__(self, type, left, right, *, closed):\n         super().__init__()\n         self.type = type\n@@ -410,6 +405,18 @@ def __init__(self, type, left, right, *, closed):\n         self._check_params()\n \n     def _check_params(self):\n+        if self.type not in (Integral, Real, \"real_not_int\"):\n+            raise ValueError(\n+                \"type must be either numbers.Integral, numbers.Real or 'real_not_int'.\"\n+                f\" Got {self.type} instead.\"\n+            )\n+\n+        if self.closed not in (\"left\", \"right\", \"both\", \"neither\"):\n+            raise ValueError(\n+                \"closed must be either 'left', 'right', 'both' or 'neither'. \"\n+                f\"Got {self.closed} instead.\"\n+            )\n+\n         if self.type is Integral:\n             suffix = \"for an interval over the integers.\"\n             if self.left is not None and not isinstance(self.left, Integral):\n@@ -424,6 +431,11 @@ def _check_params(self):\n                 raise ValueError(\n                     f\"right can't be None when closed == {self.closed} {suffix}\"\n                 )\n+        else:\n+            if self.left is not None and not isinstance(self.left, Real):\n+                raise TypeError(\"Expecting left to be a real number.\")\n+            if self.right is not None and not isinstance(self.right, Real):\n+                raise TypeError(\"Expecting right to be a real number.\")\n \n         if self.right is not None and self.left is not None and self.right <= self.left:\n             raise ValueError(\n@@ -447,8 +459,13 @@ def __contains__(self, val):\n             return False\n         return True\n \n+    def _has_valid_type(self, val):\n+        if self.type == \"real_not_int\":\n+            return isinstance(val, Real) and not isinstance(val, Integral)\n+        return isinstance(val, self.type)\n+\n     def is_satisfied_by(self, val):\n-        if not isinstance(val, self.type):\n+        if not self._has_valid_type(val):\n             return False\n \n         return val in self\n",
+  "test_patch": "diff --git a/sklearn/tree/tests/test_tree.py b/sklearn/tree/tests/test_tree.py\n--- a/sklearn/tree/tests/test_tree.py\n+++ b/sklearn/tree/tests/test_tree.py\n@@ -2425,3 +2425,25 @@ def test_tree_deserialization_from_read_only_buffer(tmpdir):\n         clf.tree_,\n         \"The trees of the original and loaded classifiers are not equal.\",\n     )\n+\n+\n+@pytest.mark.parametrize(\"Tree\", ALL_TREES.values())\n+def test_min_sample_split_1_error(Tree):\n+    \"\"\"Check that an error is raised when min_sample_split=1.\n+\n+    non-regression test for issue gh-25481.\n+    \"\"\"\n+    X = np.array([[0, 0], [1, 1]])\n+    y = np.array([0, 1])\n+\n+    # min_samples_split=1.0 is valid\n+    Tree(min_samples_split=1.0).fit(X, y)\n+\n+    # min_samples_split=1 is invalid\n+    tree = Tree(min_samples_split=1)\n+    msg = (\n+        r\"'min_samples_split' .* must be an int in the range \\[2, inf\\) \"\n+        r\"or a float in the range \\(0.0, 1.0\\]\"\n+    )\n+    with pytest.raises(ValueError, match=msg):\n+        tree.fit(X, y)\ndiff --git a/sklearn/utils/tests/test_param_validation.py b/sklearn/utils/tests/test_param_validation.py\n--- a/sklearn/utils/tests/test_param_validation.py\n+++ b/sklearn/utils/tests/test_param_validation.py\n@@ -662,3 +662,10 @@ def fit(self, X=None, y=None):\n     # does not raise, even though \"b\" is not in the constraints dict and \"a\" is not\n     # a parameter of the estimator.\n     ThirdPartyEstimator(b=0).fit()\n+\n+\n+def test_interval_real_not_int():\n+    \"\"\"Check for the type \"real_not_int\" in the Interval constraint.\"\"\"\n+    constraint = Interval(\"real_not_int\", 0, 1, closed=\"both\")\n+    assert constraint.is_satisfied_by(1.0)\n+    assert not constraint.is_satisfied_by(1)\n",
+  "problem_statement": "Setting min_samples_split=1 in DecisionTreeClassifier does not raise exception\n### Describe the bug\n\nIf `min_samples_split` is set to 1, an exception should be raised according to the paramter's constraints:\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/blob/e2e705021eb6c9f23f0972f119b56e37cd7567ef/sklearn/tree/_classes.py#L100-L103\r\n\r\nHowever, `DecisionTreeClassifier` accepts `min_samples_split=1` without complaining.\r\n\r\nWith scikit-survival 1.0, this raises an exception as expected:\r\n```\r\nValueError: min_samples_split == 1, must be >= 2.\r\n```\r\n\r\nI suspect that this has to do with the Intervals of the constraints overlapping. `min_samples_split=1` satisfies the `Real` constraint, whereas the `Integral` constraint should have precedence.\n\n### Steps/Code to Reproduce\n\n```python\r\nfrom sklearn.tree import DecisionTreeClassifier\r\nfrom sklearn.datasets import load_iris\r\n\r\nX, y = load_iris(return_X_y=True)\r\nt = DecisionTreeClassifier(min_samples_split=1)\r\nt.fit(X, y)\r\n```\n\n### Expected Results\n\n```\r\nsklearn.utils._param_validation.InvalidParameterError: The 'min_samples_split' parameter of DecisionTreeClassifier must be an int in the range [2, inf) or a float in the range (0.0, 1.0]. Got 1 instead.\r\n```\n\n### Actual Results\n\nNo exception is raised.\n\n### Versions\n\n```shell\nSystem:\r\n    python: 3.10.8 | packaged by conda-forge | (main, Nov 22 2022, 08:26:04) [GCC 10.4.0]\r\nexecutable: /\u2026/bin/python\r\n   machine: Linux-6.1.6-100.fc36.x86_64-x86_64-with-glibc2.35\r\n\r\nPython dependencies:\r\n      sklearn: 1.3.dev0\r\n          pip: 22.2.2\r\n   setuptools: 63.2.0\r\n        numpy: 1.24.1\r\n        scipy: 1.10.0\r\n       Cython: None\r\n       pandas: None\r\n   matplotlib: None\r\n       joblib: 1.2.0\r\nthreadpoolctl: 3.1.0\r\n\r\nBuilt with OpenMP: True\r\n\r\nthreadpoolctl info:\r\n       user_api: openmp\r\n   internal_api: openmp\r\n         prefix: libgomp\r\n       filepath: /\u2026/lib/libgomp.so.1.0.0\r\n        version: None\r\n    num_threads: 16\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /\u2026/lib/python3.10/site-packages/numpy.libs/libopenblas64_p-r0-15028c96.3.21.so\r\n        version: 0.3.21\r\nthreading_layer: pthreads\r\n   architecture: Zen\r\n    num_threads: 16\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /\u2026/lib/python3.10/site-packages/scipy.libs/libopenblasp-r0-41284840.3.18.so\r\n        version: 0.3.18\r\nthreading_layer: pthreads\r\n   architecture: Zen\r\n    num_threads: 16\n```\n\n",
+  "hints_text": "I think that this is on purpose. Otherwise, we would have used `closed=\"neither\"` for the `Real` case and `1` is qualified as a `Real`.\r\n\r\nAt least this is not a regression since the code in the past would have failed and now we allow it to be considered as 100% of the train set.\r\n\r\nIf we exclude `1` it means that we don't accept both 100% and 1. I don't know if this is something that we want.\nNote that with sklearn 1.0, `min_samples_split=1.0` does not raise an exception, only `min_samples_split=1`.\nReading the docstring, I agree it is strange to interpret the integer `1` as 100%:\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/blob/baefe83933df9abecc2c16769d42e52b2694a9c8/sklearn/tree/_classes.py#L635-L638\r\n\r\nFrom the docstring, `min_samples_split=1` is interpreted as 1 sample, which does not make any sense. \r\n\r\nI think we should be able to specify \"1.0\" but not \"1\" in our parameter validation framework. @jeremiedbb What do you think of having a way to reject `Integral`, such as:\r\n\r\n```python\r\nInterval(Real, 0.0, 1.0, closed=\"right\", invalid_type=Integral),\r\n```\r\n\r\nIf we have a way to specify a `invalid_type`, then I prefer to reject `min_samples_split=1` as we did in previous versions. \nAlso note that `min_samples_split=1.0` and `min_samples_split=1` do not result in the same behavior:\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/blob/baefe83933df9abecc2c16769d42e52b2694a9c8/sklearn/tree/_classes.py#L257-L263\r\n\r\nIf `min_samples_split=1`, the actual `min_samples_split` is determine by `min_samples_leaf`:\r\n```python\r\nmin_samples_split = max(min_samples_split, 2 * min_samples_leaf)\r\n```\r\n\r\nIf `min_samples_split=1.0` and assuming there are more than 2 samples in the data, `min_samples_split = n_samples`:\r\n```python\r\nmin_samples_split = int(ceil(self.min_samples_split * n_samples))\r\n```",
+  "created_at": "2023-03-02T17:04:42Z",
+  "version": "1.3",
+  "FAIL_TO_PASS": "[\"sklearn/tree/tests/test_tree.py::test_min_sample_split_1_error[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_sample_split_1_error[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_sample_split_1_error[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_sample_split_1_error[ExtraTreeRegressor]\", \"sklearn/utils/tests/test_param_validation.py::test_interval_real_not_int\"]",
+  "PASS_TO_PASS": "[\"sklearn/tree/tests/test_tree.py::test_1d_input[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_1d_input[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_1d_input[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_1d_input[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-best-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-best-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-best-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-best-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-random-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-random-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-random-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csc-random-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-best-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-best-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-best-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-best-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-random-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-random-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-random-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[csr-random-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-best-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-best-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-best-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-best-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-random-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-random-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-random-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_apply_path_readonly_all_trees[dense-random-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_arrayrepr\", \"sklearn/tree/tests/test_tree.py::test_arrays_persist\", \"sklearn/tree/tests/test_tree.py::test_balance_property[DecisionTreeRegressor-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_balance_property[DecisionTreeRegressor-poisson]\", \"sklearn/tree/tests/test_tree.py::test_balance_property[DecisionTreeRegressor-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_balance_property[ExtraTreeRegressor-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_balance_property[ExtraTreeRegressor-poisson]\", \"sklearn/tree/tests/test_tree.py::test_balance_property[ExtraTreeRegressor-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_behaviour_constant_feature_after_splits\", \"sklearn/tree/tests/test_tree.py::test_big_input\", \"sklearn/tree/tests/test_tree.py::test_check_n_classes\", \"sklearn/tree/tests/test_tree.py::test_check_node_ndarray\", \"sklearn/tree/tests/test_tree.py::test_check_value_ndarray\", \"sklearn/tree/tests/test_tree.py::test_class_weight_errors[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_class_weight_errors[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_class_weights[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_class_weights[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_classes_shape\", \"sklearn/tree/tests/test_tree.py::test_classification_toy\", \"sklearn/tree/tests/test_tree.py::test_criterion_copy\", \"sklearn/tree/tests/test_tree.py::test_criterion_entropy_same_as_log_loss[2-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_criterion_entropy_same_as_log_loss[2-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_criterion_entropy_same_as_log_loss[4-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_criterion_entropy_same_as_log_loss[4-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_decision_path[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_decision_path[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_decision_path[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_decision_path[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_decision_path_hardcoded\", \"sklearn/tree/tests/test_tree.py::test_decision_tree_regressor_sample_weight_consistency[absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_decision_tree_regressor_sample_weight_consistency[friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_decision_tree_regressor_sample_weight_consistency[poisson]\", \"sklearn/tree/tests/test_tree.py::test_decision_tree_regressor_sample_weight_consistency[squared_error]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[absolute_error-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[absolute_error-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[friedman_mse-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[friedman_mse-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[poisson-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[poisson-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[squared_error-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_overfit[squared_error-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[absolute_error-20-mean_squared_error-60-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[absolute_error-20-mean_squared_error-60-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[friedman_mse-15-mean_squared_error-60-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[friedman_mse-15-mean_squared_error-60-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[poisson-15-mean_poisson_deviance-30-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[poisson-15-mean_poisson_deviance-30-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[squared_error-15-mean_squared_error-60-DecisionTreeRegressor-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_diabetes_underfit[squared_error-15-mean_squared_error-60-ExtraTreeRegressor-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_different_bitness_joblib_pickle\", \"sklearn/tree/tests/test_tree.py::test_different_bitness_pickle\", \"sklearn/tree/tests/test_tree.py::test_different_endianness_joblib_pickle\", \"sklearn/tree/tests/test_tree.py::test_different_endianness_pickle\", \"sklearn/tree/tests/test_tree.py::test_empty_leaf_infinite_threshold\", \"sklearn/tree/tests/test_tree.py::test_error\", \"sklearn/tree/tests/test_tree.py::test_explicit_sparse_zeros[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_explicit_sparse_zeros[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_explicit_sparse_zeros[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_explicit_sparse_zeros[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_huge_allocations\", \"sklearn/tree/tests/test_tree.py::test_importances\", \"sklearn/tree/tests/test_tree.py::test_importances_gini_equal_squared_error\", \"sklearn/tree/tests/test_tree.py::test_importances_raises\", \"sklearn/tree/tests/test_tree.py::test_iris\", \"sklearn/tree/tests/test_tree.py::test_mae\", \"sklearn/tree/tests/test_tree.py::test_max_features\", \"sklearn/tree/tests/test_tree.py::test_max_features_auto_deprecated\", \"sklearn/tree/tests/test_tree.py::test_max_leaf_nodes\", \"sklearn/tree/tests/test_tree.py::test_max_leaf_nodes_max_depth\", \"sklearn/tree/tests/test_tree.py::test_memory_layout\", \"sklearn/tree/tests/test_tree.py::test_min_impurity_decrease\", \"sklearn/tree/tests/test_tree.py::test_min_samples_leaf\", \"sklearn/tree/tests/test_tree.py::test_min_samples_split\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_dense_input[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_dense_input[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_dense_input[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_dense_input[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_sparse_input[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_sparse_input[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_sparse_input[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_on_sparse_input[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_dense_input[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_dense_input[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_dense_input[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_dense_input[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_sparse_input[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_sparse_input[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_sparse_input[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_fraction_leaf_with_min_samples_leaf_on_sparse_input[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_leaf_split_level[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_leaf_split_level[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_leaf_split_level[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_min_weight_leaf_split_level[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_multioutput\", \"sklearn/tree/tests/test_tree.py::test_no_sparse_y_support[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_no_sparse_y_support[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_no_sparse_y_support[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_no_sparse_y_support[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_numerical_stability\", \"sklearn/tree/tests/test_tree.py::test_only_constant_features\", \"sklearn/tree/tests/test_tree.py::test_pickle\", \"sklearn/tree/tests/test_tree.py::test_poisson_vs_mse\", \"sklearn/tree/tests/test_tree.py::test_poisson_zero_nodes[0]\", \"sklearn/tree/tests/test_tree.py::test_poisson_zero_nodes[1]\", \"sklearn/tree/tests/test_tree.py::test_poisson_zero_nodes[2]\", \"sklearn/tree/tests/test_tree.py::test_probability\", \"sklearn/tree/tests/test_tree.py::test_prune_single_node_tree\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-clf_small-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-clf_small-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-digits-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-digits-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-iris-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-iris-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-multilabel-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-multilabel-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-mix-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-mix-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-neg-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-neg-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-pos-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-sparse-pos-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-toy-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-toy-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-zeros-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[DecisionTreeClassifier-zeros-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-clf_small-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-clf_small-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-digits-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-digits-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-iris-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-iris-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-multilabel-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-multilabel-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-mix-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-mix-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-neg-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-neg-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-pos-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-sparse-pos-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-toy-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-toy-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-zeros-gini]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_classifier_are_subtrees[ExtraTreeClassifier-zeros-log_loss]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-clf_small-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-clf_small-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-clf_small-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-clf_small-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-diabetes-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-diabetes-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-diabetes-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-diabetes-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-digits-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-digits-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-digits-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-digits-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-iris-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-iris-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-iris-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-iris-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-multilabel-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-multilabel-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-multilabel-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-multilabel-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-reg_small-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-reg_small-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-reg_small-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-reg_small-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-mix-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-mix-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-mix-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-mix-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-neg-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-neg-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-neg-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-neg-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-pos-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-pos-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-pos-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-sparse-pos-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-toy-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-toy-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-toy-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-toy-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-zeros-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-zeros-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-zeros-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[DecisionTreeRegressor-zeros-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-clf_small-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-clf_small-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-clf_small-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-clf_small-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-diabetes-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-diabetes-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-diabetes-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-diabetes-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-digits-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-digits-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-digits-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-digits-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-iris-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-iris-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-iris-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-iris-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-multilabel-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-multilabel-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-multilabel-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-multilabel-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-reg_small-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-reg_small-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-reg_small-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-reg_small-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-mix-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-mix-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-mix-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-mix-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-neg-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-neg-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-neg-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-neg-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-pos-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-pos-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-pos-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-sparse-pos-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-toy-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-toy-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-toy-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-toy-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-zeros-absolute_error]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-zeros-friedman_mse]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-zeros-poisson]\", \"sklearn/tree/tests/test_tree.py::test_prune_tree_regression_are_subtrees[ExtraTreeRegressor-zeros-squared_error]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_all_trees[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_all_trees[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_all_trees[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_all_trees[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_sparse_trees[DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_sparse_trees[DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_sparse_trees[ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_public_apply_sparse_trees[ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_pure_set\", \"sklearn/tree/tests/test_tree.py::test_realloc\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[absolute_error-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[absolute_error-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[friedman_mse-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[friedman_mse-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[poisson-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[poisson-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[squared_error-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_regression_toy[squared_error-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sample_weight\", \"sklearn/tree/tests/test_tree.py::test_sample_weight_invalid\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-mix-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-mix-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-mix-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-mix-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-neg-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-neg-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-neg-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-neg-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-pos-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-pos-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-pos-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-sparse-pos-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-zeros-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-zeros-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-zeros-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_criterion-zeros-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-mix-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-mix-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-mix-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-mix-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-neg-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-neg-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-neg-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-neg-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-pos-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-pos-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-pos-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-sparse-pos-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-zeros-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-zeros-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-zeros-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse[check_sparse_parameters-zeros-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[clf_small-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[clf_small-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[clf_small-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[clf_small-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[digits-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[digits-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[digits-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[digits-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[multilabel-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[multilabel-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[multilabel-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[multilabel-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-mix-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-mix-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-mix-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-mix-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-neg-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-neg-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-neg-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-neg-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-pos-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-pos-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-pos-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[sparse-pos-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[toy-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[toy-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[toy-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[toy-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[zeros-DecisionTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[zeros-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[zeros-ExtraTreeClassifier]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input[zeros-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input_reg_trees[diabetes-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input_reg_trees[diabetes-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input_reg_trees[reg_small-DecisionTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_sparse_input_reg_trees[reg_small-ExtraTreeRegressor]\", \"sklearn/tree/tests/test_tree.py::test_splitter_serializable[BestSparseSplitter]\", \"sklearn/tree/tests/test_tree.py::test_splitter_serializable[BestSplitter]\", \"sklearn/tree/tests/test_tree.py::test_splitter_serializable[RandomSparseSplitter]\", \"sklearn/tree/tests/test_tree.py::test_splitter_serializable[RandomSplitter]\", \"sklearn/tree/tests/test_tree.py::test_tree_deserialization_from_read_only_buffer\", \"sklearn/tree/tests/test_tree.py::test_unbalanced_iris\", \"sklearn/tree/tests/test_tree.py::test_weighted_classification_toy\", \"sklearn/tree/tests/test_tree.py::test_with_only_one_non_constant_features\", \"sklearn/tree/tests/test_tree.py::test_xor\", \"sklearn/utils/tests/test_param_validation.py::test_boolean_constraint_deprecated_int\", \"sklearn/utils/tests/test_param_validation.py::test_cv_objects\", \"sklearn/utils/tests/test_param_validation.py::test_decorate_validated_function\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint0]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint1]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint2]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint3]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint4]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint5]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint6]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint7]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val[constraint8]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval0-real_interval0]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval1-real_interval1]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval10-real_interval10]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval11-real_interval11]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval12-real_interval12]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval13-real_interval13]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval14-real_interval14]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval15-real_interval15]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval16-real_interval16]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval17-real_interval17]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval2-real_interval2]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval3-real_interval3]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval4-real_interval4]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval5-real_interval5]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval6-real_interval6]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval7-real_interval7]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval8-real_interval8]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_2_intervals[integer_interval9-real_interval9]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints0]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints1]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints2]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints3]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints4]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints5]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints6]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints7]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_invalid_param_val_all_valid[constraints8]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint0]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint10]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint11]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint12]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint13]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint14]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint15]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint16]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint17]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint18]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint19]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint1]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint20]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint2]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint3]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint4]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint5]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint6]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint7]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint8]\", \"sklearn/utils/tests/test_param_validation.py::test_generate_valid_param[constraint9]\", \"sklearn/utils/tests/test_param_validation.py::test_hasmethods\", \"sklearn/utils/tests/test_param_validation.py::test_hidden_constraint\", \"sklearn/utils/tests/test_param_validation.py::test_hidden_stroptions\", \"sklearn/utils/tests/test_param_validation.py::test_instances_of_type_human_readable[Integral-int]\", \"sklearn/utils/tests/test_param_validation.py::test_instances_of_type_human_readable[Real-float]\", \"sklearn/utils/tests/test_param_validation.py::test_instances_of_type_human_readable[int-int]\", \"sklearn/utils/tests/test_param_validation.py::test_instances_of_type_human_readable[ndarray-numpy.ndarray]\", \"sklearn/utils/tests/test_param_validation.py::test_interval_errors[params0-TypeError-Expecting\", \"sklearn/utils/tests/test_param_validation.py::test_interval_errors[params1-TypeError-Expecting\", \"sklearn/utils/tests/test_param_validation.py::test_interval_errors[params2-ValueError-left\", \"sklearn/utils/tests/test_param_validation.py::test_interval_errors[params3-ValueError-right\", \"sklearn/utils/tests/test_param_validation.py::test_interval_errors[params4-ValueError-right\", \"sklearn/utils/tests/test_param_validation.py::test_interval_inf_in_bounds\", \"sklearn/utils/tests/test_param_validation.py::test_interval_range[Integral]\", \"sklearn/utils/tests/test_param_validation.py::test_interval_range[Real]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[None-None]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[Real-0.5]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[_Class-value12]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[array-like-value6]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[array-like-value7]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[boolean-False]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[callable-<lambda>]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[constraint_declaration0-0.42]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[constraint_declaration1-42]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[constraint_declaration2-b]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[constraint_declaration23-value23]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[constraint_declaration3-float64]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[cv_object-5]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[int-1]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values--1.0]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values--1]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values-None]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values-missing]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values-nan0]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[missing_values-nan1]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[random_state-0]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[random_state-None]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[random_state-value10]\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[sparse\", \"sklearn/utils/tests/test_param_validation.py::test_is_satisfied_by[verbose-1]\", \"sklearn/utils/tests/test_param_validation.py::test_iterable_not_string\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[None-_NoneConstraint]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[array-like-_ArrayLikes]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[boolean-_Booleans]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[callable-_Callables]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[constraint_declaration0-Interval]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[constraint_declaration1-StrOptions]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[constraint_declaration12-HasMethods]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[constraint_declaration2-Options]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[cv_object-_CVObjects]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[int-_InstancesOf]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[missing_values-_MissingValues]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[random_state-_RandomStates]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[sparse\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint[verbose-_VerboseHelper]\", \"sklearn/utils/tests/test_param_validation.py::test_make_constraint_unknown\", \"sklearn/utils/tests/test_param_validation.py::test_nan_not_in_interval[interval0]\", \"sklearn/utils/tests/test_param_validation.py::test_nan_not_in_interval[interval1]\", \"sklearn/utils/tests/test_param_validation.py::test_no_validation\", \"sklearn/utils/tests/test_param_validation.py::test_options\", \"sklearn/utils/tests/test_param_validation.py::test_pandas_na_constraint_with_pd_na\", \"sklearn/utils/tests/test_param_validation.py::test_stroptions\", \"sklearn/utils/tests/test_param_validation.py::test_stroptions_deprecated_subset\", \"sklearn/utils/tests/test_param_validation.py::test_third_party_estimator\", \"sklearn/utils/tests/test_param_validation.py::test_validate_params\", \"sklearn/utils/tests/test_param_validation.py::test_validate_params_estimator\", \"sklearn/utils/tests/test_param_validation.py::test_validate_params_method\", \"sklearn/utils/tests/test_param_validation.py::test_validate_params_missing_params\", \"sklearn/utils/tests/test_param_validation.py::test_validate_params_set_param_constraints_attribute\"]",
+  "environment_setup_commit": "1e8a5b833d1b58f3ab84099c4582239af854b23a",
+  "patch_files": [
+    "sklearn/tree/_classes.py",
+    "sklearn/utils/_param_validation.py"
+  ],
+  "test_patch_files": [
+    "sklearn/tree/tests/test_tree.py",
+    "sklearn/utils/tests/test_param_validation.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/tree/_classes.py": {
+      "diffs": [
+        {
+          "start_line_old": 102,
+          "end_line_old": 111,
+          "file_pos": 1,
+          "file_context_length": 15340,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeRegressor.__init___",
+          "closest_snippet_line_distance": 1640
+        }
+      ]
+    },
+    "sklearn/utils/_param_validation.py": {
+      "diffs": [
+        {
+          "start_line_old": 367,
+          "end_line_old": 367,
+          "file_pos": 13,
+          "file_context_length": 125259,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/_param_validation.py_Interval._check_params_Interval._check_params.2.1",
+          "closest_snippet_line_distance": 45
+        },
+        {
+          "start_line_old": 395,
+          "end_line_old": 402,
+          "file_pos": 13,
+          "file_context_length": 125259,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/_param_validation.py_Interval._check_params_Interval._check_params.2.1",
+          "closest_snippet_line_distance": 17
+        },
+        {
+          "start_line_old": 413,
+          "end_line_old": 413,
+          "file_pos": 13,
+          "file_context_length": 125259,
+          "pos": 23,
+          "context_length": 25882
+        },
+        {
+          "start_line_old": 427,
+          "end_line_old": 427,
+          "file_pos": 13,
+          "file_context_length": 125259,
+          "pos": 23,
+          "context_length": 25882
+        },
+        {
+          "start_line_old": 450,
+          "end_line_old": 450,
+          "file_pos": 13,
+          "file_context_length": 125259,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/_param_validation.py_Interval._check_params_Interval._check_params.2.1",
+          "closest_snippet_line_distance": 18
+        }
+      ]
+    }
+  },
+  "vectors": 3922,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_DecisionTreeClassifier._parameter_constraints_DecisionTreeClassifier.__init__.1",
+      "distance": 0.8276604413986206,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 822,
+      "end_line": 857,
+      "tokens": 262,
+      "context_length": 262,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_DecisionTreeClassifier.1_DecisionTreeClassifier.1",
+      "distance": 0.8431603312492371,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 596,
+      "end_line": 820,
+      "tokens": 2353,
+      "context_length": 2615,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeClassifier.__init___ExtraTreeRegressor",
+      "distance": 0.9153528809547424,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1509,
+      "end_line": 1769,
+      "tokens": 208,
+      "context_length": 2823,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeClassifier.1_ExtraTreeClassifier.1",
+      "distance": 0.9164590835571289,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1284,
+      "end_line": 1507,
+      "tokens": 2270,
+      "context_length": 5093,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_1_SPARSE_SPLITTERS.1",
+      "distance": 0.9251795411109924,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 471,
+      "context_length": 5564,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_BaseDecisionTree.fit_BaseDecisionTree.fit.min_samples_split.1",
+      "distance": 0.9264167547225952,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 176,
+      "end_line": 263,
+      "tokens": 726,
+      "context_length": 6290,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_DecisionTreeRegressor._parameter_constraints_DecisionTreeRegressor.__init__.1",
+      "distance": 0.9494753479957581,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1181,
+      "end_line": 1216,
+      "tokens": 244,
+      "context_length": 6534,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_13_",
+      "distance": 0.9524693489074707,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 62,
+      "end_line": 123,
+      "tokens": 522,
+      "context_length": 7056
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_BaseDecisionTree.fit.17_BaseDecisionTree.fit.32",
+      "distance": 0.9615734815597534,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 265,
+      "end_line": 358,
+      "tokens": 812,
+      "context_length": 7868,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_hist_gradient_boosting/grower.py_TreeGrower._validate_parameters_TreeGrower._validate_parameters.5.1",
+      "distance": 0.963860273361206,
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/grower.py",
+      "start_line": 335,
+      "end_line": 359,
+      "tokens": 185,
+      "context_length": 8053
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_1_bench_scikit_tree_regressor.10",
+      "distance": 0.9640884399414062,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 340,
+      "context_length": 8393
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_gb.py_GradientBoostingClassifier.1_GradientBoostingClassifier.1",
+      "distance": 0.9649320840835571,
+      "file_path": "sklearn/ensemble/_gb.py",
+      "start_line": 867,
+      "end_line": 1195,
+      "tokens": 3416,
+      "context_length": 11809
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeRegressor.1_ExtraTreeRegressor.1",
+      "distance": 0.9659702777862549,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1542,
+      "end_line": 1740,
+      "tokens": 1949,
+      "context_length": 13758,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_DecisionTreeRegressor.1_DecisionTreeRegressor.1",
+      "distance": 0.9725255966186523,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 978,
+      "end_line": 1179,
+      "tokens": 2046,
+      "context_length": 15804,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesClassifier._parameter_constraints_ExtraTreesRegressor",
+      "distance": 0.978114664554596,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2090,
+      "end_line": 2483,
+      "tokens": 427,
+      "context_length": 16231
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_X_132_",
+      "distance": 0.978298544883728,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 195,
+      "end_line": 281,
+      "tokens": 764,
+      "context_length": 16995
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_numbers_IsolationForest",
+      "distance": 1.0003842115402222,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 5,
+      "end_line": 520,
+      "tokens": 138,
+      "context_length": 17133
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_one_run_one_run.cat_score_duration.1",
+      "distance": 1.0022308826446533,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 92,
+      "end_line": 171,
+      "tokens": 754,
+      "context_length": 17887
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_testing.py__Raises__Raises.__exit__.3.5.1",
+      "distance": 1.003059983253479,
+      "file_path": "sklearn/utils/_testing.py",
+      "start_line": 890,
+      "end_line": 932,
+      "tokens": 374,
+      "context_length": 18261
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifier_multioutput_check_estimators_unfitted.5.1.1.1",
+      "distance": 1.0055222511291504,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1956,
+      "end_line": 2704,
+      "tokens": 6424,
+      "context_length": 24685
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.005549669265747,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 83,
+      "end_line": 117,
+      "tokens": 323,
+      "context_length": 25008
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_categorical_only.py_argparse_",
+      "distance": 1.0071930885314941,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 651,
+      "context_length": 25659
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_param_validation.py_Interval._check_params_Interval._check_params.2.1",
+      "distance": 1.009704828262329,
+      "file_path": "sklearn/utils/_param_validation.py",
+      "start_line": 412,
+      "end_line": 432,
+      "tokens": 223,
+      "context_length": 25882,
+      "file_pos": 13
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_1_np_82",
+      "distance": 1.0169631242752075,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 1,
+      "end_line": 120,
+      "tokens": 1150,
+      "context_length": 27032
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_41_49.3.1.3",
+      "distance": 1.0180071592330933,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 87,
+      "end_line": 139,
+      "tokens": 382,
+      "context_length": 27414
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestClassifier._parameter_constraints_RandomForestRegressor",
+      "distance": 1.0188661813735962,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1395,
+      "end_line": 1801,
+      "tokens": 425,
+      "context_length": 27839
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_BaseDecisionTree.fit.33_BaseDecisionTree.fit.37.1",
+      "distance": 1.0193722248077393,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 359,
+      "end_line": 387,
+      "tokens": 199,
+      "context_length": 28038,
+      "file_pos": 15
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_BaseDecisionTree._validate_X_predict_BaseDecisionTree._validate_X_predict.3.1",
+      "distance": 1.0198520421981812,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 389,
+      "end_line": 400,
+      "tokens": 146,
+      "context_length": 28184,
+      "file_pos": 15
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/setup.py_USE_NEWEST_NUMPY_C_API_USE_NEWEST_NUMPY_C_API.1",
+      "distance": 1.0208038091659546,
+      "file_path": "setup.py",
+      "start_line": 70,
+      "end_line": 132,
+      "tokens": 676,
+      "context_length": 28860
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestClassifier.1_RandomForestClassifier.1",
+      "distance": 1.0217394828796387,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1104,
+      "end_line": 1393,
+      "tokens": 2938,
+      "context_length": 31798
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeRegressor.__init___",
+      "distance": 1.0235451459884644,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1742,
+      "end_line": 1770,
+      "tokens": 190,
+      "context_length": 31988,
+      "file_pos": 16
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_n_iter_check_classifiers_regression_target.2",
+      "distance": 1.024843692779541,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 3433,
+      "end_line": 3543,
+      "tokens": 957,
+      "context_length": 32945
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__warn_or_raise_about_fit_failures__warn_or_raise_about_fit_failures.2.6.3.2",
+      "distance": 1.0249743461608887,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 346,
+      "end_line": 378,
+      "tokens": 350,
+      "context_length": 33295
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesClassifier.1_ExtraTreesClassifier.1",
+      "distance": 1.0282727479934692,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1805,
+      "end_line": 2088,
+      "tokens": 2846,
+      "context_length": 36141
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_multiclass.py_1_32",
+      "distance": 1.029878854751587,
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 749,
+      "context_length": 36890
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_1_39",
+      "distance": 1.0332311391830444,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 516,
+      "context_length": 37406
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_1_max_bins.1",
+      "distance": 1.0349555015563965,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 397,
+      "context_length": 37803
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_regression.py_1_",
+      "distance": 1.035205364227295,
+      "file_path": "examples/ensemble/plot_adaboost_regression.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 619,
+      "context_length": 38422
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.0355256795883179,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 101,
+      "end_line": 110,
+      "tokens": 137,
+      "context_length": 38559
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py_1_26",
+      "distance": 1.0361988544464111,
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 363,
+      "context_length": 38922
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_isolation_forest.py_19_",
+      "distance": 1.0381096601486206,
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "start_line": 54,
+      "end_line": 165,
+      "tokens": 1035,
+      "context_length": 39957
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_forest_iris.py_1_models.1",
+      "distance": 1.0381158590316772,
+      "file_path": "examples/ensemble/plot_forest_iris.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 585,
+      "context_length": 40542
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_display_",
+      "distance": 1.0391552448272705,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 211,
+      "end_line": 265,
+      "tokens": 510,
+      "context_length": 41052
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification_make_classification",
+      "distance": 1.0394247770309448,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 42,
+      "end_line": 309,
+      "tokens": 392,
+      "context_length": 41444
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/tree/plot_tree_regression_multioutput.py_1_",
+      "distance": 1.039667010307312,
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 570,
+      "context_length": 42014
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_1_58",
+      "distance": 1.0397613048553467,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 749,
+      "context_length": 42763
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 1.0401415824890137,
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "start_line": 9,
+      "end_line": 56,
+      "tokens": 405,
+      "context_length": 43168
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/tree/_classes.py",
+      "position": 1,
+      "tokens": 15340,
+      "context_length": 15340
+    },
+    {
+      "file_path": "benchmarks/bench_tree.py",
+      "position": 2,
+      "tokens": 862,
+      "context_length": 16202
+    },
+    {
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/grower.py",
+      "position": 3,
+      "tokens": 6656,
+      "context_length": 22858
+    },
+    {
+      "file_path": "sklearn/ensemble/_gb.py",
+      "position": 4,
+      "tokens": 16225,
+      "context_length": 39083
+    },
+    {
+      "file_path": "sklearn/ensemble/_forest.py",
+      "position": 5,
+      "tokens": 24021,
+      "context_length": 63104
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "position": 6,
+      "tokens": 2410,
+      "context_length": 65514
+    },
+    {
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "position": 7,
+      "tokens": 4440,
+      "context_length": 69954
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "position": 8,
+      "tokens": 2427,
+      "context_length": 72381
+    },
+    {
+      "file_path": "sklearn/utils/_testing.py",
+      "position": 9,
+      "tokens": 7791,
+      "context_length": 80172
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 10,
+      "tokens": 36356,
+      "context_length": 116528
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 11,
+      "tokens": 1801,
+      "context_length": 118329
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "position": 12,
+      "tokens": 651,
+      "context_length": 118980
+    },
+    {
+      "file_path": "sklearn/utils/_param_validation.py",
+      "position": 13,
+      "tokens": 6279,
+      "context_length": 125259
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "position": 14,
+      "tokens": 2438,
+      "context_length": 127697
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "position": 15,
+      "tokens": 2738,
+      "context_length": 130435
+    },
+    {
+      "file_path": "setup.py",
+      "position": 16,
+      "tokens": 5971,
+      "context_length": 136406
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 17,
+      "tokens": 15952,
+      "context_length": 152358
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "position": 18,
+      "tokens": 1025,
+      "context_length": 153383
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_regression.py",
+      "position": 19,
+      "tokens": 642,
+      "context_length": 154025
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 20,
+      "tokens": 1918,
+      "context_length": 155943
+    },
+    {
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "position": 21,
+      "tokens": 17203,
+      "context_length": 173146
+    },
+    {
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "position": 22,
+      "tokens": 1471,
+      "context_length": 174617
+    },
+    {
+      "file_path": "examples/ensemble/plot_forest_iris.py",
+      "position": 23,
+      "tokens": 1486,
+      "context_length": 176103
+    },
+    {
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "position": 24,
+      "tokens": 15912,
+      "context_length": 192015
+    },
+    {
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "position": 25,
+      "tokens": 570,
+      "context_length": 192585
+    },
+    {
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "position": 26,
+      "tokens": 19845,
+      "context_length": 212430
+    }
+  ]
+}

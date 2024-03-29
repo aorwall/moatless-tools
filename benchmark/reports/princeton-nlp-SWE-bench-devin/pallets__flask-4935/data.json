@@ -1,0 +1,2772 @@
+{
+  "instance_id": "pallets__flask-4935",
+  "model_patch": "diff --git a/src/flask/blueprints.py b/src/flask/blueprints.py\nindex f6d62ba8..ea6017f0 100644\n--- a/src/flask/blueprints.py\n+++ b/src/flask/blueprints.py\n@@ -450,22 +450,46 @@ class Blueprint(Scaffold):\n                 self.cli.name = cli_resolved_group\n                 app.cli.add_command(self.cli)\n \n+        \"\"\"\n+        Modifications to Blueprint registration to support subdomains in nested blueprints:\n+\n+        - The register method now includes logic to ensure that nested blueprints inherit the subdomain from the parent blueprint.\n+        - If a subdomain is not explicitly set for a nested blueprint, it will inherit the subdomain from the parent blueprint's BlueprintSetupState.\n+        - This change addresses an issue where nested blueprints were not accessible when mounted on subdomains.\n+        \"\"\"\n+\n+        # Loop through each registered nested blueprint\n         for blueprint, bp_options in self._blueprints:\n             bp_options = bp_options.copy()\n             bp_url_prefix = bp_options.get(\"url_prefix\")\n+            # Check if a subdomain is set for the nested blueprint\n+            bp_subdomain = bp_options.get(\"subdomain\")\n \n+            # Inherit url_prefix from the parent blueprint if not set on the nested blueprint\n             if bp_url_prefix is None:\n                 bp_url_prefix = blueprint.url_prefix\n \n+            # Concatenate parent's url_prefix with nested blueprint's url_prefix if both are set\n             if state.url_prefix is not None and bp_url_prefix is not None:\n                 bp_options[\"url_prefix\"] = (\n                     state.url_prefix.rstrip(\"/\") + \"/\" + bp_url_prefix.lstrip(\"/\")\n                 )\n+            # Set the nested blueprint's url_prefix if only it is set\n             elif bp_url_prefix is not None:\n                 bp_options[\"url_prefix\"] = bp_url_prefix\n+            # Set the parent blueprint's url_prefix if only it is set\n             elif state.url_prefix is not None:\n                 bp_options[\"url_prefix\"] = state.url_prefix\n \n+            # Inherit subdomain from the parent blueprint if not set on the nested blueprint\n+            if bp_subdomain is None:\n+                bp_subdomain = state.subdomain\n+\n+            # Set the nested blueprint's subdomain if it is set\n+            if bp_subdomain is not None:\n+                bp_options[\"subdomain\"] = bp_subdomain\n+\n+            # Register the nested blueprint with the updated options\n             bp_options[\"name_prefix\"] = name\n             blueprint.register(app, bp_options)\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "src/flask/blueprints.py"
+  ],
+  "repo": "pallets/flask",
+  "base_commit": "fa1ee7066807c21256e90089731c548b313394d2",
+  "patch": "diff --git a/src/flask/blueprints.py b/src/flask/blueprints.py\n--- a/src/flask/blueprints.py\n+++ b/src/flask/blueprints.py\n@@ -358,6 +358,9 @@ def register(self, app: \"Flask\", options: dict) -> None:\n         :param options: Keyword arguments forwarded from\n             :meth:`~Flask.register_blueprint`.\n \n+        .. versionchanged:: 2.3\n+            Nested blueprints now correctly apply subdomains.\n+\n         .. versionchanged:: 2.0.1\n             Nested blueprints are registered with their dotted name.\n             This allows different blueprints with the same name to be\n@@ -453,6 +456,17 @@ def extend(bp_dict, parent_dict):\n         for blueprint, bp_options in self._blueprints:\n             bp_options = bp_options.copy()\n             bp_url_prefix = bp_options.get(\"url_prefix\")\n+            bp_subdomain = bp_options.get(\"subdomain\")\n+\n+            if bp_subdomain is None:\n+                bp_subdomain = blueprint.subdomain\n+\n+            if state.subdomain is not None and bp_subdomain is not None:\n+                bp_options[\"subdomain\"] = bp_subdomain + \".\" + state.subdomain\n+            elif bp_subdomain is not None:\n+                bp_options[\"subdomain\"] = bp_subdomain\n+            elif state.subdomain is not None:\n+                bp_options[\"subdomain\"] = state.subdomain\n \n             if bp_url_prefix is None:\n                 bp_url_prefix = blueprint.url_prefix\n",
+  "test_patch": "diff --git a/tests/test_blueprints.py b/tests/test_blueprints.py\n--- a/tests/test_blueprints.py\n+++ b/tests/test_blueprints.py\n@@ -950,6 +950,55 @@ def index():\n     assert response.status_code == 200\n \n \n+def test_nesting_subdomains(app, client) -> None:\n+    subdomain = \"api\"\n+    parent = flask.Blueprint(\"parent\", __name__)\n+    child = flask.Blueprint(\"child\", __name__)\n+\n+    @child.route(\"/child/\")\n+    def index():\n+        return \"child\"\n+\n+    parent.register_blueprint(child)\n+    app.register_blueprint(parent, subdomain=subdomain)\n+\n+    client.allow_subdomain_redirects = True\n+\n+    domain_name = \"domain.tld\"\n+    app.config[\"SERVER_NAME\"] = domain_name\n+    response = client.get(\"/child/\", base_url=\"http://api.\" + domain_name)\n+\n+    assert response.status_code == 200\n+\n+\n+def test_child_and_parent_subdomain(app, client) -> None:\n+    child_subdomain = \"api\"\n+    parent_subdomain = \"parent\"\n+    parent = flask.Blueprint(\"parent\", __name__)\n+    child = flask.Blueprint(\"child\", __name__, subdomain=child_subdomain)\n+\n+    @child.route(\"/\")\n+    def index():\n+        return \"child\"\n+\n+    parent.register_blueprint(child)\n+    app.register_blueprint(parent, subdomain=parent_subdomain)\n+\n+    client.allow_subdomain_redirects = True\n+\n+    domain_name = \"domain.tld\"\n+    app.config[\"SERVER_NAME\"] = domain_name\n+    response = client.get(\n+        \"/\", base_url=f\"http://{child_subdomain}.{parent_subdomain}.{domain_name}\"\n+    )\n+\n+    assert response.status_code == 200\n+\n+    response = client.get(\"/\", base_url=f\"http://{parent_subdomain}.{domain_name}\")\n+\n+    assert response.status_code == 404\n+\n+\n def test_unique_blueprint_names(app, client) -> None:\n     bp = flask.Blueprint(\"bp\", __name__)\n     bp2 = flask.Blueprint(\"bp\", __name__)\n",
+  "problem_statement": "Nested blueprints are not respected when mounted on subdomains\nHello, and thanks for all your work \ud83d\ude4f\ud83c\udffb \r\n\r\nNested blueprints [as described in the docs](https://flask.palletsprojects.com/en/2.2.x/blueprints/#nesting-blueprints) work perfectly fine when using `url_prefix`. However, when mounting the parent blueprint using a subdomain, the child routes are not accessible.\r\n\r\n```python\r\nfrom flask import Flask\r\nfrom flask import Blueprint\r\n\r\napp = Flask(__name__)\r\napp.config[\"SERVER_NAME\"] = \"localhost:5000\"\r\nparent = Blueprint(\"parent\", __name__)\r\nchild = Blueprint(\"child\", __name__)\r\n\r\n@app.route('/')\r\ndef index():\r\n    return \"index\"\r\n\r\n@parent.route('/')\r\ndef parent_index():\r\n    return \"parent\"\r\n\r\n@child.route('/child/')\r\ndef child_index():\r\n    return \"child\"\r\n\r\nparent.register_blueprint(child)\r\napp.register_blueprint(parent, subdomain=\"api\")\r\n\r\n\r\nif __name__ == '__main__':\r\n    app.run(debug=True)\r\n```\r\n\r\nThe index route works as expected:\r\n\r\n```\r\n\u276f http http://localhost:5000/\r\nHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\nContent-Type: text/html; charset=utf-8\r\nDate: Tue, 04 Oct 2022 10:44:10 GMT\r\nServer: Werkzeug/2.2.2 Python/3.10.4\r\n\r\nindex\r\n```\r\n\r\nSo does the parent route in the subdomain:\r\n\r\n```\r\n\u276f http http://api.localhost:5000/\r\nHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 6\r\nContent-Type: text/html; charset=utf-8\r\nDate: Tue, 04 Oct 2022 10:44:06 GMT\r\nServer: Werkzeug/2.2.2 Python/3.10.4\r\n\r\nparent\r\n```\r\n\r\nBut the child responds with a 404:\r\n\r\n```\r\n\u276f http http://api.localhost:5000/child/\r\nHTTP/1.1 404 NOT FOUND\r\nConnection: close\r\nContent-Length: 207\r\nContent-Type: text/html; charset=utf-8\r\nDate: Tue, 04 Oct 2022 10:45:42 GMT\r\nServer: Werkzeug/2.2.2 Python/3.10.4\r\n\r\n<!doctype html>\r\n<html lang=en>\r\n<title>404 Not Found</title>\r\n<h1>Not Found</h1>\r\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\r\n```\r\n\r\nIf we change the `subdomain=\"api\"` for `url_prefix=\"/api\"` when registering the blueprint however everything works as expected:\r\n\r\n```\r\n\u276f http http://localhost:5000/api/\r\nHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 6\r\nContent-Type: text/html; charset=utf-8\r\nDate: Tue, 04 Oct 2022 10:46:53 GMT\r\nServer: Werkzeug/2.2.2 Python/3.10.4\r\n\r\nparent\r\n\r\n\u276f http http://localhost:5000/api/child/\r\nHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\nContent-Type: text/html; charset=utf-8\r\nDate: Tue, 04 Oct 2022 10:46:59 GMT\r\nServer: Werkzeug/2.2.2 Python/3.10.4\r\n\r\nchild\r\n```\r\n\r\nThis was surprising to me as I expected the same nesting to apply regardless of whether the parent is mounted using a subdomain or a URL prefix. Am I missing something?\r\n\r\nEnvironment:\r\n\r\n- Python version: 3.10\r\n- Flask version: 2.2.2\r\n\n",
+  "hints_text": "It looks like if you request `http://localhost:5000/child/`, you'll get 200 OK.\r\n\r\nIt means that when registering child blueprints, they don't respect the subdomain set by the parent.\r\n\r\nI submitted a PR at #4855.",
+  "created_at": "2023-01-04T16:50:46Z",
+  "version": "2.3",
+  "FAIL_TO_PASS": "[\"tests/test_blueprints.py::test_child_and_parent_subdomain\", \"tests/test_blueprints.py::test_nesting_subdomains\"]",
+  "PASS_TO_PASS": "[\"tests/test_blueprints.py::test_add_template_filter\", \"tests/test_blueprints.py::test_add_template_filter_with_name\", \"tests/test_blueprints.py::test_add_template_test\", \"tests/test_blueprints.py::test_add_template_test_with_name\", \"tests/test_blueprints.py::test_dotted_name_not_allowed\", \"tests/test_blueprints.py::test_route_decorator_custom_endpoint_with_dots\", \"tests/test_blueprints.py::test_self_registration\", \"tests/test_blueprints.py::test_template_filter\", \"tests/test_blueprints.py::test_template_filter_with_name\", \"tests/test_blueprints.py::test_template_global\", \"tests/test_blueprints.py::test_template_test\", \"tests/test_blueprints.py::test_template_test_with_name\", \"tests/test_blueprints.py::test_templates_list\", \"tests/test_blueprints.py::test_unique_blueprint_names\"]",
+  "environment_setup_commit": "182ce3dd15dfa3537391c3efaf9c3ff407d134d4",
+  "patch_files": [
+    "src/flask/blueprints.py"
+  ],
+  "test_patch_files": [
+    "tests/test_blueprints.py"
+  ],
+  "patch_diff_details": {
+    "src/flask/blueprints.py": {
+      "diffs": [
+        {
+          "start_line_old": 361,
+          "end_line_old": 361,
+          "file_pos": 1,
+          "file_context_length": 5740,
+          "closest_snippet_id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_errorhandler_Blueprint.app_errorhandler.3.1",
+          "closest_snippet_line_distance": 315,
+          "pos": 19,
+          "context_length": 6995
+        },
+        {
+          "start_line_old": 456,
+          "end_line_old": 456,
+          "file_pos": 1,
+          "file_context_length": 5740,
+          "closest_snippet_id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint_Blueprint._json_decoder.1",
+          "closest_snippet_line_distance": 279,
+          "pos": 2,
+          "context_length": 846
+        }
+      ]
+    }
+  },
+  "vectors": 274,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint_Blueprint._json_decoder.1",
+      "distance": 0.8074798583984375,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 121,
+      "end_line": 177,
+      "tokens": 595,
+      "context_length": 595,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.register.16_Blueprint.register.17.6",
+      "distance": 0.8557869791984558,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 443,
+      "end_line": 470,
+      "tokens": 251,
+      "context_length": 846,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.register_blueprint_Flask.iter_blueprints.2.1",
+      "distance": 0.8933846354484558,
+      "file_path": "src/flask/app.py",
+      "start_line": 1273,
+      "end_line": 1306,
+      "tokens": 324,
+      "context_length": 1170
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.json_decoder_8_Blueprint.__init__.self._blueprints.1",
+      "distance": 0.8991067409515381,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 235,
+      "end_line": 281,
+      "tokens": 379,
+      "context_length": 1549,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/flask/src/flask/wrappers.py_Request.blueprints_Request.on_json_loading_failed.1.2.2",
+      "distance": 0.9214459657669067,
+      "file_path": "src/flask/wrappers.py",
+      "start_line": 94,
+      "end_line": 133,
+      "tokens": 258,
+      "context_length": 1807
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_url_value_preprocessor_",
+      "distance": 0.9500511884689331,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 690,
+      "end_line": 707,
+      "tokens": 145,
+      "context_length": 1952,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.__init___Scaffold.__init__.self.import_name.self.url_default_functions.1",
+      "distance": 0.9961258769035339,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 91,
+      "end_line": 237,
+      "tokens": 1470,
+      "context_length": 3422
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.url_for.3_Flask.url_for.10.1",
+      "distance": 0.9971346855163574,
+      "file_path": "src/flask/app.py",
+      "start_line": 1975,
+      "end_line": 2039,
+      "tokens": 567,
+      "context_length": 3989
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/flask/src/flask/templating.py_Environment_Environment.__init__.self.app.1",
+      "distance": 1.0052876472473145,
+      "file_path": "src/flask/templating.py",
+      "start_line": 36,
+      "end_line": 46,
+      "tokens": 108,
+      "context_length": 4097
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.add_url_rule_Blueprint.add_url_rule.4",
+      "distance": 1.0053318738937378,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 472,
+      "end_line": 498,
+      "tokens": 218,
+      "context_length": 4315,
+      "file_pos": 5
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint._check_setup_finished_Blueprint._check_setup_finished.1.2",
+      "distance": 1.007574439048767,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 283,
+      "end_line": 298,
+      "tokens": 146,
+      "context_length": 4461,
+      "file_pos": 5
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.register_blueprint_Blueprint.register_blueprint.3",
+      "distance": 1.016202688217163,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 332,
+      "end_line": 348,
+      "tokens": 166,
+      "context_length": 4627,
+      "file_pos": 5
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.after_app_request_Blueprint.app_context_processor.3.1",
+      "distance": 1.0224120616912842,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 643,
+      "end_line": 674,
+      "tokens": 276,
+      "context_length": 4903,
+      "file_pos": 5
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold_Scaffold.json_decoder.1",
+      "distance": 1.0411577224731445,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 55,
+      "end_line": 89,
+      "tokens": 376,
+      "context_length": 5279
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.json_encoder_6_Blueprint.json_decoder.4.1",
+      "distance": 1.0607357025146484,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 201,
+      "end_line": 233,
+      "tokens": 254,
+      "context_length": 5533,
+      "file_pos": 5
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_errorhandler_Blueprint.app_errorhandler.3.1",
+      "distance": 1.0713300704956055,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 676,
+      "end_line": 688,
+      "tokens": 118,
+      "context_length": 5651,
+      "file_pos": 5
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/flask/src/flask/__init__.py_1___version__.1",
+      "distance": 1.0721806287765503,
+      "file_path": "src/flask/__init__.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 454,
+      "context_length": 6105
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/flask/src/flask/wrappers.py_Request.blueprint_Request.blueprint.4.1",
+      "distance": 1.0771546363830566,
+      "file_path": "src/flask/wrappers.py",
+      "start_line": 75,
+      "end_line": 92,
+      "tokens": 124,
+      "context_length": 6229
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.register_Blueprint.register.cli_resolved_group.1",
+      "distance": 1.079840898513794,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 350,
+      "end_line": 441,
+      "tokens": 766,
+      "context_length": 6995,
+      "file_pos": 6
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_json_T_url_value_preprocessor.1",
+      "distance": 1.0825263261795044,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 331,
+      "context_length": 7326,
+      "file_pos": 6
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_template_global_Blueprint.app_template_global.3.1",
+      "distance": 1.0904508829116821,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 572,
+      "end_line": 589,
+      "tokens": 138,
+      "context_length": 7464,
+      "file_pos": 6
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/blog.py_1_index.4.1",
+      "distance": 1.0914372205734253,
+      "file_path": "examples/tutorial/flaskr/blog.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 157,
+      "context_length": 7621
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_BlueprintSetupState.add_url_rule_BlueprintSetupState.add_url_rule.7",
+      "distance": 1.092139482498169,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 89,
+      "end_line": 118,
+      "tokens": 235,
+      "context_length": 7856,
+      "file_pos": 7
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/flask/src/flask/typing.py_t_",
+      "distance": 1.105121374130249,
+      "file_path": "src/flask/typing.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 736,
+      "context_length": 8592
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_template_test_Blueprint.app_template_test.3.1",
+      "distance": 1.1184048652648926,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 534,
+      "end_line": 551,
+      "tokens": 138,
+      "context_length": 8730,
+      "file_pos": 8
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.__init___Flask.__init__.self.cli.name.1",
+      "distance": 1.1196485757827759,
+      "file_path": "src/flask/app.py",
+      "start_line": 553,
+      "end_line": 718,
+      "tokens": 1564,
+      "context_length": 10294
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_BlueprintSetupState_BlueprintSetupState.__init__.self.app.27",
+      "distance": 1.133948802947998,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 36,
+      "end_line": 87,
+      "tokens": 412,
+      "context_length": 10706,
+      "file_pos": 8
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.before_app_first_request_Blueprint.before_app_first_request.5.1",
+      "distance": 1.1340489387512207,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 620,
+      "end_line": 641,
+      "tokens": 178,
+      "context_length": 10884,
+      "file_pos": 8
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.run.4_Flask.run.18.2.self._got_first_request.1",
+      "distance": 1.1380245685577393,
+      "file_path": "src/flask/app.py",
+      "start_line": 1132,
+      "end_line": 1196,
+      "tokens": 540,
+      "context_length": 11424
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.add_url_rule_Flask.add_url_rule.22.3",
+      "distance": 1.1431493759155273,
+      "file_path": "src/flask/app.py",
+      "start_line": 1308,
+      "end_line": 1365,
+      "tokens": 486,
+      "context_length": 11910
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.app_template_filter_Blueprint.app_template_filter.3.1",
+      "distance": 1.1531672477722168,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 500,
+      "end_line": 515,
+      "tokens": 128,
+      "context_length": 12038,
+      "file_pos": 8
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.add_app_template_global_Blueprint.before_app_request.3.1",
+      "distance": 1.1658395528793335,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 591,
+      "end_line": 618,
+      "tokens": 240,
+      "context_length": 12278,
+      "file_pos": 8
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/flask/src/flask/globals.py__no_app_msg_session.1",
+      "distance": 1.1665775775909424,
+      "file_path": "src/flask/globals.py",
+      "start_line": 47,
+      "end_line": 83,
+      "tokens": 371,
+      "context_length": 12649
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.add_app_template_test_Blueprint.add_app_template_test.3",
+      "distance": 1.166581153869629,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 553,
+      "end_line": 570,
+      "tokens": 158,
+      "context_length": 12807,
+      "file_pos": 9
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.json_encoder_Blueprint.json_encoder.4.1",
+      "distance": 1.1676459312438965,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 179,
+      "end_line": 199,
+      "tokens": 160,
+      "context_length": 12967,
+      "file_pos": 9
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/flask/src/flask/templating.py_t_13.Flask",
+      "distance": 1.174790620803833,
+      "file_path": "src/flask/templating.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 118,
+      "context_length": 13085
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/flask/src/flask/app.py_functools__make_timedelta.2.1",
+      "distance": 1.179255485534668,
+      "file_path": "src/flask/app.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 792,
+      "context_length": 13877
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/flask/src/flask/templating.py_DispatchingJinjaLoader._get_source_fast_DispatchingJinjaLoader.list_templates.5.1",
+      "distance": 1.1810214519500732,
+      "file_path": "src/flask/templating.py",
+      "start_line": 90,
+      "end_line": 124,
+      "tokens": 256,
+      "context_length": 14133
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.add_app_template_filter_Blueprint.add_app_template_filter.3",
+      "distance": 1.1842682361602783,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 517,
+      "end_line": 532,
+      "tokens": 148,
+      "context_length": 14281,
+      "file_pos": 9
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/flask/src/flask/debughelpers.py_explain_template_loading_attempts_",
+      "distance": 1.18450129032135,
+      "file_path": "src/flask/debughelpers.py",
+      "start_line": 114,
+      "end_line": 159,
+      "tokens": 407,
+      "context_length": 14688
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/flask/src/flask/templating.py_DispatchingJinjaLoader_DispatchingJinjaLoader.get_source.2.1",
+      "distance": 1.1863309144973755,
+      "file_path": "src/flask/templating.py",
+      "start_line": 49,
+      "end_line": 62,
+      "tokens": 127,
+      "context_length": 14815
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.raise_routing_exception_Flask.raise_routing_exception.4",
+      "distance": 1.1880861520767212,
+      "file_path": "src/flask/app.py",
+      "start_line": 1748,
+      "end_line": 1774,
+      "tokens": 199,
+      "context_length": 15014
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/flask/src/flask/blueprints.py_Blueprint.record_Blueprint.make_setup_state.2.1",
+      "distance": 1.2028536796569824,
+      "file_path": "src/flask/blueprints.py",
+      "start_line": 300,
+      "end_line": 330,
+      "tokens": 278,
+      "context_length": 15292,
+      "file_pos": 10
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.2_Flask.secret_key.1",
+      "distance": 1.208178997039795,
+      "file_path": "src/flask/app.py",
+      "start_line": 207,
+      "end_line": 275,
+      "tokens": 689,
+      "context_length": 15981
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_importlib.util_setupmethod.3.1",
+      "distance": 1.2156141996383667,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 410,
+      "context_length": 16391
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.preprocess_request_Flask.preprocess_request.5.1",
+      "distance": 1.228867530822754,
+      "file_path": "src/flask/app.py",
+      "start_line": 2292,
+      "end_line": 2317,
+      "tokens": 217,
+      "context_length": 16608
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.__repr___Scaffold.static_url_path_24.self._static_url_path.1",
+      "distance": 1.2356514930725098,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 239,
+      "end_line": 291,
+      "tokens": 377,
+      "context_length": 16985
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_response.8_Flask.make_response.14.1",
+      "distance": 1.2403554916381836,
+      "file_path": "src/flask/app.py",
+      "start_line": 2144,
+      "end_line": 2193,
+      "tokens": 452,
+      "context_length": 17437
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.create_global_jinja_loader_Flask.create_global_jinja_loader.2.1",
+      "distance": 1.2511615753173828,
+      "file_path": "src/flask/app.py",
+      "start_line": 947,
+      "end_line": 958,
+      "tokens": 120,
+      "context_length": 17557
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.templates_auto_reload_Flask.templates_auto_reload_137.3",
+      "distance": 1.252203106880188,
+      "file_path": "src/flask/app.py",
+      "start_line": 871,
+      "end_line": 905,
+      "tokens": 285,
+      "context_length": 17842
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/flask/src/flask/debughelpers.py_t_DebugFilesKeyError.__str__.1.1",
+      "distance": 1.253112554550171,
+      "file_path": "src/flask/debughelpers.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 287,
+      "context_length": 18129
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/flask/src/flask/cli.py_routes_command_",
+      "distance": 1.2561167478561401,
+      "file_path": "src/flask/cli.py",
+      "start_line": 988,
+      "end_line": 1055,
+      "tokens": 497,
+      "context_length": 18626
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask_Flask.1",
+      "distance": 1.2561750411987305,
+      "file_path": "src/flask/app.py",
+      "start_line": 110,
+      "end_line": 205,
+      "tokens": 1013,
+      "context_length": 19639
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.use_x_sendfile_77_Flask._json_decoder.1",
+      "distance": 1.258521318435669,
+      "file_path": "src/flask/app.py",
+      "start_line": 371,
+      "end_line": 384,
+      "tokens": 142,
+      "context_length": 19781
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/flask/src/flask/templating.py_DispatchingJinjaLoader._get_source_explained_DispatchingJinjaLoader._get_source_explained.8",
+      "distance": 1.2651078701019287,
+      "file_path": "src/flask/templating.py",
+      "start_line": 64,
+      "end_line": 88,
+      "tokens": 210,
+      "context_length": 19991
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.send_static_file_Scaffold.send_static_file.6.1",
+      "distance": 1.267871379852295,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 317,
+      "end_line": 333,
+      "tokens": 167,
+      "context_length": 20158
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/flask/src/flask/testing.py_FlaskClient.open_FlaskClient.__exit__.2",
+      "distance": 1.2683711051940918,
+      "file_path": "src/flask/testing.py",
+      "start_line": 192,
+      "end_line": 250,
+      "tokens": 436,
+      "context_length": 20594
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/flask/docs/conf.py_28_",
+      "distance": 1.2723898887634277,
+      "file_path": "docs/conf.py",
+      "start_line": 66,
+      "end_line": 99,
+      "tokens": 213,
+      "context_length": 20807
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.dispatch_request_Flask.dispatch_request.12.1",
+      "distance": 1.2731342315673828,
+      "file_path": "src/flask/app.py",
+      "start_line": 1776,
+      "end_line": 1799,
+      "tokens": 262,
+      "context_length": 21069
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.inject_url_defaults_Flask.inject_url_defaults.6.1.1.1",
+      "distance": 1.2781012058258057,
+      "file_path": "src/flask/app.py",
+      "start_line": 2237,
+      "end_line": 2256,
+      "tokens": 169,
+      "context_length": 21238
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.json_decoder_83_Flask.session_interface.1",
+      "distance": 1.27968168258667,
+      "file_path": "src/flask/app.py",
+      "start_line": 452,
+      "end_line": 551,
+      "tokens": 912,
+      "context_length": 22150
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.jinja_env_Flask.got_first_request.2.1",
+      "distance": 1.2798572778701782,
+      "file_path": "src/flask/app.py",
+      "start_line": 798,
+      "end_line": 815,
+      "tokens": 128,
+      "context_length": 22278
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.full_dispatch_request_Flask.full_dispatch_request.7.1",
+      "distance": 1.2826703786849976,
+      "file_path": "src/flask/app.py",
+      "start_line": 1801,
+      "end_line": 1826,
+      "tokens": 208,
+      "context_length": 22486
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/flask/src/flask/testing.py_EnvironBuilder_EnvironBuilder.json_dumps.2",
+      "distance": 1.2906216382980347,
+      "file_path": "src/flask/testing.py",
+      "start_line": 23,
+      "end_line": 91,
+      "tokens": 612,
+      "context_length": 23098
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/flask/src/flask/testing.py_FlaskClient._copy_environ_FlaskClient._request_from_builder_args.3.2.1",
+      "distance": 1.295161485671997,
+      "file_path": "src/flask/testing.py",
+      "start_line": 175,
+      "end_line": 190,
+      "tokens": 122,
+      "context_length": 23220
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.auto_find_instance_path_Flask.auto_find_instance_path.4.1",
+      "distance": 1.2960890531539917,
+      "file_path": "src/flask/app.py",
+      "start_line": 846,
+      "end_line": 857,
+      "tokens": 125,
+      "context_length": 23345
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.run_Flask.run.3",
+      "distance": 1.2967679500579834,
+      "file_path": "src/flask/app.py",
+      "start_line": 1067,
+      "end_line": 1131,
+      "tokens": 702,
+      "context_length": 24047
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.add_url_rule_Scaffold.add_url_rule.2",
+      "distance": 1.2986159324645996,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 454,
+      "end_line": 520,
+      "tokens": 501,
+      "context_length": 24548
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/flask/src/flask/__main__.py__",
+      "distance": 1.2999382019042969,
+      "file_path": "src/flask/__main__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 24548
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/flask/src/flask/testing.py_t_14.2",
+      "distance": 1.3005163669586182,
+      "file_path": "src/flask/testing.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 119,
+      "context_length": 24667
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/flask/src/flask/cli.py_1_NoAppException.1",
+      "distance": 1.3005564212799072,
+      "file_path": "src/flask/cli.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 139,
+      "context_length": 24806
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/auth.py_functools_load_logged_in_user.3.2.g.user.1",
+      "distance": 1.3010554313659668,
+      "file_path": "examples/tutorial/flaskr/auth.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 240,
+      "context_length": 25046
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.create_url_adapter_Flask.create_url_adapter.6.1",
+      "distance": 1.30203115940094,
+      "file_path": "src/flask/app.py",
+      "start_line": 2195,
+      "end_line": 2235,
+      "tokens": 338,
+      "context_length": 25384
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask._check_setup_finished_Flask._check_setup_finished.1.1",
+      "distance": 1.3021559715270996,
+      "file_path": "src/flask/app.py",
+      "start_line": 720,
+      "end_line": 730,
+      "tokens": 110,
+      "context_length": 25494
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.do_teardown_request_Flask.do_teardown_request.4",
+      "distance": 1.303101897239685,
+      "file_path": "src/flask/app.py",
+      "start_line": 2347,
+      "end_line": 2378,
+      "tokens": 278,
+      "context_length": 25772
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.create_jinja_environment_Flask.create_jinja_environment.8.1",
+      "distance": 1.3063418865203857,
+      "file_path": "src/flask/app.py",
+      "start_line": 907,
+      "end_line": 945,
+      "tokens": 304,
+      "context_length": 26076
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.handle_url_build_error_Flask.handle_url_build_error.6",
+      "distance": 1.3080573081970215,
+      "file_path": "src/flask/app.py",
+      "start_line": 2258,
+      "end_line": 2290,
+      "tokens": 292,
+      "context_length": 26368
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold._method_route_Scaffold.patch.2.1",
+      "distance": 1.3091566562652588,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 371,
+      "end_line": 420,
+      "tokens": 444,
+      "context_length": 26812
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.env_144_Flask.debug_146.2.self.jinja_env.auto_reload.1",
+      "distance": 1.312520980834961,
+      "file_path": "src/flask/app.py",
+      "start_line": 1035,
+      "end_line": 1065,
+      "tokens": 240,
+      "context_length": 27052
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/flask/src/flask/__init__.py___getattr___",
+      "distance": 1.3163189888000488,
+      "file_path": "src/flask/__init__.py",
+      "start_line": 48,
+      "end_line": 72,
+      "tokens": 147,
+      "context_length": 27199
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/flask/src/flask/globals.py_t__FakeStack.top.2.1",
+      "distance": 1.316932201385498,
+      "file_path": "src/flask/globals.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 281,
+      "context_length": 27480
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.handle_http_exception_Flask.handle_http_exception.11.1",
+      "distance": 1.317600965499878,
+      "file_path": "src/flask/app.py",
+      "start_line": 1576,
+      "end_line": 1609,
+      "tokens": 277,
+      "context_length": 27757
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.name_Flask.name.2",
+      "distance": 1.320932388305664,
+      "file_path": "src/flask/app.py",
+      "start_line": 732,
+      "end_line": 747,
+      "tokens": 163,
+      "context_length": 27920
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/flask/src/flask/debughelpers.py_FormDataRoutingRedirect_FormDataRoutingRedirect.__init__.5",
+      "distance": 1.325228214263916,
+      "file_path": "src/flask/debughelpers.py",
+      "start_line": 41,
+      "end_line": 68,
+      "tokens": 238,
+      "context_length": 28158
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.jinja_loader_Scaffold.jinja_loader.2.2.1.1",
+      "distance": 1.327923059463501,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 335,
+      "end_line": 346,
+      "tokens": 110,
+      "context_length": 28268
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_os_19.2",
+      "distance": 1.328023910522461,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 152,
+      "context_length": 28420
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_config_Flask.make_config.7.1",
+      "distance": 1.334552526473999,
+      "file_path": "src/flask/app.py",
+      "start_line": 817,
+      "end_line": 832,
+      "tokens": 162,
+      "context_length": 28582
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/flask/src/flask/signals.py_t_",
+      "distance": 1.334848403930664,
+      "file_path": "src/flask/signals.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 483,
+      "context_length": 29065
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_find_package_",
+      "distance": 1.338242530822754,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 860,
+      "end_line": 899,
+      "tokens": 318,
+      "context_length": 29383
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.add_template_global_Flask.add_template_global.2",
+      "distance": 1.3397107124328613,
+      "file_path": "src/flask/app.py",
+      "start_line": 1468,
+      "end_line": 1480,
+      "tokens": 114,
+      "context_length": 29497
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.route_Scaffold.route.3.1",
+      "distance": 1.3404057025909424,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 422,
+      "end_line": 452,
+      "tokens": 237,
+      "context_length": 29734
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/__init__.py_os_",
+      "distance": 1.3409392833709717,
+      "file_path": "examples/tutorial/flaskr/__init__.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 315,
+      "context_length": 30049
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/flask/src/flask/cli.py_FlaskGroup.get_command_FlaskGroup.get_command.14.1",
+      "distance": 1.3417038917541504,
+      "file_path": "src/flask/cli.py",
+      "start_line": 564,
+      "end_line": 589,
+      "tokens": 226,
+      "context_length": 30275
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_shell_context_Flask.env.4.1",
+      "distance": 1.3443834781646729,
+      "file_path": "src/flask/app.py",
+      "start_line": 1001,
+      "end_line": 1033,
+      "tokens": 222,
+      "context_length": 30497
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.test_cli_runner_Flask.test_cli_runner.5",
+      "distance": 1.3456218242645264,
+      "file_path": "src/flask/app.py",
+      "start_line": 1256,
+      "end_line": 1271,
+      "tokens": 141,
+      "context_length": 30638
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.handle_exception_Flask.handle_exception.12.1",
+      "distance": 1.3481886386871338,
+      "file_path": "src/flask/app.py",
+      "start_line": 1678,
+      "end_line": 1729,
+      "tokens": 437,
+      "context_length": 31075
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.url_for_Flask.url_for.req_ctx.1",
+      "distance": 1.3490142822265625,
+      "file_path": "src/flask/app.py",
+      "start_line": 1917,
+      "end_line": 1973,
+      "tokens": 617,
+      "context_length": 31692
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_default_options_response_Flask.ensure_sync.3.1",
+      "distance": 1.3494625091552734,
+      "file_path": "src/flask/app.py",
+      "start_line": 1857,
+      "end_line": 1892,
+      "tokens": 293,
+      "context_length": 31985
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.wsgi_app_",
+      "distance": 1.3505464792251587,
+      "file_path": "src/flask/app.py",
+      "start_line": 2498,
+      "end_line": 2552,
+      "tokens": 461,
+      "context_length": 32446
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/flask/src/flask/cli.py_run_command_run_command.7",
+      "distance": 1.350594401359558,
+      "file_path": "src/flask/cli.py",
+      "start_line": 824,
+      "end_line": 933,
+      "tokens": 664,
+      "context_length": 33110
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/flask/src/flask/globals.py___getattr___",
+      "distance": 1.3507449626922607,
+      "file_path": "src/flask/globals.py",
+      "start_line": 86,
+      "end_line": 108,
+      "tokens": 133,
+      "context_length": 33243
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/flask/src/flask/cli.py_find_best_app_find_best_app.10",
+      "distance": 1.3514509201049805,
+      "file_path": "src/flask/cli.py",
+      "start_line": 32,
+      "end_line": 82,
+      "tokens": 370,
+      "context_length": 33613
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.session_cookie_name_65_Flask.permanent_session_lifetime.1",
+      "distance": 1.3517520427703857,
+      "file_path": "src/flask/app.py",
+      "start_line": 295,
+      "end_line": 316,
+      "tokens": 212,
+      "context_length": 33825
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_contextvars__sentinel.1",
+      "distance": 1.3517745733261108,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 124,
+      "context_length": 33949
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.shell_context_processor_Flask._find_error_handler.5.1",
+      "distance": 1.3518109321594238,
+      "file_path": "src/flask/app.py",
+      "start_line": 1542,
+      "end_line": 1574,
+      "tokens": 253,
+      "context_length": 34202
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py__endpoint_from_view_func__path_is_relative_to.2.3.1.1",
+      "distance": 1.3524768352508545,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 750,
+      "end_line": 789,
+      "tokens": 319,
+      "context_length": 34521
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/flask/examples/javascript/js_example/views.py_1_",
+      "distance": 1.3529226779937744,
+      "file_path": "examples/javascript/js_example/views.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 113,
+      "context_length": 34634
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.propagate_exceptions_Flask.propagate_exceptions.6.1",
+      "distance": 1.3535176515579224,
+      "file_path": "src/flask/app.py",
+      "start_line": 749,
+      "end_line": 769,
+      "tokens": 152,
+      "context_length": 34786
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.select_jinja_autoescape_Flask.select_jinja_autoescape.3.1",
+      "distance": 1.3542628288269043,
+      "file_path": "src/flask/app.py",
+      "start_line": 960,
+      "end_line": 971,
+      "tokens": 120,
+      "context_length": 34906
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/flask/src/flask/cli.py_FlaskGroup_FlaskGroup.__init__.self._loaded_plugin_commands.1",
+      "distance": 1.3546699285507202,
+      "file_path": "src/flask/cli.py",
+      "start_line": 481,
+      "end_line": 545,
+      "tokens": 599,
+      "context_length": 35505
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/flask/src/flask/cli.py_AppGroup_AppGroup.group.3.1",
+      "distance": 1.3548271656036377,
+      "file_path": "src/flask/cli.py",
+      "start_line": 362,
+      "end_line": 390,
+      "tokens": 255,
+      "context_length": 35760
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/flask/setup.py_1_",
+      "distance": 1.3567997217178345,
+      "file_path": "setup.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 131,
+      "context_length": 35891
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.test_client_Flask.test_client.4.1",
+      "distance": 1.357377529144287,
+      "file_path": "src/flask/app.py",
+      "start_line": 1198,
+      "end_line": 1254,
+      "tokens": 545,
+      "context_length": 36436
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/blog.py_create_create.3.1",
+      "distance": 1.3580329418182373,
+      "file_path": "examples/tutorial/flaskr/blog.py",
+      "start_line": 60,
+      "end_line": 83,
+      "tokens": 149,
+      "context_length": 36585
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/flask/src/flask/cli.py_FlaskGroup._load_plugin_commands_FlaskGroup._load_plugin_commands.self._loaded_plugin_commands.1",
+      "distance": 1.3581832647323608,
+      "file_path": "src/flask/cli.py",
+      "start_line": 547,
+      "end_line": 562,
+      "tokens": 135,
+      "context_length": 36720
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/flask/src/flask/wrappers.py_t_Request.endpoint.3.1",
+      "distance": 1.3606700897216797,
+      "file_path": "src/flask/wrappers.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 594,
+      "context_length": 37314
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.template_global_Flask.template_global.3.1",
+      "distance": 1.360689640045166,
+      "file_path": "src/flask/app.py",
+      "start_line": 1444,
+      "end_line": 1466,
+      "tokens": 164,
+      "context_length": 37478
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config.from_prefixed_env_Config.from_prefixed_env.5.1",
+      "distance": 1.3614697456359863,
+      "file_path": "src/flask/config.py",
+      "start_line": 101,
+      "end_line": 163,
+      "tokens": 456,
+      "context_length": 37934
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/flask/examples/tutorial/setup.py__",
+      "distance": 1.3634750843048096,
+      "file_path": "examples/tutorial/setup.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 37934
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.open_instance_resource_Flask.open_instance_resource.2.1",
+      "distance": 1.3662346601486206,
+      "file_path": "src/flask/app.py",
+      "start_line": 859,
+      "end_line": 869,
+      "tokens": 130,
+      "context_length": 38064
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.handle_user_exception_Flask.handle_user_exception.6.1",
+      "distance": 1.3697443008422852,
+      "file_path": "src/flask/app.py",
+      "start_line": 1646,
+      "end_line": 1676,
+      "tokens": 242,
+      "context_length": 38306
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/flask/src/flask/views.py_t_View.dispatch_request.2",
+      "distance": 1.374778389930725,
+      "file_path": "src/flask/views.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 676,
+      "context_length": 38982
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.test_request_context_Flask.test_request_context.4.2.1",
+      "distance": 1.3754361867904663,
+      "file_path": "src/flask/app.py",
+      "start_line": 2442,
+      "end_line": 2496,
+      "tokens": 497,
+      "context_length": 39479
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/blog.py_get_post_get_post.5.1",
+      "distance": 1.375939965248108,
+      "file_path": "examples/tutorial/flaskr/blog.py",
+      "start_line": 28,
+      "end_line": 57,
+      "tokens": 121,
+      "context_length": 39600
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/flask/src/flask/cli.py_locate_app_locate_app.3.2.1.1",
+      "distance": 1.3778448104858398,
+      "file_path": "src/flask/cli.py",
+      "start_line": 216,
+      "end_line": 237,
+      "tokens": 180,
+      "context_length": 39780
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/flask/src/flask/testing.py_FlaskClient_FlaskClient.__init__.self.environ_base.1",
+      "distance": 1.3785773515701294,
+      "file_path": "src/flask/testing.py",
+      "start_line": 94,
+      "end_line": 118,
+      "tokens": 239,
+      "context_length": 40019
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.trap_http_exception_Flask.trap_http_exception.7.1",
+      "distance": 1.3789780139923096,
+      "file_path": "src/flask/app.py",
+      "start_line": 1611,
+      "end_line": 1644,
+      "tokens": 277,
+      "context_length": 40296
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.session_cookie_name_Flask.session_cookie_name.4.1",
+      "distance": 1.3806805610656738,
+      "file_path": "src/flask/app.py",
+      "start_line": 277,
+      "end_line": 293,
+      "tokens": 133,
+      "context_length": 40429
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/flask/src/flask/json/tag.py_PassDict_TagBytes.to_python.1.1",
+      "distance": 1.3827143907546997,
+      "file_path": "src/flask/json/tag.py",
+      "start_line": 116,
+      "end_line": 167,
+      "tokens": 332,
+      "context_length": 40761
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.context_processor_Scaffold.url_defaults.3.1",
+      "distance": 1.3842108249664307,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 613,
+      "end_line": 649,
+      "tokens": 293,
+      "context_length": 41054
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/flask/src/flask/views.py_View.as_view_View.as_view.18.1",
+      "distance": 1.3863153457641602,
+      "file_path": "src/flask/views.py",
+      "start_line": 82,
+      "end_line": 132,
+      "tokens": 453,
+      "context_length": 41507
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/flask/src/flask/cli.py__debug_option__env_file_option.1",
+      "distance": 1.3867053985595703,
+      "file_path": "src/flask/cli.py",
+      "start_line": 438,
+      "end_line": 478,
+      "tokens": 254,
+      "context_length": 41761
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/flask/src/flask/cli.py_FlaskGroup.make_context__path_is_ancestor.2.1",
+      "distance": 1.3875641822814941,
+      "file_path": "src/flask/cli.py",
+      "start_line": 612,
+      "end_line": 651,
+      "tokens": 406,
+      "context_length": 42167
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/blog.py_update_",
+      "distance": 1.3877522945404053,
+      "file_path": "examples/tutorial/flaskr/blog.py",
+      "start_line": 86,
+      "end_line": 126,
+      "tokens": 236,
+      "context_length": 42403
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.use_x_sendfile_Flask.use_x_sendfile.4.1",
+      "distance": 1.3886373043060303,
+      "file_path": "src/flask/app.py",
+      "start_line": 353,
+      "end_line": 369,
+      "tokens": 162,
+      "context_length": 42565
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.update_template_context_Flask.update_template_context.9",
+      "distance": 1.3894033432006836,
+      "file_path": "src/flask/app.py",
+      "start_line": 973,
+      "end_line": 999,
+      "tokens": 236,
+      "context_length": 42801
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.open_resource_Scaffold.open_resource.3.1",
+      "distance": 1.38954496383667,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 348,
+      "end_line": 369,
+      "tokens": 209,
+      "context_length": 43010
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/flask/src/flask/views.py_MethodView_",
+      "distance": 1.3920273780822754,
+      "file_path": "src/flask/views.py",
+      "start_line": 135,
+      "end_line": 189,
+      "tokens": 386,
+      "context_length": 43396
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.send_file_max_age_default_75_Flask.send_file_max_age_default_75.3",
+      "distance": 1.3923838138580322,
+      "file_path": "src/flask/app.py",
+      "start_line": 341,
+      "end_line": 351,
+      "tokens": 117,
+      "context_length": 43513
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.add_template_test_Flask.add_template_test.2",
+      "distance": 1.393021821975708,
+      "file_path": "src/flask/app.py",
+      "start_line": 1430,
+      "end_line": 1442,
+      "tokens": 112,
+      "context_length": 43625
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/flask/examples/javascript/js_example/__init__.py__",
+      "distance": 1.3933544158935547,
+      "file_path": "examples/javascript/js_example/__init__.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 43625
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/flask/examples/javascript/setup.py__",
+      "distance": 1.3946611881256104,
+      "file_path": "examples/javascript/setup.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 43625
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/flask/src/flask/cli.py_FlaskGroup.list_commands_FlaskGroup.list_commands.8.1",
+      "distance": 1.3967376947402954,
+      "file_path": "src/flask/cli.py",
+      "start_line": 591,
+      "end_line": 610,
+      "tokens": 192,
+      "context_length": 43817
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.logger_Flask.logger.2.1",
+      "distance": 1.3995018005371094,
+      "file_path": "src/flask/app.py",
+      "start_line": 771,
+      "end_line": 796,
+      "tokens": 252,
+      "context_length": 44069
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.before_first_request_Flask.before_first_request.5.1",
+      "distance": 1.3998209238052368,
+      "file_path": "src/flask/app.py",
+      "start_line": 1482,
+      "end_line": 1506,
+      "tokens": 180,
+      "context_length": 44249
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/flask/src/flask/cli.py_pass_script_info_with_appcontext.3.1",
+      "distance": 1.4040448665618896,
+      "file_path": "src/flask/cli.py",
+      "start_line": 334,
+      "end_line": 359,
+      "tokens": 203,
+      "context_length": 44452
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/flask/src/flask/cli.py_53_shell_command.15",
+      "distance": 1.4046204090118408,
+      "file_path": "src/flask/cli.py",
+      "start_line": 936,
+      "end_line": 985,
+      "tokens": 371,
+      "context_length": 44823
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_is_ip_",
+      "distance": 1.404627799987793,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 678,
+      "end_line": 706,
+      "tokens": 161,
+      "context_length": 44984
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.template_test_Flask.template_test.3.1",
+      "distance": 1.409402847290039,
+      "file_path": "src/flask/app.py",
+      "start_line": 1401,
+      "end_line": 1428,
+      "tokens": 201,
+      "context_length": 45185
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.endpoint_Scaffold.endpoint.3.1",
+      "distance": 1.4103232622146606,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 522,
+      "end_line": 544,
+      "tokens": 143,
+      "context_length": 45328
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_stream_with_context_stream_with_context.2.3.3",
+      "distance": 1.4118010997772217,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 84,
+      "end_line": 130,
+      "tokens": 344,
+      "context_length": 45672
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.process_response_Flask.process_response.7.1",
+      "distance": 1.414351463317871,
+      "file_path": "src/flask/app.py",
+      "start_line": 2319,
+      "end_line": 2345,
+      "tokens": 248,
+      "context_length": 45920
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.template_filter_Flask.add_template_filter.2",
+      "distance": 1.4149764776229858,
+      "file_path": "src/flask/app.py",
+      "start_line": 1367,
+      "end_line": 1399,
+      "tokens": 247,
+      "context_length": 46167
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py__find_package_path__find_package_path.12.1",
+      "distance": 1.417954921722412,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 792,
+      "end_line": 857,
+      "tokens": 565,
+      "context_length": 46732
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_url_for_url_for.2.1",
+      "distance": 1.4192862510681152,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 212,
+      "end_line": 263,
+      "tokens": 455,
+      "context_length": 47187
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config_Config.__init__.self.root_path.1",
+      "distance": 1.4233717918395996,
+      "file_path": "src/flask/config.py",
+      "start_line": 29,
+      "end_line": 75,
+      "tokens": 406,
+      "context_length": 47593
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/db.py_sqlite3_",
+      "distance": 1.424443006515503,
+      "file_path": "examples/tutorial/flaskr/db.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 277,
+      "context_length": 47870
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SessionInterface.get_cookie_domain_SessionInterface.get_cookie_domain.19.1",
+      "distance": 1.4244431257247925,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 183,
+      "end_line": 239,
+      "tokens": 473,
+      "context_length": 48343
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/flask/src/flask/templating.py__default_template_ctx_processor__default_template_ctx_processor.7.1",
+      "distance": 1.4253816604614258,
+      "file_path": "src/flask/templating.py",
+      "start_line": 21,
+      "end_line": 33,
+      "tokens": 119,
+      "context_length": 48462
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/flask/src/flask/ctx.py__AppCtxGlobals__AppCtxGlobals.get.2.1",
+      "distance": 1.4314265251159668,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 25,
+      "end_line": 72,
+      "tokens": 329,
+      "context_length": 48791
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.log_exception_Flask.log_exception.2",
+      "distance": 1.433211326599121,
+      "file_path": "src/flask/app.py",
+      "start_line": 1731,
+      "end_line": 1746,
+      "tokens": 138,
+      "context_length": 48929
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/auth.py_register_register.3.1",
+      "distance": 1.4370375871658325,
+      "file_path": "examples/tutorial/flaskr/auth.py",
+      "start_line": 46,
+      "end_line": 81,
+      "tokens": 225,
+      "context_length": 49154
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/flask/src/flask/json/tag.py_TagUUID_TagDateTime.to_python.1.1",
+      "distance": 1.4374223947525024,
+      "file_path": "src/flask/json/tag.py",
+      "start_line": 188,
+      "end_line": 213,
+      "tokens": 158,
+      "context_length": 49312
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.finalize_request_Flask.finalize_request.4.1",
+      "distance": 1.4389548301696777,
+      "file_path": "src/flask/app.py",
+      "start_line": 1828,
+      "end_line": 1855,
+      "tokens": 218,
+      "context_length": 49530
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/flask/src/flask/cli.py_ScriptInfo.load_app_ScriptInfo.load_app.7.1",
+      "distance": 1.439119577407837,
+      "file_path": "src/flask/cli.py",
+      "start_line": 292,
+      "end_line": 331,
+      "tokens": 310,
+      "context_length": 49840
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.json_encoder_81_Flask.json_decoder.5.1",
+      "distance": 1.4393473863601685,
+      "file_path": "src/flask/app.py",
+      "start_line": 413,
+      "end_line": 450,
+      "tokens": 269,
+      "context_length": 50109
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.teardown_request_Scaffold.teardown_request.3.1",
+      "distance": 1.4445679187774658,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 584,
+      "end_line": 611,
+      "tokens": 236,
+      "context_length": 50345
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.async_to_sync_Flask.async_to_sync.3.1",
+      "distance": 1.4483915567398071,
+      "file_path": "src/flask/app.py",
+      "start_line": 1894,
+      "end_line": 1915,
+      "tokens": 164,
+      "context_length": 50509
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_root_path_get_root_path.13.1",
+      "distance": 1.4490554332733154,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 595,
+      "end_line": 641,
+      "tokens": 416,
+      "context_length": 50925
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_aborter_Flask.make_aborter.2.1",
+      "distance": 1.451397180557251,
+      "file_path": "src/flask/app.py",
+      "start_line": 834,
+      "end_line": 844,
+      "tokens": 108,
+      "context_length": 51033
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_RequestContext.push_RequestContext.push.app_ctx.11.1",
+      "distance": 1.4514013528823853,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 356,
+      "end_line": 383,
+      "tokens": 243,
+      "context_length": 51276
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_RequestContext.__enter___",
+      "distance": 1.4528350830078125,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 422,
+      "end_line": 439,
+      "tokens": 117,
+      "context_length": 51393
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_abort_abort.3",
+      "distance": 1.4578461647033691,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 290,
+      "end_line": 312,
+      "tokens": 212,
+      "context_length": 51605
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config.get_namespace_",
+      "distance": 1.458356261253357,
+      "file_path": "src/flask/config.py",
+      "start_line": 294,
+      "end_line": 339,
+      "tokens": 346,
+      "context_length": 51951
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.teardown_appcontext_Flask.teardown_appcontext.3.1",
+      "distance": 1.4584790468215942,
+      "file_path": "src/flask/app.py",
+      "start_line": 1508,
+      "end_line": 1540,
+      "tokens": 281,
+      "context_length": 52232
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_has_app_context_AppContext.push.3",
+      "distance": 1.4586379528045654,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 219,
+      "end_line": 245,
+      "tokens": 230,
+      "context_length": 52462
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/flask/src/flask/logging.py_logging_wsgi_errors_stream.2.1",
+      "distance": 1.4589498043060303,
+      "file_path": "src/flask/logging.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 172,
+      "context_length": 52634
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.after_request_Scaffold.after_request.3.1",
+      "distance": 1.462615728378296,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 568,
+      "end_line": 582,
+      "tokens": 148,
+      "context_length": 52782
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.before_request_Scaffold.before_request.3.1",
+      "distance": 1.4628578424453735,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 546,
+      "end_line": 566,
+      "tokens": 168,
+      "context_length": 52950
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_RequestContext.copy_RequestContext.match_request.2.5.self.request.routing_exception.1",
+      "distance": 1.4643099308013916,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 326,
+      "end_line": 354,
+      "tokens": 242,
+      "context_length": 53192
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_stream_with_context.generator_stream_with_context.10.1",
+      "distance": 1.4694544076919556,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 132,
+      "end_line": 160,
+      "tokens": 289,
+      "context_length": 53481
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.redirect_Flask.redirect.2.1",
+      "distance": 1.476689338684082,
+      "file_path": "src/flask/app.py",
+      "start_line": 2041,
+      "end_line": 2053,
+      "tokens": 120,
+      "context_length": 53601
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/flask/examples/tutorial/flaskr/auth.py_login_",
+      "distance": 1.4783480167388916,
+      "file_path": "examples/tutorial/flaskr/auth.py",
+      "start_line": 84,
+      "end_line": 117,
+      "tokens": 215,
+      "context_length": 53816
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/flask/src/flask/templating.py__render_render_template.5.1",
+      "distance": 1.4807788133621216,
+      "file_path": "src/flask/templating.py",
+      "start_line": 127,
+      "end_line": 147,
+      "tokens": 214,
+      "context_length": 54030
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/flask/src/flask/testing.py_FlaskCliRunner_",
+      "distance": 1.4824912548065186,
+      "file_path": "src/flask/testing.py",
+      "start_line": 253,
+      "end_line": 287,
+      "tokens": 329,
+      "context_length": 54359
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.make_response_Flask.make_response.7",
+      "distance": 1.4833940267562866,
+      "file_path": "src/flask/app.py",
+      "start_line": 2055,
+      "end_line": 2143,
+      "tokens": 725,
+      "context_length": 55084
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.request_context_Flask.request_context.2.1",
+      "distance": 1.4838552474975586,
+      "file_path": "src/flask/app.py",
+      "start_line": 2426,
+      "end_line": 2440,
+      "tokens": 151,
+      "context_length": 55235
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.do_teardown_appcontext_Flask.do_teardown_appcontext.4",
+      "distance": 1.484257459640503,
+      "file_path": "src/flask/app.py",
+      "start_line": 2380,
+      "end_line": 2403,
+      "tokens": 196,
+      "context_length": 55431
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/flask/src/flask/cli.py_show_server_banner_CertParamType.convert.2.2.5",
+      "distance": 1.4859330654144287,
+      "file_path": "src/flask/cli.py",
+      "start_line": 715,
+      "end_line": 772,
+      "tokens": 353,
+      "context_length": 55784
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.send_file_max_age_default_Flask.send_file_max_age_default.4.1",
+      "distance": 1.4862741231918335,
+      "file_path": "src/flask/app.py",
+      "start_line": 318,
+      "end_line": 339,
+      "tokens": 207,
+      "context_length": 55991
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.json_encoder_Flask.json_encoder.5.1",
+      "distance": 1.4877307415008545,
+      "file_path": "src/flask/app.py",
+      "start_line": 386,
+      "end_line": 411,
+      "tokens": 180,
+      "context_length": 56171
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/flask/src/flask/cli.py_ScriptInfo_ScriptInfo.__init__.self.app_import_path.self._loaded_app.1",
+      "distance": 1.4922212362289429,
+      "file_path": "src/flask/cli.py",
+      "start_line": 266,
+      "end_line": 290,
+      "tokens": 246,
+      "context_length": 56417
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/flask/src/flask/cli.py_find_app_by_string_find_app_by_string.12",
+      "distance": 1.4924116134643555,
+      "file_path": "src/flask/cli.py",
+      "start_line": 111,
+      "end_line": 184,
+      "tokens": 562,
+      "context_length": 56979
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config.from_mapping_Config.from_mapping.6.1",
+      "distance": 1.4933936595916748,
+      "file_path": "src/flask/config.py",
+      "start_line": 275,
+      "end_line": 292,
+      "tokens": 133,
+      "context_length": 57112
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/flask/src/flask/json/__init__.py_JSONDecoder_JSONDecoder.__init__.3",
+      "distance": 1.495526909828186,
+      "file_path": "src/flask/json/__init__.py",
+      "start_line": 58,
+      "end_line": 81,
+      "tokens": 180,
+      "context_length": 57292
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/flask/src/flask/app.py_Flask.app_context_Flask.app_context.2.1",
+      "distance": 1.4965472221374512,
+      "file_path": "src/flask/app.py",
+      "start_line": 2405,
+      "end_line": 2424,
+      "tokens": 148,
+      "context_length": 57440
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/flask/src/flask/cli.py_get_version_version_option.1",
+      "distance": 1.4966658353805542,
+      "file_path": "src/flask/cli.py",
+      "start_line": 240,
+      "end_line": 263,
+      "tokens": 129,
+      "context_length": 57569
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/flask/src/flask/cli.py_load_dotenv_load_dotenv.9",
+      "distance": 1.4978073835372925,
+      "file_path": "src/flask/cli.py",
+      "start_line": 654,
+      "end_line": 712,
+      "tokens": 439,
+      "context_length": 58008
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_make_response_make_response.5",
+      "distance": 1.4980034828186035,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 163,
+      "end_line": 209,
+      "tokens": 421,
+      "context_length": 58429
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_AppContext.pop_AppContext.__exit__.1",
+      "distance": 1.500230073928833,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 247,
+      "end_line": 275,
+      "tokens": 212,
+      "context_length": 58641
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_send_from_directory_send_from_directory.2.1",
+      "distance": 1.501112937927246,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 552,
+      "end_line": 592,
+      "tokens": 349,
+      "context_length": 58990
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.get_send_file_max_age_Scaffold.get_send_file_max_age.5.1",
+      "distance": 1.5016989707946777,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 293,
+      "end_line": 315,
+      "tokens": 191,
+      "context_length": 59181
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_RequestContext_RequestContext.__init__.self._cv_tokens.1",
+      "distance": 1.5019145011901855,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 278,
+      "end_line": 324,
+      "tokens": 444,
+      "context_length": 59625
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/flask/src/flask/cli.py__set_app__app_option.1",
+      "distance": 1.5022722482681274,
+      "file_path": "src/flask/cli.py",
+      "start_line": 393,
+      "end_line": 418,
+      "tokens": 236,
+      "context_length": 59861
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_send_file_send_file.2.1",
+      "distance": 1.5023903846740723,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 424,
+      "end_line": 549,
+      "tokens": 1261,
+      "context_length": 61122
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/flask/src/flask/debughelpers.py_attach_enctype_error_multidict_attach_enctype_error_multidict.request.files.__class__.1",
+      "distance": 1.5030760765075684,
+      "file_path": "src/flask/debughelpers.py",
+      "start_line": 71,
+      "end_line": 94,
+      "tokens": 165,
+      "context_length": 61287
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/flask/src/flask/json/tag.py_1_loads",
+      "distance": 1.5042160749435425,
+      "file_path": "src/flask/json/tag.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 365,
+      "context_length": 61652
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/flask/src/flask/cli.py_prepare_import_prepare_import.10.1",
+      "distance": 1.507979154586792,
+      "file_path": "src/flask/cli.py",
+      "start_line": 187,
+      "end_line": 213,
+      "tokens": 177,
+      "context_length": 61829
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/flask/src/flask/cli.py__called_with_wrong_args__called_with_wrong_args.3.4.3",
+      "distance": 1.5083893537521362,
+      "file_path": "src/flask/cli.py",
+      "start_line": 85,
+      "end_line": 108,
+      "tokens": 162,
+      "context_length": 61991
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/flask/src/flask/json/tag.py_TagMarkup_TagMarkup.to_python.1.1",
+      "distance": 1.5091578960418701,
+      "file_path": "src/flask/json/tag.py",
+      "start_line": 170,
+      "end_line": 185,
+      "tokens": 141,
+      "context_length": 62132
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_copy_current_request_context_copy_current_request_context.6.1",
+      "distance": 1.5100035667419434,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 146,
+      "end_line": 184,
+      "tokens": 271,
+      "context_length": 62403
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_env_get_env.4.1",
+      "distance": 1.5107128620147705,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 28,
+      "end_line": 44,
+      "tokens": 138,
+      "context_length": 62541
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/flask/src/flask/debughelpers.py__dump_loader_info__dump_loader_info.2.3",
+      "distance": 1.5127010345458984,
+      "file_path": "src/flask/debughelpers.py",
+      "start_line": 97,
+      "end_line": 111,
+      "tokens": 133,
+      "context_length": 62674
+    },
+    {
+      "position": 214,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_template_attribute_get_template_attribute.2.1",
+      "distance": 1.5132958889007568,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 315,
+      "end_line": 334,
+      "tokens": 184,
+      "context_length": 62858
+    },
+    {
+      "position": 215,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_RequestContext.pop_RequestContext.pop.2",
+      "distance": 1.5152204036712646,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 385,
+      "end_line": 420,
+      "tokens": 290,
+      "context_length": 63148
+    },
+    {
+      "position": 216,
+      "id": "/tmp/repos/flask/src/flask/json/provider.py_1_JSONProvider._prepare_response_obj.4.1",
+      "distance": 1.5191504955291748,
+      "file_path": "src/flask/json/provider.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 662,
+      "context_length": 63810
+    },
+    {
+      "position": 217,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.errorhandler_Scaffold.errorhandler.3.1",
+      "distance": 1.5191526412963867,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 651,
+      "end_line": 688,
+      "tokens": 284,
+      "context_length": 64094
+    },
+    {
+      "position": 218,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_flash_flash.12",
+      "distance": 1.522005319595337,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 337,
+      "end_line": 366,
+      "tokens": 293,
+      "context_length": 64387
+    },
+    {
+      "position": 219,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_after_this_request_after_this_request.5.1",
+      "distance": 1.5221108198165894,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 113,
+      "end_line": 143,
+      "tokens": 226,
+      "context_length": 64613
+    },
+    {
+      "position": 220,
+      "id": "/tmp/repos/flask/src/flask/templating.py_stream_template_stream_template.5.1",
+      "distance": 1.524353265762329,
+      "file_path": "src/flask/templating.py",
+      "start_line": 181,
+      "end_line": 197,
+      "tokens": 180,
+      "context_length": 64793
+    },
+    {
+      "position": 221,
+      "id": "/tmp/repos/flask/src/flask/testing.py_FlaskClient.session_transaction_FlaskClient.session_transaction.7.17",
+      "distance": 1.525277853012085,
+      "file_path": "src/flask/testing.py",
+      "start_line": 120,
+      "end_line": 173,
+      "tokens": 498,
+      "context_length": 65291
+    },
+    {
+      "position": 222,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_locked_cached_property_locked_cached_property.__delete__.1.1",
+      "distance": 1.5300443172454834,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 644,
+      "end_line": 675,
+      "tokens": 260,
+      "context_length": 65551
+    },
+    {
+      "position": 223,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold.register_error_handler_Scaffold.register_error_handler.3",
+      "distance": 1.530358076095581,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 690,
+      "end_line": 703,
+      "tokens": 118,
+      "context_length": 65669
+    },
+    {
+      "position": 224,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SessionInterface.make_null_session_SessionInterface.make_null_session.2.1",
+      "distance": 1.5323888063430786,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 158,
+      "end_line": 168,
+      "tokens": 117,
+      "context_length": 65786
+    },
+    {
+      "position": 225,
+      "id": "/tmp/repos/flask/src/flask/wrappers.py_Response_",
+      "distance": 1.535301685333252,
+      "file_path": "src/flask/wrappers.py",
+      "start_line": 136,
+      "end_line": 172,
+      "tokens": 288,
+      "context_length": 66074
+    },
+    {
+      "position": 226,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_flashed_messages__prepare_send_file_kwargs.3.1",
+      "distance": 1.5389971733093262,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 369,
+      "end_line": 421,
+      "tokens": 499,
+      "context_length": 66573
+    },
+    {
+      "position": 227,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SecureCookieSessionInterface.save_session_",
+      "distance": 1.5416277647018433,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 376,
+      "end_line": 420,
+      "tokens": 318,
+      "context_length": 66891
+    },
+    {
+      "position": 228,
+      "id": "/tmp/repos/flask/src/flask/json/__init__.py_loads_loads.4.1",
+      "distance": 1.544966697692871,
+      "file_path": "src/flask/json/__init__.py",
+      "start_line": 174,
+      "end_line": 214,
+      "tokens": 328,
+      "context_length": 67219
+    },
+    {
+      "position": 229,
+      "id": "/tmp/repos/flask/src/flask/logging.py_create_logger_",
+      "distance": 1.5468661785125732,
+      "file_path": "src/flask/logging.py",
+      "start_line": 53,
+      "end_line": 75,
+      "tokens": 170,
+      "context_length": 67389
+    },
+    {
+      "position": 230,
+      "id": "/tmp/repos/flask/src/flask/cli.py__validate_key_SeparatedPathType.convert.3.1",
+      "distance": 1.5485074520111084,
+      "file_path": "src/flask/cli.py",
+      "start_line": 775,
+      "end_line": 821,
+      "tokens": 355,
+      "context_length": 67744
+    },
+    {
+      "position": 231,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SessionInterface.open_session_session_json_serializer.1",
+      "distance": 1.550633430480957,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 297,
+      "end_line": 323,
+      "tokens": 222,
+      "context_length": 67966
+    },
+    {
+      "position": 232,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_redirect_redirect.3.1",
+      "distance": 1.553146243095398,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 266,
+      "end_line": 287,
+      "tokens": 207,
+      "context_length": 68173
+    },
+    {
+      "position": 233,
+      "id": "/tmp/repos/flask/src/flask/json/provider.py_DefaultJSONProvider_DefaultJSONProvider.12",
+      "distance": 1.5540242195129395,
+      "file_path": "src/flask/json/provider.py",
+      "start_line": 125,
+      "end_line": 167,
+      "tokens": 413,
+      "context_length": 68586
+    },
+    {
+      "position": 234,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SessionInterface_SessionInterface.pickle_based.1",
+      "distance": 1.5574780702590942,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 108,
+      "end_line": 156,
+      "tokens": 468,
+      "context_length": 69054
+    },
+    {
+      "position": 235,
+      "id": "/tmp/repos/flask/src/flask/json/__init__.py_htmlsafe_dumps_htmlsafe_dumps.4.1",
+      "distance": 1.5576727390289307,
+      "file_path": "src/flask/json/__init__.py",
+      "start_line": 256,
+      "end_line": 288,
+      "tokens": 323,
+      "context_length": 69377
+    },
+    {
+      "position": 236,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_load_dotenv_get_load_dotenv.4.1",
+      "distance": 1.5587120056152344,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 69,
+      "end_line": 81,
+      "tokens": 107,
+      "context_length": 69484
+    },
+    {
+      "position": 237,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config.from_envvar_Config.from_envvar.4.1",
+      "distance": 1.5589882135391235,
+      "file_path": "src/flask/config.py",
+      "start_line": 77,
+      "end_line": 99,
+      "tokens": 207,
+      "context_length": 69691
+    },
+    {
+      "position": 238,
+      "id": "/tmp/repos/flask/src/flask/scaffold.py_Scaffold._get_exc_class_and_code_Scaffold._get_exc_class_and_code.6.2.1.1",
+      "distance": 1.5607084035873413,
+      "file_path": "src/flask/scaffold.py",
+      "start_line": 705,
+      "end_line": 747,
+      "tokens": 325,
+      "context_length": 70016
+    },
+    {
+      "position": 239,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_hashlib_SessionMixin.accessed.1",
+      "distance": 1.5622978210449219,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 315,
+      "context_length": 70331
+    },
+    {
+      "position": 240,
+      "id": "/tmp/repos/flask/src/flask/helpers.py_get_debug_flag_get_debug_flag.4.1",
+      "distance": 1.5659658908843994,
+      "file_path": "src/flask/helpers.py",
+      "start_line": 47,
+      "end_line": 66,
+      "tokens": 148,
+      "context_length": 70479
+    },
+    {
+      "position": 241,
+      "id": "/tmp/repos/flask/src/flask/cli.py__set_debug__set_debug.source.7.1",
+      "distance": 1.5672918558120728,
+      "file_path": "src/flask/cli.py",
+      "start_line": 421,
+      "end_line": 435,
+      "tokens": 148,
+      "context_length": 70627
+    },
+    {
+      "position": 242,
+      "id": "/tmp/repos/flask/src/flask/config.py_errno_ConfigAttribute.__set__.1",
+      "distance": 1.5695512294769287,
+      "file_path": "src/flask/config.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 175,
+      "context_length": 70802
+    },
+    {
+      "position": 243,
+      "id": "/tmp/repos/flask/src/flask/ctx.py__AppCtxGlobals.setdefault__AppCtxGlobals.__repr__.3.1",
+      "distance": 1.5715606212615967,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 88,
+      "end_line": 110,
+      "tokens": 201,
+      "context_length": 71003
+    },
+    {
+      "position": 244,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SecureCookieSessionInterface.open_session_SecureCookieSessionInterface.open_session.6.3.1.1",
+      "distance": 1.5719830989837646,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 360,
+      "end_line": 374,
+      "tokens": 127,
+      "context_length": 71130
+    },
+    {
+      "position": 245,
+      "id": "/tmp/repos/flask/src/flask/ctx.py_has_request_context_has_request_context.2.1",
+      "distance": 1.573161244392395,
+      "file_path": "src/flask/ctx.py",
+      "start_line": 187,
+      "end_line": 216,
+      "tokens": 227,
+      "context_length": 71357
+    },
+    {
+      "position": 246,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SecureCookieSession_SecureCookieSession.setdefault.2.1",
+      "distance": 1.5740954875946045,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 49,
+      "end_line": 88,
+      "tokens": 381,
+      "context_length": 71738
+    },
+    {
+      "position": 247,
+      "id": "/tmp/repos/flask/src/flask/json/__init__.py_htmlsafe_dump_htmlsafe_dump.4",
+      "distance": 1.5741764307022095,
+      "file_path": "src/flask/json/__init__.py",
+      "start_line": 291,
+      "end_line": 307,
+      "tokens": 158,
+      "context_length": 71896
+    },
+    {
+      "position": 248,
+      "id": "/tmp/repos/flask/src/flask/config.py_Config.from_object_Config.from_object.3.1.1",
+      "distance": 1.5771657228469849,
+      "file_path": "src/flask/config.py",
+      "start_line": 194,
+      "end_line": 230,
+      "tokens": 348,
+      "context_length": 72244
+    },
+    {
+      "position": 249,
+      "id": "/tmp/repos/flask/src/flask/json/__init__.py_dumps_dumps.5.1",
+      "distance": 1.5775625705718994,
+      "file_path": "src/flask/json/__init__.py",
+      "start_line": 84,
+      "end_line": 127,
+      "tokens": 347,
+      "context_length": 72591
+    },
+    {
+      "position": 250,
+      "id": "/tmp/repos/flask/src/flask/sessions.py_SessionInterface.is_null_session_SessionInterface.get_cookie_name.2.1",
+      "distance": 1.5808666944503784,
+      "file_path": "src/flask/sessions.py",
+      "start_line": 170,
+      "end_line": 181,
+      "tokens": 120,
+      "context_length": 72711
+    }
+  ],
+  "files": [
+    {
+      "file_path": "src/flask/blueprints.py",
+      "position": 1,
+      "tokens": 5740,
+      "context_length": 5740
+    },
+    {
+      "file_path": "src/flask/app.py",
+      "position": 2,
+      "tokens": 21247,
+      "context_length": 26987
+    },
+    {
+      "file_path": "src/flask/wrappers.py",
+      "position": 3,
+      "tokens": 1258,
+      "context_length": 28245
+    },
+    {
+      "file_path": "src/flask/scaffold.py",
+      "position": 4,
+      "tokens": 7375,
+      "context_length": 35620
+    },
+    {
+      "file_path": "src/flask/templating.py",
+      "position": 5,
+      "tokens": 1675,
+      "context_length": 37295
+    },
+    {
+      "file_path": "src/flask/__init__.py",
+      "position": 6,
+      "tokens": 601,
+      "context_length": 37896
+    },
+    {
+      "file_path": "examples/tutorial/flaskr/blog.py",
+      "position": 7,
+      "tokens": 776,
+      "context_length": 38672
+    },
+    {
+      "file_path": "src/flask/typing.py",
+      "position": 8,
+      "tokens": 736,
+      "context_length": 39408
+    },
+    {
+      "file_path": "src/flask/globals.py",
+      "position": 9,
+      "tokens": 785,
+      "context_length": 40193
+    },
+    {
+      "file_path": "src/flask/debughelpers.py",
+      "position": 10,
+      "tokens": 1233,
+      "context_length": 41426
+    },
+    {
+      "file_path": "src/flask/cli.py",
+      "position": 11,
+      "tokens": 7589,
+      "context_length": 49015
+    },
+    {
+      "file_path": "src/flask/testing.py",
+      "position": 12,
+      "tokens": 2341,
+      "context_length": 51356
+    },
+    {
+      "file_path": "docs/conf.py",
+      "position": 13,
+      "tokens": 814,
+      "context_length": 52170
+    },
+    {
+      "file_path": "src/flask/__main__.py",
+      "position": 14,
+      "tokens": 8,
+      "context_length": 52178
+    },
+    {
+      "file_path": "examples/tutorial/flaskr/auth.py",
+      "position": 15,
+      "tokens": 680,
+      "context_length": 52858
+    },
+    {
+      "file_path": "src/flask/helpers.py",
+      "position": 16,
+      "tokens": 5850,
+      "context_length": 58708
+    },
+    {
+      "file_path": "src/flask/signals.py",
+      "position": 17,
+      "tokens": 483,
+      "context_length": 59191
+    },
+    {
+      "file_path": "examples/tutorial/flaskr/__init__.py",
+      "position": 18,
+      "tokens": 316,
+      "context_length": 59507
+    },
+    {
+      "file_path": "src/flask/ctx.py",
+      "position": 19,
+      "tokens": 3255,
+      "context_length": 62762
+    },
+    {
+      "file_path": "examples/javascript/js_example/views.py",
+      "position": 20,
+      "tokens": 113,
+      "context_length": 62875
+    },
+    {
+      "file_path": "setup.py",
+      "position": 21,
+      "tokens": 131,
+      "context_length": 63006
+    },
+    {
+      "file_path": "src/flask/config.py",
+      "position": 22,
+      "tokens": 2653,
+      "context_length": 65659
+    },
+    {
+      "file_path": "examples/tutorial/setup.py",
+      "position": 23,
+      "tokens": 7,
+      "context_length": 65666
+    },
+    {
+      "file_path": "src/flask/views.py",
+      "position": 24,
+      "tokens": 1513,
+      "context_length": 67179
+    },
+    {
+      "file_path": "src/flask/json/tag.py",
+      "position": 25,
+      "tokens": 2117,
+      "context_length": 69296
+    },
+    {
+      "file_path": "examples/javascript/js_example/__init__.py",
+      "position": 26,
+      "tokens": 23,
+      "context_length": 69319
+    },
+    {
+      "file_path": "examples/javascript/setup.py",
+      "position": 27,
+      "tokens": 7,
+      "context_length": 69326
+    },
+    {
+      "file_path": "examples/tutorial/flaskr/db.py",
+      "position": 28,
+      "tokens": 277,
+      "context_length": 69603
+    },
+    {
+      "file_path": "src/flask/sessions.py",
+      "position": 29,
+      "tokens": 3480,
+      "context_length": 73083
+    },
+    {
+      "file_path": "src/flask/logging.py",
+      "position": 30,
+      "tokens": 534,
+      "context_length": 73617
+    },
+    {
+      "file_path": "src/flask/json/__init__.py",
+      "position": 31,
+      "tokens": 2770,
+      "context_length": 76387
+    },
+    {
+      "file_path": "src/flask/json/provider.py",
+      "position": 32,
+      "tokens": 2424,
+      "context_length": 78811
+    }
+  ]
+}

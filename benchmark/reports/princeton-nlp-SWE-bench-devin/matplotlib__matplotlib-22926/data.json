@@ -1,0 +1,624 @@
+{
+  "instance_id": "matplotlib__matplotlib-22926",
+  "model_patch": "diff --git a/lib/matplotlib/widgets.py b/lib/matplotlib/widgets.py\nindex cd79e9523a..cec65cf350 100644\n--- a/lib/matplotlib/widgets.py\n+++ b/lib/matplotlib/widgets.py\n@@ -911,7 +911,7 @@ class RangeSlider(SliderBase):\n             xy[1] = .25, val[1]\n             xy[2] = .75, val[1]\n             xy[3] = .75, val[0]\n-            xy[4] = .25, val[0]\n+            # xy[4] = .25, val[0]\n \n             self._handles[0].set_ydata([val[0]])\n             self._handles[1].set_ydata([val[1]])\n@@ -920,7 +920,7 @@ class RangeSlider(SliderBase):\n             xy[1] = val[0], .75\n             xy[2] = val[1], .75\n             xy[3] = val[1], .25\n-            xy[4] = val[0], .25\n+            # xy[4] = val[0], .25\n \n             self._handles[0].set_xdata([val[0]])\n             self._handles[1].set_xdata([val[1]])\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/widgets.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "e779b97174ff3ab2737fbdffb432ef8689201602",
+  "patch": "diff --git a/lib/matplotlib/widgets.py b/lib/matplotlib/widgets.py\n--- a/lib/matplotlib/widgets.py\n+++ b/lib/matplotlib/widgets.py\n@@ -19,7 +19,7 @@\n from . import (_api, _docstring, backend_tools, cbook, colors, ticker,\n                transforms)\n from .lines import Line2D\n-from .patches import Circle, Rectangle, Ellipse\n+from .patches import Circle, Rectangle, Ellipse, Polygon\n from .transforms import TransformedPatchPath, Affine2D\n \n \n@@ -709,7 +709,7 @@ def __init__(\n                 facecolor=track_color\n             )\n             ax.add_patch(self.track)\n-            self.poly = ax.axhspan(valinit[0], valinit[1], 0, 1, **kwargs)\n+            poly_transform = self.ax.get_yaxis_transform(which=\"grid\")\n             handleXY_1 = [.5, valinit[0]]\n             handleXY_2 = [.5, valinit[1]]\n         else:\n@@ -719,9 +719,15 @@ def __init__(\n                 facecolor=track_color\n             )\n             ax.add_patch(self.track)\n-            self.poly = ax.axvspan(valinit[0], valinit[1], 0, 1, **kwargs)\n+            poly_transform = self.ax.get_xaxis_transform(which=\"grid\")\n             handleXY_1 = [valinit[0], .5]\n             handleXY_2 = [valinit[1], .5]\n+        self.poly = Polygon(np.zeros([5, 2]), **kwargs)\n+        self._update_selection_poly(*valinit)\n+        self.poly.set_transform(poly_transform)\n+        self.poly.get_path()._interpolation_steps = 100\n+        self.ax.add_patch(self.poly)\n+        self.ax._request_autoscale_view()\n         self._handles = [\n             ax.plot(\n                 *handleXY_1,\n@@ -777,6 +783,27 @@ def __init__(\n         self._active_handle = None\n         self.set_val(valinit)\n \n+    def _update_selection_poly(self, vmin, vmax):\n+        \"\"\"\n+        Update the vertices of the *self.poly* slider in-place\n+        to cover the data range *vmin*, *vmax*.\n+        \"\"\"\n+        # The vertices are positioned\n+        #  1 ------ 2\n+        #  |        |\n+        # 0, 4 ---- 3\n+        verts = self.poly.xy\n+        if self.orientation == \"vertical\":\n+            verts[0] = verts[4] = .25, vmin\n+            verts[1] = .25, vmax\n+            verts[2] = .75, vmax\n+            verts[3] = .75, vmin\n+        else:\n+            verts[0] = verts[4] = vmin, .25\n+            verts[1] = vmin, .75\n+            verts[2] = vmax, .75\n+            verts[3] = vmax, .25\n+\n     def _min_in_bounds(self, min):\n         \"\"\"Ensure the new min value is between valmin and self.val[1].\"\"\"\n         if min <= self.valmin:\n@@ -903,36 +930,24 @@ def set_val(self, val):\n         \"\"\"\n         val = np.sort(val)\n         _api.check_shape((2,), val=val)\n-        val[0] = self._min_in_bounds(val[0])\n-        val[1] = self._max_in_bounds(val[1])\n-        xy = self.poly.xy\n+        vmin, vmax = val\n+        vmin = self._min_in_bounds(vmin)\n+        vmax = self._max_in_bounds(vmax)\n+        self._update_selection_poly(vmin, vmax)\n         if self.orientation == \"vertical\":\n-            xy[0] = .25, val[0]\n-            xy[1] = .25, val[1]\n-            xy[2] = .75, val[1]\n-            xy[3] = .75, val[0]\n-            xy[4] = .25, val[0]\n-\n-            self._handles[0].set_ydata([val[0]])\n-            self._handles[1].set_ydata([val[1]])\n+            self._handles[0].set_ydata([vmin])\n+            self._handles[1].set_ydata([vmax])\n         else:\n-            xy[0] = val[0], .25\n-            xy[1] = val[0], .75\n-            xy[2] = val[1], .75\n-            xy[3] = val[1], .25\n-            xy[4] = val[0], .25\n+            self._handles[0].set_xdata([vmin])\n+            self._handles[1].set_xdata([vmax])\n \n-            self._handles[0].set_xdata([val[0]])\n-            self._handles[1].set_xdata([val[1]])\n-\n-        self.poly.xy = xy\n-        self.valtext.set_text(self._format(val))\n+        self.valtext.set_text(self._format((vmin, vmax)))\n \n         if self.drawon:\n             self.ax.figure.canvas.draw_idle()\n-        self.val = val\n+        self.val = (vmin, vmax)\n         if self.eventson:\n-            self._observers.process(\"changed\", val)\n+            self._observers.process(\"changed\", (vmin, vmax))\n \n     def on_changed(self, func):\n         \"\"\"\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_widgets.py b/lib/matplotlib/tests/test_widgets.py\n--- a/lib/matplotlib/tests/test_widgets.py\n+++ b/lib/matplotlib/tests/test_widgets.py\n@@ -1161,6 +1161,23 @@ def handle_positions(slider):\n     assert_allclose(handle_positions(slider), (0.1, 0.34))\n \n \n+@pytest.mark.parametrize(\"orientation\", [\"horizontal\", \"vertical\"])\n+def test_range_slider_same_init_values(orientation):\n+    if orientation == \"vertical\":\n+        idx = [1, 0, 3, 2]\n+    else:\n+        idx = [0, 1, 2, 3]\n+\n+    fig, ax = plt.subplots()\n+\n+    slider = widgets.RangeSlider(\n+         ax=ax, label=\"\", valmin=0.0, valmax=1.0, orientation=orientation,\n+         valinit=[0, 0]\n+     )\n+    box = slider.poly.get_extents().transformed(ax.transAxes.inverted())\n+    assert_allclose(box.get_points().flatten()[idx], [0, 0.25, 0, 0.75])\n+\n+\n def check_polygon_selector(event_sequence, expected_result, selections_count,\n                            **kwargs):\n     \"\"\"\n",
+  "problem_statement": "[Bug]: cannot give init value for RangeSlider widget\n### Bug summary\r\n\r\nI think `xy[4] = .25, val[0]` should be commented in /matplotlib/widgets. py\", line 915, in set_val\r\nas it prevents to initialized value for RangeSlider\r\n\r\n### Code for reproduction\r\n\r\n```python\r\nimport numpy as np\r\nimport matplotlib.pyplot as plt\r\nfrom matplotlib.widgets import RangeSlider\r\n\r\n# generate a fake image\r\nnp.random.seed(19680801)\r\nN = 128\r\nimg = np.random.randn(N, N)\r\n\r\nfig, axs = plt.subplots(1, 2, figsize=(10, 5))\r\nfig.subplots_adjust(bottom=0.25)\r\n\r\nim = axs[0].imshow(img)\r\naxs[1].hist(img.flatten(), bins='auto')\r\naxs[1].set_title('Histogram of pixel intensities')\r\n\r\n# Create the RangeSlider\r\nslider_ax = fig.add_axes([0.20, 0.1, 0.60, 0.03])\r\nslider = RangeSlider(slider_ax, \"Threshold\", img.min(), img.max(),valinit=[0.0,0.0])\r\n\r\n# Create the Vertical lines on the histogram\r\nlower_limit_line = axs[1].axvline(slider.val[0], color='k')\r\nupper_limit_line = axs[1].axvline(slider.val[1], color='k')\r\n\r\n\r\ndef update(val):\r\n    # The val passed to a callback by the RangeSlider will\r\n    # be a tuple of (min, max)\r\n\r\n    # Update the image's colormap\r\n    im.norm.vmin = val[0]\r\n    im.norm.vmax = val[1]\r\n\r\n    # Update the position of the vertical lines\r\n    lower_limit_line.set_xdata([val[0], val[0]])\r\n    upper_limit_line.set_xdata([val[1], val[1]])\r\n\r\n    # Redraw the figure to ensure it updates\r\n    fig.canvas.draw_idle()\r\n\r\n\r\nslider.on_changed(update)\r\nplt.show()\r\n```\r\n\r\n\r\n### Actual outcome\r\n\r\n```python\r\n  File \"<ipython-input-52-b704c53e18d4>\", line 19, in <module>\r\n    slider = RangeSlider(slider_ax, \"Threshold\", img.min(), img.max(),valinit=[0.0,0.0])\r\n\r\n  File \"/Users/Vincent/opt/anaconda3/envs/py38/lib/python3.8/site-packages/matplotlib/widgets.py\", line 778, in __init__\r\n    self.set_val(valinit)\r\n\r\n  File \"/Users/Vincent/opt/anaconda3/envs/py38/lib/python3.8/site-packages/matplotlib/widgets.py\", line 915, in set_val\r\n    xy[4] = val[0], .25\r\n\r\nIndexError: index 4 is out of bounds for axis 0 with size 4\r\n```\r\n\r\n### Expected outcome\r\n\r\nrange slider with user initial values\r\n\r\n### Additional information\r\n\r\nerror can be removed by commenting this line\r\n```python\r\n\r\n    def set_val(self, val):\r\n        \"\"\"\r\n        Set slider value to *val*.\r\n\r\n        Parameters\r\n        ----------\r\n        val : tuple or array-like of float\r\n        \"\"\"\r\n        val = np.sort(np.asanyarray(val))\r\n        if val.shape != (2,):\r\n            raise ValueError(\r\n                f\"val must have shape (2,) but has shape {val.shape}\"\r\n            )\r\n        val[0] = self._min_in_bounds(val[0])\r\n        val[1] = self._max_in_bounds(val[1])\r\n        xy = self.poly.xy\r\n        if self.orientation == \"vertical\":\r\n            xy[0] = .25, val[0]\r\n            xy[1] = .25, val[1]\r\n            xy[2] = .75, val[1]\r\n            xy[3] = .75, val[0]\r\n            # xy[4] = .25, val[0]\r\n        else:\r\n            xy[0] = val[0], .25\r\n            xy[1] = val[0], .75\r\n            xy[2] = val[1], .75\r\n            xy[3] = val[1], .25\r\n            # xy[4] = val[0], .25\r\n        self.poly.xy = xy\r\n        self.valtext.set_text(self._format(val))\r\n        if self.drawon:\r\n            self.ax.figure.canvas.draw_idle()\r\n        self.val = val\r\n        if self.eventson:\r\n            self._observers.process(\"changed\", val)\r\n\r\n```\r\n\r\n### Operating system\r\n\r\nOSX\r\n\r\n### Matplotlib Version\r\n\r\n3.5.1\r\n\r\n### Matplotlib Backend\r\n\r\n_No response_\r\n\r\n### Python version\r\n\r\n3.8\r\n\r\n### Jupyter version\r\n\r\n_No response_\r\n\r\n### Installation\r\n\r\npip\n",
+  "hints_text": "Huh, the polygon object must have changed inadvertently. Usually, you have\nto \"close\" the polygon by repeating the first vertex, but we make it\npossible for polygons to auto-close themselves. I wonder how (when?) this\nbroke?\n\nOn Tue, Mar 22, 2022 at 10:29 PM vpicouet ***@***.***> wrote:\n\n> Bug summary\n>\n> I think xy[4] = .25, val[0] should be commented in /matplotlib/widgets.\n> py\", line 915, in set_val\n> as it prevents to initialized value for RangeSlider\n> Code for reproduction\n>\n> import numpy as npimport matplotlib.pyplot as pltfrom matplotlib.widgets import RangeSlider\n> # generate a fake imagenp.random.seed(19680801)N = 128img = np.random.randn(N, N)\n> fig, axs = plt.subplots(1, 2, figsize=(10, 5))fig.subplots_adjust(bottom=0.25)\n> im = axs[0].imshow(img)axs[1].hist(img.flatten(), bins='auto')axs[1].set_title('Histogram of pixel intensities')\n> # Create the RangeSliderslider_ax = fig.add_axes([0.20, 0.1, 0.60, 0.03])slider = RangeSlider(slider_ax, \"Threshold\", img.min(), img.max(),valinit=[0.0,0.0])\n> # Create the Vertical lines on the histogramlower_limit_line = axs[1].axvline(slider.val[0], color='k')upper_limit_line = axs[1].axvline(slider.val[1], color='k')\n>\n> def update(val):\n>     # The val passed to a callback by the RangeSlider will\n>     # be a tuple of (min, max)\n>\n>     # Update the image's colormap\n>     im.norm.vmin = val[0]\n>     im.norm.vmax = val[1]\n>\n>     # Update the position of the vertical lines\n>     lower_limit_line.set_xdata([val[0], val[0]])\n>     upper_limit_line.set_xdata([val[1], val[1]])\n>\n>     # Redraw the figure to ensure it updates\n>     fig.canvas.draw_idle()\n>\n> slider.on_changed(update)plt.show()\n>\n> Actual outcome\n>\n>   File \"<ipython-input-52-b704c53e18d4>\", line 19, in <module>\n>     slider = RangeSlider(slider_ax, \"Threshold\", img.min(), img.max(),valinit=[0.0,0.0])\n>\n>   File \"/Users/Vincent/opt/anaconda3/envs/py38/lib/python3.8/site-packages/matplotlib/widgets.py\", line 778, in __init__\n>     self.set_val(valinit)\n>\n>   File \"/Users/Vincent/opt/anaconda3/envs/py38/lib/python3.8/site-packages/matplotlib/widgets.py\", line 915, in set_val\n>     xy[4] = val[0], .25\n>\n> IndexError: index 4 is out of bounds for axis 0 with size 4\n>\n> Expected outcome\n>\n> range slider with user initial values\n> Additional information\n>\n> error can be\n>\n>\n>     def set_val(self, val):\n>         \"\"\"\n>         Set slider value to *val*.\n>\n>         Parameters\n>         ----------\n>         val : tuple or array-like of float\n>         \"\"\"\n>         val = np.sort(np.asanyarray(val))\n>         if val.shape != (2,):\n>             raise ValueError(\n>                 f\"val must have shape (2,) but has shape {val.shape}\"\n>             )\n>         val[0] = self._min_in_bounds(val[0])\n>         val[1] = self._max_in_bounds(val[1])\n>         xy = self.poly.xy\n>         if self.orientation == \"vertical\":\n>             xy[0] = .25, val[0]\n>             xy[1] = .25, val[1]\n>             xy[2] = .75, val[1]\n>             xy[3] = .75, val[0]\n>             # xy[4] = .25, val[0]\n>         else:\n>             xy[0] = val[0], .25\n>             xy[1] = val[0], .75\n>             xy[2] = val[1], .75\n>             xy[3] = val[1], .25\n>             # xy[4] = val[0], .25\n>         self.poly.xy = xy\n>         self.valtext.set_text(self._format(val))\n>         if self.drawon:\n>             self.ax.figure.canvas.draw_idle()\n>         self.val = val\n>         if self.eventson:\n>             self._observers.process(\"changed\", val)\n>\n>\n> Operating system\n>\n> OSX\n> Matplotlib Version\n>\n> 3.5.1\n> Matplotlib Backend\n>\n> *No response*\n> Python version\n>\n> 3.8\n> Jupyter version\n>\n> *No response*\n> Installation\n>\n> pip\n>\n> \u2014\n> Reply to this email directly, view it on GitHub\n> <https://github.com/matplotlib/matplotlib/issues/22686>, or unsubscribe\n> <https://github.com/notifications/unsubscribe-auth/AACHF6CW2HVLKT5Q56BVZDLVBJ6X7ANCNFSM5RMUEIDQ>\n> .\n> You are receiving this because you are subscribed to this thread.Message\n> ID: ***@***.***>\n>\n\nYes, i might have been too fast, cause it allows to skip the error but then it seems that the polygon is not right...\r\nLet me know if you know how this should be solved...\r\n![Capture d\u2019e\u0301cran, le 2022-03-22 a\u0300 23 20 23](https://user-images.githubusercontent.com/37241971/159617326-44c69bfc-bf0a-4f79-ab23-925c7066f2c2.jpg)\r\n\r\n\nSo I think you found an edge case because your valinit has both values equal. This means that the poly object created by `axhspan` is not as large as the rest of the code expects. \r\n\r\nhttps://github.com/matplotlib/matplotlib/blob/11737d0694109f71d2603ba67d764aa2fb302761/lib/matplotlib/widgets.py#L722\r\n\r\nA quick workaround is to have the valinit contain two different numbers (even if only minuscule difference)\nYes you are right!\r\nThanks a lot for digging into this!!\nCompare:\r\n\r\n```python\r\nimport matplotlib.pyplot as plt\r\nfig, ax = plt.subplots()\r\npoly_same_valinit = ax.axvspan(0, 0, 0, 1)\r\npoly_diff_valinit = ax.axvspan(0, .5, 0, 1)\r\nprint(poly_same_valinit.xy.shape)\r\nprint(poly_diff_valinit.xy.shape)\r\n```\r\n\r\nwhich gives:\r\n\r\n```\r\n(4, 2)\r\n(5, 2)\r\n```\r\n\nTwo solutions spring to mind:\r\n\r\n1. Easier option\r\nThrow an error in init if `valinit[0] == valinit[1]`\r\n\r\n2. Maybe better option?\r\nDon't use axhspan and manually create the poly to ensure it always has the expected number of vertices\nOption 2 might be better yes\n@vpicouet any interest in opening a PR?\nI don't think I am qualified to do so, never opened a PR yet. \r\nRangeSlider might also contain another issue. \r\nWhen I call `RangeSlider.set_val([0.0,0.1])`\r\nIt changes only the blue poly object and the range value on the right side of the slider not the dot:\r\n![Capture d\u2019e\u0301cran, le 2022-03-25 a\u0300 15 53 44](https://user-images.githubusercontent.com/37241971/160191943-aef5fbe2-2f54-42ae-9719-23375767b212.jpg)\r\n \n> I don't think I am qualified to do so, never opened a PR yet.\r\n\r\nThat's always true until you've opened your first one :). But I also understand that it can be intimidating.\r\n\r\n\r\n>  RangeSlider might also contain another issue.\r\n> When I call RangeSlider.set_val([0.0,0.1])\r\n> It changes only the blue poly object and the range value on the right side of the slider not the dot:\r\n\r\n\r\noh hmm - good catch! may be worth opening a separate issue there as these are two distinct bugs and this one may be a bit more comlicated to fix.\nHaha true! I might try when I have more time!\r\nThrowing an error at least as I have never worked with axhspan and polys.\r\nOk, openning another issue.\nCan I try working on this? @ianhi @vpicouet \r\nFrom the discussion, I could identify that a quick fix would be to use a try-except block to throw an error \r\nif valinit[0] == valinit[1]\r\n\r\nPlease let me know your thoughts.\nSure! \n@nik1097 anyone can work on any issue at any point - no need to ask :) The only thing you should do is check that theres not already a PR for it.\r\n\r\n> From the discussion, I could identify that a quick fix would be to use a try-except block to throw an error\r\n> if valinit[0] == valinit[1]\r\n\r\n> Please let me know your thoughts.\r\n\r\nwhile this would have made this an explicit error I think we should use this an opportunity to improve the functionality by using option 2 from https://github.com/matplotlib/matplotlib/issues/22686#issuecomment-1076496982\r\n\r\nThat creation code will look something like what axhspan does internally ( replacing `self` with `self.ax`)\r\n\r\nhttps://github.com/matplotlib/matplotlib/blob/710fce3df95e22701bd68bf6af2c8adbc9d67a79/lib/matplotlib/axes/_axes.py#L988-L993\r\nwith the key difference that the `verts` variable should be defined as `verts = np.zeros([5,2])` and then the values should be filled the same way they are in the `set_val` method here: https://github.com/matplotlib/matplotlib/blob/2e921df22ba6b2a7782241798b042403c04cbdaf/lib/matplotlib/widgets.py#L901-L912\r\n\nHey, I guess the below PR should fix this issue too. If I'm not wrong, I will wait for the PR to be approved.\r\nhttps://github.com/matplotlib/matplotlib/pull/22711\n@nik1097 that PR doesn't address this issue so no need to wait for that one\nYes, it makes sense now. Will get back to you asap @ianhi \r\n\nIs someone still working on this ?\nI still am but I'm currently caught up with another project. Feel free to give it a shot, thanks! @AnnaMastori \r\n\nshould this be the expected outcome of the solution?\r\n![\u03a3\u03c4\u03b9\u03b3\u03bc\u03b9\u03bf\u0301\u03c4\u03c5\u03c0\u03bf \u03bf\u03b8\u03bf\u0301\u03bd\u03b7\u03c2 (104)](https://user-images.githubusercontent.com/72826029/165545175-aca35912-1b46-491d-8fb3-841e1ae4a1c4.png)\r\n\n@NickolasGiannatos that looks like the correct starting position if you give an init value of `(0, 0)`. The next things to check are that it looks correct when you move the slider around, and that it looks correct with init values like `(.3, .5)`\n@ianhi Me and @NickolasGiannatos work together. It works for (.3, .5). Is there anything else that we should try ?\r\n![\u03a3\u03c4\u03b9\u03b3\u03bc\u03b9\u03cc\u03c4\u03c5\u03c0\u03bf \u03bf\u03b8\u03cc\u03bd\u03b7\u03c2 (107)](https://user-images.githubusercontent.com/72812754/165580835-cc41e3f7-7761-42e2-b276-2e1f9c12fffa.png)\r\n \n@AnnaMastori @NickolasGiannatos can you please open a PR with your changes? It makes it much easier to discuss if we can all look at the same code.\nokay we will do it as soon as possible although it's our first time so there might be mistakes.\n>  our first time so there might be mistakes.\r\n\r\nThat's fine! I had lots of mistakes my first time",
+  "created_at": "2022-04-28T13:39:16Z",
+  "version": "3.5",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_widgets.py::test_range_slider_same_init_values[horizontal]\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_widgets.py::test_CheckButtons\", \"lib/matplotlib/tests/test_widgets.py::test_MultiCursor[False-True]\", \"lib/matplotlib/tests/test_widgets.py::test_MultiCursor[True-False]\", \"lib/matplotlib/tests/test_widgets.py::test_MultiCursor[True-True]\", \"lib/matplotlib/tests/test_widgets.py::test_TextBox[none]\", \"lib/matplotlib/tests/test_widgets.py::test_TextBox[toolbar2]\", \"lib/matplotlib/tests/test_widgets.py::test_TextBox[toolmanager]\", \"lib/matplotlib/tests/test_widgets.py::test_check_bunch_of_radio_buttons[png]\", \"lib/matplotlib/tests/test_widgets.py::test_check_radio_buttons_image[png]\", \"lib/matplotlib/tests/test_widgets.py::test_ellipse\", \"lib/matplotlib/tests/test_widgets.py::test_lasso_selector\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector[False]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector[True]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_box\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_redraw[False]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_redraw[True]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[False-1]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[False-2]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[False-3]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[True-1]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[True-2]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove[True-3]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove_first_point[False]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_remove_first_point[True]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_set_props_handle_props[False]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_set_props_handle_props[True]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_verts_setter[png-False]\", \"lib/matplotlib/tests/test_widgets.py::test_polygon_selector_verts_setter[png-True]\", \"lib/matplotlib/tests/test_widgets.py::test_range_slider[horizontal]\", \"lib/matplotlib/tests/test_widgets.py::test_range_slider[vertical]\", \"lib/matplotlib/tests/test_widgets.py::test_range_slider_same_init_values[vertical]\", \"lib/matplotlib/tests/test_widgets.py::test_rect_visibility[pdf]\", \"lib/matplotlib/tests/test_widgets.py::test_rect_visibility[png]\", \"lib/matplotlib/tests/test_widgets.py::test_rectange_add_remove_set\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_add_state\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_drag[False-new_center1]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_drag[True-new_center0]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_handles\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-0-10-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-0-10-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-1-10.5-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-1-10.5-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-1-11-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[0-10-1-11-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-0-10-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-0-10-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-1-10.5-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-1-10.5-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-1-11-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-10.5-1-11-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-0-10-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-0-10-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-1-10.5-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-1-10.5-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-1-11-data]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_minspan[1-11-1-11-pixels]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_center[False]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_center[True]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_square[False]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_square[True]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_square_center\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_square_center_aspect[False]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_resize_square_center_aspect[True]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_rotate[EllipseSelector]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_rotate[RectangleSelector]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector_ignore_outside[False]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector_ignore_outside[True]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector_onselect[False]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector_onselect[True]\", \"lib/matplotlib/tests/test_widgets.py::test_rectangle_selector_set_props_handle_props\", \"lib/matplotlib/tests/test_widgets.py::test_selector_clear[rectangle]\", \"lib/matplotlib/tests/test_widgets.py::test_selector_clear[span]\", \"lib/matplotlib/tests/test_widgets.py::test_selector_clear_method[rectangle]\", \"lib/matplotlib/tests/test_widgets.py::test_selector_clear_method[span]\", \"lib/matplotlib/tests/test_widgets.py::test_slider_horizontal_vertical\", \"lib/matplotlib/tests/test_widgets.py::test_slider_reset\", \"lib/matplotlib/tests/test_widgets.py::test_slider_slidermin_slidermax\", \"lib/matplotlib/tests/test_widgets.py::test_slider_slidermin_slidermax_invalid\", \"lib/matplotlib/tests/test_widgets.py::test_slider_valmin_valmax\", \"lib/matplotlib/tests/test_widgets.py::test_slider_valstep_snapping\", \"lib/matplotlib/tests/test_widgets.py::test_snapping_values_span_selector\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_add_state\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_bound[horizontal]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_bound[vertical]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_direction\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_drag[False]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_drag[True]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_ignore_outside[False]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_ignore_outside[True]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_onselect[False]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_onselect[True]\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_set_props_handle_props\", \"lib/matplotlib/tests/test_widgets.py::test_span_selector_snap\", \"lib/matplotlib/tests/test_widgets.py::test_tool_line_handle\"]",
+  "environment_setup_commit": "de98877e3dc45de8dd441d008f23d88738dc015d",
+  "patch_files": [
+    "lib/matplotlib/widgets.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_widgets.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/widgets.py": {
+      "diffs": [
+        {
+          "start_line_old": 22,
+          "end_line_old": 22,
+          "file_pos": 1,
+          "file_context_length": 32204,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_TextBox.set_val_TextBox.begin_typing.9.4.3.1",
+          "closest_snippet_line_distance": 1258
+        },
+        {
+          "start_line_old": 712,
+          "end_line_old": 712,
+          "file_pos": 1,
+          "file_context_length": 32204,
+          "pos": 1,
+          "context_length": 1268
+        },
+        {
+          "start_line_old": 722,
+          "end_line_old": 722,
+          "file_pos": 1,
+          "file_context_length": 32204,
+          "pos": 1,
+          "context_length": 1268
+        },
+        {
+          "start_line_old": 780,
+          "end_line_old": 780,
+          "file_pos": 1,
+          "file_context_length": 32204,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider._update_RangeSlider._update.11.2.1",
+          "closest_snippet_line_distance": 41,
+          "pos": 13,
+          "context_length": 5673
+        },
+        {
+          "start_line_old": 906,
+          "end_line_old": 935,
+          "file_pos": 1,
+          "file_context_length": 32204,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider.__init___RangeSlider.__init__.15",
+          "closest_snippet_line_distance": 157,
+          "pos": 3,
+          "context_length": 1892
+        }
+      ]
+    }
+  },
+  "vectors": 3915,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider.__init___RangeSlider.__init__.15",
+      "distance": 0.5195666551589966,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 603,
+      "end_line": 778,
+      "tokens": 1268,
+      "context_length": 1268,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/examples/widgets/range_slider.py_update_",
+      "distance": 0.5283333659172058,
+      "file_path": "examples/widgets/range_slider.py",
+      "start_line": 44,
+      "end_line": 71,
+      "tokens": 168,
+      "context_length": 1436
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider.set_val_RangeSlider.on_changed.2.1",
+      "distance": 0.5503956079483032,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 896,
+      "end_line": 952,
+      "tokens": 456,
+      "context_length": 1892,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider.__init___Slider.__init__.17",
+      "distance": 0.6026304364204407,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 331,
+      "end_line": 485,
+      "tokens": 1378,
+      "context_length": 3270,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider.set_val_Slider.on_changed.2.1",
+      "distance": 0.6492706537246704,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 545,
+      "end_line": 585,
+      "tokens": 270,
+      "context_length": 3540,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider._update_val_from_pos_RangeSlider._update_val_from_pos.4.1.2.1",
+      "distance": 0.6851791739463806,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 806,
+      "end_line": 819,
+      "tokens": 125,
+      "context_length": 3665,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_SliderBase._stepped_value_SliderBase.reset.2.1",
+      "distance": 0.6978750228881836,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 281,
+      "end_line": 309,
+      "tokens": 229,
+      "context_length": 3894,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider._update_Slider._format.2.2.3.1",
+      "distance": 0.7052367925643921,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 511,
+      "end_line": 543,
+      "tokens": 267,
+      "context_length": 4161,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/examples/widgets/slider_snap_demo.py_1_",
+      "distance": 0.7131788730621338,
+      "file_path": "examples/widgets/slider_snap_demo.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 584,
+      "context_length": 4745
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider._format_RangeSlider.set_max.2",
+      "distance": 0.7150365114212036,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 862,
+      "end_line": 894,
+      "tokens": 248,
+      "context_length": 4993,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider_Slider.observers.1",
+      "distance": 0.7237257361412048,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 312,
+      "end_line": 329,
+      "tokens": 147,
+      "context_length": 5140,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider._update_RangeSlider._update.11.2.1",
+      "distance": 0.7272274494171143,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 821,
+      "end_line": 860,
+      "tokens": 318,
+      "context_length": 5458,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider._min_in_bounds_RangeSlider._value_in_bounds.2.1",
+      "distance": 0.7284402847290039,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 780,
+      "end_line": 804,
+      "tokens": 215,
+      "context_length": 5673,
+      "file_pos": 3
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider._value_in_bounds_Slider._value_in_bounds.6.1",
+      "distance": 0.7581043243408203,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 487,
+      "end_line": 509,
+      "tokens": 159,
+      "context_length": 5832,
+      "file_pos": 3
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_RangeSlider_RangeSlider.1",
+      "distance": 0.7817428112030029,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 588,
+      "end_line": 601,
+      "tokens": 118,
+      "context_length": 5950,
+      "file_pos": 3
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/examples/widgets/range_slider.py_1_upper_limit_line.1",
+      "distance": 0.7903560400009155,
+      "file_path": "examples/widgets/range_slider.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 340,
+      "context_length": 6290
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/examples/widgets/slider_demo.py_1_",
+      "distance": 0.8108813762664795,
+      "file_path": "examples/widgets/slider_demo.py",
+      "start_line": 1,
+      "end_line": 92,
+      "tokens": 591,
+      "context_length": 6881
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_SliderBase_SliderBase.__init__.self._observers.1",
+      "distance": 0.8950568437576294,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 234,
+      "end_line": 279,
+      "tokens": 374,
+      "context_length": 7255,
+      "file_pos": 4
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/fourier_demo_wx_sgskip.py_SliderGroup_SliderGroup.setKnob.2",
+      "distance": 0.9076191186904907,
+      "file_path": "examples/user_interfaces/fourier_demo_wx_sgskip.py",
+      "start_line": 67,
+      "end_line": 102,
+      "tokens": 308,
+      "context_length": 7563
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/examples/widgets/annotated_cursor.py_6_",
+      "distance": 0.9985555410385132,
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "start_line": 286,
+      "end_line": 343,
+      "tokens": 471,
+      "context_length": 8034
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_TextBox.set_val_TextBox.begin_typing.9.4.3.1",
+      "distance": 1.009549617767334,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 1280,
+      "end_line": 1309,
+      "tokens": 313,
+      "context_length": 8347,
+      "file_pos": 6
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_1__log.1",
+      "distance": 1.0346109867095947,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 665,
+      "context_length": 9012
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_cm.py__cubehelix_data__g36.1.1",
+      "distance": 1.036177158355713,
+      "file_path": "lib/matplotlib/_cm.py",
+      "start_line": 106,
+      "end_line": 156,
+      "tokens": 787,
+      "context_length": 9799
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Tick.apply_tickdir_Tick._set_artist_props.1",
+      "distance": 1.0378963947296143,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 219,
+      "end_line": 346,
+      "tokens": 802,
+      "context_length": 10601
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_tk_sgskip.py_1_",
+      "distance": 1.0404081344604492,
+      "file_path": "examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 466,
+      "context_length": 11067
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/svg_histogram_sgskip.py_np_",
+      "distance": 1.0490823984146118,
+      "file_path": "examples/user_interfaces/svg_histogram_sgskip.py",
+      "start_line": 37,
+      "end_line": 160,
+      "tokens": 907,
+      "context_length": 11974
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/colormap_interactive_adjustment.py_1_",
+      "distance": 1.0493505001068115,
+      "file_path": "examples/images_contours_and_fields/colormap_interactive_adjustment.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 306,
+      "context_length": 12280
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/grid_helper_curvelinear.py_FloatingAxisArtistHelper.update_lim_FloatingAxisArtistHelper.update_lim.self._grid_info.1",
+      "distance": 1.051593542098999,
+      "file_path": "lib/mpl_toolkits/axisartist/grid_helper_curvelinear.py",
+      "start_line": 89,
+      "end_line": 130,
+      "tokens": 470,
+      "context_length": 12750
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/mplot3d/axis3d.py_Axis.init3d_Axis.get_rotate_label.1.2.1.1",
+      "distance": 1.052213191986084,
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "start_line": 165,
+      "end_line": 211,
+      "tokens": 398,
+      "context_length": 13148
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/examples/event_handling/viewlims.py_MandelbrotDisplay.ax_update_MandelbrotDisplay.ax_update.12",
+      "distance": 1.0534698963165283,
+      "file_path": "examples/event_handling/viewlims.py",
+      "start_line": 55,
+      "end_line": 67,
+      "tokens": 150,
+      "context_length": 13298
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_base.py__AxesBase.name__AxesBase.clear.48.1",
+      "distance": 1.0554375648498535,
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "start_line": 542,
+      "end_line": 1299,
+      "tokens": 6388,
+      "context_length": 19686
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_SubplotToolQt._on_value_changed_SubplotToolQt._on_value_changed.5",
+      "distance": 1.0562089681625366,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 891,
+      "end_line": 899,
+      "tokens": 140,
+      "context_length": 19826
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/examples/ticks/tick-formatters.py_5_",
+      "distance": 1.0598437786102295,
+      "file_path": "examples/ticks/tick-formatters.py",
+      "start_line": 37,
+      "end_line": 137,
+      "tokens": 970,
+      "context_length": 20796
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/pylab_with_gtk3_sgskip.py_1_",
+      "distance": 1.0642740726470947,
+      "file_path": "examples/user_interfaces/pylab_with_gtk3_sgskip.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 388,
+      "context_length": 21184
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/examples/event_handling/image_slices_viewer.py_IndexTracker_",
+      "distance": 1.0650216341018677,
+      "file_path": "examples/event_handling/image_slices_viewer.py",
+      "start_line": 25,
+      "end_line": 60,
+      "tokens": 237,
+      "context_length": 21421
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/examples/event_handling/ginput_manual_clabel_sgskip.py_1_",
+      "distance": 1.06561279296875,
+      "file_path": "examples/event_handling/ginput_manual_clabel_sgskip.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 631,
+      "context_length": 22052
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._process_values_Colorbar._process_values.14.self._values.1",
+      "distance": 1.0678762197494507,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1123,
+      "end_line": 1174,
+      "tokens": 589,
+      "context_length": 22641
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.set_ticklabels_Axis.set_ticklabels.9.1",
+      "distance": 1.070148229598999,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1804,
+      "end_line": 1884,
+      "tokens": 736,
+      "context_length": 23377
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/projections/polar.py_RadialTick.update_position_RadialTick.update_position.self.tick2line._marker._transform.1",
+      "distance": 1.070483922958374,
+      "file_path": "lib/matplotlib/projections/polar.py",
+      "start_line": 557,
+      "end_line": 635,
+      "tokens": 764,
+      "context_length": 24141
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/widgets.py",
+      "position": 1,
+      "tokens": 32204,
+      "context_length": 32204
+    },
+    {
+      "file_path": "examples/widgets/range_slider.py",
+      "position": 2,
+      "tokens": 508,
+      "context_length": 32712
+    },
+    {
+      "file_path": "examples/widgets/slider_snap_demo.py",
+      "position": 3,
+      "tokens": 584,
+      "context_length": 33296
+    },
+    {
+      "file_path": "examples/widgets/slider_demo.py",
+      "position": 4,
+      "tokens": 591,
+      "context_length": 33887
+    },
+    {
+      "file_path": "examples/user_interfaces/fourier_demo_wx_sgskip.py",
+      "position": 5,
+      "tokens": 2144,
+      "context_length": 36031
+    },
+    {
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "position": 6,
+      "tokens": 2848,
+      "context_length": 38879
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 7,
+      "tokens": 26585,
+      "context_length": 65464
+    },
+    {
+      "file_path": "lib/matplotlib/_cm.py",
+      "position": 8,
+      "tokens": 28443,
+      "context_length": 93907
+    },
+    {
+      "file_path": "lib/matplotlib/axis.py",
+      "position": 9,
+      "tokens": 21445,
+      "context_length": 115352
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "position": 10,
+      "tokens": 466,
+      "context_length": 115818
+    },
+    {
+      "file_path": "examples/user_interfaces/svg_histogram_sgskip.py",
+      "position": 11,
+      "tokens": 1168,
+      "context_length": 116986
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/colormap_interactive_adjustment.py",
+      "position": 12,
+      "tokens": 306,
+      "context_length": 117292
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/grid_helper_curvelinear.py",
+      "position": 13,
+      "tokens": 3425,
+      "context_length": 120717
+    },
+    {
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "position": 14,
+      "tokens": 5548,
+      "context_length": 126265
+    },
+    {
+      "file_path": "examples/event_handling/viewlims.py",
+      "position": 15,
+      "tokens": 824,
+      "context_length": 127089
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "position": 16,
+      "tokens": 38605,
+      "context_length": 165694
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "position": 17,
+      "tokens": 8819,
+      "context_length": 174513
+    },
+    {
+      "file_path": "examples/ticks/tick-formatters.py",
+      "position": 18,
+      "tokens": 1242,
+      "context_length": 175755
+    },
+    {
+      "file_path": "examples/user_interfaces/pylab_with_gtk3_sgskip.py",
+      "position": 19,
+      "tokens": 388,
+      "context_length": 176143
+    },
+    {
+      "file_path": "examples/event_handling/image_slices_viewer.py",
+      "position": 20,
+      "tokens": 359,
+      "context_length": 176502
+    },
+    {
+      "file_path": "examples/event_handling/ginput_manual_clabel_sgskip.py",
+      "position": 21,
+      "tokens": 631,
+      "context_length": 177133
+    },
+    {
+      "file_path": "lib/matplotlib/colorbar.py",
+      "position": 22,
+      "tokens": 14679,
+      "context_length": 191812
+    },
+    {
+      "file_path": "lib/matplotlib/projections/polar.py",
+      "position": 23,
+      "tokens": 12353,
+      "context_length": 204165
+    }
+  ]
+}

@@ -1,0 +1,1427 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-11315",
+  "model_patch": "diff --git a/sklearn/utils/metaestimators.py b/sklearn/utils/metaestimators.py\nindex 541ffc583..140c01c37 100644\n--- a/sklearn/utils/metaestimators.py\n+++ b/sklearn/utils/metaestimators.py\n@@ -41,7 +41,11 @@ class _BaseComposition(six.with_metaclass(ABCMeta, BaseEstimator)):\n         if attr in params:\n             setattr(self, attr, params.pop(attr))\n         # 2. Step replacement\n-        names, _ = zip(*getattr(self, attr))\n+        estimators = getattr(self, attr)\n+        if estimators:\n+            names, _ = zip(*estimators)\n+        else:\n+            names = []\n         for name in list(six.iterkeys(params)):\n             if '__' not in name and name in names:\n                 self._replace_estimator(attr, name, params.pop(name))\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/utils/metaestimators.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "bb5110b8e0b70d98eae2f7f8b6d4deaa5d2de038",
+  "patch": "diff --git a/sklearn/compose/_column_transformer.py b/sklearn/compose/_column_transformer.py\n--- a/sklearn/compose/_column_transformer.py\n+++ b/sklearn/compose/_column_transformer.py\n@@ -6,7 +6,7 @@\n # Author: Andreas Mueller\n #         Joris Van den Bossche\n # License: BSD\n-\n+from itertools import chain\n \n import numpy as np\n from scipy import sparse\n@@ -69,7 +69,7 @@ class ColumnTransformer(_BaseComposition, TransformerMixin):\n             ``transformer`` expects X to be a 1d array-like (vector),\n             otherwise a 2d array will be passed to the transformer.\n \n-    remainder : {'passthrough', 'drop'}, default 'passthrough'\n+    remainder : {'passthrough', 'drop'} or estimator, default 'passthrough'\n         By default, all remaining columns that were not specified in\n         `transformers` will be automatically passed through (default of\n         ``'passthrough'``). This subset of columns is concatenated with the\n@@ -77,6 +77,9 @@ class ColumnTransformer(_BaseComposition, TransformerMixin):\n         By using ``remainder='drop'``, only the specified columns in\n         `transformers` are transformed and combined in the output, and the\n         non-specified columns are dropped.\n+        By setting ``remainder`` to be an estimator, the remaining\n+        non-specified columns will use the ``remainder`` estimator. The\n+        estimator must support `fit` and `transform`.\n \n     n_jobs : int, optional\n         Number of jobs to run in parallel (default 1).\n@@ -90,7 +93,13 @@ class ColumnTransformer(_BaseComposition, TransformerMixin):\n     ----------\n     transformers_ : list\n         The collection of fitted transformers as tuples of\n-        (name, fitted_transformer, column).\n+        (name, fitted_transformer, column). `fitted_transformer` can be an\n+        estimator, 'drop', or 'passthrough'. If there are remaining columns,\n+        the final element is a tuple of the form:\n+        ('remainder', transformer, remaining_columns) corresponding to the\n+        ``remainder`` parameter. If there are remaining columns, then\n+        ``len(transformers_)==len(transformers)+1``, otherwise\n+        ``len(transformers_)==len(transformers)``.\n \n     named_transformers_ : Bunch object, a dictionary with attribute access\n         Read-only attribute to access any transformer by given name.\n@@ -188,13 +197,12 @@ def _iter(self, X=None, fitted=False, replace_strings=False):\n             transformers = self.transformers_\n         else:\n             transformers = self.transformers\n+            if self._remainder[2] is not None:\n+                transformers = chain(transformers, [self._remainder])\n         get_weight = (self.transformer_weights or {}).get\n \n         for name, trans, column in transformers:\n-            if X is None:\n-                sub = X\n-            else:\n-                sub = _get_column(X, column)\n+            sub = None if X is None else _get_column(X, column)\n \n             if replace_strings:\n                 # replace 'passthrough' with identity transformer and\n@@ -209,7 +217,10 @@ def _iter(self, X=None, fitted=False, replace_strings=False):\n             yield (name, trans, sub, get_weight(name))\n \n     def _validate_transformers(self):\n-        names, transformers, _, _ = zip(*self._iter())\n+        if not self.transformers:\n+            return\n+\n+        names, transformers, _ = zip(*self.transformers)\n \n         # validate names\n         self._validate_names(names)\n@@ -226,24 +237,27 @@ def _validate_transformers(self):\n                                 (t, type(t)))\n \n     def _validate_remainder(self, X):\n-        \"\"\"Generate list of passthrough columns for 'remainder' case.\"\"\"\n-        if self.remainder not in ('drop', 'passthrough'):\n+        \"\"\"\n+        Validates ``remainder`` and defines ``_remainder`` targeting\n+        the remaining columns.\n+        \"\"\"\n+        is_transformer = ((hasattr(self.remainder, \"fit\")\n+                           or hasattr(self.remainder, \"fit_transform\"))\n+                          and hasattr(self.remainder, \"transform\"))\n+        if (self.remainder not in ('drop', 'passthrough')\n+                and not is_transformer):\n             raise ValueError(\n-                \"The remainder keyword needs to be one of 'drop' or \"\n-                \"'passthrough'. {0:r} was passed instead\")\n+                \"The remainder keyword needs to be one of 'drop', \"\n+                \"'passthrough', or estimator. '%s' was passed instead\" %\n+                self.remainder)\n \n         n_columns = X.shape[1]\n+        cols = []\n+        for _, _, columns in self.transformers:\n+            cols.extend(_get_column_indices(X, columns))\n+        remaining_idx = sorted(list(set(range(n_columns)) - set(cols))) or None\n \n-        if self.remainder == 'passthrough':\n-            cols = []\n-            for _, _, columns in self.transformers:\n-                cols.extend(_get_column_indices(X, columns))\n-            self._passthrough = sorted(list(set(range(n_columns)) - set(cols)))\n-            if not self._passthrough:\n-                # empty list -> no need to select passthrough columns\n-                self._passthrough = None\n-        else:\n-            self._passthrough = None\n+        self._remainder = ('remainder', self.remainder, remaining_idx)\n \n     @property\n     def named_transformers_(self):\n@@ -267,12 +281,6 @@ def get_feature_names(self):\n             Names of the features produced by transform.\n         \"\"\"\n         check_is_fitted(self, 'transformers_')\n-        if self._passthrough is not None:\n-            raise NotImplementedError(\n-                \"get_feature_names is not yet supported when having columns\"\n-                \"that are passed through (you specify remainder='drop' to not \"\n-                \"pass through the unspecified columns).\")\n-\n         feature_names = []\n         for name, trans, _, _ in self._iter(fitted=True):\n             if trans == 'drop':\n@@ -294,7 +302,11 @@ def _update_fitted_transformers(self, transformers):\n         transformers = iter(transformers)\n         transformers_ = []\n \n-        for name, old, column in self.transformers:\n+        transformer_iter = self.transformers\n+        if self._remainder[2] is not None:\n+            transformer_iter = chain(transformer_iter, [self._remainder])\n+\n+        for name, old, column in transformer_iter:\n             if old == 'drop':\n                 trans = 'drop'\n             elif old == 'passthrough':\n@@ -304,7 +316,6 @@ def _update_fitted_transformers(self, transformers):\n                 trans = 'passthrough'\n             else:\n                 trans = next(transformers)\n-\n             transformers_.append((name, trans, column))\n \n         # sanity check that transformers is exhausted\n@@ -335,7 +346,7 @@ def _fit_transform(self, X, y, func, fitted=False):\n             return Parallel(n_jobs=self.n_jobs)(\n                 delayed(func)(clone(trans) if not fitted else trans,\n                               X_sel, y, weight)\n-                for name, trans, X_sel, weight in self._iter(\n+                for _, trans, X_sel, weight in self._iter(\n                     X=X, fitted=fitted, replace_strings=True))\n         except ValueError as e:\n             if \"Expected 2D array, got 1D array instead\" in str(e):\n@@ -361,12 +372,12 @@ def fit(self, X, y=None):\n             This estimator\n \n         \"\"\"\n-        self._validate_transformers()\n         self._validate_remainder(X)\n+        self._validate_transformers()\n \n         transformers = self._fit_transform(X, y, _fit_one_transformer)\n-\n         self._update_fitted_transformers(transformers)\n+\n         return self\n \n     def fit_transform(self, X, y=None):\n@@ -390,31 +401,21 @@ def fit_transform(self, X, y=None):\n             sparse matrices.\n \n         \"\"\"\n-        self._validate_transformers()\n         self._validate_remainder(X)\n+        self._validate_transformers()\n \n         result = self._fit_transform(X, y, _fit_transform_one)\n \n         if not result:\n             # All transformers are None\n-            if self._passthrough is None:\n-                return np.zeros((X.shape[0], 0))\n-            else:\n-                return _get_column(X, self._passthrough)\n+            return np.zeros((X.shape[0], 0))\n \n         Xs, transformers = zip(*result)\n \n         self._update_fitted_transformers(transformers)\n         self._validate_output(Xs)\n \n-        if self._passthrough is not None:\n-            Xs = list(Xs) + [_get_column(X, self._passthrough)]\n-\n-        if any(sparse.issparse(f) for f in Xs):\n-            Xs = sparse.hstack(Xs).tocsr()\n-        else:\n-            Xs = np.hstack(Xs)\n-        return Xs\n+        return _hstack(list(Xs))\n \n     def transform(self, X):\n         \"\"\"Transform X separately by each transformer, concatenate results.\n@@ -440,19 +441,9 @@ def transform(self, X):\n \n         if not Xs:\n             # All transformers are None\n-            if self._passthrough is None:\n-                return np.zeros((X.shape[0], 0))\n-            else:\n-                return _get_column(X, self._passthrough)\n-\n-        if self._passthrough is not None:\n-            Xs = list(Xs) + [_get_column(X, self._passthrough)]\n+            return np.zeros((X.shape[0], 0))\n \n-        if any(sparse.issparse(f) for f in Xs):\n-            Xs = sparse.hstack(Xs).tocsr()\n-        else:\n-            Xs = np.hstack(Xs)\n-        return Xs\n+        return _hstack(list(Xs))\n \n \n def _check_key_type(key, superclass):\n@@ -486,6 +477,19 @@ def _check_key_type(key, superclass):\n     return False\n \n \n+def _hstack(X):\n+    \"\"\"\n+    Stacks X horizontally.\n+\n+    Supports input types (X): list of\n+        numpy arrays, sparse arrays and DataFrames\n+    \"\"\"\n+    if any(sparse.issparse(f) for f in X):\n+        return sparse.hstack(X).tocsr()\n+    else:\n+        return np.hstack(X)\n+\n+\n def _get_column(X, key):\n     \"\"\"\n     Get feature column(s) from input data X.\n@@ -612,7 +616,7 @@ def make_column_transformer(*transformers, **kwargs):\n     ----------\n     *transformers : tuples of column selections and transformers\n \n-    remainder : {'passthrough', 'drop'}, default 'passthrough'\n+    remainder : {'passthrough', 'drop'} or estimator, default 'passthrough'\n         By default, all remaining columns that were not specified in\n         `transformers` will be automatically passed through (default of\n         ``'passthrough'``). This subset of columns is concatenated with the\n@@ -620,6 +624,9 @@ def make_column_transformer(*transformers, **kwargs):\n         By using ``remainder='drop'``, only the specified columns in\n         `transformers` are transformed and combined in the output, and the\n         non-specified columns are dropped.\n+        By setting ``remainder`` to be an estimator, the remaining\n+        non-specified columns will use the ``remainder`` estimator. The\n+        estimator must support `fit` and `transform`.\n \n     n_jobs : int, optional\n         Number of jobs to run in parallel (default 1).\ndiff --git a/sklearn/utils/metaestimators.py b/sklearn/utils/metaestimators.py\n--- a/sklearn/utils/metaestimators.py\n+++ b/sklearn/utils/metaestimators.py\n@@ -23,7 +23,7 @@ def __init__(self):\n         pass\n \n     def _get_params(self, attr, deep=True):\n-        out = super(_BaseComposition, self).get_params(deep=False)\n+        out = super(_BaseComposition, self).get_params(deep=deep)\n         if not deep:\n             return out\n         estimators = getattr(self, attr)\n",
+  "test_patch": "diff --git a/sklearn/compose/tests/test_column_transformer.py b/sklearn/compose/tests/test_column_transformer.py\n--- a/sklearn/compose/tests/test_column_transformer.py\n+++ b/sklearn/compose/tests/test_column_transformer.py\n@@ -37,6 +37,14 @@ def transform(self, X, y=None):\n         return X\n \n \n+class DoubleTrans(BaseEstimator):\n+    def fit(self, X, y=None):\n+        return self\n+\n+    def transform(self, X):\n+        return 2*X\n+\n+\n class SparseMatrixTrans(BaseEstimator):\n     def fit(self, X, y=None):\n         return self\n@@ -46,6 +54,23 @@ def transform(self, X, y=None):\n         return sparse.eye(n_samples, n_samples).tocsr()\n \n \n+class TransNo2D(BaseEstimator):\n+    def fit(self, X, y=None):\n+        return self\n+\n+    def transform(self, X, y=None):\n+        return X\n+\n+\n+class TransRaise(BaseEstimator):\n+\n+    def fit(self, X, y=None):\n+        raise ValueError(\"specific message\")\n+\n+    def transform(self, X, y=None):\n+        raise ValueError(\"specific message\")\n+\n+\n def test_column_transformer():\n     X_array = np.array([[0, 1, 2], [2, 4, 6]]).T\n \n@@ -78,6 +103,7 @@ def test_column_transformer():\n                             ('trans2', Trans(), [1])])\n     assert_array_equal(ct.fit_transform(X_array), X_res_both)\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both)\n+    assert len(ct.transformers_) == 2\n \n     # test with transformer_weights\n     transformer_weights = {'trans1': .1, 'trans2': 10}\n@@ -88,11 +114,13 @@ def test_column_transformer():\n                      transformer_weights['trans2'] * X_res_second1D]).T\n     assert_array_equal(both.fit_transform(X_array), res)\n     assert_array_equal(both.fit(X_array).transform(X_array), res)\n+    assert len(both.transformers_) == 2\n \n     both = ColumnTransformer([('trans', Trans(), [0, 1])],\n                              transformer_weights={'trans': .1})\n     assert_array_equal(both.fit_transform(X_array), 0.1 * X_res_both)\n     assert_array_equal(both.fit(X_array).transform(X_array), 0.1 * X_res_both)\n+    assert len(both.transformers_) == 1\n \n \n def test_column_transformer_dataframe():\n@@ -142,11 +170,15 @@ def test_column_transformer_dataframe():\n                             ('trans2', Trans(), ['second'])])\n     assert_array_equal(ct.fit_transform(X_df), X_res_both)\n     assert_array_equal(ct.fit(X_df).transform(X_df), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     ct = ColumnTransformer([('trans1', Trans(), [0]),\n                             ('trans2', Trans(), [1])])\n     assert_array_equal(ct.fit_transform(X_df), X_res_both)\n     assert_array_equal(ct.fit(X_df).transform(X_df), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # test with transformer_weights\n     transformer_weights = {'trans1': .1, 'trans2': 10}\n@@ -157,17 +189,23 @@ def test_column_transformer_dataframe():\n                      transformer_weights['trans2'] * X_df['second']]).T\n     assert_array_equal(both.fit_transform(X_df), res)\n     assert_array_equal(both.fit(X_df).transform(X_df), res)\n+    assert len(both.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # test multiple columns\n     both = ColumnTransformer([('trans', Trans(), ['first', 'second'])],\n                              transformer_weights={'trans': .1})\n     assert_array_equal(both.fit_transform(X_df), 0.1 * X_res_both)\n     assert_array_equal(both.fit(X_df).transform(X_df), 0.1 * X_res_both)\n+    assert len(both.transformers_) == 1\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     both = ColumnTransformer([('trans', Trans(), [0, 1])],\n                              transformer_weights={'trans': .1})\n     assert_array_equal(both.fit_transform(X_df), 0.1 * X_res_both)\n     assert_array_equal(both.fit(X_df).transform(X_df), 0.1 * X_res_both)\n+    assert len(both.transformers_) == 1\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # ensure pandas object is passes through\n \n@@ -195,6 +233,11 @@ def transform(self, X, y=None):\n     assert_array_equal(ct.fit_transform(X_df), X_res_first)\n     assert_array_equal(ct.fit(X_df).transform(X_df), X_res_first)\n \n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'drop'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n+\n \n def test_column_transformer_sparse_array():\n     X_sparse = sparse.eye(3, 2).tocsr()\n@@ -230,6 +273,8 @@ def test_column_transformer_sparse_stacking():\n     assert_true(sparse.issparse(X_trans))\n     assert_equal(X_trans.shape, (X_trans.shape[0], X_trans.shape[0] + 1))\n     assert_array_equal(X_trans.toarray()[:, 1:], np.eye(X_trans.shape[0]))\n+    assert len(col_trans.transformers_) == 2\n+    assert col_trans.transformers_[-1][0] != 'remainder'\n \n \n def test_column_transformer_error_msg_1D():\n@@ -241,28 +286,12 @@ def test_column_transformer_error_msg_1D():\n     assert_raise_message(ValueError, \"1D data passed to a transformer\",\n                          col_trans.fit_transform, X_array)\n \n-    class TransRaise(BaseEstimator):\n-\n-        def fit(self, X, y=None):\n-            raise ValueError(\"specific message\")\n-\n-        def transform(self, X, y=None):\n-            raise ValueError(\"specific message\")\n-\n     col_trans = ColumnTransformer([('trans', TransRaise(), 0)])\n     for func in [col_trans.fit, col_trans.fit_transform]:\n         assert_raise_message(ValueError, \"specific message\", func, X_array)\n \n \n def test_2D_transformer_output():\n-\n-    class TransNo2D(BaseEstimator):\n-        def fit(self, X, y=None):\n-            return self\n-\n-        def transform(self, X, y=None):\n-            return X\n-\n     X_array = np.array([[0, 1, 2], [2, 4, 6]]).T\n \n     # if one transformer is dropped, test that name is still correct\n@@ -278,13 +307,6 @@ def transform(self, X, y=None):\n def test_2D_transformer_output_pandas():\n     pd = pytest.importorskip('pandas')\n \n-    class TransNo2D(BaseEstimator):\n-        def fit(self, X, y=None):\n-            return self\n-\n-        def transform(self, X, y=None):\n-            return X\n-\n     X_array = np.array([[0, 1, 2], [2, 4, 6]]).T\n     X_df = pd.DataFrame(X_array, columns=['col1', 'col2'])\n \n@@ -344,10 +366,8 @@ def test_make_column_transformer_kwargs():\n     norm = Normalizer()\n     ct = make_column_transformer(('first', scaler), (['second'], norm),\n                                  n_jobs=3, remainder='drop')\n-    assert_equal(\n-        ct.transformers,\n-        make_column_transformer(('first', scaler),\n-                                (['second'], norm)).transformers)\n+    assert_equal(ct.transformers, make_column_transformer(\n+        ('first', scaler), (['second'], norm)).transformers)\n     assert_equal(ct.n_jobs, 3)\n     assert_equal(ct.remainder, 'drop')\n     # invalid keyword parameters should raise an error message\n@@ -359,6 +379,15 @@ def test_make_column_transformer_kwargs():\n     )\n \n \n+def test_make_column_transformer_remainder_transformer():\n+    scaler = StandardScaler()\n+    norm = Normalizer()\n+    remainder = StandardScaler()\n+    ct = make_column_transformer(('first', scaler), (['second'], norm),\n+                                 remainder=remainder)\n+    assert ct.remainder == remainder\n+\n+\n def test_column_transformer_get_set_params():\n     ct = ColumnTransformer([('trans1', StandardScaler(), [0]),\n                             ('trans2', StandardScaler(), [1])])\n@@ -473,12 +502,16 @@ def test_column_transformer_special_strings():\n     exp = np.array([[0.], [1.], [2.]])\n     assert_array_equal(ct.fit_transform(X_array), exp)\n     assert_array_equal(ct.fit(X_array).transform(X_array), exp)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # all 'drop' -> return shape 0 array\n     ct = ColumnTransformer(\n         [('trans1', 'drop', [0]), ('trans2', 'drop', [1])])\n     assert_array_equal(ct.fit(X_array).transform(X_array).shape, (3, 0))\n     assert_array_equal(ct.fit_transform(X_array).shape, (3, 0))\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # 'passthrough'\n     X_array = np.array([[0., 1., 2.], [2., 4., 6.]]).T\n@@ -487,6 +520,8 @@ def test_column_transformer_special_strings():\n     exp = X_array\n     assert_array_equal(ct.fit_transform(X_array), exp)\n     assert_array_equal(ct.fit(X_array).transform(X_array), exp)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] != 'remainder'\n \n     # None itself / other string is not valid\n     for val in [None, 'other']:\n@@ -509,35 +544,51 @@ def test_column_transformer_remainder():\n     ct = ColumnTransformer([('trans', Trans(), [0])])\n     assert_array_equal(ct.fit_transform(X_array), X_res_both)\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'passthrough'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n \n     # specify to drop remaining columns\n     ct = ColumnTransformer([('trans1', Trans(), [0])],\n                            remainder='drop')\n     assert_array_equal(ct.fit_transform(X_array), X_res_first)\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_first)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'drop'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n \n     # column order is not preserved (passed through added to end)\n     ct = ColumnTransformer([('trans1', Trans(), [1])],\n                            remainder='passthrough')\n     assert_array_equal(ct.fit_transform(X_array), X_res_both[:, ::-1])\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both[:, ::-1])\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'passthrough'\n+    assert_array_equal(ct.transformers_[-1][2], [0])\n \n     # passthrough when all actual transformers are skipped\n     ct = ColumnTransformer([('trans1', 'drop', [0])],\n                            remainder='passthrough')\n     assert_array_equal(ct.fit_transform(X_array), X_res_second)\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_second)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'passthrough'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n \n     # error on invalid arg\n     ct = ColumnTransformer([('trans1', Trans(), [0])], remainder=1)\n     assert_raise_message(\n         ValueError,\n-        \"remainder keyword needs to be one of \\'drop\\' or \\'passthrough\\'\",\n-        ct.fit, X_array)\n+        \"remainder keyword needs to be one of \\'drop\\', \\'passthrough\\', \"\n+        \"or estimator.\", ct.fit, X_array)\n     assert_raise_message(\n         ValueError,\n-        \"remainder keyword needs to be one of \\'drop\\' or \\'passthrough\\'\",\n-        ct.fit_transform, X_array)\n+        \"remainder keyword needs to be one of \\'drop\\', \\'passthrough\\', \"\n+        \"or estimator.\", ct.fit_transform, X_array)\n \n \n @pytest.mark.parametrize(\"key\", [[0], np.array([0]), slice(0, 1),\n@@ -551,6 +602,10 @@ def test_column_transformer_remainder_numpy(key):\n                            remainder='passthrough')\n     assert_array_equal(ct.fit_transform(X_array), X_res_both)\n     assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'passthrough'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n \n \n @pytest.mark.parametrize(\n@@ -571,3 +626,154 @@ def test_column_transformer_remainder_pandas(key):\n                            remainder='passthrough')\n     assert_array_equal(ct.fit_transform(X_df), X_res_both)\n     assert_array_equal(ct.fit(X_df).transform(X_df), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][1] == 'passthrough'\n+    assert_array_equal(ct.transformers_[-1][2], [1])\n+\n+\n+@pytest.mark.parametrize(\"key\", [[0], np.array([0]), slice(0, 1),\n+                                 np.array([True, False, False])])\n+def test_column_transformer_remainder_transformer(key):\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).T\n+    X_res_both = X_array.copy()\n+\n+    # second and third columns are doubled when remainder = DoubleTrans\n+    X_res_both[:, 1:3] *= 2\n+\n+    ct = ColumnTransformer([('trans1', Trans(), key)],\n+                           remainder=DoubleTrans())\n+\n+    assert_array_equal(ct.fit_transform(X_array), X_res_both)\n+    assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert isinstance(ct.transformers_[-1][1], DoubleTrans)\n+    assert_array_equal(ct.transformers_[-1][2], [1, 2])\n+\n+\n+def test_column_transformer_no_remaining_remainder_transformer():\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).T\n+\n+    ct = ColumnTransformer([('trans1', Trans(), [0, 1, 2])],\n+                           remainder=DoubleTrans())\n+\n+    assert_array_equal(ct.fit_transform(X_array), X_array)\n+    assert_array_equal(ct.fit(X_array).transform(X_array), X_array)\n+    assert len(ct.transformers_) == 1\n+    assert ct.transformers_[-1][0] != 'remainder'\n+\n+\n+def test_column_transformer_drops_all_remainder_transformer():\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).T\n+\n+    # columns are doubled when remainder = DoubleTrans\n+    X_res_both = 2 * X_array.copy()[:, 1:3]\n+\n+    ct = ColumnTransformer([('trans1', 'drop', [0])],\n+                           remainder=DoubleTrans())\n+\n+    assert_array_equal(ct.fit_transform(X_array), X_res_both)\n+    assert_array_equal(ct.fit(X_array).transform(X_array), X_res_both)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert isinstance(ct.transformers_[-1][1], DoubleTrans)\n+    assert_array_equal(ct.transformers_[-1][2], [1, 2])\n+\n+\n+def test_column_transformer_sparse_remainder_transformer():\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).T\n+\n+    ct = ColumnTransformer([('trans1', Trans(), [0])],\n+                           remainder=SparseMatrixTrans())\n+\n+    X_trans = ct.fit_transform(X_array)\n+    assert sparse.issparse(X_trans)\n+    # SparseMatrixTrans creates 3 features for each column. There is\n+    # one column in ``transformers``, thus:\n+    assert X_trans.shape == (3, 3 + 1)\n+\n+    exp_array = np.hstack(\n+        (X_array[:, 0].reshape(-1, 1), np.eye(3)))\n+    assert_array_equal(X_trans.toarray(), exp_array)\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert isinstance(ct.transformers_[-1][1], SparseMatrixTrans)\n+    assert_array_equal(ct.transformers_[-1][2], [1, 2])\n+\n+\n+def test_column_transformer_drop_all_sparse_remainder_transformer():\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).T\n+    ct = ColumnTransformer([('trans1', 'drop', [0])],\n+                           remainder=SparseMatrixTrans())\n+\n+    X_trans = ct.fit_transform(X_array)\n+    assert sparse.issparse(X_trans)\n+\n+    #  SparseMatrixTrans creates 3 features for each column, thus:\n+    assert X_trans.shape == (3, 3)\n+    assert_array_equal(X_trans.toarray(), np.eye(3))\n+    assert len(ct.transformers_) == 2\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert isinstance(ct.transformers_[-1][1], SparseMatrixTrans)\n+    assert_array_equal(ct.transformers_[-1][2], [1, 2])\n+\n+\n+def test_column_transformer_get_set_params_with_remainder():\n+    ct = ColumnTransformer([('trans1', StandardScaler(), [0])],\n+                           remainder=StandardScaler())\n+\n+    exp = {'n_jobs': 1,\n+           'remainder': ct.remainder,\n+           'remainder__copy': True,\n+           'remainder__with_mean': True,\n+           'remainder__with_std': True,\n+           'trans1': ct.transformers[0][1],\n+           'trans1__copy': True,\n+           'trans1__with_mean': True,\n+           'trans1__with_std': True,\n+           'transformers': ct.transformers,\n+           'transformer_weights': None}\n+\n+    assert ct.get_params() == exp\n+\n+    ct.set_params(remainder__with_std=False)\n+    assert not ct.get_params()['remainder__with_std']\n+\n+    ct.set_params(trans1='passthrough')\n+    exp = {'n_jobs': 1,\n+           'remainder': ct.remainder,\n+           'remainder__copy': True,\n+           'remainder__with_mean': True,\n+           'remainder__with_std': False,\n+           'trans1': 'passthrough',\n+           'transformers': ct.transformers,\n+           'transformer_weights': None}\n+\n+    assert ct.get_params() == exp\n+\n+\n+def test_column_transformer_no_estimators():\n+    X_array = np.array([[0, 1, 2],\n+                        [2, 4, 6],\n+                        [8, 6, 4]]).astype('float').T\n+    ct = ColumnTransformer([], remainder=StandardScaler())\n+\n+    params = ct.get_params()\n+    assert params['remainder__with_mean']\n+\n+    X_trans = ct.fit_transform(X_array)\n+    assert X_trans.shape == X_array.shape\n+    assert len(ct.transformers_) == 1\n+    assert ct.transformers_[-1][0] == 'remainder'\n+    assert ct.transformers_[-1][2] == [0, 1, 2]\n",
+  "problem_statement": "_BaseCompostion._set_params broken where there are no estimators\n`_BaseCompostion._set_params` raises an error when the composition has no estimators.\r\n\r\nThis is a marginal case, but it might be interesting to support alongside #11315.\r\n\r\n\r\n```py\r\n>>> from sklearn.compose import ColumnTransformer\r\n>>> ColumnTransformer([]).set_params(n_jobs=2)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/Users/joel/repos/scikit-learn/sklearn/compose/_column_transformer.py\", line 181, in set_params\r\n    self._set_params('_transformers', **kwargs)\r\n  File \"/Users/joel/repos/scikit-learn/sklearn/utils/metaestimators.py\", line 44, in _set_params\r\n    names, _ = zip(*getattr(self, attr))\r\nValueError: not enough values to unpack (expected 2, got 0)\r\n```\n",
+  "hints_text": "",
+  "created_at": "2018-06-18T19:56:04Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_dataframe\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_drop_all_sparse_remainder_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_drops_all_remainder_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_get_set_params_with_remainder\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_no_estimators\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_no_remaining_remainder_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_numpy[key0]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_numpy[key1]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_numpy[key2]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_numpy[key3]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key0]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key1]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key2]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key3]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key5]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key6]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key7]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[key8]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_pandas[pd-index]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_transformer[key0]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_transformer[key1]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_transformer[key2]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_remainder_transformer[key3]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_sparse_remainder_transformer\"]",
+  "PASS_TO_PASS": "[\"sklearn/compose/tests/test_column_transformer.py::test_2D_transformer_output\", \"sklearn/compose/tests/test_column_transformer.py::test_2D_transformer_output_pandas\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_cloning\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_error_msg_1D\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_get_feature_names\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_get_set_params\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_invalid_columns[drop]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_invalid_columns[passthrough]\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_invalid_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_named_estimators\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_sparse_array\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_sparse_stacking\", \"sklearn/compose/tests/test_column_transformer.py::test_column_transformer_special_strings\", \"sklearn/compose/tests/test_column_transformer.py::test_make_column_transformer\", \"sklearn/compose/tests/test_column_transformer.py::test_make_column_transformer_kwargs\", \"sklearn/compose/tests/test_column_transformer.py::test_make_column_transformer_remainder_transformer\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/compose/_column_transformer.py",
+    "sklearn/utils/metaestimators.py"
+  ],
+  "test_patch_files": [
+    "sklearn/compose/tests/test_column_transformer.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/compose/_column_transformer.py": {
+      "diffs": [
+        {
+          "start_line_old": 9,
+          "end_line_old": 9,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._update_fitted_transformers_ColumnTransformer._update_fitted_transformers.transformers.self.transformers_.1",
+          "closest_snippet_line_distance": 283,
+          "pos": 7,
+          "context_length": 1448
+        },
+        {
+          "start_line_old": 72,
+          "end_line_old": 72,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_1__ERR_MSG_1DCOLUMN.1",
+          "closest_snippet_line_distance": 42,
+          "pos": 9,
+          "context_length": 2566
+        },
+        {
+          "start_line_old": 80,
+          "end_line_old": 80,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_1__ERR_MSG_1DCOLUMN.1",
+          "closest_snippet_line_distance": 50,
+          "pos": 9,
+          "context_length": 2566
+        },
+        {
+          "start_line_old": 93,
+          "end_line_old": 93,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_1__ERR_MSG_1DCOLUMN.1",
+          "closest_snippet_line_distance": 63,
+          "pos": 9,
+          "context_length": 2566
+        },
+        {
+          "start_line_old": 191,
+          "end_line_old": 194,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._fit_transform_ColumnTransformer._fit_transform.2.2.1.2.1",
+          "closest_snippet_line_distance": 135,
+          "pos": 37,
+          "context_length": 12547
+        },
+        {
+          "start_line_old": 212,
+          "end_line_old": 212,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.__init___ColumnTransformer.set_params.3.1",
+          "closest_snippet_line_distance": 30,
+          "pos": 3,
+          "context_length": 725
+        },
+        {
+          "start_line_old": 229,
+          "end_line_old": 246,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer_ColumnTransformer.1",
+          "closest_snippet_line_distance": 115,
+          "pos": 12,
+          "context_length": 3493
+        },
+        {
+          "start_line_old": 270,
+          "end_line_old": 275,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.fit_transform_ColumnTransformer.fit_transform.11.1",
+          "closest_snippet_line_distance": 102,
+          "pos": 61,
+          "context_length": 20569
+        },
+        {
+          "start_line_old": 297,
+          "end_line_old": 297,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_transformers_ColumnTransformer._validate_transformers.5.2.1",
+          "closest_snippet_line_distance": 71,
+          "pos": 5,
+          "context_length": 1035
+        },
+        {
+          "start_line_old": 307,
+          "end_line_old": 307,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_transformers_ColumnTransformer._validate_transformers.5.2.1",
+          "closest_snippet_line_distance": 81,
+          "pos": 5,
+          "context_length": 1035
+        },
+        {
+          "start_line_old": 338,
+          "end_line_old": 338,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_output_ColumnTransformer._validate_output.3.1.1",
+          "closest_snippet_line_distance": 14,
+          "pos": 25,
+          "context_length": 8170
+        },
+        {
+          "start_line_old": 364,
+          "end_line_old": 368,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_make_column_transformer_",
+          "closest_snippet_line_distance": 239,
+          "pos": 19,
+          "context_length": 6116
+        },
+        {
+          "start_line_old": 393,
+          "end_line_old": 417,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._iter_ColumnTransformer._iter.4.3",
+          "closest_snippet_line_distance": 208,
+          "pos": 40,
+          "context_length": 13717
+        },
+        {
+          "start_line_old": 443,
+          "end_line_old": 455,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py__get_column_indices__get_transformer_list.6.1",
+          "closest_snippet_line_distance": 98
+        },
+        {
+          "start_line_old": 489,
+          "end_line_old": 489,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py__get_column_indices__get_transformer_list.6.1",
+          "closest_snippet_line_distance": 52
+        },
+        {
+          "start_line_old": 615,
+          "end_line_old": 615,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_remainder_ColumnTransformer.named_transformers_.3.1",
+          "closest_snippet_line_distance": 356,
+          "pos": 18,
+          "context_length": 5966
+        },
+        {
+          "start_line_old": 623,
+          "end_line_old": 623,
+          "file_pos": 1,
+          "file_context_length": 5017,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_remainder_ColumnTransformer.named_transformers_.3.1",
+          "closest_snippet_line_distance": 364,
+          "pos": 18,
+          "context_length": 5966
+        }
+      ]
+    },
+    "sklearn/utils/metaestimators.py": {
+      "diffs": [
+        {
+          "start_line_old": 26,
+          "end_line_old": 26,
+          "file_pos": 2,
+          "file_context_length": 6669,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/metaestimators.py__BaseComposition._validate_names__BaseComposition._validate_names.5.1",
+          "closest_snippet_line_distance": 35,
+          "pos": 6,
+          "context_length": 1258
+        }
+      ]
+    }
+  },
+  "vectors": 2969,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.__init___ColumnTransformer.set_params.3.1",
+      "distance": 0.706575870513916,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 133,
+      "end_line": 182,
+      "tokens": 339,
+      "context_length": 339,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/metaestimators.py__BaseComposition._set_params__BaseComposition._replace_estimator.new_estimators.3",
+      "distance": 0.7538256645202637,
+      "file_path": "sklearn/utils/metaestimators.py",
+      "start_line": 38,
+      "end_line": 59,
+      "tokens": 233,
+      "context_length": 572,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_transformers_ColumnTransformer._validate_transformers.5.2.1",
+      "distance": 0.8120787143707275,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 211,
+      "end_line": 226,
+      "tokens": 153,
+      "context_length": 725,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/metaestimators.py__BaseComposition._validate_names__BaseComposition._validate_names.5.1",
+      "distance": 0.8516741991043091,
+      "file_path": "sklearn/utils/metaestimators.py",
+      "start_line": 61,
+      "end_line": 72,
+      "tokens": 151,
+      "context_length": 876,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._update_fitted_transformers_ColumnTransformer._update_fitted_transformers.transformers.self.transformers_.1",
+      "distance": 0.9176360368728638,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 292,
+      "end_line": 312,
+      "tokens": 159,
+      "context_length": 1035,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/metaestimators.py_1__BaseComposition._get_params.6.1",
+      "distance": 0.9457377791404724,
+      "file_path": "sklearn/utils/metaestimators.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 223,
+      "context_length": 1258,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_1__ERR_MSG_1DCOLUMN.1",
+      "distance": 0.9500377178192139,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 190,
+      "context_length": 1448,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/base.py_BaseEnsemble._validate_estimator_BaseEnsemble._validate_estimator.5.1",
+      "distance": 0.978280782699585,
+      "file_path": "sklearn/ensemble/base.py",
+      "start_line": 100,
+      "end_line": 117,
+      "tokens": 181,
+      "context_length": 1629
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer_ColumnTransformer.1",
+      "distance": 1.0030184984207153,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 33,
+      "end_line": 131,
+      "tokens": 937,
+      "context_length": 2566,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_overwrite_params_check_estimators_overwrite_params.16.8",
+      "distance": 1.0070457458496094,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1842,
+      "end_line": 1877,
+      "tokens": 352,
+      "context_length": 2918
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_n_iter_check_transformer_n_iter.estimator.2.5.2.1",
+      "distance": 1.0084216594696045,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2090,
+      "end_line": 2113,
+      "tokens": 308,
+      "context_length": 3226
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_remainder_ColumnTransformer.named_transformers_.3.1",
+      "distance": 1.01292085647583,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 228,
+      "end_line": 259,
+      "tokens": 267,
+      "context_length": 3493,
+      "file_pos": 4
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation._check_params_LatentDirichletAllocation._check_params.6.1",
+      "distance": 1.0248911380767822,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 288,
+      "end_line": 312,
+      "tokens": 220,
+      "context_length": 3713
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_BaseEstimator.set_params_BaseEstimator.set_params.8.1",
+      "distance": 1.0256917476654053,
+      "file_path": "sklearn/base.py",
+      "start_line": 236,
+      "end_line": 271,
+      "tokens": 264,
+      "context_length": 3977
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting_classifier.py_VotingClassifier.set_params_VotingClassifier.set_params.3.1",
+      "distance": 1.0298380851745605,
+      "file_path": "sklearn/ensemble/voting_classifier.py",
+      "start_line": 312,
+      "end_line": 335,
+      "tokens": 193,
+      "context_length": 4170
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_set_checking_parameters_set_checking_parameters.params.12.3",
+      "distance": 1.0300847291946411,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 323,
+      "end_line": 375,
+      "tokens": 509,
+      "context_length": 4679
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._check_params_BaseGradientBoosting._check_params.14.1",
+      "distance": 1.0304863452911377,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 810,
+      "end_line": 893,
+      "tokens": 806,
+      "context_length": 5485
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_make_column_transformer_",
+      "distance": 1.0321323871612549,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 603,
+      "end_line": 663,
+      "tokens": 481,
+      "context_length": 5966,
+      "file_pos": 8
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.fit_ColumnTransformer.fit.6.1",
+      "distance": 1.0329958200454712,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 346,
+      "end_line": 370,
+      "tokens": 150,
+      "context_length": 6116,
+      "file_pos": 8
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_TransformedTargetRegressor.__init___TransformedTargetRegressor._fit_transformer.7.4.1",
+      "distance": 1.038304328918457,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 104,
+      "end_line": 140,
+      "tokens": 411,
+      "context_length": 6527
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.0487498044967651,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1047,
+      "end_line": 1115,
+      "tokens": 601,
+      "context_length": 7128
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_parameters_default_constructible_check_parameters_default_constructible.classifier.4.17.6.2.1.3.1",
+      "distance": 1.049526333808899,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1972,
+      "end_line": 2043,
+      "tokens": 578,
+      "context_length": 7706
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/nmf.py_NMF.__init___NMF.__init__.self.shuffle.1",
+      "distance": 1.0525202751159668,
+      "file_path": "sklearn/decomposition/nmf.py",
+      "start_line": 1190,
+      "end_line": 1204,
+      "tokens": 151,
+      "context_length": 7857
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._validate_output_ColumnTransformer._validate_output.3.1.1",
+      "distance": 1.0544511079788208,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 314,
+      "end_line": 324,
+      "tokens": 137,
+      "context_length": 7994,
+      "file_pos": 10
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._fit_transform_ColumnTransformer._fit_transform.2.2.1.2.1",
+      "distance": 1.0575242042541504,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 326,
+      "end_line": 344,
+      "tokens": 176,
+      "context_length": 8170,
+      "file_pos": 10
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._validate_steps_Pipeline.10",
+      "distance": 1.0635825395584106,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 150,
+      "end_line": 188,
+      "tokens": 288,
+      "context_length": 8458
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.12.4.2.1",
+      "distance": 1.070776104927063,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 856,
+      "end_line": 930,
+      "tokens": 702,
+      "context_length": 9160
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._resize_state_BaseGradientBoosting.n_features.1.1",
+      "distance": 1.0711333751678467,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 926,
+      "end_line": 955,
+      "tokens": 321,
+      "context_length": 9481
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_17_BaseEstimator._get_param_names.13.1",
+      "distance": 1.072546124458313,
+      "file_path": "sklearn/base.py",
+      "start_line": 175,
+      "end_line": 211,
+      "tokens": 314,
+      "context_length": 9795
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__yield_transformer_checks__yield_transformer_checks.3.7.1",
+      "distance": 1.074416160583496,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 195,
+      "end_line": 213,
+      "tokens": 233,
+      "context_length": 10028
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 1.0788743495941162,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 831,
+      "end_line": 853,
+      "tokens": 248,
+      "context_length": 10276
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_multioutput_estimator_convert_y_2d_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.6",
+      "distance": 1.0831319093704224,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2046,
+      "end_line": 2087,
+      "tokens": 400,
+      "context_length": 10676
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dont_overwrite_parameters_check_dont_overwrite_parameters.2.21",
+      "distance": 1.0838172435760498,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 603,
+      "end_line": 651,
+      "tokens": 441,
+      "context_length": 11117
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_partial_fit_n_features_check_estimators_partial_fit_n_features.2.6.1",
+      "distance": 1.0853755474090576,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1158,
+      "end_line": 1181,
+      "tokens": 185,
+      "context_length": 11302
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting_classifier.py_VotingClassifier.__init___VotingClassifier.fit.18.1",
+      "distance": 1.0892248153686523,
+      "file_path": "sklearn/ensemble/voting_classifier.py",
+      "start_line": 124,
+      "end_line": 203,
+      "tokens": 684,
+      "context_length": 11986
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/base.py_1__set_random_states.5.1",
+      "distance": 1.0892430543899536,
+      "file_path": "sklearn/ensemble/base.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 375,
+      "context_length": 12361
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._iter_ColumnTransformer._iter.4.3",
+      "distance": 1.0907076597213745,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 184,
+      "end_line": 209,
+      "tokens": 186,
+      "context_length": 12547,
+      "file_pos": 11
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py__parallel_build_estimators__parallel_build_estimators.14.1",
+      "distance": 1.0967347621917725,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 63,
+      "end_line": 120,
+      "tokens": 446,
+      "context_length": 12993
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer.py_1_TextStats.transform.1.1",
+      "distance": 1.096751093864441,
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 376,
+      "context_length": 13369
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.fit_transform_ColumnTransformer.fit_transform.11.1",
+      "distance": 1.0988006591796875,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 372,
+      "end_line": 417,
+      "tokens": 348,
+      "context_length": 13717,
+      "file_pos": 13
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_no_attributes_set_in_init_check_no_attributes_set_in_init.10",
+      "distance": 1.1006767749786377,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1880,
+      "end_line": 1906,
+      "tokens": 252,
+      "context_length": 13969
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/base.py_BaseEnsemble_BaseEnsemble.__init__.self.base_estimator.6",
+      "distance": 1.1013013124465942,
+      "file_path": "sklearn/ensemble/base.py",
+      "start_line": 60,
+      "end_line": 98,
+      "tokens": 279,
+      "context_length": 14248
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/base.py__partition_estimators_",
+      "distance": 1.1016454696655273,
+      "file_path": "sklearn/ensemble/base.py",
+      "start_line": 150,
+      "end_line": 162,
+      "tokens": 122,
+      "context_length": 14370
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_1_",
+      "distance": 1.103116512298584,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 1,
+      "end_line": 108,
+      "tokens": 816,
+      "context_length": 15186
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_lasso_path.py_1_compute_bench.5.1",
+      "distance": 1.1058155298233032,
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 625,
+      "context_length": 15811
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._sparse_fit_SimpleImputer._sparse_fit.5.7.columns_all.7.7.1.1",
+      "distance": 1.1060787439346313,
+      "file_path": "sklearn/impute.py",
+      "start_line": 242,
+      "end_line": 317,
+      "tokens": 604,
+      "context_length": 16415
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer.py_pipeline_",
+      "distance": 1.1080312728881836,
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "start_line": 88,
+      "end_line": 137,
+      "tokens": 358,
+      "context_length": 16773
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.2_Pipeline.set_params.3.1",
+      "distance": 1.109987735748291,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 115,
+      "end_line": 148,
+      "tokens": 187,
+      "context_length": 16960
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._sparse_fit_Imputer._sparse_fit.8.7.columns_all.7.5.3.1",
+      "distance": 1.111711025238037,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 173,
+      "end_line": 251,
+      "tokens": 675,
+      "context_length": 17635
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_1___all__.1",
+      "distance": 1.1120026111602783,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 206,
+      "context_length": 17841
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__yield_non_meta_checks__yield_non_meta_checks.19",
+      "distance": 1.1125214099884033,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 84,
+      "end_line": 119,
+      "tokens": 278,
+      "context_length": 18119
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_data_not_an_array_check_estimators_data_not_an_array.14",
+      "distance": 1.1142915487289429,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1949,
+      "end_line": 1969,
+      "tokens": 200,
+      "context_length": 18319
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_pipeline_consistency_check_pipeline_consistency.14.2.4",
+      "distance": 1.116830587387085,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 933,
+      "end_line": 967,
+      "tokens": 372,
+      "context_length": 18691
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_all_estimators.15_all_estimators.19.1",
+      "distance": 1.117213249206543,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 638,
+      "end_line": 663,
+      "tokens": 260,
+      "context_length": 18951
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.1206779479980469,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 85,
+      "end_line": 106,
+      "tokens": 314,
+      "context_length": 19265
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MICEImputer.__init___MICEImputer.__init__.self.random_state.1",
+      "distance": 1.120855689048767,
+      "file_path": "sklearn/impute.py",
+      "start_line": 533,
+      "end_line": 556,
+      "tokens": 183,
+      "context_length": 19448
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion._validate_transformers_FeatureUnion._iter.3.1",
+      "distance": 1.1210885047912598,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 688,
+      "end_line": 711,
+      "tokens": 195,
+      "context_length": 19643
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator__boston_subset.3.1",
+      "distance": 1.1211459636688232,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 272,
+      "end_line": 320,
+      "tokens": 368,
+      "context_length": 20011
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py__name_estimators__name_estimators.7.1",
+      "distance": 1.1212258338928223,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 515,
+      "end_line": 533,
+      "tokens": 142,
+      "context_length": 20153
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_general_check_transformer_general.7",
+      "distance": 1.1254994869232178,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 814,
+      "end_line": 828,
+      "tokens": 169,
+      "context_length": 20322
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.get_feature_names_ColumnTransformer.get_feature_names.6.1",
+      "distance": 1.1261026859283447,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 261,
+      "end_line": 290,
+      "tokens": 247,
+      "context_length": 20569,
+      "file_pos": 19
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_9___all__.1",
+      "distance": 1.1283001899719238,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 10,
+      "end_line": 66,
+      "tokens": 347,
+      "context_length": 20916
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_get_params_invariance_check_classifiers_regression_target.boston.5",
+      "distance": 1.1314151287078857,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2116,
+      "end_line": 2149,
+      "tokens": 233,
+      "context_length": 21149
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_clone.11_clone.12.1",
+      "distance": 1.1351783275604248,
+      "file_path": "sklearn/base.py",
+      "start_line": 67,
+      "end_line": 121,
+      "tokens": 486,
+      "context_length": 21635
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_methods_subset_invariance_check_methods_subset_invariance.rnd.11.4.2",
+      "distance": 1.135335922241211,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 696,
+      "end_line": 731,
+      "tokens": 343,
+      "context_length": 21978
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/base.py_BaseEnsemble._make_estimator_BaseEnsemble.__iter__.2.1",
+      "distance": 1.1369199752807617,
+      "file_path": "sklearn/ensemble/base.py",
+      "start_line": 119,
+      "end_line": 147,
+      "tokens": 224,
+      "context_length": 22202
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_empty_data_messages_check_estimators_empty_data_messages.12",
+      "distance": 1.1370304822921753,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1024,
+      "end_line": 1044,
+      "tokens": 257,
+      "context_length": 22459
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer._transform_",
+      "distance": 1.1374964714050293,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 167,
+      "end_line": 185,
+      "tokens": 170,
+      "context_length": 22629
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.138452410697937,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 762,
+      "end_line": 793,
+      "tokens": 297,
+      "context_length": 22926
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py__get_column_indices__get_transformer_list.6.1",
+      "distance": 1.138681411743164,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 541,
+      "end_line": 600,
+      "tokens": 431,
+      "context_length": 23357,
+      "file_pos": 21
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_pickle_check_estimators_pickle.19.2",
+      "distance": 1.1398500204086304,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1118,
+      "end_line": 1155,
+      "tokens": 328,
+      "context_length": 23685
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingClassifier.__init___BaggingClassifier._validate_estimator.2",
+      "distance": 1.1428470611572266,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 551,
+      "end_line": 580,
+      "tokens": 197,
+      "context_length": 23882
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._fit_Pipeline._fit.self.steps.11.1",
+      "distance": 1.1452075242996216,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 190,
+      "end_line": 225,
+      "tokens": 341,
+      "context_length": 24223
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator_sparse_data_check_estimator_sparse_data.10.5.5.2",
+      "distance": 1.1462801694869995,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 437,
+      "end_line": 478,
+      "tokens": 427,
+      "context_length": 24650
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_1___all__.1",
+      "distance": 1.1506593227386475,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 129,
+      "context_length": 24779
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_Nystroem._get_kernel_params_",
+      "distance": 1.1520054340362549,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 519,
+      "end_line": 538,
+      "tokens": 175,
+      "context_length": 24954
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_BaseEstimator.__setstate___BaseEstimator.__setstate__.2.2.1",
+      "distance": 1.1540169715881348,
+      "file_path": "sklearn/base.py",
+      "start_line": 289,
+      "end_line": 302,
+      "tokens": 151,
+      "context_length": 25105
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.__init____PLS.__init__.self.copy.1",
+      "distance": 1.1541733741760254,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 221,
+      "end_line": 233,
+      "tokens": 150,
+      "context_length": 25255
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_dtypes_check_estimators_dtypes.10.5.1.1",
+      "distance": 1.1548950672149658,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 998,
+      "end_line": 1021,
+      "tokens": 269,
+      "context_length": 25524
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dtype_object_check_complex_data.X.5",
+      "distance": 1.155781865119934,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 521,
+      "end_line": 556,
+      "tokens": 328,
+      "context_length": 25852
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_AdditiveChi2Sampler.fit_AdditiveChi2Sampler.fit.4.1",
+      "distance": 1.1573421955108643,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 263,
+      "end_line": 279,
+      "tokens": 166,
+      "context_length": 26018
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation.__init___LatentDirichletAllocation.__init__.self.n_topics.1",
+      "distance": 1.157555341720581,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 264,
+      "end_line": 286,
+      "tokens": 264,
+      "context_length": 26282
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.159724473953247,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 100,
+      "end_line": 110,
+      "tokens": 151,
+      "context_length": 26433
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingRegressor._validate_estimator_",
+      "distance": 1.164412021636963,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 984,
+      "end_line": 1014,
+      "tokens": 248,
+      "context_length": 26681
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1sample_check_fit2d_1sample.rnd.10.2.1.1",
+      "distance": 1.166797399520874,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 734,
+      "end_line": 759,
+      "tokens": 234,
+      "context_length": 26915
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sparsify_coefficients_check_sparsify_coefficients.15",
+      "distance": 1.1669491529464722,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1909,
+      "end_line": 1929,
+      "tokens": 233,
+      "context_length": 27148
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_split.py_49_",
+      "distance": 1.1670278310775757,
+      "file_path": "sklearn/model_selection/_split.py",
+      "start_line": 2058,
+      "end_line": 2092,
+      "tokens": 319,
+      "context_length": 27467
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion_FeatureUnion.set_params.3.1",
+      "distance": 1.1680965423583984,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 611,
+      "end_line": 686,
+      "tokens": 592,
+      "context_length": 28059
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._validate_estimator_AdaBoostClassifier._validate_estimator.5.1",
+      "distance": 1.1707688570022583,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 414,
+      "end_line": 430,
+      "tokens": 188,
+      "context_length": 28247
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OneVsRestClassifier.fit_OneVsRestClassifier.fit.15.1",
+      "distance": 1.1724357604980469,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 183,
+      "end_line": 217,
+      "tokens": 352,
+      "context_length": 28599
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_1_ALLOW_NAN.1",
+      "distance": 1.1736918687820435,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 694,
+      "context_length": 29293
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dict_unchanged_is_public_parameter.1.1",
+      "distance": 1.1766496896743774,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 559,
+      "end_line": 600,
+      "tokens": 334,
+      "context_length": 29627
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_supervised_y_no_nan_check_supervised_y_no_nan.estimator.7.3.1",
+      "distance": 1.177990198135376,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 152,
+      "end_line": 172,
+      "tokens": 203,
+      "context_length": 29830
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaseBagging._fit.29_BaseBagging._fit.43.1",
+      "distance": 1.1781388521194458,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 342,
+      "end_line": 386,
+      "tokens": 377,
+      "context_length": 30207
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/scorer.py__check_multimetric_scoring.2__check_multimetric_scoring.2.3.3.1",
+      "distance": 1.1795166730880737,
+      "file_path": "sklearn/metrics/scorer.py",
+      "start_line": 348,
+      "end_line": 405,
+      "tokens": 538,
+      "context_length": 30745
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/__init__.py__",
+      "distance": 1.1812535524368286,
+      "file_path": "sklearn/compose/__init__.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 30745
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_warnings_TransformedTargetRegressor.1",
+      "distance": 1.1823430061340332,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 5,
+      "end_line": 103,
+      "tokens": 815,
+      "context_length": 31560
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/base.py_BaseMixture._check_initial_parameters_BaseMixture._check_initial_parameters.8",
+      "distance": 1.1829731464385986,
+      "file_path": "sklearn/mixture/base.py",
+      "start_line": 88,
+      "end_line": 122,
+      "tokens": 289,
+      "context_length": 31849
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/sklearn/isotonic.py_IsotonicRegression.y__IsotonicRegression._check_fit_data.1.1",
+      "distance": 1.1832302808761597,
+      "file_path": "sklearn/isotonic.py",
+      "start_line": 234,
+      "end_line": 250,
+      "tokens": 145,
+      "context_length": 31994
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/sklearn/manifold/spectral_embedding_.py_SpectralEmbedding.__init___SpectralEmbedding._pairwise.1.1",
+      "distance": 1.1839625835418701,
+      "file_path": "sklearn/manifold/spectral_embedding_.py",
+      "start_line": 414,
+      "end_line": 427,
+      "tokens": 125,
+      "context_length": 32119
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "position": 1,
+      "tokens": 5017,
+      "context_length": 5017
+    },
+    {
+      "file_path": "sklearn/utils/metaestimators.py",
+      "position": 2,
+      "tokens": 1652,
+      "context_length": 6669
+    },
+    {
+      "file_path": "sklearn/ensemble/base.py",
+      "position": 3,
+      "tokens": 1147,
+      "context_length": 7816
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 4,
+      "tokens": 19679,
+      "context_length": 27495
+    },
+    {
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "position": 5,
+      "tokens": 6658,
+      "context_length": 34153
+    },
+    {
+      "file_path": "sklearn/base.py",
+      "position": 6,
+      "tokens": 4293,
+      "context_length": 38446
+    },
+    {
+      "file_path": "sklearn/ensemble/voting_classifier.py",
+      "position": 7,
+      "tokens": 2873,
+      "context_length": 41319
+    },
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 8,
+      "tokens": 18264,
+      "context_length": 59583
+    },
+    {
+      "file_path": "sklearn/compose/_target.py",
+      "position": 9,
+      "tokens": 1910,
+      "context_length": 61493
+    },
+    {
+      "file_path": "sklearn/decomposition/nmf.py",
+      "position": 10,
+      "tokens": 11694,
+      "context_length": 73187
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 11,
+      "tokens": 6593,
+      "context_length": 79780
+    },
+    {
+      "file_path": "sklearn/ensemble/bagging.py",
+      "position": 12,
+      "tokens": 7932,
+      "context_length": 87712
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "position": 13,
+      "tokens": 979,
+      "context_length": 88691
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 14,
+      "tokens": 838,
+      "context_length": 89529
+    },
+    {
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "position": 15,
+      "tokens": 973,
+      "context_length": 90502
+    },
+    {
+      "file_path": "sklearn/impute.py",
+      "position": 16,
+      "tokens": 7887,
+      "context_length": 98389
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 17,
+      "tokens": 2942,
+      "context_length": 101331
+    },
+    {
+      "file_path": "sklearn/utils/testing.py",
+      "position": 18,
+      "tokens": 6882,
+      "context_length": 108213
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 19,
+      "tokens": 1731,
+      "context_length": 109944
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 20,
+      "tokens": 26183,
+      "context_length": 136127
+    },
+    {
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "position": 21,
+      "tokens": 1388,
+      "context_length": 137515
+    },
+    {
+      "file_path": "sklearn/kernel_approximation.py",
+      "position": 22,
+      "tokens": 4124,
+      "context_length": 141639
+    },
+    {
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "position": 23,
+      "tokens": 8011,
+      "context_length": 149650
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 24,
+      "tokens": 1903,
+      "context_length": 151553
+    },
+    {
+      "file_path": "sklearn/model_selection/_split.py",
+      "position": 25,
+      "tokens": 18019,
+      "context_length": 169572
+    },
+    {
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "position": 26,
+      "tokens": 8778,
+      "context_length": 178350
+    },
+    {
+      "file_path": "sklearn/multiclass.py",
+      "position": 27,
+      "tokens": 6487,
+      "context_length": 184837
+    },
+    {
+      "file_path": "sklearn/metrics/scorer.py",
+      "position": 28,
+      "tokens": 4920,
+      "context_length": 189757
+    },
+    {
+      "file_path": "sklearn/compose/__init__.py",
+      "position": 29,
+      "tokens": 86,
+      "context_length": 189843
+    },
+    {
+      "file_path": "sklearn/mixture/base.py",
+      "position": 30,
+      "tokens": 3571,
+      "context_length": 193414
+    },
+    {
+      "file_path": "sklearn/isotonic.py",
+      "position": 31,
+      "tokens": 3378,
+      "context_length": 196792
+    },
+    {
+      "file_path": "sklearn/manifold/spectral_embedding_.py",
+      "position": 32,
+      "tokens": 4923,
+      "context_length": 201715
+    }
+  ]
+}

@@ -1,0 +1,1742 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-13472",
+  "model_patch": "diff --git a/sklearn/ensemble/gradient_boosting.py b/sklearn/ensemble/gradient_boosting.py\nindex ed8622cc8..7f64d10a6 100644\n--- a/sklearn/ensemble/gradient_boosting.py\n+++ b/sklearn/ensemble/gradient_boosting.py\n@@ -1476,19 +1476,9 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):\n                 raw_predictions = np.zeros(shape=(X.shape[0], self.loss_.K),\n                                            dtype=np.float64)\n             else:\n-                try:\n-                    self.init_.fit(X, y, sample_weight=sample_weight)\n-                except TypeError:\n-                    if sample_weight_is_none:\n-                        self.init_.fit(X, y)\n-                    else:\n-                        raise ValueError(\n-                            \"The initial estimator {} does not support sample \"\n-                            \"weights.\".format(self.init_.__class__.__name__))\n-\n+                self.init_.fit(X, y, sample_weight=sample_weight)\n                 raw_predictions = \\\n-                    self.loss_.get_init_raw_predictions(X, self.init_)\n-\n+                    self.loss_.get_init_raw_predictions(X, self.init_).astype(np.float64)\n \n             begin_at_stage = 0\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/ensemble/gradient_boosting.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "3b35104c93cb53f67fb5f52ae2fece76ef7144da",
+  "patch": "diff --git a/sklearn/ensemble/gradient_boosting.py b/sklearn/ensemble/gradient_boosting.py\n--- a/sklearn/ensemble/gradient_boosting.py\n+++ b/sklearn/ensemble/gradient_boosting.py\n@@ -1476,20 +1476,25 @@ def fit(self, X, y, sample_weight=None, monitor=None):\n                 raw_predictions = np.zeros(shape=(X.shape[0], self.loss_.K),\n                                            dtype=np.float64)\n             else:\n-                try:\n-                    self.init_.fit(X, y, sample_weight=sample_weight)\n-                except TypeError:\n-                    if sample_weight_is_none:\n-                        self.init_.fit(X, y)\n-                    else:\n-                        raise ValueError(\n-                            \"The initial estimator {} does not support sample \"\n-                            \"weights.\".format(self.init_.__class__.__name__))\n+                # XXX clean this once we have a support_sample_weight tag\n+                if sample_weight_is_none:\n+                    self.init_.fit(X, y)\n+                else:\n+                    msg = (\"The initial estimator {} does not support sample \"\n+                           \"weights.\".format(self.init_.__class__.__name__))\n+                    try:\n+                        self.init_.fit(X, y, sample_weight=sample_weight)\n+                    except TypeError:  # regular estimator without SW support\n+                        raise ValueError(msg)\n+                    except ValueError as e:\n+                        if 'not enough values to unpack' in str(e):  # pipeline\n+                            raise ValueError(msg) from e\n+                        else:  # regular estimator whose input checking failed\n+                            raise\n \n                 raw_predictions = \\\n                     self.loss_.get_init_raw_predictions(X, self.init_)\n \n-\n             begin_at_stage = 0\n \n             # The rng state must be preserved if warm_start is True\n",
+  "test_patch": "diff --git a/sklearn/ensemble/tests/test_gradient_boosting.py b/sklearn/ensemble/tests/test_gradient_boosting.py\n--- a/sklearn/ensemble/tests/test_gradient_boosting.py\n+++ b/sklearn/ensemble/tests/test_gradient_boosting.py\n@@ -39,6 +39,9 @@\n from sklearn.exceptions import DataConversionWarning\n from sklearn.exceptions import NotFittedError\n from sklearn.dummy import DummyClassifier, DummyRegressor\n+from sklearn.pipeline import make_pipeline\n+from sklearn.linear_model import LinearRegression\n+from sklearn.svm import NuSVR\n \n \n GRADIENT_BOOSTING_ESTIMATORS = [GradientBoostingClassifier,\n@@ -1366,6 +1369,33 @@ def test_gradient_boosting_with_init(gb, dataset_maker, init_estimator):\n         gb(init=init_est).fit(X, y, sample_weight=sample_weight)\n \n \n+def test_gradient_boosting_with_init_pipeline():\n+    # Check that the init estimator can be a pipeline (see issue #13466)\n+\n+    X, y = make_regression(random_state=0)\n+    init = make_pipeline(LinearRegression())\n+    gb = GradientBoostingRegressor(init=init)\n+    gb.fit(X, y)  # pipeline without sample_weight works fine\n+\n+    with pytest.raises(\n+            ValueError,\n+            match='The initial estimator Pipeline does not support sample '\n+                  'weights'):\n+        gb.fit(X, y, sample_weight=np.ones(X.shape[0]))\n+\n+    # Passing sample_weight to a pipeline raises a ValueError. This test makes\n+    # sure we make the distinction between ValueError raised by a pipeline that\n+    # was passed sample_weight, and a ValueError raised by a regular estimator\n+    # whose input checking failed.\n+    with pytest.raises(\n+            ValueError,\n+            match='nu <= 0 or nu > 1'):\n+        # Note that NuSVR properly supports sample_weight\n+        init = NuSVR(gamma='auto', nu=1.5)\n+        gb = GradientBoostingRegressor(init=init)\n+        gb.fit(X, y, sample_weight=np.ones(X.shape[0]))\n+\n+\n @pytest.mark.parametrize('estimator, missing_method', [\n     (GradientBoostingClassifier(init=LinearSVC()), 'predict_proba'),\n     (GradientBoostingRegressor(init=OneHotEncoder()), 'predict')\n",
+  "problem_statement": "GradientBoostingRegressor initial estimator does not play together with Pipeline\nUsing a pipeline as the initial estimator of GradientBoostingRegressor doesn't work due to incompatible signatures.\r\n\r\n```python\r\nimport sklearn\r\nimport sklearn.pipeline\r\nimport sklearn.ensemble\r\nimport sklearn.decomposition\r\nimport sklearn.linear_model\r\nimport numpy as np\r\ninit = sklearn.pipeline.make_pipeline(sklearn.decomposition.PCA(), sklearn.linear_model.ElasticNet())\r\nmodel = sklearn.ensemble.GradientBoostingRegressor(init=init)\r\nx = np.random.rand(12, 3)\r\ny = np.random.rand(12)\r\nmodel.fit(x, y)\r\n\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/Users/Thomas/.local/miniconda3/envs/4cast/lib/python3.6/site-packages/sklearn/ensemble/gradient_boosting.py\", line 1421, in fit\r\n    self.init_.fit(X, y, sample_weight)\r\nTypeError: fit() takes from 2 to 3 positional arguments but 4 were given\r\n```\r\nThe signature of `Pipeline.fit` is\r\n\r\n```python\r\n# sklearn/pipeline.py\r\n...\r\n239 def fit(self, X, y=None, **fit_params):\r\n...\r\n```\r\nwhich cannot be called with three positional arguments as above.\r\n\r\nSo I guess line 1421 in `sklearn/ensemble/gradient_boosting.py` should read\r\n`self.init_.fit(X, y, sample_weight=sample_weight)` instead and the issue is solved. Right?\r\n\r\n#### Versions\r\n```python\r\n>>> sklearn.show_versions()\r\n\r\nSystem:\r\n    python: 3.6.2 |Continuum Analytics, Inc.| (default, Jul 20 2017, 13:14:59)  [GCC 4.2.1 Compatible Apple LLVM 6.0 (clang-600.0.57)]\r\nexecutable: /Users/Thomas/.local/miniconda3/envs/test/bin/python\r\n   machine: Darwin-18.2.0-x86_64-i386-64bit\r\n\r\nBLAS:\r\n    macros: SCIPY_MKL_H=None, HAVE_CBLAS=None\r\n  lib_dirs: /Users/Thomas/.local/miniconda3/envs/test/lib\r\ncblas_libs: mkl_rt, pthread\r\n\r\nPython deps:\r\n       pip: 10.0.1\r\nsetuptools: 39.2.0\r\n   sklearn: 0.20.2\r\n     numpy: 1.16.1\r\n     scipy: 1.2.0\r\n    Cython: None\r\n    pandas: 0.24.2\r\n```\n",
+  "hints_text": "",
+  "created_at": "2019-03-18T22:15:59Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_with_init_pipeline\"]",
+  "PASS_TO_PASS": "[\"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-huber-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-huber-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-huber-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-lad-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-lad-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-lad-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-ls-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-ls-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[0.5-ls-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-huber-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-huber-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-huber-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-lad-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-lad-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-lad-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-ls-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-ls-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_boston[1.0-ls-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_check_inputs\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_check_inputs_predict\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_check_inputs_predict_stages\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_check_max_features\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[deviance-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[deviance-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[deviance-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[exponential-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[exponential-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_synthetic[exponential-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[deviance-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[deviance-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[deviance-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[exponential-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[exponential-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classification_toy[exponential-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_classifier_parameter_checks\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_complete_classification\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_complete_regression\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_degenerate_targets\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_early_stopping_n_classes\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_feature_importance_regression\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_feature_importances\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_float_class_labels\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_early_stopping\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_init_wrong_methods[estimator0-predict_proba]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_init_wrong_methods[estimator1-predict]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_validation_fraction\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_with_init[binary\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_with_init[multiclass\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_gradient_boosting_with_init[regression]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-0.5-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-0.5-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-0.5-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-1.0-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-1.0-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[1-1.0-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-0.5-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-0.5-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-0.5-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-1.0-False]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-1.0-True]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_iris[None-1.0-auto]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_loss_function\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_max_feature_auto\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_max_feature_regression\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_max_leaf_nodes_max_depth[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_max_leaf_nodes_max_depth[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_mem_layout\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_min_impurity_decrease[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_min_impurity_decrease[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_min_impurity_split[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_min_impurity_split[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_monitor_early_stopping[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_monitor_early_stopping[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_more_verbose_output\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_non_uniform_weights_toy_edge_case_clf\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_non_uniform_weights_toy_edge_case_reg\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_oob_improvement\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_oob_improvement_raise\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_oob_multilcass_iris\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_probability_exponential\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_probability_log\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_quantile_loss\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_regression_synthetic\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_regressor_parameter_checks\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_serialization\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_shape_y\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[coo_matrix-GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[coo_matrix-GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[csc_matrix-GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[csc_matrix-GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[csr_matrix-GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_sparse_input[csr_matrix-GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_staged_functions_defensive[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_staged_functions_defensive[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_staged_predict\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_staged_predict_proba\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_symbol_labels\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_verbose_output\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_clear[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_clear[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_equal_n_estimators[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_equal_n_estimators[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_fortran[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_fortran[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_max_depth[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_max_depth[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_n_estimators[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_n_estimators[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_oob[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_oob[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_oob_switch[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_oob_switch[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_smaller_n_estimators[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_smaller_n_estimators[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_sparse[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_sparse[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_wo_nestimators_change\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_zero_n_estimators[GradientBoostingClassifier]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_warm_start_zero_n_estimators[GradientBoostingRegressor]\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_zero_estimator_clf\", \"sklearn/ensemble/tests/test_gradient_boosting.py::test_zero_estimator_reg\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/ensemble/gradient_boosting.py"
+  ],
+  "test_patch_files": [
+    "sklearn/ensemble/tests/test_gradient_boosting.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/ensemble/gradient_boosting.py": {
+      "diffs": [
+        {
+          "start_line_old": 1479,
+          "end_line_old": 1492,
+          "file_pos": 1,
+          "file_context_length": 21197,
+          "pos": 1,
+          "context_length": 672
+        }
+      ]
+    }
+  },
+  "vectors": 3237,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting.fit.13_BaseGradientBoosting.fit.26.1",
+      "distance": 0.785274863243103,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1470,
+      "end_line": 1543,
+      "tokens": 672,
+      "context_length": 672,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_pipeline_consistency_check_pipeline_consistency.13.2.4",
+      "distance": 0.9032168388366699,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1048,
+      "end_line": 1074,
+      "tokens": 262,
+      "context_length": 934
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._validate_steps_Pipeline._validate_steps.9.1",
+      "distance": 0.9034656286239624,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 162,
+      "end_line": 188,
+      "tokens": 248,
+      "context_length": 1182
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._fit_Pipeline._fit.self.steps.11.1",
+      "distance": 0.9132382869720459,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 244,
+      "end_line": 288,
+      "tokens": 412,
+      "context_length": 1594
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingRegressor._SUPPORTED_LOSS_GradientBoostingRegressor.__init__.1",
+      "distance": 0.9160282611846924,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2466,
+      "end_line": 2489,
+      "tokens": 322,
+      "context_length": 1916,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._make_estimator_BaseGradientBoosting._raw_predict.4.1",
+      "distance": 0.9209483861923218,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1637,
+      "end_line": 1661,
+      "tokens": 259,
+      "context_length": 2175,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline_Pipeline.1",
+      "distance": 0.9266102313995361,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 29,
+      "end_line": 124,
+      "tokens": 1039,
+      "context_length": 3214
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting.fit_BaseGradientBoosting.fit.12",
+      "distance": 0.9415386915206909,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1395,
+      "end_line": 1468,
+      "tokens": 674,
+      "context_length": 3888,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._check_params_BaseGradientBoosting._check_params.14.1",
+      "distance": 0.9476763010025024,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1256,
+      "end_line": 1338,
+      "tokens": 804,
+      "context_length": 4692,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_early_stopping.py_1_bar2.1",
+      "distance": 0.95693439245224,
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 772,
+      "context_length": 5464
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingRegressor.1_GradientBoostingRegressor.1",
+      "distance": 0.9595593214035034,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2221,
+      "end_line": 2464,
+      "tokens": 2515,
+      "context_length": 7979,
+      "file_pos": 4
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_regression.py_1_",
+      "distance": 0.9607526063919067,
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 546,
+      "context_length": 8525
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingClassifier._validate_y_GradientBoostingClassifier._validate_y.6.1",
+      "distance": 0.9629324674606323,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2034,
+      "end_line": 2044,
+      "tokens": 124,
+      "context_length": 8649,
+      "file_pos": 5
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingClassifier._SUPPORTED_LOSS_GradientBoostingClassifier.__init__.1",
+      "distance": 0.967881441116333,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2007,
+      "end_line": 2032,
+      "tokens": 307,
+      "context_length": 8956,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_1_NotFittedError",
+      "distance": 0.9830645322799683,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 371,
+      "context_length": 9327,
+      "file_pos": 5
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_oob.py_1_37",
+      "distance": 0.9837961196899414,
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 793,
+      "context_length": 10120
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_1_55",
+      "distance": 0.9873301982879639,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 826,
+      "context_length": 10946
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_regularization.py_1_",
+      "distance": 0.9948283433914185,
+      "file_path": "examples/ensemble/plot_gradient_boosting_regularization.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 696,
+      "context_length": 11642
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._fit_stage_BaseGradientBoosting._fit_stage.11.1",
+      "distance": 0.9963657855987549,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1202,
+      "end_line": 1254,
+      "tokens": 460,
+      "context_length": 12102,
+      "file_pos": 8
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_digits_pipe.py_1_",
+      "distance": 1.0135998725891113,
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 572,
+      "context_length": 12674
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._init_state_BaseGradientBoosting._init_state.7.self.oob_improvement_.1",
+      "distance": 1.020978331565857,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1340,
+      "end_line": 1353,
+      "tokens": 143,
+      "context_length": 12817,
+      "file_pos": 9
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingClassifier.1_GradientBoostingClassifier.1",
+      "distance": 1.0215590000152588,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1757,
+      "end_line": 2005,
+      "tokens": 2527,
+      "context_length": 15344,
+      "file_pos": 9
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.score_Pipeline._pairwise.2.1",
+      "distance": 1.0242269039154053,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 531,
+      "end_line": 568,
+      "tokens": 278,
+      "context_length": 15622
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_1___all__.1",
+      "distance": 1.0248053073883057,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 128,
+      "context_length": 15750
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_BaseWeightBoosting._validate_data_BaseWeightBoosting._validate_data.accept_sparse.3.1",
+      "distance": 1.0254859924316406,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 72,
+      "end_line": 90,
+      "tokens": 143,
+      "context_length": 15893
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_log_proba_Pipeline.predict_log_proba.4.1",
+      "distance": 1.0273735523223877,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 452,
+      "end_line": 469,
+      "tokens": 134,
+      "context_length": 16027
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_Pipeline.fit.4.1",
+      "distance": 1.0292702913284302,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 290,
+      "end_line": 319,
+      "tokens": 219,
+      "context_length": 16246
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_22__fit_transform_one.4.1",
+      "distance": 1.029707908630371,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 645,
+      "end_line": 668,
+      "tokens": 219,
+      "context_length": 16465
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_regression.py_1_",
+      "distance": 1.0297707319259644,
+      "file_path": "examples/ensemble/plot_adaboost_regression.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 389,
+      "context_length": 16854
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_transform_Pipeline.fit_transform.4.3.1.1",
+      "distance": 1.0297740697860718,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 321,
+      "end_line": 355,
+      "tokens": 282,
+      "context_length": 17136
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_Pipeline.predict.4.1",
+      "distance": 1.0314831733703613,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 357,
+      "end_line": 382,
+      "tokens": 207,
+      "context_length": 17343
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingRegressor.__init___BaggingRegressor.__init__.1",
+      "distance": 1.034481406211853,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 925,
+      "end_line": 948,
+      "tokens": 153,
+      "context_length": 17496
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostRegressor.__init___AdaBoostRegressor._validate_estimator.2",
+      "distance": 1.0354899168014526,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 954,
+      "end_line": 1001,
+      "tokens": 349,
+      "context_length": 17845
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_1_y_pred_grd_lm.1",
+      "distance": 1.0455467700958252,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 740,
+      "context_length": 18585
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 1.047269582748413,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1077,
+      "end_line": 1102,
+      "tokens": 282,
+      "context_length": 18867
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_1_classifiers.1",
+      "distance": 1.0533369779586792,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 793,
+      "context_length": 19660
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ExponentialLoss._update_terminal_region_ExponentialLoss._score_to_decision.1.1",
+      "distance": 1.0533595085144043,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1063,
+      "end_line": 1088,
+      "tokens": 330,
+      "context_length": 19990,
+      "file_pos": 14
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 1.0534214973449707,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 741,
+      "context_length": 20731
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingRegressor._validate_estimator_",
+      "distance": 1.0534305572509766,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 990,
+      "end_line": 1020,
+      "tokens": 248,
+      "context_length": 20979
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.33_RANSACRegressor.fit.38.1",
+      "distance": 1.0539441108703613,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 425,
+      "end_line": 454,
+      "tokens": 346,
+      "context_length": 21325
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._clear_state_BaseGradientBoosting._clear_state.6.1",
+      "distance": 1.055262804031372,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1355,
+      "end_line": 1366,
+      "tokens": 128,
+      "context_length": 21453,
+      "file_pos": 16
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.decision_function_Pipeline.decision_function.4.1",
+      "distance": 1.0553019046783447,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 433,
+      "end_line": 450,
+      "tokens": 131,
+      "context_length": 21584
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaseBagging._fit.30_BaseBagging._fit.44.1",
+      "distance": 1.0555522441864014,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 345,
+      "end_line": 390,
+      "tokens": 383,
+      "context_length": 21967
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.16_RANSACRegressor.fit.32",
+      "distance": 1.066860556602478,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 327,
+      "end_line": 424,
+      "tokens": 809,
+      "context_length": 22776
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_make_pipeline_make_pipeline.4.1",
+      "distance": 1.0714057683944702,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 596,
+      "end_line": 642,
+      "tokens": 390,
+      "context_length": 23166
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_proba_Pipeline.predict_proba.4.1",
+      "distance": 1.0715724229812622,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 414,
+      "end_line": 431,
+      "tokens": 131,
+      "context_length": 23297
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostRegressor_AdaBoostRegressor.1",
+      "distance": 1.0727035999298096,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 871,
+      "end_line": 953,
+      "tokens": 798,
+      "context_length": 24095
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostRegressor._get_median_predict_AdaBoostRegressor._get_median_predict.predictions.10.1",
+      "distance": 1.0735565423965454,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 1095,
+      "end_line": 1111,
+      "tokens": 180,
+      "context_length": 24275
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_np_DEFAULT_EPSILON.1",
+      "distance": 1.0738320350646973,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 7,
+      "end_line": 42,
+      "tokens": 340,
+      "context_length": 24615
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostRegressor._boost_AdaBoostRegressor._boost.28.1",
+      "distance": 1.0738911628723145,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 1003,
+      "end_line": 1093,
+      "tokens": 694,
+      "context_length": 25309
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_oob.py_cumsum_",
+      "distance": 1.074446678161621,
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "start_line": 96,
+      "end_line": 138,
+      "tokens": 423,
+      "context_length": 25732
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_1___all__.1",
+      "distance": 1.0746080875396729,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 263,
+      "context_length": 25995
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._validate_estimator_AdaBoostClassifier._validate_estimator.5.1",
+      "distance": 1.0753390789031982,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 429,
+      "end_line": 445,
+      "tokens": 182,
+      "context_length": 26177
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._resize_state_BaseGradientBoosting._check_initialized.2",
+      "distance": 1.0796538591384888,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1368,
+      "end_line": 1393,
+      "tokens": 296,
+      "context_length": 26473,
+      "file_pos": 17
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.transform_Pipeline._transform.3.1",
+      "distance": 1.0827633142471313,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 471,
+      "end_line": 498,
+      "tokens": 190,
+      "context_length": 26663
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_1_",
+      "distance": 1.0846142768859863,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 1,
+      "end_line": 104,
+      "tokens": 799,
+      "context_length": 27462
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_types_CROSS_DECOMPOSITION.1",
+      "distance": 1.0851895809173584,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 466,
+      "context_length": 27928
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._fit_regressor_SGDRegressor",
+      "distance": 1.085190773010254,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1237,
+      "end_line": 1528,
+      "tokens": 678,
+      "context_length": 28606
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._partial_fit_BaseSGDRegressor._partial_fit.9.1",
+      "distance": 1.0887722969055176,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1079,
+      "end_line": 1105,
+      "tokens": 296,
+      "context_length": 28902
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingRegressor_BaggingRegressor.1",
+      "distance": 1.0923504829406738,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 813,
+      "end_line": 923,
+      "tokens": 1112,
+      "context_length": 30014
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_hastie_10_2.py_1_40.1",
+      "distance": 1.093981146812439,
+      "file_path": "examples/ensemble/plot_adaboost_hastie_10_2.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 749,
+      "context_length": 30763
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_HuberLossFunction._update_terminal_region_HuberLossFunction._update_terminal_region.7",
+      "distance": 1.0975593328475952,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 694,
+      "end_line": 705,
+      "tokens": 194,
+      "context_length": 30957,
+      "file_pos": 19
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.099852204322815,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 84,
+      "end_line": 105,
+      "tokens": 314,
+      "context_length": 31271
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py__parallel_build_estimators__parallel_build_estimators.14.1",
+      "distance": 1.1017112731933594,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 60,
+      "end_line": 116,
+      "tokens": 433,
+      "context_length": 31704
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._fit_stages_BaseGradientBoosting._fit_stages.16.1",
+      "distance": 1.1037315130233765,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1545,
+      "end_line": 1635,
+      "tokens": 834,
+      "context_length": 32538,
+      "file_pos": 20
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_predict_Pipeline.fit_predict.3.1",
+      "distance": 1.1037538051605225,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 384,
+      "end_line": 412,
+      "tokens": 242,
+      "context_length": 32780
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._fit_BaseSGDRegressor._fit.8.1",
+      "distance": 1.105262041091919,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1138,
+      "end_line": 1170,
+      "tokens": 286,
+      "context_length": 33066
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingClassifier.__init___BaggingClassifier._validate_estimator.2",
+      "distance": 1.1078687906265259,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 554,
+      "end_line": 583,
+      "tokens": 184,
+      "context_length": 33250
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/gaussian_process/gpr.py_GaussianProcessRegressor.fit.15_GaussianProcessRegressor.fit.18.1",
+      "distance": 1.113439679145813,
+      "file_path": "sklearn/gaussian_process/gpr.py",
+      "start_line": 250,
+      "end_line": 262,
+      "tokens": 175,
+      "context_length": 33425
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.2_Pipeline.set_params.3.1",
+      "distance": 1.1139315366744995,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 126,
+      "end_line": 160,
+      "tokens": 195,
+      "context_length": 33620
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/mocking.py_CheckingClassifier_CheckingClassifier.__init__.self.expected_fit_params.1",
+      "distance": 1.1160991191864014,
+      "file_path": "sklearn/utils/mocking.py",
+      "start_line": 51,
+      "end_line": 70,
+      "tokens": 140,
+      "context_length": 33760
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting_BaseGradientBoosting.__init__.self.tol.1",
+      "distance": 1.1181533336639404,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1166,
+      "end_line": 1200,
+      "tokens": 327,
+      "context_length": 34087,
+      "file_pos": 22
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_BaseWeightBoosting.fit_BaseWeightBoosting.fit.14.1",
+      "distance": 1.1191024780273438,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 92,
+      "end_line": 173,
+      "tokens": 602,
+      "context_length": 34689
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_LeastAbsoluteError._update_terminal_region_LeastAbsoluteError._update_terminal_region.5",
+      "distance": 1.1191036701202393,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 593,
+      "end_line": 599,
+      "tokens": 164,
+      "context_length": 34853,
+      "file_pos": 22
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingClassifier._set_oob_score_BaggingClassifier._set_oob_score.self.oob_score_.1",
+      "distance": 1.1218962669372559,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 585,
+      "end_line": 620,
+      "tokens": 295,
+      "context_length": 35148
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_34_",
+      "distance": 1.1236611604690552,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 85,
+      "end_line": 131,
+      "tokens": 384,
+      "context_length": 35532
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.inverse_transform_Pipeline._inverse_transform.4.1",
+      "distance": 1.125626802444458,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 500,
+      "end_line": 529,
+      "tokens": 225,
+      "context_length": 35757
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_bias_variance.py_X_train_",
+      "distance": 1.1276977062225342,
+      "file_path": "examples/ensemble/plot_bias_variance.py",
+      "start_line": 116,
+      "end_line": 192,
+      "tokens": 684,
+      "context_length": 36441
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_LogOddsEstimator_LogOddsEstimator.predict.5.1",
+      "distance": 1.1279451847076416,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 168,
+      "end_line": 217,
+      "tokens": 351,
+      "context_length": 36792,
+      "file_pos": 23
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_multiclass.py_1_33",
+      "distance": 1.1281154155731201,
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 748,
+      "context_length": 37540
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting.apply_GradientBoostingClassifier",
+      "distance": 1.1304428577423096,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1720,
+      "end_line": 2217,
+      "tokens": 322,
+      "context_length": 37862,
+      "file_pos": 24
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_56_",
+      "distance": 1.131399393081665,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 106,
+      "end_line": 132,
+      "tokens": 236,
+      "context_length": 38098
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_1_x_plot.1",
+      "distance": 1.132660984992981,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 509,
+      "context_length": 38607
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.__getitem___Pipeline.14",
+      "distance": 1.1361202001571655,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 208,
+      "end_line": 242,
+      "tokens": 284,
+      "context_length": 38891
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py__prepare_fit_binary__prepare_fit_binary.7.1",
+      "distance": 1.1371314525604248,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 292,
+      "end_line": 321,
+      "tokens": 250,
+      "context_length": 39141
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingRegressor.apply_",
+      "distance": 1.1372764110565186,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2531,
+      "end_line": 2553,
+      "tokens": 195,
+      "context_length": 39336,
+      "file_pos": 25
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_function_transformer.py_1_",
+      "distance": 1.1384220123291016,
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 450,
+      "context_length": 39786
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 1.1387498378753662,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1828,
+      "end_line": 1870,
+      "tokens": 469,
+      "context_length": 40255
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier.__init___AdaBoostClassifier.fit.5.1",
+      "distance": 1.14104163646698,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 387,
+      "end_line": 427,
+      "tokens": 300,
+      "context_length": 40555
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.141568899154663,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1151,
+      "end_line": 1219,
+      "tokens": 601,
+      "context_length": 41156
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_early_stopping.py_34_",
+      "distance": 1.1417410373687744,
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "start_line": 105,
+      "end_line": 159,
+      "tokens": 344,
+      "context_length": 41500
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_grid_search_refit_callable.py_pipe_",
+      "distance": 1.1421799659729004,
+      "file_path": "examples/model_selection/plot_grid_search_refit_callable.py",
+      "start_line": 78,
+      "end_line": 117,
+      "tokens": 323,
+      "context_length": 41823
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.__init___RANSACRegressor.__init__.self.loss.1",
+      "distance": 1.142494797706604,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 210,
+      "end_line": 228,
+      "tokens": 201,
+      "context_length": 42024
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaseBagging._fit_BaseBagging._fit.n_more_estimators.1",
+      "distance": 1.1439907550811768,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 246,
+      "end_line": 343,
+      "tokens": 783,
+      "context_length": 42807
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_SGDRegressor.__init___",
+      "distance": 1.1444110870361328,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1514,
+      "end_line": 1529,
+      "tokens": 245,
+      "context_length": 43052
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py__name_estimators__name_estimators.7.1",
+      "distance": 1.1452593803405762,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 571,
+      "end_line": 593,
+      "tokens": 155,
+      "context_length": 43207
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ScaledLogOddsEstimator_PriorProbabilityEstimator.predict.5.1",
+      "distance": 1.1460888385772705,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 220,
+      "end_line": 269,
+      "tokens": 369,
+      "context_length": 43576,
+      "file_pos": 27
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier_AdaBoostClassifier.1",
+      "distance": 1.1474721431732178,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 292,
+      "end_line": 386,
+      "tokens": 892,
+      "context_length": 44468
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_fit_binary.18_fit_binary.19.1",
+      "distance": 1.1510028839111328,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 394,
+      "end_line": 426,
+      "tokens": 341,
+      "context_length": 44809
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_multiclass.py_34_",
+      "distance": 1.1515319347381592,
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "start_line": 90,
+      "end_line": 119,
+      "tokens": 243,
+      "context_length": 45052
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.11.5.2.1",
+      "distance": 1.1522003412246704,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 975,
+      "end_line": 1045,
+      "tokens": 628,
+      "context_length": 45680
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor_BaseSGDRegressor.__init__.1",
+      "distance": 1.1525942087173462,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1052,
+      "end_line": 1077,
+      "tokens": 320,
+      "context_length": 46000
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion.fit_transform_FeatureUnion.fit_transform.8.1",
+      "distance": 1.1527217626571655,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 822,
+      "end_line": 854,
+      "tokens": 274,
+      "context_length": 46274
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_MeanEstimator_MeanEstimator.predict.5.1",
+      "distance": 1.152843952178955,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 125,
+      "end_line": 165,
+      "tokens": 267,
+      "context_length": 46541,
+      "file_pos": 27
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaggingClassifier_BaggingClassifier.1",
+      "distance": 1.1534134149551392,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 431,
+      "end_line": 553,
+      "tokens": 1185,
+      "context_length": 47726
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/grid_search_text_feature_extraction.py_1_34",
+      "distance": 1.1534709930419922,
+      "file_path": "examples/model_selection/grid_search_text_feature_extraction.py",
+      "start_line": 2,
+      "end_line": 94,
+      "tokens": 661,
+      "context_length": 48387
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.153576135635376,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 99,
+      "end_line": 109,
+      "tokens": 151,
+      "context_length": 48538
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_missing_values.py_1_get_scores_for_imputer.3.1",
+      "distance": 1.1550695896148682,
+      "file_path": "examples/impute/plot_missing_values.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 371,
+      "context_length": 48909
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ExponentialLoss.__call___ExponentialLoss.negative_gradient.3.1",
+      "distance": 1.1568275690078735,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1028,
+      "end_line": 1061,
+      "tokens": 272,
+      "context_length": 49181,
+      "file_pos": 30
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_int_check_regressors_int.18",
+      "distance": 1.1570883989334106,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1800,
+      "end_line": 1825,
+      "tokens": 277,
+      "context_length": 49458
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ZeroEstimator.predict_ZeroEstimator.predict_proba.1.1",
+      "distance": 1.1574822664260864,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 306,
+      "end_line": 326,
+      "tokens": 150,
+      "context_length": 49608,
+      "file_pos": 30
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_BaseBagging.fit_BaseBagging._parallel_args.1.1",
+      "distance": 1.1576251983642578,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 218,
+      "end_line": 244,
+      "tokens": 212,
+      "context_length": 49820
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ZeroEstimator_ZeroEstimator.fit.2.3.self.n_classes.1",
+      "distance": 1.158690333366394,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 272,
+      "end_line": 304,
+      "tokens": 244,
+      "context_length": 50064,
+      "file_pos": 30
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__fit_and_score.2__fit_and_score.13.3.5.train_scores.1",
+      "distance": 1.1597607135772705,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 486,
+      "end_line": 558,
+      "tokens": 745,
+      "context_length": 50809
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/scikit-learn/examples/feature_selection/plot_feature_selection_pipeline.py_1_",
+      "distance": 1.1601529121398926,
+      "file_path": "examples/feature_selection/plot_feature_selection_pipeline.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 301,
+      "context_length": 51110
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_underfitting_overfitting.py_1_",
+      "distance": 1.161636471748352,
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 631,
+      "context_length": 51741
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train.10_check_classifiers_train.10.24.y_prob.7.y_log_prob.3",
+      "distance": 1.161705493927002,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1423,
+      "end_line": 1522,
+      "tokens": 940,
+      "context_length": 52681
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit_RANSACRegressor.fit.15.1",
+      "distance": 1.1621034145355225,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 230,
+      "end_line": 326,
+      "tokens": 806,
+      "context_length": 53487
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_partial_dependence.py_main_",
+      "distance": 1.162733554840088,
+      "file_path": "examples/ensemble/plot_partial_dependence.py",
+      "start_line": 61,
+      "end_line": 115,
+      "tokens": 496,
+      "context_length": 53983
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_idempotent_",
+      "distance": 1.1634434461593628,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2427,
+      "end_line": 2471,
+      "tokens": 423,
+      "context_length": 54406
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDClassifier._fit_BaseSGDClassifier._fit.13.1",
+      "distance": 1.1634900569915771,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 512,
+      "end_line": 552,
+      "tokens": 372,
+      "context_length": 54778
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_30",
+      "distance": 1.1638767719268799,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 754,
+      "context_length": 55532
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/bagging.py_1__generate_bagging_indices.7.1",
+      "distance": 1.1639187335968018,
+      "file_path": "sklearn/ensemble/bagging.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 380,
+      "context_length": 55912
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.25_LogisticRegressionCV.fit.self.Cs_.1",
+      "distance": 1.1640969514846802,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 2040,
+      "end_line": 2101,
+      "tokens": 680,
+      "context_length": 56592
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sgd_early_stopping.py_fit_and_score_fit_and_score.10.1",
+      "distance": 1.1655445098876953,
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "start_line": 72,
+      "end_line": 86,
+      "tokens": 135,
+      "context_length": 56727
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV.fit.20__RidgeGCV.fit.26.1",
+      "distance": 1.1668968200683594,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1135,
+      "end_line": 1163,
+      "tokens": 276,
+      "context_length": 57003
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting_classifier.py_VotingClassifier._required_parameters_VotingClassifier.fit.18.1",
+      "distance": 1.1680655479431152,
+      "file_path": "sklearn/ensemble/voting_classifier.py",
+      "start_line": 124,
+      "end_line": 205,
+      "tokens": 692,
+      "context_length": 57695
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_multioutput_estimator_convert_y_2d_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.6",
+      "distance": 1.1680924892425537,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2211,
+      "end_line": 2252,
+      "tokens": 399,
+      "context_length": 58094
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/scikit-learn/sklearn/multioutput.py__partial_fit_estimator__partial_fit_estimator.3.1",
+      "distance": 1.168107271194458,
+      "file_path": "sklearn/multioutput.py",
+      "start_line": 43,
+      "end_line": 59,
+      "tokens": 123,
+      "context_length": 58217
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/scikit-learn/sklearn/gaussian_process/gpr.py_GaussianProcessRegressor.predict.4_GaussianProcessRegressor.predict.4.3.K_trans.6.7.1.1",
+      "distance": 1.1683979034423828,
+      "file_path": "sklearn/gaussian_process/gpr.py",
+      "start_line": 305,
+      "end_line": 351,
+      "tokens": 521,
+      "context_length": 58738
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_1__EPSILON.1",
+      "distance": 1.1686224937438965,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 111,
+      "context_length": 58849
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_BaseWeightBoosting._boost_BaseWeightBoosting._boost.2",
+      "distance": 1.1693098545074463,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 175,
+      "end_line": 213,
+      "tokens": 279,
+      "context_length": 59128
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor.fit_BaseSGDRegressor.fit.2.1",
+      "distance": 1.1694157123565674,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1172,
+      "end_line": 1201,
+      "tokens": 227,
+      "context_length": 59355
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDClassifier._partial_fit_BaseSGDClassifier._partial_fit.13.1",
+      "distance": 1.169740915298462,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 465,
+      "end_line": 510,
+      "tokens": 411,
+      "context_length": 59766
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.fit.28__PLS.fit.30",
+      "distance": 1.169806718826294,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 288,
+      "end_line": 349,
+      "tokens": 823,
+      "context_length": 60589
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_twoclass.py_1_43",
+      "distance": 1.1699283123016357,
+      "file_path": "examples/ensemble/plot_adaboost_twoclass.py",
+      "start_line": 1,
+      "end_line": 85,
+      "tokens": 705,
+      "context_length": 61294
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/passive_aggressive.py_PassiveAggressiveRegressor.__init___PassiveAggressiveRegressor.__init__.self.loss.1",
+      "distance": 1.170332670211792,
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "start_line": 389,
+      "end_line": 412,
+      "tokens": 209,
+      "context_length": 61503
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._boost_real_AdaBoostClassifier._boost_real.34.1",
+      "distance": 1.1706445217132568,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 492,
+      "end_line": 548,
+      "tokens": 534,
+      "context_length": 62037
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpr_noisy.py_1_33",
+      "distance": 1.1711890697479248,
+      "file_path": "examples/gaussian_process/plot_gpr_noisy.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 747,
+      "context_length": 62784
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.fit_transform.24_IterativeImputer.fit_transform.26.1",
+      "distance": 1.1716219186782837,
+      "file_path": "sklearn/impute.py",
+      "start_line": 936,
+      "end_line": 971,
+      "tokens": 344,
+      "context_length": 63128
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 1,
+      "tokens": 21197,
+      "context_length": 21197
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 2,
+      "tokens": 21897,
+      "context_length": 43094
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 3,
+      "tokens": 7268,
+      "context_length": 50362
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "position": 4,
+      "tokens": 1164,
+      "context_length": 51526
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "position": 5,
+      "tokens": 574,
+      "context_length": 52100
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "position": 6,
+      "tokens": 1245,
+      "context_length": 53345
+    },
+    {
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "position": 7,
+      "tokens": 1081,
+      "context_length": 54426
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_regularization.py",
+      "position": 8,
+      "tokens": 724,
+      "context_length": 55150
+    },
+    {
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "position": 9,
+      "tokens": 580,
+      "context_length": 55730
+    },
+    {
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "position": 10,
+      "tokens": 9116,
+      "context_length": 64846
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_regression.py",
+      "position": 11,
+      "tokens": 417,
+      "context_length": 65263
+    },
+    {
+      "file_path": "sklearn/ensemble/bagging.py",
+      "position": 12,
+      "tokens": 7984,
+      "context_length": 73247
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 13,
+      "tokens": 1175,
+      "context_length": 74422
+    },
+    {
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "position": 14,
+      "tokens": 1846,
+      "context_length": 76268
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 15,
+      "tokens": 1125,
+      "context_length": 77393
+    },
+    {
+      "file_path": "sklearn/linear_model/ransac.py",
+      "position": 16,
+      "tokens": 4065,
+      "context_length": 81458
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 17,
+      "tokens": 13776,
+      "context_length": 95234
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 18,
+      "tokens": 821,
+      "context_length": 96055
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_hastie_10_2.py",
+      "position": 19,
+      "tokens": 966,
+      "context_length": 97021
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 20,
+      "tokens": 1718,
+      "context_length": 98739
+    },
+    {
+      "file_path": "sklearn/gaussian_process/gpr.py",
+      "position": 21,
+      "tokens": 4457,
+      "context_length": 103196
+    },
+    {
+      "file_path": "sklearn/utils/mocking.py",
+      "position": 22,
+      "tokens": 909,
+      "context_length": 104105
+    },
+    {
+      "file_path": "examples/ensemble/plot_bias_variance.py",
+      "position": 23,
+      "tokens": 1814,
+      "context_length": 105919
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "position": 24,
+      "tokens": 1014,
+      "context_length": 106933
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 25,
+      "tokens": 794,
+      "context_length": 107727
+    },
+    {
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "position": 26,
+      "tokens": 450,
+      "context_length": 108177
+    },
+    {
+      "file_path": "examples/model_selection/plot_grid_search_refit_callable.py",
+      "position": 27,
+      "tokens": 832,
+      "context_length": 109009
+    },
+    {
+      "file_path": "examples/model_selection/grid_search_text_feature_extraction.py",
+      "position": 28,
+      "tokens": 1095,
+      "context_length": 110104
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 29,
+      "tokens": 1891,
+      "context_length": 111995
+    },
+    {
+      "file_path": "examples/impute/plot_missing_values.py",
+      "position": 30,
+      "tokens": 1204,
+      "context_length": 113199
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 31,
+      "tokens": 13110,
+      "context_length": 126309
+    },
+    {
+      "file_path": "examples/feature_selection/plot_feature_selection_pipeline.py",
+      "position": 32,
+      "tokens": 301,
+      "context_length": 126610
+    },
+    {
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "position": 33,
+      "tokens": 631,
+      "context_length": 127241
+    },
+    {
+      "file_path": "examples/ensemble/plot_partial_dependence.py",
+      "position": 34,
+      "tokens": 1043,
+      "context_length": 128284
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 35,
+      "tokens": 1219,
+      "context_length": 129503
+    },
+    {
+      "file_path": "sklearn/linear_model/logistic.py",
+      "position": 36,
+      "tokens": 22042,
+      "context_length": 151545
+    },
+    {
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "position": 37,
+      "tokens": 1297,
+      "context_length": 152842
+    },
+    {
+      "file_path": "sklearn/linear_model/ridge.py",
+      "position": 38,
+      "tokens": 13385,
+      "context_length": 166227
+    },
+    {
+      "file_path": "sklearn/ensemble/voting_classifier.py",
+      "position": 39,
+      "tokens": 2845,
+      "context_length": 169072
+    },
+    {
+      "file_path": "sklearn/multioutput.py",
+      "position": 40,
+      "tokens": 5563,
+      "context_length": 174635
+    },
+    {
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "position": 41,
+      "tokens": 8219,
+      "context_length": 182854
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_twoclass.py",
+      "position": 42,
+      "tokens": 870,
+      "context_length": 183724
+    },
+    {
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "position": 43,
+      "tokens": 3980,
+      "context_length": 187704
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpr_noisy.py",
+      "position": 44,
+      "tokens": 1129,
+      "context_length": 188833
+    },
+    {
+      "file_path": "sklearn/impute.py",
+      "position": 45,
+      "tokens": 10678,
+      "context_length": 199511
+    }
+  ]
+}

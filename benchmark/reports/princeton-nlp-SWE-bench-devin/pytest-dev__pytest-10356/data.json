@@ -1,0 +1,1234 @@
+{
+  "instance_id": "pytest-dev__pytest-10356",
+  "model_patch": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\nindex 800a25c92..ce919ff00 100644\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -350,6 +350,7 @@ class MarkDecorator:\n             func = args[0]\n             is_class = inspect.isclass(func)\n             if len(args) == 1 and (istestfunc(func) or is_class):\n+                print(f\"Applying {self.mark} to {func.__name__}\")  # Print statement added for debugging\n                 store_mark(func, self.mark)\n                 return func\n         return self.with_args(*args, **kwargs)\n@@ -360,7 +361,10 @@ def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n     mark_list = getattr(obj, \"pytestmark\", [])\n     if not isinstance(mark_list, list):\n         mark_list = [mark_list]\n-    return normalize_mark_list(mark_list)\n+    print(f\"Raw marks from {getattr(obj, '__name__', repr(obj))}: {mark_list}\")  # Print statement added for debugging\n+    normalized_marks = list(normalize_mark_list(mark_list))\n+    print(f\"Normalized marks from {getattr(obj, '__name__', repr(obj))}: {normalized_marks}\")  # Print statement added for debugging\n+    return normalized_marks\n \n \n def normalize_mark_list(\n@@ -381,14 +385,35 @@ def normalize_mark_list(\n \n \n def store_mark(obj, mark: Mark) -> None:\n-    \"\"\"Store a Mark on an object.\n-\n+    \"\"\"Store a Mark on an object, considering the Method Resolution Order (MRO).\n     This is used to implement the Mark declarations/decorators correctly.\n     \"\"\"\n     assert isinstance(mark, Mark), mark\n+    # Retrieve existing marks, considering MRO if obj is a class\n+    existing_marks = []\n+    if inspect.isclass(obj):\n+        for cls in inspect.getmro(obj)[::-1]:  # Reverse the MRO to start from the base\n+            cls_marks = get_unpacked_marks(cls)\n+            print(f\"Marks from {cls.__name__}: {list(cls_marks)}\")  # Print statement added for debugging\n+            for cls_mark in cls_marks:\n+                if cls_mark.name not in (m.name for m in existing_marks):\n+                    existing_marks.append(cls_mark)\n+    else:\n+        existing_marks.extend(get_unpacked_marks(obj))\n+    # Add the new mark if it's not already present\n+    print(f\"Existing marks before adding new mark: {existing_marks}\")  # Print statement added for debugging\n+    if mark.name not in (m.name for m in existing_marks):\n+        existing_marks.append(mark)\n+    print(f\"Existing marks after adding new mark: {existing_marks}\")  # Print statement added for debugging\n     # Always reassign name to avoid updating pytestmark in a reference that\n     # was only borrowed.\n-    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n+    obj.pytestmark = existing_marks\n+    # Update the pytestmark attribute on any subclasses\n+    for subclass in obj.__subclasses__():\n+        subclass_existing_marks = list(getattr(subclass, 'pytestmark', []))\n+        if mark not in subclass_existing_marks:\n+            subclass_existing_marks.append(mark)\n+            subclass.pytestmark = subclass_existing_marks\n \n \n # Typing for builtin pytest marks. This is cheating; it gives builtin marks\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "src/_pytest/mark/structures.py"
+  ],
+  "repo": "pytest-dev/pytest",
+  "base_commit": "3c1534944cbd34e8a41bc9e76818018fadefc9a1",
+  "patch": "diff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -355,12 +355,35 @@ def __call__(self, *args: object, **kwargs: object):\n         return self.with_args(*args, **kwargs)\n \n \n-def get_unpacked_marks(obj: object) -> Iterable[Mark]:\n-    \"\"\"Obtain the unpacked marks that are stored on an object.\"\"\"\n-    mark_list = getattr(obj, \"pytestmark\", [])\n-    if not isinstance(mark_list, list):\n-        mark_list = [mark_list]\n-    return normalize_mark_list(mark_list)\n+def get_unpacked_marks(\n+    obj: Union[object, type],\n+    *,\n+    consider_mro: bool = True,\n+) -> List[Mark]:\n+    \"\"\"Obtain the unpacked marks that are stored on an object.\n+\n+    If obj is a class and consider_mro is true, return marks applied to\n+    this class and all of its super-classes in MRO order. If consider_mro\n+    is false, only return marks applied directly to this class.\n+    \"\"\"\n+    if isinstance(obj, type):\n+        if not consider_mro:\n+            mark_lists = [obj.__dict__.get(\"pytestmark\", [])]\n+        else:\n+            mark_lists = [x.__dict__.get(\"pytestmark\", []) for x in obj.__mro__]\n+        mark_list = []\n+        for item in mark_lists:\n+            if isinstance(item, list):\n+                mark_list.extend(item)\n+            else:\n+                mark_list.append(item)\n+    else:\n+        mark_attribute = getattr(obj, \"pytestmark\", [])\n+        if isinstance(mark_attribute, list):\n+            mark_list = mark_attribute\n+        else:\n+            mark_list = [mark_attribute]\n+    return list(normalize_mark_list(mark_list))\n \n \n def normalize_mark_list(\n@@ -388,7 +411,7 @@ def store_mark(obj, mark: Mark) -> None:\n     assert isinstance(mark, Mark), mark\n     # Always reassign name to avoid updating pytestmark in a reference that\n     # was only borrowed.\n-    obj.pytestmark = [*get_unpacked_marks(obj), mark]\n+    obj.pytestmark = [*get_unpacked_marks(obj, consider_mro=False), mark]\n \n \n # Typing for builtin pytest marks. This is cheating; it gives builtin marks\n",
+  "test_patch": "diff --git a/testing/test_mark.py b/testing/test_mark.py\n--- a/testing/test_mark.py\n+++ b/testing/test_mark.py\n@@ -1109,3 +1109,27 @@ def test_foo():\n     result = pytester.runpytest(foo, \"-m\", expr)\n     result.stderr.fnmatch_lines([expected])\n     assert result.ret == ExitCode.USAGE_ERROR\n+\n+\n+def test_mark_mro() -> None:\n+    xfail = pytest.mark.xfail\n+\n+    @xfail(\"a\")\n+    class A:\n+        pass\n+\n+    @xfail(\"b\")\n+    class B:\n+        pass\n+\n+    @xfail(\"c\")\n+    class C(A, B):\n+        pass\n+\n+    from _pytest.mark.structures import get_unpacked_marks\n+\n+    all_marks = get_unpacked_marks(C)\n+\n+    assert all_marks == [xfail(\"c\").mark, xfail(\"a\").mark, xfail(\"b\").mark]\n+\n+    assert get_unpacked_marks(C, consider_mro=False) == [xfail(\"c\").mark]\n",
+  "problem_statement": "Consider MRO when obtaining marks for classes\nWhen using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.\r\n\r\nIf it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.\r\n\r\n```python\r\nimport itertools\r\nimport pytest\r\n\r\nclass BaseMeta(type):\r\n    @property\r\n    def pytestmark(self):\r\n        return (\r\n            getattr(self, \"_pytestmark\", []) +\r\n            list(itertools.chain.from_iterable(getattr(x, \"_pytestmark\", []) for x in self.__mro__))\r\n        )\r\n\r\n    @pytestmark.setter\r\n    def pytestmark(self, value):\r\n        self._pytestmark = value\r\n\r\n\r\nclass Base(object):\r\n    # Without this metaclass, foo and bar markers override each other, and test_dings\r\n    # will only have one marker\r\n    # With the metaclass, test_dings will have both\r\n    __metaclass__ = BaseMeta\r\n\r\n@pytest.mark.foo\r\nclass Foo(Base):\r\n    pass\r\n\r\n\r\n@pytest.mark.bar\r\nclass Bar(Base):\r\n    pass\r\n\r\nclass TestDings(Foo, Bar):\r\n    def test_dings(self):\r\n        # This test should have both markers, foo and bar.\r\n        # In practice markers are resolved using MRO (so foo wins), unless the\r\n        # metaclass is applied\r\n        pass\r\n```\r\n\r\nI'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.\r\n\r\nPlease note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)\nConsider MRO when obtaining marks for classes\nWhen using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.\r\n\r\nIf it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.\r\n\r\n```python\r\nimport itertools\r\nimport pytest\r\n\r\nclass BaseMeta(type):\r\n    @property\r\n    def pytestmark(self):\r\n        return (\r\n            getattr(self, \"_pytestmark\", []) +\r\n            list(itertools.chain.from_iterable(getattr(x, \"_pytestmark\", []) for x in self.__mro__))\r\n        )\r\n\r\n    @pytestmark.setter\r\n    def pytestmark(self, value):\r\n        self._pytestmark = value\r\n\r\n\r\nclass Base(object):\r\n    # Without this metaclass, foo and bar markers override each other, and test_dings\r\n    # will only have one marker\r\n    # With the metaclass, test_dings will have both\r\n    __metaclass__ = BaseMeta\r\n\r\n@pytest.mark.foo\r\nclass Foo(Base):\r\n    pass\r\n\r\n\r\n@pytest.mark.bar\r\nclass Bar(Base):\r\n    pass\r\n\r\nclass TestDings(Foo, Bar):\r\n    def test_dings(self):\r\n        # This test should have both markers, foo and bar.\r\n        # In practice markers are resolved using MRO (so foo wins), unless the\r\n        # metaclass is applied\r\n        pass\r\n```\r\n\r\nI'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.\r\n\r\nPlease note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)\nFix missing marks when inheritance from multiple classes\n\r\n<!--\r\nThanks for submitting a PR, your contribution is really appreciated!\r\n\r\nHere is a quick checklist that should be present in PRs.\r\n\r\n- [] Include documentation when adding new features.\r\n- [ ] Include new tests or update existing tests when applicable.\r\n- [X] Allow maintainers to push and squash when merging my commits. Please uncheck this if you prefer to squash the commits yourself.\r\n\r\nIf this change fixes an issue, please:\r\n\r\n- [x] Add text like ``closes #XYZW`` to the PR description and/or commits (where ``XYZW`` is the issue number). See the [github docs](https://help.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) for more information.\r\n\r\nUnless your change is trivial or a small documentation fix (e.g., a typo or reword of a small section) please:\r\n\r\n- [x] Create a new changelog file in the `changelog` folder, with a name like `<ISSUE NUMBER>.<TYPE>.rst`. See [changelog/README.rst](https://github.com/pytest-dev/pytest/blob/main/changelog/README.rst) for details.\r\n\r\n  Write sentences in the **past or present tense**, examples:\r\n\r\n  * *Improved verbose diff output with sequences.*\r\n  * *Terminal summary statistics now use multiple colors.*\r\n\r\n  Also make sure to end the sentence with a `.`.\r\n\r\n- [x] Add yourself to `AUTHORS` in alphabetical order.\r\n-->\r\n\n",
+  "hints_text": "ronny has already refactored this multiple times iirc, but I wonder if it would make sense to store markers as `pytestmark_foo` and `pytestmark_bar` on the class instead of in one `pytestmark` array, that way you can leverage regular inheritance rules\nThanks for bringing this to attention, pytest show walk the mro of a class to get all markers\n\nIt hadn't done before, but it is a logical conclusion\n\nIt's potentially a breaking change.\n\nCc @nicoddemus @bluetech @asottile \nAs for storing as normal attributes, that has issues when combining same name marks from diamond structures, so it doesn't buy anything that isn't already solved \n>so it doesn't buy anything that isn't already solved\r\n\r\nSo I mean it absolves you from explicitly walking MRO because you just sort of rely on the attributes being propagated by Python to subclasses like pytest currently expects it to.\n> It's potentially a breaking change.\r\n\r\nStrictly yes, so if we were to fix this it should go into 7.0 only.\nAnd are there plans to include it to 7.0? The metaclass workaround does not work for me. :/ I use pytest 6.2.4, python 3.7.9\n@radkujawa Nobody has been working on this so far, and 7.0 has been delayed for a long time (we haven't had a feature release this year yet!) for various reasons. Even if someone worked on this, it'd likely have to wait for 8.0 (at least in my eyes).\nRe workaround: The way the metaclass is declared needs to be ported from Python 2 to 3 for it to work. \n\nOn Fri, Jun 4, 2021, at 11:15, radkujawa wrote:\n> \n\n> And are there plans to include it to 7.0? The metaclass workaround does not work for me. :/ I use pytest 6.2.4, python 3.7.9\n\n\n> \u2014\n> You are receiving this because you authored the thread.\n> Reply to this email directly, view it on GitHub <https://github.com/pytest-dev/pytest/issues/7792#issuecomment-854515753>, or unsubscribe <https://github.com/notifications/unsubscribe-auth/AAGMPRKY3A7P2EBKQN5KHY3TRCKU5ANCNFSM4RYY25OA>.\n\n> @radkujawa Nobody has been working on this so far, and 7.0 has been delayed for a long time (we haven't had a feature release this year yet!) for various reasons. Even if someone worked on this, it'd likely have to wait for 8.0 (at least in my eyes).\r\n\r\nthanks! \nI can not understand the solution proposed by @untitaker. In my opinion, the purpose of test inheritance is that the new test class will contain all tests from parent classes. Also, I do not think it is necessary to mark the tests in the new class with the markers from parent classes. In my opinion, every test in the new class is separate and should be explicitly marked by the user.\r\n\r\nExample:\r\n```python\r\n@pytest.mark.mark1\r\nclass Test1:\r\n    @pytest.mark.mark2\r\n    def test_a(self):\r\n        ...\r\n\r\n    @pytest.mark.mark3\r\n    def test_b(self):\r\n        ...\r\n\r\n\r\n@pytest.mark4\r\nclass Test2:\r\n    @pytest.mark.mark5\r\n    def test_c(self):\r\n        ...\r\n\r\n\r\nclass Test3(Test1, Test):\r\n    def test_d(self):\r\n        ...\r\n```\r\n\r\nPytest will run these tests `Test3`:\r\n* Test3.test_a - The value of variable `pytestmark` cotians  [Mark(name=\"mark1\", ...), Mark(name=\"mark2\", ...)]\r\n* Test3.test_b - The value of variable `pytestmark` cotians  [Mark(name=\"mark1\", ...), Mark(name=\"mark3\", ...)]\r\n* Test3.test_c - The value of variable `pytestmark` cotians  [Mark(name=\"mark4\", ...), Mark(name=\"mark5\", ...)]\r\n* Test3.test_d - The value of variable `pytestmark` is empty\r\n\r\n@RonnyPfannschmidt What do you think?\r\n\nThe marks have to transfer with the mro, its a well used feature and its a bug that it doesn't extend to multiple inheritance \n> The marks have to transfer with the mro, its a well used feature and its a bug that it doesn't extend to multiple inheritance\r\n\r\nAfter fixing the problem with mro, the goal is that each test will contain all the marks it inherited from parent classes?\r\nAccording to my example,  the marks of `test_d` should be ` [Mark(name=\"mark1\", ...), Mark(name=\"mark4\", ...)]`?\nCorrect \nronny has already refactored this multiple times iirc, but I wonder if it would make sense to store markers as `pytestmark_foo` and `pytestmark_bar` on the class instead of in one `pytestmark` array, that way you can leverage regular inheritance rules\nThanks for bringing this to attention, pytest show walk the mro of a class to get all markers\n\nIt hadn't done before, but it is a logical conclusion\n\nIt's potentially a breaking change.\n\nCc @nicoddemus @bluetech @asottile \nAs for storing as normal attributes, that has issues when combining same name marks from diamond structures, so it doesn't buy anything that isn't already solved \n>so it doesn't buy anything that isn't already solved\r\n\r\nSo I mean it absolves you from explicitly walking MRO because you just sort of rely on the attributes being propagated by Python to subclasses like pytest currently expects it to.\n> It's potentially a breaking change.\r\n\r\nStrictly yes, so if we were to fix this it should go into 7.0 only.\nAnd are there plans to include it to 7.0? The metaclass workaround does not work for me. :/ I use pytest 6.2.4, python 3.7.9\n@radkujawa Nobody has been working on this so far, and 7.0 has been delayed for a long time (we haven't had a feature release this year yet!) for various reasons. Even if someone worked on this, it'd likely have to wait for 8.0 (at least in my eyes).\nRe workaround: The way the metaclass is declared needs to be ported from Python 2 to 3 for it to work. \n\nOn Fri, Jun 4, 2021, at 11:15, radkujawa wrote:\n> \n\n> And are there plans to include it to 7.0? The metaclass workaround does not work for me. :/ I use pytest 6.2.4, python 3.7.9\n\n\n> \u2014\n> You are receiving this because you authored the thread.\n> Reply to this email directly, view it on GitHub <https://github.com/pytest-dev/pytest/issues/7792#issuecomment-854515753>, or unsubscribe <https://github.com/notifications/unsubscribe-auth/AAGMPRKY3A7P2EBKQN5KHY3TRCKU5ANCNFSM4RYY25OA>.\n\n> @radkujawa Nobody has been working on this so far, and 7.0 has been delayed for a long time (we haven't had a feature release this year yet!) for various reasons. Even if someone worked on this, it'd likely have to wait for 8.0 (at least in my eyes).\r\n\r\nthanks! \nI can not understand the solution proposed by @untitaker. In my opinion, the purpose of test inheritance is that the new test class will contain all tests from parent classes. Also, I do not think it is necessary to mark the tests in the new class with the markers from parent classes. In my opinion, every test in the new class is separate and should be explicitly marked by the user.\r\n\r\nExample:\r\n```python\r\n@pytest.mark.mark1\r\nclass Test1:\r\n    @pytest.mark.mark2\r\n    def test_a(self):\r\n        ...\r\n\r\n    @pytest.mark.mark3\r\n    def test_b(self):\r\n        ...\r\n\r\n\r\n@pytest.mark4\r\nclass Test2:\r\n    @pytest.mark.mark5\r\n    def test_c(self):\r\n        ...\r\n\r\n\r\nclass Test3(Test1, Test):\r\n    def test_d(self):\r\n        ...\r\n```\r\n\r\nPytest will run these tests `Test3`:\r\n* Test3.test_a - The value of variable `pytestmark` cotians  [Mark(name=\"mark1\", ...), Mark(name=\"mark2\", ...)]\r\n* Test3.test_b - The value of variable `pytestmark` cotians  [Mark(name=\"mark1\", ...), Mark(name=\"mark3\", ...)]\r\n* Test3.test_c - The value of variable `pytestmark` cotians  [Mark(name=\"mark4\", ...), Mark(name=\"mark5\", ...)]\r\n* Test3.test_d - The value of variable `pytestmark` is empty\r\n\r\n@RonnyPfannschmidt What do you think?\r\n\nThe marks have to transfer with the mro, its a well used feature and its a bug that it doesn't extend to multiple inheritance \n> The marks have to transfer with the mro, its a well used feature and its a bug that it doesn't extend to multiple inheritance\r\n\r\nAfter fixing the problem with mro, the goal is that each test will contain all the marks it inherited from parent classes?\r\nAccording to my example,  the marks of `test_d` should be ` [Mark(name=\"mark1\", ...), Mark(name=\"mark4\", ...)]`?\nCorrect \n@bluetech \r\n\r\nit deals with\r\n```text\r\nIn [1]: import pytest\r\n\r\nIn [2]: @pytest.mark.a\r\n   ...: class A:\r\n   ...:     pass\r\n   ...: \r\n\r\nIn [3]: @pytest.mark.b\r\n   ...: class B: pass\r\n\r\nIn [6]: @pytest.mark.c\r\n   ...: class C(A,B): pass\r\n\r\nIn [7]: C.pytestmark\r\nOut[7]: [Mark(name='a', args=(), kwargs={}), Mark(name='c', args=(), kwargs={})]\r\n\r\n```\r\n(b is missing)\nRight, I understand the problem. What I'd like to see as a description of the proposed solution, it is not very clear to me.\n> Right, I understand the problem. What I'd like to see as a description of the proposed solution, it is not very clear to me.\r\n\r\n@bluetech \r\nThe solution I want to implement is: \r\n* Go through the items list. \r\n* For each item, I go through the list of classes from which he inherits. The same logic I do for each class until I found the object class.\r\n* I am updating the list of marks only if the mark does not exist in the current list.\r\n \r\nThe existing code is incorrect, and I will now update it to work according to the logic I wrote here\n@RonnyPfannschmidt \r\nThe PR is not ready for review.\r\nI trying to fix all the tests and after that, I'll improve the logic.\n@RonnyPfannschmidt \r\nOnce the PR is approved I'll create one commit with description \n@RonnyPfannschmidt \r\nYou can review the PR.",
+  "created_at": "2022-10-08T06:20:42Z",
+  "version": "7.2",
+  "FAIL_TO_PASS": "[\"testing/test_mark.py::test_mark_mro\"]",
+  "PASS_TO_PASS": "[\"testing/test_mark.py::TestFunctional::test_keyword_added_for_session\", \"testing/test_mark.py::TestFunctional::test_keywords_at_node_level\", \"testing/test_mark.py::TestFunctional::test_mark_closest\", \"testing/test_mark.py::TestFunctional::test_mark_decorator_baseclasses_merged\", \"testing/test_mark.py::TestFunctional::test_mark_decorator_subclass_does_not_propagate_to_base\", \"testing/test_mark.py::TestFunctional::test_mark_dynamically_in_funcarg\", \"testing/test_mark.py::TestFunctional::test_mark_from_parameters\", \"testing/test_mark.py::TestFunctional::test_mark_should_not_pass_to_siebling_class\", \"testing/test_mark.py::TestFunctional::test_mark_with_wrong_marker\", \"testing/test_mark.py::TestFunctional::test_merging_markers_deep\", \"testing/test_mark.py::TestFunctional::test_no_marker_match_on_unmarked_names\", \"testing/test_mark.py::TestFunctional::test_reevaluate_dynamic_expr\", \"testing/test_mark.py::TestKeywordSelection::test_keyword_extra\", \"testing/test_mark.py::TestKeywordSelection::test_no_magic_values[+]\", \"testing/test_mark.py::TestKeywordSelection::test_no_magic_values[..]\", \"testing/test_mark.py::TestKeywordSelection::test_no_magic_values[__]\", \"testing/test_mark.py::TestKeywordSelection::test_no_match_directories_outside_the_suite\", \"testing/test_mark.py::TestKeywordSelection::test_select_extra_keywords[TestClass\", \"testing/test_mark.py::TestKeywordSelection::test_select_extra_keywords[TestClass]\", \"testing/test_mark.py::TestKeywordSelection::test_select_extra_keywords[xxx\", \"testing/test_mark.py::TestKeywordSelection::test_select_extra_keywords[xxx]\", \"testing/test_mark.py::TestKeywordSelection::test_select_simple\", \"testing/test_mark.py::TestMark::test_mark_with_param\", \"testing/test_mark.py::TestMark::test_pytest_exists_in_namespace_all[mark]\", \"testing/test_mark.py::TestMark::test_pytest_exists_in_namespace_all[param]\", \"testing/test_mark.py::TestMark::test_pytest_mark_name_starts_with_underscore\", \"testing/test_mark.py::TestMark::test_pytest_mark_notcallable\", \"testing/test_mark.py::TestMarkDecorator::test__eq__[foo-rhs3-False]\", \"testing/test_mark.py::TestMarkDecorator::test__eq__[lhs0-rhs0-True]\", \"testing/test_mark.py::TestMarkDecorator::test__eq__[lhs1-rhs1-False]\", \"testing/test_mark.py::TestMarkDecorator::test__eq__[lhs2-bar-False]\", \"testing/test_mark.py::TestMarkDecorator::test_aliases\", \"testing/test_mark.py::test_addmarker_order\", \"testing/test_mark.py::test_ini_markers\", \"testing/test_mark.py::test_ini_markers_whitespace\", \"testing/test_mark.py::test_keyword_option_considers_mark\", \"testing/test_mark.py::test_keyword_option_custom[1\", \"testing/test_mark.py::test_keyword_option_custom[interface-expected_passed0]\", \"testing/test_mark.py::test_keyword_option_custom[not\", \"testing/test_mark.py::test_keyword_option_custom[pass-expected_passed2]\", \"testing/test_mark.py::test_keyword_option_parametrize[2-3-expected_passed2]\", \"testing/test_mark.py::test_keyword_option_parametrize[None-expected_passed0]\", \"testing/test_mark.py::test_keyword_option_parametrize[[1.3]-expected_passed1]\", \"testing/test_mark.py::test_keyword_option_wrong_arguments[(foo-at\", \"testing/test_mark.py::test_keyword_option_wrong_arguments[foo\", \"testing/test_mark.py::test_keyword_option_wrong_arguments[not\", \"testing/test_mark.py::test_keyword_option_wrong_arguments[or\", \"testing/test_mark.py::test_mark_expressions_no_smear\", \"testing/test_mark.py::test_mark_on_pseudo_function\", \"testing/test_mark.py::test_mark_option[(((\", \"testing/test_mark.py::test_mark_option[not\", \"testing/test_mark.py::test_mark_option[xyz\", \"testing/test_mark.py::test_mark_option[xyz-expected_passed0]\", \"testing/test_mark.py::test_mark_option[xyz2-expected_passed4]\", \"testing/test_mark.py::test_mark_option_custom[interface-expected_passed0]\", \"testing/test_mark.py::test_mark_option_custom[not\", \"testing/test_mark.py::test_marked_class_run_twice\", \"testing/test_mark.py::test_marker_expr_eval_failure_handling[NOT\", \"testing/test_mark.py::test_marker_expr_eval_failure_handling[bogus=]\", \"testing/test_mark.py::test_marker_without_description\", \"testing/test_mark.py::test_markers_from_parametrize\", \"testing/test_mark.py::test_markers_option\", \"testing/test_mark.py::test_markers_option_with_plugin_in_current_dir\", \"testing/test_mark.py::test_parameterset_for_fail_at_collect\", \"testing/test_mark.py::test_parameterset_for_parametrize_bad_markname\", \"testing/test_mark.py::test_parameterset_for_parametrize_marks[None]\", \"testing/test_mark.py::test_parameterset_for_parametrize_marks[]\", \"testing/test_mark.py::test_parameterset_for_parametrize_marks[skip]\", \"testing/test_mark.py::test_parameterset_for_parametrize_marks[xfail]\", \"testing/test_mark.py::test_parametrize_iterator\", \"testing/test_mark.py::test_parametrize_with_module\", \"testing/test_mark.py::test_parametrized_collect_with_wrong_args\", \"testing/test_mark.py::test_parametrized_collected_from_command_line\", \"testing/test_mark.py::test_parametrized_with_kwargs\", \"testing/test_mark.py::test_pytest_param_id_allows_none_or_string[None]\", \"testing/test_mark.py::test_pytest_param_id_allows_none_or_string[hello\", \"testing/test_mark.py::test_pytest_param_id_requires_string\", \"testing/test_mark.py::test_strict_prohibits_unregistered_markers[--strict-markers]\", \"testing/test_mark.py::test_strict_prohibits_unregistered_markers[--strict]\"]",
+  "environment_setup_commit": "572b5657d7ca557593418ce0319fabff88800c73",
+  "patch_files": [
+    "src/_pytest/mark/structures.py"
+  ],
+  "test_patch_files": [
+    "testing/test_mark.py"
+  ],
+  "patch_diff_details": {
+    "src/_pytest/mark/structures.py": {
+      "diffs": [
+        {
+          "start_line_old": 358,
+          "end_line_old": 363,
+          "file_pos": 4,
+          "file_context_length": 45291,
+          "closest_snippet_id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MarkGenerator.__getattr___MarkGenerator.__getattr__.4.1",
+          "closest_snippet_line_distance": 132,
+          "pos": 91,
+          "context_length": 57697
+        },
+        {
+          "start_line_old": 391,
+          "end_line_old": 391,
+          "file_pos": 4,
+          "file_context_length": 45291,
+          "pos": 7,
+          "context_length": 25982
+        }
+      ]
+    }
+  },
+  "vectors": 1130,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestRequestBasic.test_request_fixturenames_dynamic_fixture_TestAutouseManagement.test_autouse_conftest_mid_directory.9",
+      "distance": 0.868852436542511,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 990,
+      "end_line": 1958,
+      "tokens": 6100,
+      "context_length": 6100
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pytest/src/pytest/__init__.py_1_set_trace.1",
+      "distance": 0.871008038520813,
+      "file_path": "src/pytest/__init__.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 733,
+      "context_length": 6833
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_test_getfuncargnames_methods_TestRequestBasic.test_request_fixturenames.3",
+      "distance": 0.8862746953964233,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 41,
+      "end_line": 988,
+      "tokens": 6136,
+      "context_length": 12969
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestClass.test_setup_teardown_class_as_classmethod_TestClass.test_issue2234_property.3",
+      "distance": 0.9088640213012695,
+      "file_path": "testing/python/collect.py",
+      "start_line": 210,
+      "end_line": 263,
+      "tokens": 342,
+      "context_length": 13311
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureMarker.test_parametrized_fixture_teardown_order_TestParameterizedSubRequest.test_external_fixture.4",
+      "distance": 0.9122895002365112,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 2834,
+      "end_line": 3839,
+      "tokens": 6155,
+      "context_length": 19466
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestAutouseManagement.test_funcarg_and_setup_TestFixtureMarker.test_parametrize_separated_order_higher_scope_first.8",
+      "distance": 0.9189556837081909,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 1960,
+      "end_line": 2832,
+      "tokens": 5920,
+      "context_length": 25386
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_store_mark_48._FilterwarningsMarkDecorator.__call__.2",
+      "distance": 0.9236204624176025,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 383,
+      "end_line": 457,
+      "tokens": 596,
+      "context_length": 25982,
+      "file_pos": 4
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_1_69",
+      "distance": 0.9239598512649536,
+      "file_path": "doc/en/conf.py",
+      "start_line": 1,
+      "end_line": 116,
+      "tokens": 847,
+      "context_length": 26829
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestParameterizedSubRequest.test_non_relative_path_",
+      "distance": 0.93382728099823,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 3841,
+      "end_line": 4471,
+      "tokens": 4315,
+      "context_length": 31144
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MarkDecorator_MarkDecorator.__call___14.3.1",
+      "distance": 0.9360849261283875,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 264,
+      "end_line": 355,
+      "tokens": 763,
+      "context_length": 31907,
+      "file_pos": 5
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue_519.py_pprint_checked_order.4",
+      "distance": 0.955398440361023,
+      "file_path": "testing/example_scripts/issue_519.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 362,
+      "context_length": 32269
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_Mark_Markable.1",
+      "distance": 0.9566502571105957,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 193,
+      "end_line": 261,
+      "tokens": 556,
+      "context_length": 32825,
+      "file_pos": 6
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_exclude_patterns_128",
+      "distance": 0.9568200707435608,
+      "file_path": "doc/en/conf.py",
+      "start_line": 117,
+      "end_line": 222,
+      "tokens": 862,
+      "context_length": 33687
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest.config_FixtureRequest._fillfixtures.3.1.1",
+      "distance": 0.9587738513946533,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 456,
+      "end_line": 549,
+      "tokens": 809,
+      "context_length": 34496
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_setup_",
+      "distance": 0.9689879417419434,
+      "file_path": "doc/en/conf.py",
+      "start_line": 423,
+      "end_line": 476,
+      "tokens": 418,
+      "context_length": 34914
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization_TestMarkersWithParametrization.test_simple_mark.7",
+      "distance": 0.9709572196006775,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1669,
+      "end_line": 1691,
+      "tokens": 175,
+      "context_length": 35089
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_issue323_TestMetafuncFunctional.test_usefixtures_seen_in_generate_tests.3",
+      "distance": 0.9725341200828552,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1403,
+      "end_line": 1435,
+      "tokens": 211,
+      "context_length": 35300
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_1_old_mark_config_key.1",
+      "distance": 0.9797623157501221,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 228,
+      "context_length": 35528
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_html_sidebars_texinfo_documents.1",
+      "distance": 0.9864609241485596,
+      "file_path": "doc/en/conf.py",
+      "start_line": 224,
+      "end_line": 385,
+      "tokens": 925,
+      "context_length": 36453
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_kwarg_TestMarkersWithParametrization.test_xfail_with_kwarg.4",
+      "distance": 0.9905189275741577,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1761,
+      "end_line": 1775,
+      "tokens": 133,
+      "context_length": 36586
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pytest/src/_pytest/deprecated.py_NODE_CTOR_FSPATH_ARG_",
+      "distance": 0.9919690489768982,
+      "file_path": "src/_pytest/deprecated.py",
+      "start_line": 77,
+      "end_line": 132,
+      "tokens": 498,
+      "context_length": 37084
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_misspelling_TestMetafuncFunctional.test_parametrize_misspelling.4",
+      "distance": 0.9926143884658813,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1479,
+      "end_line": 1503,
+      "tokens": 214,
+      "context_length": 37298
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pytest/scripts/publish-gh-release-notes.py_main_",
+      "distance": 0.9977574944496155,
+      "file_path": "scripts/publish-gh-release-notes.py",
+      "start_line": 66,
+      "end_line": 103,
+      "tokens": 287,
+      "context_length": 37585
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_simple_xfail_TestMarkersWithParametrization.test_simple_xfail.5",
+      "distance": 0.9989521503448486,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1712,
+      "end_line": 1727,
+      "tokens": 135,
+      "context_length": 37720
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pytest/scripts/prepare-release-pr.py_prepare_release_pr_prepare_release_pr.27",
+      "distance": 1.0006126165390015,
+      "file_path": "scripts/prepare-release-pr.py",
+      "start_line": 49,
+      "end_line": 133,
+      "tokens": 575,
+      "context_length": 38295
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_marked_value_TestMarkersWithParametrization.test_parametrize_marked_value.5",
+      "distance": 1.0010331869125366,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1858,
+      "end_line": 1881,
+      "tokens": 230,
+      "context_length": 38525
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg.4",
+      "distance": 1.0010464191436768,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1777,
+      "end_line": 1791,
+      "tokens": 138,
+      "context_length": 38663
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_arg_TestMarkersWithParametrization.test_xfail_with_arg.4",
+      "distance": 1.001387119293213,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1745,
+      "end_line": 1759,
+      "tokens": 130,
+      "context_length": 38793
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_passing_is_xpass_TestMarkersWithParametrization.test_xfail_passing_is_xpass.5",
+      "distance": 1.0031870603561401,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1793,
+      "end_line": 1813,
+      "tokens": 203,
+      "context_length": 38996
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_called_in_generate_tests_TestMarkersWithParametrization.test_parametrize_called_in_generate_tests.4",
+      "distance": 1.006562352180481,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1815,
+      "end_line": 1836,
+      "tokens": 166,
+      "context_length": 39162
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_iterator_",
+      "distance": 1.0088317394256592,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1940,
+      "end_line": 1975,
+      "tokens": 296,
+      "context_length": 39458
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_select_based_on_mark_TestMarkersWithParametrization.test_select_based_on_mark.7",
+      "distance": 1.0100094079971313,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1693,
+      "end_line": 1710,
+      "tokens": 158,
+      "context_length": 39616
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestItem.repr_failure_DoctestItem.reportinfo.2.1",
+      "distance": 1.0103716850280762,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 313,
+      "end_line": 379,
+      "tokens": 618,
+      "context_length": 40234
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir.6",
+      "distance": 1.0112518072128296,
+      "file_path": "testing/python/collect.py",
+      "start_line": 822,
+      "end_line": 846,
+      "tokens": 188,
+      "context_length": 40422
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_pytest_addoption_pytest_addoption.6",
+      "distance": 1.0122692584991455,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 71,
+      "end_line": 110,
+      "tokens": 356,
+      "context_length": 40778
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MARK_GEN_",
+      "distance": 1.0125994682312012,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 532,
+      "end_line": 591,
+      "tokens": 433,
+      "context_length": 41211,
+      "file_pos": 13
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pytest/src/pytest/__init__.py___all___",
+      "distance": 1.0132250785827637,
+      "file_path": "src/pytest/__init__.py",
+      "start_line": 83,
+      "end_line": 170,
+      "tokens": 476,
+      "context_length": 41687
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ast_50.1",
+      "distance": 1.013352632522583,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 382,
+      "context_length": 42069
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestModule_DoctestModule.collect.MockAwareDocTestFinder._find.2.2",
+      "distance": 1.0145246982574463,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 497,
+      "end_line": 538,
+      "tokens": 347,
+      "context_length": 42416
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__showfixtures_main_write_docstring.1.1",
+      "distance": 1.0189532041549683,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1597,
+      "end_line": 1654,
+      "tokens": 437,
+      "context_length": 42853
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__is_setup_py_MultipleDoctestFailures.__init__.self.failures.1",
+      "distance": 1.0189943313598633,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 142,
+      "end_line": 176,
+      "tokens": 292,
+      "context_length": 43145
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_mock_double_patch_issue473_TestMockDecoration.test_mock_double_patch_issue473.4",
+      "distance": 1.0191378593444824,
+      "file_path": "testing/python/integration.py",
+      "start_line": 203,
+      "end_line": 219,
+      "tokens": 127,
+      "context_length": 43272
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pytest/scripts/publish-gh-release-notes.py_parse_changelog_convert_rst_to_md.1.1",
+      "distance": 1.0198969841003418,
+      "file_path": "scripts/publish-gh-release-notes.py",
+      "start_line": 38,
+      "end_line": 63,
+      "tokens": 227,
+      "context_length": 43499
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_pytest_make_parametrize_id_with_argname_TestMarkersWithParametrization.test_parametrize_positional_args.3",
+      "distance": 1.020527958869934,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1902,
+      "end_line": 1938,
+      "tokens": 265,
+      "context_length": 43764
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_re_TestRaises.test_raises_repr_inflight.3.4",
+      "distance": 1.021965503692627,
+      "file_path": "testing/python/raises.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 439,
+      "context_length": 44203
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_deselect_by_mark_pytest_collection_modifyitems.2",
+      "distance": 1.0225157737731934,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 222,
+      "end_line": 249,
+      "tokens": 213,
+      "context_length": 44416
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_pytest_configure_",
+      "distance": 1.0240020751953125,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 252,
+      "end_line": 267,
+      "tokens": 143,
+      "context_length": 44559
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pytest/extra/get_issues.py_report_",
+      "distance": 1.0243242979049683,
+      "file_path": "extra/get_issues.py",
+      "start_line": 55,
+      "end_line": 86,
+      "tokens": 231,
+      "context_length": 44790
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pytest/src/_pytest/deprecated.py_1_HOOK_LEGACY_PATH_ARG.1",
+      "distance": 1.0261213779449463,
+      "file_path": "src/_pytest/deprecated.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 693,
+      "context_length": 45483
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__init_checker_class__init_checker_class.4.1",
+      "distance": 1.0267183780670166,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 591,
+      "end_line": 676,
+      "tokens": 786,
+      "context_length": 46269
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pytest/src/_pytest/nodes.py_os_tracebackcutdir.1",
+      "distance": 1.026972770690918,
+      "file_path": "src/_pytest/nodes.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 328,
+      "context_length": 46597
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_pytest_make_parametrize_id_TestMarkersWithParametrization.test_pytest_make_parametrize_id.4",
+      "distance": 1.0292878150939941,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1883,
+      "end_line": 1900,
+      "tokens": 133,
+      "context_length": 46730
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_generate_same_function_names_issue403_TestMetafuncFunctional.test_generate_same_function_names_issue403.3",
+      "distance": 1.0300830602645874,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1461,
+      "end_line": 1477,
+      "tokens": 110,
+      "context_length": 46840
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_cmdline_main_pytest_configure.2",
+      "distance": 1.030213713645935,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 138,
+      "end_line": 170,
+      "tokens": 330,
+      "context_length": 47170
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pytest/src/_pytest/config/__init__.py__get_legacy_hook_marks__get_legacy_hook_marks.7.1",
+      "distance": 1.0316922664642334,
+      "file_path": "src/_pytest/config/__init__.py",
+      "start_line": 346,
+      "end_line": 375,
+      "tokens": 266,
+      "context_length": 47436
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakeitem_TestConftestCustomization.test_customized_pymakeitem.6",
+      "distance": 1.033805012702942,
+      "file_path": "testing/python/collect.py",
+      "start_line": 848,
+      "end_line": 880,
+      "tokens": 222,
+      "context_length": 47658
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pytest/src/_pytest/assertion/rewrite.py__should_repr_global_name__call_reprcompare.3.1",
+      "distance": 1.0376168489456177,
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "start_line": 448,
+      "end_line": 480,
+      "tokens": 223,
+      "context_length": 47881
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.write_sep_TerminalReporter.pytest_runtest_logstart.3.4.2",
+      "distance": 1.0384571552276611,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 447,
+      "end_line": 511,
+      "tokens": 554,
+      "context_length": 48435
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_os_TestModule.test_import_duplicate.10",
+      "distance": 1.0391809940338135,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 300,
+      "context_length": 48735
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pytest/doc/en/example/xfail_demo.py_pytest_",
+      "distance": 1.039531946182251,
+      "file_path": "doc/en/example/xfail_demo.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 143,
+      "context_length": 48878
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional_TestMetafuncFunctional.test_attributes.3",
+      "distance": 1.040583610534668,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1061,
+      "end_line": 1090,
+      "tokens": 227,
+      "context_length": 49105
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pytest/src/_pytest/legacypath.py_pytest_load_initial_conftests_pytest_load_initial_conftests.19",
+      "distance": 1.0406957864761353,
+      "file_path": "src/_pytest/legacypath.py",
+      "start_line": 418,
+      "end_line": 447,
+      "tokens": 308,
+      "context_length": 49413
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_1_CHECKER_CLASS.1",
+      "distance": 1.0434696674346924,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 452,
+      "context_length": 49865
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_1_IGNORE_PAM.1",
+      "distance": 1.044154405593872,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 502,
+      "context_length": 50367
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_collections.abc_istestfunc.1.1",
+      "distance": 1.0466842651367188,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 238,
+      "context_length": 50605,
+      "file_pos": 25
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_format_args_TestMetafunc.test_format_args",
+      "distance": 1.0473530292510986,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1039,
+      "end_line": 1058,
+      "tokens": 128,
+      "context_length": 50733
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_ID_generation_string_int_works_TestMarkersWithParametrization.test_parametrize_ID_generation_string_int_works.4",
+      "distance": 1.0496045351028442,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1838,
+      "end_line": 1856,
+      "tokens": 118,
+      "context_length": 50851
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_autoname_TestMetafunc.test_idmaker_with_bytes_regex.2",
+      "distance": 1.0496186017990112,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 386,
+      "end_line": 419,
+      "tokens": 301,
+      "context_length": 51152
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pytest/extra/get_issues.py_main__get_kind.3.1",
+      "distance": 1.049790382385254,
+      "file_path": "extra/get_issues.py",
+      "start_line": 33,
+      "end_line": 52,
+      "tokens": 152,
+      "context_length": 51304
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_manual_ids_must_be_printable_TestMetafunc.test_idmaker_enum.4",
+      "distance": 1.0527539253234863,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 480,
+      "end_line": 501,
+      "tokens": 189,
+      "context_length": 51493
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pytest/scripts/release.py_pre_release_changelog.2",
+      "distance": 1.0531244277954102,
+      "file_path": "scripts/release.py",
+      "start_line": 87,
+      "end_line": 107,
+      "tokens": 180,
+      "context_length": 51673
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MarkGenerator.__getattr___MarkGenerator.__getattr__.4.1",
+      "distance": 1.0536452531814575,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 490,
+      "end_line": 529,
+      "tokens": 445,
+      "context_length": 52118,
+      "file_pos": 26
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_configure_pytest_configure.4",
+      "distance": 1.0544066429138184,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 46,
+      "end_line": 82,
+      "tokens": 382,
+      "context_length": 52500
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pytest/testing/conftest.py_re_pytest_collection_modifyitems.9",
+      "distance": 1.0548303127288818,
+      "file_path": "testing/conftest.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 384,
+      "context_length": 52884
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_1__PYTEST_DIR.1",
+      "distance": 1.055199146270752,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 637,
+      "context_length": 53521
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_simple_xfail_single_argname_TestMarkersWithParametrization.test_simple_xfail_single_argname.4",
+      "distance": 1.0556252002716064,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1729,
+      "end_line": 1743,
+      "tokens": 118,
+      "context_length": 53639
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_pycollect_makeitem_pytest_pycollect_makeitem.4.1",
+      "distance": 1.0559536218643188,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 235,
+      "end_line": 272,
+      "tokens": 400,
+      "context_length": 54039
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py__folded_skips__folded_skips.5.1",
+      "distance": 1.0562632083892822,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 1332,
+      "end_line": 1360,
+      "tokens": 309,
+      "context_length": 54348
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test__show_fixtures_per_test.write_fixture.8.2.1",
+      "distance": 1.0563459396362305,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1541,
+      "end_line": 1567,
+      "tokens": 238,
+      "context_length": 54586
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests.3",
+      "distance": 1.0569645166397095,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1161,
+      "end_line": 1175,
+      "tokens": 118,
+      "context_length": 54704
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_bad_scope_TestMetafunc.test_parametrize_request_name.4.1",
+      "distance": 1.0572795867919922,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 115,
+      "end_line": 137,
+      "tokens": 190,
+      "context_length": 54894
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo_FormattedExcinfo.repr_args.2.1",
+      "distance": 1.058391809463501,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 687,
+      "end_line": 733,
+      "tokens": 354,
+      "context_length": 55248
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pytest/scripts/release.py_regen_check_links.3",
+      "distance": 1.0584360361099243,
+      "file_path": "scripts/release.py",
+      "start_line": 64,
+      "end_line": 84,
+      "tokens": 197,
+      "context_length": 55445
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestRaises_test_dynamic_compile_shows_nicely.10",
+      "distance": 1.0594277381896973,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 163,
+      "end_line": 202,
+      "tokens": 270,
+      "context_length": 55715
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_raises_with_raising_dunder_class_TestRaises.test_raises_context_manager_with_kwargs.2",
+      "distance": 1.0595204830169678,
+      "file_path": "testing/python/raises.py",
+      "start_line": 266,
+      "end_line": 284,
+      "tokens": 189,
+      "context_length": 55904
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_mock_sorting_TestMockDecoration.test_mock_sorting.7",
+      "distance": 1.0597150325775146,
+      "file_path": "testing/python/integration.py",
+      "start_line": 179,
+      "end_line": 201,
+      "tokens": 189,
+      "context_length": 56093
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_noclass_TestRaises.test_no_raise_message.2.3.1",
+      "distance": 1.0604840517044067,
+      "file_path": "testing/python/raises.py",
+      "start_line": 132,
+      "end_line": 159,
+      "tokens": 219,
+      "context_length": 56312
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pytest/src/_pytest/debugging.py_pytestPDB._get_pdb_wrapper_class_pytestPDB._get_pdb_wrapper_class.5.1",
+      "distance": 1.060608148574829,
+      "file_path": "src/_pytest/debugging.py",
+      "start_line": 150,
+      "end_line": 235,
+      "tokens": 650,
+      "context_length": 56962
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.make_function_TestFunction.test_single_tuple_unwraps_values.3",
+      "distance": 1.0615718364715576,
+      "file_path": "testing/python/collect.py",
+      "start_line": 293,
+      "end_line": 345,
+      "tokens": 400,
+      "context_length": 57362
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_93_99",
+      "distance": 1.0618716478347778,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 367,
+      "end_line": 383,
+      "tokens": 142,
+      "context_length": 57504
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_get_unpacked_marks_normalize_mark_list.2.3",
+      "distance": 1.0621473789215088,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 358,
+      "end_line": 380,
+      "tokens": 193,
+      "context_length": 57697,
+      "file_pos": 30
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_multiple_times_TestMetafunc.test_parametrize_CSV.3",
+      "distance": 1.0622133016586304,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 968,
+      "end_line": 995,
+      "tokens": 222,
+      "context_length": 57919
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pytest/src/_pytest/legacypath.py_Testdir.makeconftest_Testdir.runpytest_inprocess.2.1",
+      "distance": 1.062509536743164,
+      "file_path": "src/_pytest/legacypath.py",
+      "start_line": 107,
+      "end_line": 179,
+      "tokens": 765,
+      "context_length": 58684
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pytest/src/_pytest/_io/terminalwriter.py_TerminalWriter.markup_TerminalWriter.markup.3.1",
+      "distance": 1.0645983219146729,
+      "file_path": "src/_pytest/_io/terminalwriter.py",
+      "start_line": 97,
+      "end_line": 105,
+      "tokens": 119,
+      "context_length": 58803
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pytest/scripts/prepare-release-pr.py_argparse_login.4.1",
+      "distance": 1.0667295455932617,
+      "file_path": "scripts/prepare-release-pr.py",
+      "start_line": 15,
+      "end_line": 46,
+      "tokens": 154,
+      "context_length": 58957
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Function._prunetraceback_",
+      "distance": 1.0676063299179077,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1775,
+      "end_line": 1817,
+      "tokens": 405,
+      "context_length": 59362
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ReprEntry_ReprEntry._write_entry_lines.14.1",
+      "distance": 1.0682348012924194,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 1091,
+      "end_line": 1141,
+      "tokens": 424,
+      "context_length": 59786
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pytest/testing/python/approx.py_TestApprox.test_doctests_TestApprox.test_unicode_plus_minus.5",
+      "distance": 1.0685498714447021,
+      "file_path": "testing/python/approx.py",
+      "start_line": 752,
+      "end_line": 778,
+      "tokens": 219,
+      "context_length": 60005
+    }
+  ],
+  "files": [
+    {
+      "file_path": "testing/python/fixtures.py",
+      "position": 1,
+      "tokens": 28814,
+      "context_length": 28814
+    },
+    {
+      "file_path": "src/pytest/__init__.py",
+      "position": 2,
+      "tokens": 1210,
+      "context_length": 30024
+    },
+    {
+      "file_path": "testing/python/collect.py",
+      "position": 3,
+      "tokens": 10717,
+      "context_length": 40741
+    },
+    {
+      "file_path": "src/_pytest/mark/structures.py",
+      "position": 4,
+      "tokens": 4550,
+      "context_length": 45291
+    },
+    {
+      "file_path": "doc/en/conf.py",
+      "position": 5,
+      "tokens": 3601,
+      "context_length": 48892
+    },
+    {
+      "file_path": "testing/example_scripts/issue_519.py",
+      "position": 6,
+      "tokens": 474,
+      "context_length": 49366
+    },
+    {
+      "file_path": "src/_pytest/fixtures.py",
+      "position": 7,
+      "tokens": 14236,
+      "context_length": 63602
+    },
+    {
+      "file_path": "testing/python/metafunc.py",
+      "position": 8,
+      "tokens": 14975,
+      "context_length": 78577
+    },
+    {
+      "file_path": "src/_pytest/mark/__init__.py",
+      "position": 9,
+      "tokens": 1895,
+      "context_length": 80472
+    },
+    {
+      "file_path": "src/_pytest/deprecated.py",
+      "position": 10,
+      "tokens": 1191,
+      "context_length": 81663
+    },
+    {
+      "file_path": "scripts/publish-gh-release-notes.py",
+      "position": 11,
+      "tokens": 729,
+      "context_length": 82392
+    },
+    {
+      "file_path": "scripts/prepare-release-pr.py",
+      "position": 12,
+      "tokens": 1164,
+      "context_length": 83556
+    },
+    {
+      "file_path": "src/_pytest/doctest.py",
+      "position": 13,
+      "tokens": 5816,
+      "context_length": 89372
+    },
+    {
+      "file_path": "src/_pytest/_code/code.py",
+      "position": 14,
+      "tokens": 10134,
+      "context_length": 99506
+    },
+    {
+      "file_path": "src/_pytest/python.py",
+      "position": 15,
+      "tokens": 15257,
+      "context_length": 114763
+    },
+    {
+      "file_path": "testing/python/integration.py",
+      "position": 16,
+      "tokens": 2818,
+      "context_length": 117581
+    },
+    {
+      "file_path": "testing/python/raises.py",
+      "position": 17,
+      "tokens": 2339,
+      "context_length": 119920
+    },
+    {
+      "file_path": "extra/get_issues.py",
+      "position": 18,
+      "tokens": 554,
+      "context_length": 120474
+    },
+    {
+      "file_path": "src/_pytest/nodes.py",
+      "position": 19,
+      "tokens": 5885,
+      "context_length": 126359
+    },
+    {
+      "file_path": "src/_pytest/config/__init__.py",
+      "position": 20,
+      "tokens": 13456,
+      "context_length": 139815
+    },
+    {
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "position": 21,
+      "tokens": 9835,
+      "context_length": 149650
+    },
+    {
+      "file_path": "src/_pytest/terminal.py",
+      "position": 22,
+      "tokens": 11464,
+      "context_length": 161114
+    },
+    {
+      "file_path": "doc/en/example/xfail_demo.py",
+      "position": 23,
+      "tokens": 144,
+      "context_length": 161258
+    },
+    {
+      "file_path": "src/_pytest/legacypath.py",
+      "position": 24,
+      "tokens": 4090,
+      "context_length": 165348
+    },
+    {
+      "file_path": "src/_pytest/pytester.py",
+      "position": 25,
+      "tokens": 13954,
+      "context_length": 179302
+    },
+    {
+      "file_path": "scripts/release.py",
+      "position": 26,
+      "tokens": 1026,
+      "context_length": 180328
+    },
+    {
+      "file_path": "src/_pytest/skipping.py",
+      "position": 27,
+      "tokens": 2283,
+      "context_length": 182611
+    },
+    {
+      "file_path": "testing/conftest.py",
+      "position": 28,
+      "tokens": 1437,
+      "context_length": 184048
+    },
+    {
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "position": 29,
+      "tokens": 1649,
+      "context_length": 185697
+    },
+    {
+      "file_path": "src/_pytest/debugging.py",
+      "position": 30,
+      "tokens": 2986,
+      "context_length": 188683
+    },
+    {
+      "file_path": "src/_pytest/_io/terminalwriter.py",
+      "position": 31,
+      "tokens": 1852,
+      "context_length": 190535
+    },
+    {
+      "file_path": "testing/python/approx.py",
+      "position": 32,
+      "tokens": 9611,
+      "context_length": 200146
+    }
+  ]
+}

@@ -1,0 +1,988 @@
+{
+  "instance_id": "matplotlib__matplotlib-20761",
+  "model_patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\nindex e47d7c0836..889e6cb874 100644\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -418,6 +418,13 @@ default: %(va)s\n         # docstring from _suplabels...\n         info = {'name': '_supxlabel', 'x0': 0.5, 'y0': 0.01,\n                 'ha': 'center', 'va': 'bottom', 'rotation': 0}\n+        x = kwargs.pop('x', None)\n+        if x is not None:\n+            # Only update the position of the text, not the subfigure itself.\n+            if self._supxlabel is not None:\n+                self._supxlabel.set_x(x)\n+            else:\n+                kwargs['x'] = x\n         return self._suplabels(t, info, **kwargs)\n \n     @docstring.Substitution(x0=0.02, y0=0.5, name='supylabel', ha='left',\n@@ -2535,6 +2542,8 @@ class Figure(FigureBase):\n         a resampled image to fill the entire figure, you can define an\n         `~matplotlib.axes.Axes` with extent [0, 0, 1, 1].\n \n+        Thanks to Fernando Perez for this function.\n+\n         Examples\n         --------\n         ::\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/figure.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "7413aa92b5be5760c73e31641ab0770f328ad546",
+  "patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -370,7 +370,10 @@ def _suplabels(self, t, info, **kwargs):\n \n         x = kwargs.pop('x', None)\n         y = kwargs.pop('y', None)\n-        autopos = x is None and y is None\n+        if info['name'] in ['_supxlabel', '_suptitle']:\n+            autopos = y is None\n+        elif info['name'] == '_supylabel':\n+            autopos = x is None\n         if x is None:\n             x = info['x0']\n         if y is None:\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_constrainedlayout.py b/lib/matplotlib/tests/test_constrainedlayout.py\n--- a/lib/matplotlib/tests/test_constrainedlayout.py\n+++ b/lib/matplotlib/tests/test_constrainedlayout.py\n@@ -537,3 +537,26 @@ def test_align_labels():\n                                after_align[1].x0, rtol=0, atol=1e-05)\n     # ensure labels do not go off the edge\n     assert after_align[0].x0 >= 1\n+\n+\n+def test_suplabels():\n+    fig, ax = plt.subplots(constrained_layout=True)\n+    fig.draw_no_output()\n+    pos0 = ax.get_tightbbox(fig.canvas.get_renderer())\n+    fig.supxlabel('Boo')\n+    fig.supylabel('Booy')\n+    fig.draw_no_output()\n+    pos = ax.get_tightbbox(fig.canvas.get_renderer())\n+    assert pos.y0 > pos0.y0 + 10.0\n+    assert pos.x0 > pos0.x0 + 10.0\n+\n+    fig, ax = plt.subplots(constrained_layout=True)\n+    fig.draw_no_output()\n+    pos0 = ax.get_tightbbox(fig.canvas.get_renderer())\n+    # check that specifying x (y) doesn't ruin the layout\n+    fig.supxlabel('Boo', x=0.5)\n+    fig.supylabel('Boo', y=0.5)\n+    fig.draw_no_output()\n+    pos = ax.get_tightbbox(fig.canvas.get_renderer())\n+    assert pos.y0 > pos0.y0 + 10.0\n+    assert pos.x0 > pos0.x0 + 10.0\n",
+  "problem_statement": "[Bug]: subfigure position shifts on y-axis when x kwarg added to supxlabel\n### Bug summary\r\n\r\nLocation of subfigure shifts lower on y-axis when 'x' kwarg is used for supxlabel for that subfigure.\r\nI've also posted to StackOverflow: https://stackoverflow.com/q/68567315/9249533\r\n\r\n### Code for reproduction\r\n\r\n```python\r\nfig = plt.figure(constrained_layout=True, figsize=(10, 8))\r\n\r\n# create top/bottom subfigs\r\n# see https://stackoverflow.com/a/68553015/9249533\r\n(subfig_t, subfig_b) = fig.subfigures(2, 1, hspace=0.05, height_ratios=[1, 3])\r\n\r\n# put ax0 in top subfig\r\nax0 = subfig_t.subplots()\r\n\r\n# create left/right subfigs nested in bottom subfig\r\n(subfig_bl, subfig_br) = subfig_b.subfigures(1, 2, wspace=0.1, width_ratios=[3, 1])\r\n\r\n# put ax1-ax3 in gridspec of bottom-left subfig\r\ngs = subfig_bl.add_gridspec(nrows=1, ncols=9)\r\n\r\nax1 = subfig_bl.add_subplot(gs[0, :3])\r\nax2 = subfig_bl.add_subplot(gs[0, 3:6], sharey=ax1)\r\nax3 = subfig_bl.add_subplot(gs[0, 6:9], sharey=ax1)\r\n\r\n\r\nax1.set_title('Nov. 7 to Nov. 13')\r\nax2.set_title('Nov. 13 to Nov. 27')\r\nax3.set_title('Nov. 27 to Dec. 31')\r\nax2.get_yaxis().set_visible(False)\r\nax3.get_yaxis().set_visible(False)\r\n\r\nsubfig_bl.supxlabel(\"My Subfigure Label\", x=0.54, size=12, fontweight='bold')\r\n\r\n# put ax4 in bottom-right subfig\r\nax4 = subfig_br.subplots()\r\nax4.set_title('Some Other Title')\r\nsubfig_br.supxlabel('Other Subfigure SubLabel', size=12, fontweight='bold')\r\n```\r\n\r\n\r\n### Actual outcome\r\n\r\nBody of subfigure shifts downward (lower on y-axis) and covers supxlabel\r\n\r\n![image](https://user-images.githubusercontent.com/41835370/127401472-20570876-b098-4cc8-bed4-d58d5cfe9669.png)\r\n\r\n\r\n\r\n### Expected outcome\r\n\r\nsubfigure position doesn't change. supxlabel shifts to right.\r\n\r\n![image](https://user-images.githubusercontent.com/41835370/127401167-48803a9c-9d2c-4b52-b109-eec49cdc89de.png)\r\n\r\n\r\n### Operating system\r\n\r\nWindows 10 Pro\r\n\r\n### Matplotlib Version\r\n\r\n3.4.2\r\n\r\n### Matplotlib Backend\r\n\r\n_No response_\r\n\r\n### Python version\r\n\r\n3.9.5\r\n\r\n### Jupyter version\r\n\r\n3.0.16\r\n\r\n### Other libraries\r\n\r\n_No response_\r\n\r\n### Installation\r\n\r\nconda\r\n\r\n### Conda channel\r\n\r\nconda-forge\n",
+  "hints_text": "This has nothing to do with subfigures, right?  This happens if you specify x or y in supx/ylabel even on a normal figure, I think.  \nNot sure.  I've only used suptitles to date.  Will do some more digging.  Cheers\r\n\n```python\r\nimport matplotlib.pyplot as plt\r\n\r\nfig, ax = plt.subplots(constrained_layout=True)\r\nfig.supxlabel('Boo', x=0.54)\r\nplt.show()\r\n```\r\ndoes the same thing.  I think this is an easy-ish fix, but you'll need a private workaround for now:\r\n\r\n```python\r\nlab = fig.supxlabel('Boo', x=0.7)\r\nlab._autopos = True\r\n```",
+  "created_at": "2021-07-28T22:36:30Z",
+  "version": "3.4",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_constrainedlayout.py::test_suplabels\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_constrainedlayout.py::test_align_labels\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_bbox[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_bboxtight[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_colorbar_align\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_colorbar_location[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_colorbars_no_overlapH[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_colorbars_no_overlapV[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout10[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout11[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout11rat[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout12[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout13[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout14[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout15[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout16[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout17[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout18\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout19\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout1[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout20\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout21\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout22\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout23\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout2[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout3[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout4[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout5[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout6[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout7\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout8[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_constrained_layout9[png]\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_hidden_axes\", \"lib/matplotlib/tests/test_constrainedlayout.py::test_manually_set_position\"]",
+  "environment_setup_commit": "f93c0a3dcb82feed0262d758626c90d4002685f3",
+  "patch_files": [
+    "lib/matplotlib/figure.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_constrainedlayout.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/figure.py": {
+      "diffs": [
+        {
+          "start_line_old": 373,
+          "end_line_old": 373,
+          "file_pos": 1,
+          "file_context_length": 26046,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_SubFigure_SubFigure.__init__.25.1",
+          "closest_snippet_line_distance": 1544
+        }
+      ]
+    }
+  },
+  "vectors": 3799,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.supxlabel_FigureBase.supxlabel.info.2.1",
+      "distance": 0.7779744863510132,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 414,
+      "end_line": 421,
+      "tokens": 129,
+      "context_length": 129,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subfigures.py_37_",
+      "distance": 0.7848389148712158,
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "start_line": 84,
+      "end_line": 149,
+      "tokens": 667,
+      "context_length": 796
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.supylabel_FigureBase.supylabel.info.2.1",
+      "distance": 0.7889546155929565,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 423,
+      "end_line": 431,
+      "tokens": 137,
+      "context_length": 933,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/figure_title.py_1_",
+      "distance": 0.8216551542282104,
+      "file_path": "examples/subplots_axes_and_figures/figure_title.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 544,
+      "context_length": 1477
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subfigures.py_1_36",
+      "distance": 0.8348833918571472,
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 756,
+      "context_length": 2233
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_64_fig_127.1",
+      "distance": 0.8473855257034302,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 87,
+      "end_line": 170,
+      "tokens": 785,
+      "context_length": 3018
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.suptitle_FigureBase.suptitle.info.2.1",
+      "distance": 0.8536746501922607,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 405,
+      "end_line": 412,
+      "tokens": 132,
+      "context_length": 3150,
+      "file_pos": 4
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_143_163",
+      "distance": 0.8738887310028076,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2481,
+      "end_line": 2556,
+      "tokens": 767,
+      "context_length": 3917
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_106_163.1",
+      "distance": 0.8898075819015503,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 196,
+      "end_line": 268,
+      "tokens": 763,
+      "context_length": 4680
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_gs_128_",
+      "distance": 0.8949673175811768,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 171,
+      "end_line": 212,
+      "tokens": 441,
+      "context_length": 5121
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/align_ylabels.py_5_",
+      "distance": 0.8997454047203064,
+      "file_path": "examples/pyplots/align_ylabels.py",
+      "start_line": 40,
+      "end_line": 86,
+      "tokens": 346,
+      "context_length": 5467
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/label_subplots.py_1_",
+      "distance": 0.9146389365196228,
+      "file_path": "examples/text_labels_and_annotations/label_subplots.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 603,
+      "context_length": 6070
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.autofmt_xdate_FigureBase.autofmt_xdate.self.stale.1",
+      "distance": 0.917499303817749,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 253,
+      "end_line": 294,
+      "tokens": 419,
+      "context_length": 6489,
+      "file_pos": 8
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py__make_margin_suptitles__make_margin_suptitles.inv_trans_fig.10.2.3",
+      "distance": 0.9178762435913086,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 275,
+      "end_line": 309,
+      "tokens": 457,
+      "context_length": 6946
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/gridspec.py_91_gs0.1",
+      "distance": 0.9254863262176514,
+      "file_path": "tutorials/intermediate/gridspec.py",
+      "start_line": 137,
+      "end_line": 206,
+      "tokens": 756,
+      "context_length": 7702
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_SubFigure.get_axes_SubFigure.draw.self._cachedRenderer.5.6.self.stale.1",
+      "distance": 0.9298440217971802,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 2083,
+      "end_line": 2105,
+      "tokens": 150,
+      "context_length": 7852,
+      "file_pos": 10
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot.2_subplot.27.1",
+      "distance": 0.9313775300979614,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1212,
+      "end_line": 1276,
+      "tokens": 649,
+      "context_length": 8501
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_SubplotBase._label_outer_xaxis_SubplotBase._label_outer_xaxis.4.2.3.1",
+      "distance": 0.9351922273635864,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 115,
+      "end_line": 129,
+      "tokens": 175,
+      "context_length": 8676
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/scatter_hist.py_10_",
+      "distance": 0.9363704919815063,
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "start_line": 53,
+      "end_line": 126,
+      "tokens": 595,
+      "context_length": 9271
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_tight_layout.py_1_top.1",
+      "distance": 0.9372763633728027,
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "start_line": 1,
+      "end_line": 128,
+      "tokens": 766,
+      "context_length": 10037
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/auto_subplots_adjust.py_1_6",
+      "distance": 0.9419122934341431,
+      "file_path": "examples/pyplots/auto_subplots_adjust.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 411,
+      "context_length": 10448
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/examples/showcase/anatomy.py_49_",
+      "distance": 0.9424285888671875,
+      "file_path": "examples/showcase/anatomy.py",
+      "start_line": 90,
+      "end_line": 162,
+      "tokens": 554,
+      "context_length": 11002
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/broken_axis.py_1_",
+      "distance": 0.9431986212730408,
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 525,
+      "context_length": 11527
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_norm_105",
+      "distance": 0.9437609910964966,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 122,
+      "end_line": 194,
+      "tokens": 777,
+      "context_length": 12304
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_SubFigure._redo_transform_rel_fig_SubFigure._redo_transform_rel_fig.11.2.self.bbox_relative.p1.1",
+      "distance": 0.9441094398498535,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 2001,
+      "end_line": 2027,
+      "tokens": 304,
+      "context_length": 12608,
+      "file_pos": 16
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_279_tricontourf.3.1",
+      "distance": 0.9452284574508667,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 3149,
+      "end_line": 3185,
+      "tokens": 401,
+      "context_length": 13009
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_191_clabel.1.1",
+      "distance": 0.9469153881072998,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2669,
+      "end_line": 2680,
+      "tokens": 146,
+      "context_length": 13155
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_401_",
+      "distance": 0.9475135803222656,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 590,
+      "end_line": 674,
+      "tokens": 815,
+      "context_length": 13970
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/examples/showcase/anatomy.py_1_48",
+      "distance": 0.9505349397659302,
+      "file_path": "examples/showcase/anatomy.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 760,
+      "context_length": 14730
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.align_xlabels_FigureBase.align_xlabels.4.10.1.2.2",
+      "distance": 0.9529619812965393,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1204,
+      "end_line": 1263,
+      "tokens": 538,
+      "context_length": 15268,
+      "file_pos": 16
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/secondary_axis.py_xnew_",
+      "distance": 0.9565475583076477,
+      "file_path": "examples/subplots_axes_and_figures/secondary_axis.py",
+      "start_line": 102,
+      "end_line": 193,
+      "tokens": 656,
+      "context_length": 15924
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/tutorials/advanced/transforms_tutorial.py_fig_200",
+      "distance": 0.9589186906814575,
+      "file_path": "tutorials/advanced/transforms_tutorial.py",
+      "start_line": 233,
+      "end_line": 330,
+      "tokens": 1003,
+      "context_length": 16927
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/auto_subplots_adjust.py_8_",
+      "distance": 0.9589338898658752,
+      "file_path": "examples/pyplots/auto_subplots_adjust.py",
+      "start_line": 66,
+      "end_line": 85,
+      "tokens": 140,
+      "context_length": 17067
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/colorbar_placement.py_1_cmaps_44.1",
+      "distance": 0.9598312377929688,
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 750,
+      "context_length": 17817
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_tight_layout.py_bottom_",
+      "distance": 0.9606071710586548,
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "start_line": 129,
+      "end_line": 148,
+      "tokens": 123,
+      "context_length": 17940
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_SubplotBase._label_outer_yaxis_SubplotBase._label_outer_yaxis.4.2.3.1",
+      "distance": 0.9619015455245972,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 131,
+      "end_line": 145,
+      "tokens": 182,
+      "context_length": 18122
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py__match_submerged_margins.4__match_submerged_margins.4.7.5.1",
+      "distance": 0.9620450735092163,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 343,
+      "end_line": 406,
+      "tokens": 705,
+      "context_length": 18827
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_constrained_layout.py_1_",
+      "distance": 0.9625823497772217,
+      "file_path": "examples/subplots_axes_and_figures/demo_constrained_layout.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 430,
+      "context_length": 19257
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/tight_layout_guide.py_fig_146",
+      "distance": 0.9639804363250732,
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "start_line": 105,
+      "end_line": 221,
+      "tokens": 877,
+      "context_length": 20134
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_164_fig_222.1",
+      "distance": 0.9677329063415527,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 269,
+      "end_line": 350,
+      "tokens": 765,
+      "context_length": 20899
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_1_SubplotBase.update_params.3",
+      "distance": 0.968207597732544,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 807,
+      "context_length": 21706
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_gs0_249",
+      "distance": 0.9691490530967712,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 352,
+      "end_line": 393,
+      "tokens": 338,
+      "context_length": 22044
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/align_labels_demo.py_1_",
+      "distance": 0.9692089557647705,
+      "file_path": "examples/subplots_axes_and_figures/align_labels_demo.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 294,
+      "context_length": 22338
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.align_labels_FigureBase.align_labels.3",
+      "distance": 0.9699950218200684,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1325,
+      "end_line": 1347,
+      "tokens": 169,
+      "context_length": 22507,
+      "file_pos": 22
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/tutorials/advanced/transforms_tutorial.py_plt_119",
+      "distance": 0.9714637994766235,
+      "file_path": "tutorials/advanced/transforms_tutorial.py",
+      "start_line": 95,
+      "end_line": 231,
+      "tokens": 1411,
+      "context_length": 23918
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/make_room_for_ylabel_using_axesgrid.py_1_",
+      "distance": 0.9715827107429504,
+      "file_path": "examples/axes_grid1/make_room_for_ylabel_using_axesgrid.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 401,
+      "context_length": 24319
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/titles_demo.py_1_",
+      "distance": 0.9741294384002686,
+      "file_path": "examples/text_labels_and_annotations/titles_demo.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 367,
+      "context_length": 24686
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/auto_subplots_adjust.py_on_draw_on_draw.5.2",
+      "distance": 0.9741499423980713,
+      "file_path": "examples/pyplots/auto_subplots_adjust.py",
+      "start_line": 49,
+      "end_line": 63,
+      "tokens": 151,
+      "context_length": 24837
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/examples/specialty_plots/leftventricle_bulleye.py_6_",
+      "distance": 0.975796103477478,
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "start_line": 130,
+      "end_line": 195,
+      "tokens": 733,
+      "context_length": 25570
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/tutorials/text/text_intro.py_font_149",
+      "distance": 0.9765140414237976,
+      "file_path": "tutorials/text/text_intro.py",
+      "start_line": 173,
+      "end_line": 261,
+      "tokens": 771,
+      "context_length": 26341
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_256_400",
+      "distance": 0.9777860641479492,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 426,
+      "end_line": 588,
+      "tokens": 1487,
+      "context_length": 27828
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/examples/ticks_and_spines/tick-formatters.py_5_",
+      "distance": 0.9783497452735901,
+      "file_path": "examples/ticks_and_spines/tick-formatters.py",
+      "start_line": 37,
+      "end_line": 135,
+      "tokens": 963,
+      "context_length": 28791
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_ConfigureSubplotsWx_RubberbandWx.remove_rubberband.1",
+      "distance": 0.9788707494735718,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 1273,
+      "end_line": 1299,
+      "tokens": 240,
+      "context_length": 29031
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/gridspec.py_1_46",
+      "distance": 0.9812197685241699,
+      "file_path": "tutorials/intermediate/gridspec.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 757,
+      "context_length": 29788
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_SubplotBase.is_first_row_SubplotBase.label_outer.3",
+      "distance": 0.9812198281288147,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 88,
+      "end_line": 113,
+      "tokens": 285,
+      "context_length": 30073
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/line_with_text.py_8_",
+      "distance": 0.9825590252876282,
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "start_line": 51,
+      "end_line": 87,
+      "tokens": 260,
+      "context_length": 30333
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.align_ylabels_FigureBase.align_ylabels.4.10.1.2.2",
+      "distance": 0.9828786253929138,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1265,
+      "end_line": 1323,
+      "tokens": 537,
+      "context_length": 30870,
+      "file_pos": 29
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_cm.py__cubehelix_data__g36.1.1",
+      "distance": 0.9857133626937866,
+      "file_path": "lib/matplotlib/_cm.py",
+      "start_line": 106,
+      "end_line": 156,
+      "tokens": 787,
+      "context_length": 31657
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_1__stale_figure_callback.1.self.figure.stale.1",
+      "distance": 0.9862310886383057,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 321,
+      "context_length": 31978,
+      "file_pos": 30
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/examples/widgets/annotated_cursor.py_6_",
+      "distance": 0.990736722946167,
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "start_line": 284,
+      "end_line": 341,
+      "tokens": 471,
+      "context_length": 32449
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/examples/shapes_and_collections/fancybox_demo.py_36_",
+      "distance": 0.9922219514846802,
+      "file_path": "examples/shapes_and_collections/fancybox_demo.py",
+      "start_line": 80,
+      "end_line": 127,
+      "tokens": 501,
+      "context_length": 32950
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/gridspec.py_f3_ax4_90",
+      "distance": 0.9923165440559387,
+      "file_path": "tutorials/intermediate/gridspec.py",
+      "start_line": 79,
+      "end_line": 136,
+      "tokens": 719,
+      "context_length": 33669
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_267_stackplot.1.1",
+      "distance": 0.9945966601371765,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 3070,
+      "end_line": 3089,
+      "tokens": 226,
+      "context_length": 33895
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/axes_box_aspect.py_74_",
+      "distance": 0.9953171014785767,
+      "file_path": "examples/subplots_axes_and_figures/axes_box_aspect.py",
+      "start_line": 111,
+      "end_line": 156,
+      "tokens": 344,
+      "context_length": 34239
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_SubFigure_SubFigure.__init__.25.1",
+      "distance": 0.9962024688720703,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1917,
+      "end_line": 1999,
+      "tokens": 706,
+      "context_length": 34945,
+      "file_pos": 33
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_1_63",
+      "distance": 0.9971524477005005,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 741,
+      "context_length": 35686
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/angle_annotation.py_75_",
+      "distance": 0.9974489808082581,
+      "file_path": "examples/text_labels_and_annotations/angle_annotation.py",
+      "start_line": 271,
+      "end_line": 327,
+      "tokens": 707,
+      "context_length": 36393
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/shared_axis_demo.py_1_",
+      "distance": 0.9998065233230591,
+      "file_path": "examples/subplots_axes_and_figures/shared_axis_demo.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 490,
+      "context_length": 36883
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_140_figimage.1.1",
+      "distance": 0.999875009059906,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2468,
+      "end_line": 2478,
+      "tokens": 137,
+      "context_length": 37020
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_XAxis.tick_top_XAxis.set_inverted.2",
+      "distance": 1.002168893814087,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 2195,
+      "end_line": 2239,
+      "tokens": 422,
+      "context_length": 37442
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes.stem.2_Axes.boxplot",
+      "distance": 1.0033934116363525,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 2865,
+      "end_line": 3815,
+      "tokens": 6362,
+      "context_length": 43804
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 1,
+      "tokens": 26046,
+      "context_length": 26046
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "position": 2,
+      "tokens": 1423,
+      "context_length": 27469
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/figure_title.py",
+      "position": 3,
+      "tokens": 544,
+      "context_length": 28013
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "position": 4,
+      "tokens": 1967,
+      "context_length": 29980
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 5,
+      "tokens": 28466,
+      "context_length": 58446
+    },
+    {
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "position": 6,
+      "tokens": 6118,
+      "context_length": 64564
+    },
+    {
+      "file_path": "examples/pyplots/align_ylabels.py",
+      "position": 7,
+      "tokens": 634,
+      "context_length": 65198
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/label_subplots.py",
+      "position": 8,
+      "tokens": 603,
+      "context_length": 65801
+    },
+    {
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "position": 9,
+      "tokens": 5976,
+      "context_length": 71777
+    },
+    {
+      "file_path": "tutorials/intermediate/gridspec.py",
+      "position": 10,
+      "tokens": 2776,
+      "context_length": 74553
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "position": 11,
+      "tokens": 1638,
+      "context_length": 76191
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "position": 12,
+      "tokens": 968,
+      "context_length": 77159
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "position": 13,
+      "tokens": 889,
+      "context_length": 78048
+    },
+    {
+      "file_path": "examples/pyplots/auto_subplots_adjust.py",
+      "position": 14,
+      "tokens": 702,
+      "context_length": 78750
+    },
+    {
+      "file_path": "examples/showcase/anatomy.py",
+      "position": 15,
+      "tokens": 1314,
+      "context_length": 80064
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "position": 16,
+      "tokens": 525,
+      "context_length": 80589
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/secondary_axis.py",
+      "position": 17,
+      "tokens": 1434,
+      "context_length": 82023
+    },
+    {
+      "file_path": "tutorials/advanced/transforms_tutorial.py",
+      "position": 18,
+      "tokens": 6101,
+      "context_length": 88124
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "position": 19,
+      "tokens": 886,
+      "context_length": 89010
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/demo_constrained_layout.py",
+      "position": 20,
+      "tokens": 430,
+      "context_length": 89440
+    },
+    {
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "position": 21,
+      "tokens": 2150,
+      "context_length": 91590
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/align_labels_demo.py",
+      "position": 22,
+      "tokens": 294,
+      "context_length": 91884
+    },
+    {
+      "file_path": "examples/axes_grid1/make_room_for_ylabel_using_axesgrid.py",
+      "position": 23,
+      "tokens": 401,
+      "context_length": 92285
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/titles_demo.py",
+      "position": 24,
+      "tokens": 367,
+      "context_length": 92652
+    },
+    {
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "position": 25,
+      "tokens": 2192,
+      "context_length": 94844
+    },
+    {
+      "file_path": "tutorials/text/text_intro.py",
+      "position": 26,
+      "tokens": 3878,
+      "context_length": 98722
+    },
+    {
+      "file_path": "examples/ticks_and_spines/tick-formatters.py",
+      "position": 27,
+      "tokens": 1235,
+      "context_length": 99957
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "position": 28,
+      "tokens": 12087,
+      "context_length": 112044
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "position": 29,
+      "tokens": 592,
+      "context_length": 112636
+    },
+    {
+      "file_path": "lib/matplotlib/_cm.py",
+      "position": 30,
+      "tokens": 28443,
+      "context_length": 141079
+    },
+    {
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "position": 31,
+      "tokens": 2835,
+      "context_length": 143914
+    },
+    {
+      "file_path": "examples/shapes_and_collections/fancybox_demo.py",
+      "position": 32,
+      "tokens": 1273,
+      "context_length": 145187
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/axes_box_aspect.py",
+      "position": 33,
+      "tokens": 1125,
+      "context_length": 146312
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/angle_annotation.py",
+      "position": 34,
+      "tokens": 3453,
+      "context_length": 149765
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/shared_axis_demo.py",
+      "position": 35,
+      "tokens": 490,
+      "context_length": 150255
+    },
+    {
+      "file_path": "lib/matplotlib/axis.py",
+      "position": 36,
+      "tokens": 20208,
+      "context_length": 170463
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "position": 37,
+      "tokens": 72914,
+      "context_length": 243377
+    }
+  ]
+}

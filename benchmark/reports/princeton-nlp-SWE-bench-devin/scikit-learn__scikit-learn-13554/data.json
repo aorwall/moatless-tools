@@ -1,0 +1,1260 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-13554",
+  "model_patch": "diff --git a/sklearn/metrics/pairwise.py b/sklearn/metrics/pairwise.py\nindex 5f87d880c..1abe1ba5a 100644\n--- a/sklearn/metrics/pairwise.py\n+++ b/sklearn/metrics/pairwise.py\n@@ -245,6 +245,12 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n     else:\n         YY = row_norms(Y, squared=True)[np.newaxis, :]\n \n+    # Cast X and Y to float64 if they are float32, to improve precision\n+    if X.dtype == np.float32:\n+        X = X.astype(np.float64)\n+    if Y is not None and Y.dtype == np.float32:\n+        Y = Y.astype(np.float64)\n+\n     distances = safe_sparse_dot(X, Y.T, dense_output=True)\n     distances *= -2\n     distances += XX\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/metrics/pairwise.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "c903d71c5b06aa4cf518de7e3676c207519e0295",
+  "patch": "diff --git a/sklearn/metrics/pairwise.py b/sklearn/metrics/pairwise.py\n--- a/sklearn/metrics/pairwise.py\n+++ b/sklearn/metrics/pairwise.py\n@@ -193,6 +193,7 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n     Y_norm_squared : array-like, shape (n_samples_2, ), optional\n         Pre-computed dot-products of vectors in Y (e.g.,\n         ``(Y**2).sum(axis=1)``)\n+        May be ignored in some cases, see the note below.\n \n     squared : boolean, optional\n         Return squared Euclidean distances.\n@@ -200,10 +201,16 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n     X_norm_squared : array-like, shape = [n_samples_1], optional\n         Pre-computed dot-products of vectors in X (e.g.,\n         ``(X**2).sum(axis=1)``)\n+        May be ignored in some cases, see the note below.\n+\n+    Notes\n+    -----\n+    To achieve better accuracy, `X_norm_squared`\u00a0and `Y_norm_squared` may be\n+    unused if they are passed as ``float32``.\n \n     Returns\n     -------\n-    distances : {array, sparse matrix}, shape (n_samples_1, n_samples_2)\n+    distances : array, shape (n_samples_1, n_samples_2)\n \n     Examples\n     --------\n@@ -224,6 +231,9 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n     \"\"\"\n     X, Y = check_pairwise_arrays(X, Y)\n \n+    # If norms are passed as float32, they are unused. If arrays are passed as\n+    # float32, norms needs to be recomputed on upcast chunks.\n+    # TODO: use a float64 accumulator in row_norms to avoid the latter.\n     if X_norm_squared is not None:\n         XX = check_array(X_norm_squared)\n         if XX.shape == (1, X.shape[0]):\n@@ -231,10 +241,15 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n         elif XX.shape != (X.shape[0], 1):\n             raise ValueError(\n                 \"Incompatible dimensions for X and X_norm_squared\")\n+        if XX.dtype == np.float32:\n+            XX = None\n+    elif X.dtype == np.float32:\n+        XX = None\n     else:\n         XX = row_norms(X, squared=True)[:, np.newaxis]\n \n-    if X is Y:  # shortcut in the common case euclidean_distances(X, X)\n+    if X is Y and XX is not None:\n+        # shortcut in the common case euclidean_distances(X, X)\n         YY = XX.T\n     elif Y_norm_squared is not None:\n         YY = np.atleast_2d(Y_norm_squared)\n@@ -242,23 +257,99 @@ def euclidean_distances(X, Y=None, Y_norm_squared=None, squared=False,\n         if YY.shape != (1, Y.shape[0]):\n             raise ValueError(\n                 \"Incompatible dimensions for Y and Y_norm_squared\")\n+        if YY.dtype == np.float32:\n+            YY = None\n+    elif Y.dtype == np.float32:\n+        YY = None\n     else:\n         YY = row_norms(Y, squared=True)[np.newaxis, :]\n \n-    distances = safe_sparse_dot(X, Y.T, dense_output=True)\n-    distances *= -2\n-    distances += XX\n-    distances += YY\n+    if X.dtype == np.float32:\n+        # To minimize precision issues with float32, we compute the distance\n+        # matrix on chunks of X and Y upcast to float64\n+        distances = _euclidean_distances_upcast(X, XX, Y, YY)\n+    else:\n+        # if dtype is already float64, no need to chunk and upcast\n+        distances = - 2 * safe_sparse_dot(X, Y.T, dense_output=True)\n+        distances += XX\n+        distances += YY\n     np.maximum(distances, 0, out=distances)\n \n+    # Ensure that distances between vectors and themselves are set to 0.0.\n+    # This may not be the case due to floating point rounding errors.\n     if X is Y:\n-        # Ensure that distances between vectors and themselves are set to 0.0.\n-        # This may not be the case due to floating point rounding errors.\n-        distances.flat[::distances.shape[0] + 1] = 0.0\n+        np.fill_diagonal(distances, 0)\n \n     return distances if squared else np.sqrt(distances, out=distances)\n \n \n+def _euclidean_distances_upcast(X, XX=None, Y=None, YY=None):\n+    \"\"\"Euclidean distances between X and Y\n+\n+    Assumes X and Y have float32 dtype.\n+    Assumes XX and YY have float64 dtype or are None.\n+\n+    X and Y are upcast to float64 by chunks, which size is chosen to limit\n+    memory increase by approximately 10% (at least 10MiB).\n+    \"\"\"\n+    n_samples_X = X.shape[0]\n+    n_samples_Y = Y.shape[0]\n+    n_features = X.shape[1]\n+\n+    distances = np.empty((n_samples_X, n_samples_Y), dtype=np.float32)\n+\n+    x_density = X.nnz / np.prod(X.shape) if issparse(X) else 1\n+    y_density = Y.nnz / np.prod(Y.shape) if issparse(Y) else 1\n+\n+    # Allow 10% more memory than X, Y and the distance matrix take (at least\n+    # 10MiB)\n+    maxmem = max(\n+        ((x_density * n_samples_X + y_density * n_samples_Y) * n_features\n+         + (x_density * n_samples_X * y_density * n_samples_Y)) / 10,\n+        10 * 2**17)\n+\n+    # The increase amount of memory in 8-byte blocks is:\n+    # - x_density * batch_size * n_features (copy of chunk of X)\n+    # - y_density * batch_size * n_features (copy of chunk of Y)\n+    # - batch_size * batch_size (chunk of distance matrix)\n+    # Hence x\u00b2 + (xd+yd)kx = M, where x=batch_size, k=n_features, M=maxmem\n+    #                                 xd=x_density and yd=y_density\n+    tmp = (x_density + y_density) * n_features\n+    batch_size = (-tmp + np.sqrt(tmp**2 + 4 * maxmem)) / 2\n+    batch_size = max(int(batch_size), 1)\n+\n+    x_batches = gen_batches(X.shape[0], batch_size)\n+    y_batches = gen_batches(Y.shape[0], batch_size)\n+\n+    for i, x_slice in enumerate(x_batches):\n+        X_chunk = X[x_slice].astype(np.float64)\n+        if XX is None:\n+            XX_chunk = row_norms(X_chunk, squared=True)[:, np.newaxis]\n+        else:\n+            XX_chunk = XX[x_slice]\n+\n+        for j, y_slice in enumerate(y_batches):\n+            if X is Y and j < i:\n+                # when X is Y the distance matrix is symmetric so we only need\n+                # to compute half of it.\n+                d = distances[y_slice, x_slice].T\n+\n+            else:\n+                Y_chunk = Y[y_slice].astype(np.float64)\n+                if YY is None:\n+                    YY_chunk = row_norms(Y_chunk, squared=True)[np.newaxis, :]\n+                else:\n+                    YY_chunk = YY[:, y_slice]\n+\n+                d = -2 * safe_sparse_dot(X_chunk, Y_chunk.T, dense_output=True)\n+                d += XX_chunk\n+                d += YY_chunk\n+\n+            distances[x_slice, y_slice] = d.astype(np.float32, copy=False)\n+\n+    return distances\n+\n+\n def _argmin_min_reduce(dist, start):\n     indices = dist.argmin(axis=1)\n     values = dist[np.arange(dist.shape[0]), indices]\n",
+  "test_patch": "diff --git a/sklearn/metrics/tests/test_pairwise.py b/sklearn/metrics/tests/test_pairwise.py\n--- a/sklearn/metrics/tests/test_pairwise.py\n+++ b/sklearn/metrics/tests/test_pairwise.py\n@@ -584,41 +584,115 @@ def test_pairwise_distances_chunked():\n     assert_raises(StopIteration, next, gen)\n \n \n-def test_euclidean_distances():\n-    # Check the pairwise Euclidean distances computation\n-    X = [[0]]\n-    Y = [[1], [2]]\n+@pytest.mark.parametrize(\"x_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+@pytest.mark.parametrize(\"y_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+def test_euclidean_distances_known_result(x_array_constr, y_array_constr):\n+    # Check the pairwise Euclidean distances computation on known result\n+    X = x_array_constr([[0]])\n+    Y = y_array_constr([[1], [2]])\n     D = euclidean_distances(X, Y)\n-    assert_array_almost_equal(D, [[1., 2.]])\n+    assert_allclose(D, [[1., 2.]])\n \n-    X = csr_matrix(X)\n-    Y = csr_matrix(Y)\n-    D = euclidean_distances(X, Y)\n-    assert_array_almost_equal(D, [[1., 2.]])\n \n+@pytest.mark.parametrize(\"dtype\", [np.float32, np.float64])\n+@pytest.mark.parametrize(\"y_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+def test_euclidean_distances_with_norms(dtype, y_array_constr):\n+    # check that we still get the right answers with {X,Y}_norm_squared\n+    # and that we get a wrong answer with wrong {X,Y}_norm_squared\n     rng = np.random.RandomState(0)\n-    X = rng.random_sample((10, 4))\n-    Y = rng.random_sample((20, 4))\n-    X_norm_sq = (X ** 2).sum(axis=1).reshape(1, -1)\n-    Y_norm_sq = (Y ** 2).sum(axis=1).reshape(1, -1)\n+    X = rng.random_sample((10, 10)).astype(dtype, copy=False)\n+    Y = rng.random_sample((20, 10)).astype(dtype, copy=False)\n+\n+    # norms will only be used if their dtype is float64\n+    X_norm_sq = (X.astype(np.float64) ** 2).sum(axis=1).reshape(1, -1)\n+    Y_norm_sq = (Y.astype(np.float64) ** 2).sum(axis=1).reshape(1, -1)\n+\n+    Y = y_array_constr(Y)\n \n-    # check that we still get the right answers with {X,Y}_norm_squared\n     D1 = euclidean_distances(X, Y)\n     D2 = euclidean_distances(X, Y, X_norm_squared=X_norm_sq)\n     D3 = euclidean_distances(X, Y, Y_norm_squared=Y_norm_sq)\n     D4 = euclidean_distances(X, Y, X_norm_squared=X_norm_sq,\n                              Y_norm_squared=Y_norm_sq)\n-    assert_array_almost_equal(D2, D1)\n-    assert_array_almost_equal(D3, D1)\n-    assert_array_almost_equal(D4, D1)\n+    assert_allclose(D2, D1)\n+    assert_allclose(D3, D1)\n+    assert_allclose(D4, D1)\n \n     # check we get the wrong answer with wrong {X,Y}_norm_squared\n-    X_norm_sq *= 0.5\n-    Y_norm_sq *= 0.5\n     wrong_D = euclidean_distances(X, Y,\n                                   X_norm_squared=np.zeros_like(X_norm_sq),\n                                   Y_norm_squared=np.zeros_like(Y_norm_sq))\n-    assert_greater(np.max(np.abs(wrong_D - D1)), .01)\n+    with pytest.raises(AssertionError):\n+        assert_allclose(wrong_D, D1)\n+\n+\n+@pytest.mark.parametrize(\"dtype\", [np.float32, np.float64])\n+@pytest.mark.parametrize(\"x_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+@pytest.mark.parametrize(\"y_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+def test_euclidean_distances(dtype, x_array_constr, y_array_constr):\n+    # check that euclidean distances gives same result as scipy cdist\n+    # when X and Y != X are provided\n+    rng = np.random.RandomState(0)\n+    X = rng.random_sample((100, 10)).astype(dtype, copy=False)\n+    X[X < 0.8] = 0\n+    Y = rng.random_sample((10, 10)).astype(dtype, copy=False)\n+    Y[Y < 0.8] = 0\n+\n+    expected = cdist(X, Y)\n+\n+    X = x_array_constr(X)\n+    Y = y_array_constr(Y)\n+    distances = euclidean_distances(X, Y)\n+\n+    # the default rtol=1e-7 is too close to the float32 precision\n+    # and fails due too rounding errors.\n+    assert_allclose(distances, expected, rtol=1e-6)\n+    assert distances.dtype == dtype\n+\n+\n+@pytest.mark.parametrize(\"dtype\", [np.float32, np.float64])\n+@pytest.mark.parametrize(\"x_array_constr\", [np.array, csr_matrix],\n+                         ids=[\"dense\", \"sparse\"])\n+def test_euclidean_distances_sym(dtype, x_array_constr):\n+    # check that euclidean distances gives same result as scipy pdist\n+    # when only X is provided\n+    rng = np.random.RandomState(0)\n+    X = rng.random_sample((100, 10)).astype(dtype, copy=False)\n+    X[X < 0.8] = 0\n+\n+    expected = squareform(pdist(X))\n+\n+    X = x_array_constr(X)\n+    distances = euclidean_distances(X)\n+\n+    # the default rtol=1e-7 is too close to the float32 precision\n+    # and fails due too rounding errors.\n+    assert_allclose(distances, expected, rtol=1e-6)\n+    assert distances.dtype == dtype\n+\n+\n+@pytest.mark.parametrize(\n+    \"dtype, eps, rtol\",\n+    [(np.float32, 1e-4, 1e-5),\n+     pytest.param(\n+         np.float64, 1e-8, 0.99,\n+         marks=pytest.mark.xfail(reason='failing due to lack of precision'))])\n+@pytest.mark.parametrize(\"dim\", [1, 1000000])\n+def test_euclidean_distances_extreme_values(dtype, eps, rtol, dim):\n+    # check that euclidean distances is correct with float32 input thanks to\n+    # upcasting. On float64 there are still precision issues.\n+    X = np.array([[1.] * dim], dtype=dtype)\n+    Y = np.array([[1. + eps] * dim], dtype=dtype)\n+\n+    distances = euclidean_distances(X, Y)\n+    expected = cdist(X, Y)\n+\n+    assert_allclose(distances, expected, rtol=1e-5)\n \n \n def test_cosine_distances():\n",
+  "problem_statement": "Numerical precision of euclidean_distances with float32\n<!-- Instructions For Filing a Bug: https://github.com/scikit-learn/scikit-learn/blob/master/CONTRIBUTING.md#filing-bugs -->\r\n\r\n#### Description\r\nI noticed that sklearn.metrics.pairwise.pairwise_distances function agrees with np.linalg.norm when using np.float64 arrays, but disagrees when using np.float32 arrays. See the code snippet below.\r\n\r\n#### Steps/Code to Reproduce\r\n\r\n```python\r\nimport numpy as np\r\nimport scipy\r\nimport sklearn.metrics.pairwise\r\n\r\n# create 64-bit vectors a and b that are very similar to each other\r\na_64 = np.array([61.221637725830078125, 71.60662841796875,    -65.7512664794921875],  dtype=np.float64)\r\nb_64 = np.array([61.221637725830078125, 71.60894012451171875, -65.72847747802734375], dtype=np.float64)\r\n\r\n# create 32-bit versions of a and b\r\na_32 = a_64.astype(np.float32)\r\nb_32 = b_64.astype(np.float32)\r\n\r\n# compute the distance from a to b using numpy, for both 64-bit and 32-bit\r\ndist_64_np = np.array([np.linalg.norm(a_64 - b_64)], dtype=np.float64)\r\ndist_32_np = np.array([np.linalg.norm(a_32 - b_32)], dtype=np.float32)\r\n\r\n# compute the distance from a to b using sklearn, for both 64-bit and 32-bit\r\ndist_64_sklearn = sklearn.metrics.pairwise.pairwise_distances([a_64], [b_64])\r\ndist_32_sklearn = sklearn.metrics.pairwise.pairwise_distances([a_32], [b_32])\r\n\r\n# note that the 64-bit sklearn results agree exactly with numpy, but the 32-bit results disagree\r\nnp.set_printoptions(precision=200)\r\n\r\nprint(dist_64_np)\r\nprint(dist_32_np)\r\nprint(dist_64_sklearn)\r\nprint(dist_32_sklearn)\r\n```\r\n\r\n#### Expected Results\r\nI expect that the results from sklearn.metrics.pairwise.pairwise_distances would agree with np.linalg.norm for both 64-bit and 32-bit. In other words, I expect the following output:\r\n```\r\n[ 0.0229059506440019884643266578905240749008953571319580078125]\r\n[ 0.02290595136582851409912109375]\r\n[[ 0.0229059506440019884643266578905240749008953571319580078125]]\r\n[[ 0.02290595136582851409912109375]]\r\n```\r\n\r\n#### Actual Results\r\nThe code snippet above produces the following output for me:\r\n```\r\n[ 0.0229059506440019884643266578905240749008953571319580078125]\r\n[ 0.02290595136582851409912109375]\r\n[[ 0.0229059506440019884643266578905240749008953571319580078125]]\r\n[[ 0.03125]]\r\n```\r\n\r\n#### Versions\r\n```\r\nDarwin-16.6.0-x86_64-i386-64bit\r\n('Python', '2.7.11 | 64-bit | (default, Jun 11 2016, 03:41:56) \\n[GCC 4.2.1 Compatible Apple LLVM 6.0 (clang-600.0.57)]')\r\n('NumPy', '1.11.3')\r\n('SciPy', '0.19.0')\r\n('Scikit-Learn', '0.18.1')\r\n```\n[WIP] Stable and fast float32 implementation of euclidean_distances\n#### Reference Issues/PRs\r\nFixes #9354\r\nSuperseds PR #10069\r\n\r\n#### What does this implement/fix? Explain your changes.\r\nThese commits implement a block-wise casting to float64 and uses the older code to compute the euclidean distance matrix on the blocks. This is done useing only a fixed amount of additional (temporary) memory.\r\n\r\n#### Any other comments?\r\nThis code implements several optimizations:\r\n\r\n* since the distance matrix is symmetric when `X is Y`, copy the blocks of the upper triangle to the lower triangle;\r\n* compute the optimal block size that would use most of the allowed additional memory;\r\n* cast blocks of `{X,Y}_norm_squared` to float64;\r\n* precompute blocks of `X_norm_squared` if not given so it gets reused through the iterations over `Y`;\r\n* swap `X` and `Y` when `X_norm_squared` is given, but not `Y_norm_squared`.\r\n\r\nNote that all the optimizations listed here have proven useful in a benchmark. The hardcoded amount of additional memory of 10MB is also derived from a benchmark.\r\n\r\nAs a side bonus, this implementation should also support float16 out of the box, should scikit-learn support it at some point.\nAdd a test for numeric precision (see #9354)\nSurprisingly bad precision, isn't it?\r\n\r\nNote that the traditional computation sqrt(sum((x-y)**2)) gets the results exact.\r\n\r\n<!--\r\nThanks for contributing a pull request! Please ensure you have taken a look at\r\nthe contribution guidelines: https://github.com/scikit-learn/scikit-learn/blob/master/CONTRIBUTING.md#pull-request-checklist\r\n-->\r\n\r\n#### Reference Issues/PRs\r\n<!--\r\nExample: Fixes #1234. See also #3456.\r\nPlease use keywords (e.g., Fixes) to create link to the issues or pull requests\r\nyou resolved, so that they will automatically be closed when your pull request\r\nis merged. See https://github.com/blog/1506-closing-issues-via-pull-requests\r\n-->\r\n\r\n\r\n#### What does this implement/fix? Explain your changes.\r\n\r\n\r\n#### Any other comments?\r\n\r\n\r\n<!--\r\nPlease be aware that we are a loose team of volunteers so patience is\r\nnecessary; assistance handling other issues is very welcome. We value\r\nall user contributions, no matter how minor they are. If we are slow to\r\nreview, either the pull request needs some benchmarking, tinkering,\r\nconvincing, etc. or more likely the reviewers are simply busy. In either\r\ncase, we ask for your understanding during the review process.\r\nFor more information, see our FAQ on this topic:\r\nhttp://scikit-learn.org/dev/faq.html#why-is-my-pull-request-not-getting-any-attention.\r\n\r\nThanks for contributing!\r\n-->\r\n\n",
+  "hints_text": "Same results with python 3.5 :\r\n\r\n```\r\nDarwin-15.6.0-x86_64-i386-64bit\r\nPython 3.5.1 (v3.5.1:37a07cee5969, Dec  5 2015, 21:12:44) \r\n[GCC 4.2.1 (Apple Inc. build 5666) (dot 3)]\r\nNumPy 1.11.0\r\nSciPy 0.18.1\r\nScikit-Learn 0.17.1\r\n```\r\n\r\nIt happens only with euclidean distance and can be reproduced using directly `sklearn.metrics.pairwise.euclidean_distances` :\r\n\r\n```\r\nimport scipy\r\nimport sklearn.metrics.pairwise\r\n\r\n# create 64-bit vectors a and b that are very similar to each other\r\na_64 = np.array([61.221637725830078125, 71.60662841796875,    -65.7512664794921875],  dtype=np.float64)\r\nb_64 = np.array([61.221637725830078125, 71.60894012451171875, -65.72847747802734375], dtype=np.float64)\r\n\r\n# create 32-bit versions of a and b\r\na_32 = a_64.astype(np.float32)\r\nb_32 = b_64.astype(np.float32)\r\n\r\n# compute the distance from a to b using sklearn, for both 64-bit and 32-bit\r\ndist_64_sklearn = sklearn.metrics.pairwise.euclidean_distances([a_64], [b_64])\r\ndist_32_sklearn = sklearn.metrics.pairwise.euclidean_distances([a_32], [b_32])\r\n\r\nnp.set_printoptions(precision=200)\r\n\r\nprint(dist_64_sklearn)\r\nprint(dist_32_sklearn)\r\n```\r\n\r\nI couldn't track down further the error.\r\nI hope this can help.\r\n\r\n\nnumpy might use a higher precision accumulator. yes, it looks like this\ndeserves fixing.\n\nOn 19 Jul 2017 12:05 am, \"nvauquie\" <notifications@github.com> wrote:\n\n> Same results with python 3.5 :\n>\n> Darwin-15.6.0-x86_64-i386-64bit\n> Python 3.5.1 (v3.5.1:37a07cee5969, Dec  5 2015, 21:12:44)\n> [GCC 4.2.1 (Apple Inc. build 5666) (dot 3)]\n> NumPy 1.11.0\n> SciPy 0.18.1\n> Scikit-Learn 0.17.1\n>\n> It happens only with euclidean distance and can be reproduced using\n> directly sklearn.metrics.pairwise.euclidean_distances :\n>\n> import scipy\n> import sklearn.metrics.pairwise\n>\n> # create 64-bit vectors a and b that are very similar to each other\n> a_64 = np.array([61.221637725830078125, 71.60662841796875,    -65.7512664794921875],  dtype=np.float64)\n> b_64 = np.array([61.221637725830078125, 71.60894012451171875, -65.72847747802734375], dtype=np.float64)\n>\n> # create 32-bit versions of a and b\n> a_32 = a_64.astype(np.float32)\n> b_32 = b_64.astype(np.float32)\n>\n> # compute the distance from a to b using sklearn, for both 64-bit and 32-bit\n> dist_64_sklearn = sklearn.metrics.pairwise.euclidean_distances([a_64], [b_64])\n> dist_32_sklearn = sklearn.metrics.pairwise.euclidean_distances([a_32], [b_32])\n>\n> np.set_printoptions(precision=200)\n>\n> print(dist_64_sklearn)\n> print(dist_32_sklearn)\n>\n> I couldn't track down further the error.\n> I hope this can help.\n>\n> \u2014\n> You are receiving this because you are subscribed to this thread.\n> Reply to this email directly, view it on GitHub\n> <https://github.com/scikit-learn/scikit-learn/issues/9354#issuecomment-316074315>,\n> or mute the thread\n> <https://github.com/notifications/unsubscribe-auth/AAEz65yy8Aq2FcsDAcWHT8qkkdXF_MfPks5sPLu_gaJpZM4OXbpZ>\n> .\n>\n\nI'd like to work on this if possible \nGo for it!\nSo I think the problem lies around the fact that we are using `sqrt(dot(x, x) - 2 * dot(x, y) + dot(y, y))` for computing euclidean distance \r\nBecause if I try - ` (-2 * np.dot(X, Y.T) + (X * X).sum(axis=1) + (Y * Y).sum(axis=1)` I get the answer 0 for np.float32, while I get the correct ans for np.float 64.\n@jnothman What do you think I should do then ? As mentioned in my comment above the problem is probably computing euclidean distance using `sqrt(dot(x, x) - 2 * dot(x, y) + dot(y, y))`\nSo you're saying that dot is returning a less precise result than product-then-sum?\nNo, what I'm trying to say is dot is returning more precise result than product-then-sum\r\n`-2 * np.dot(X, Y.T) + (X * X).sum(axis=1) + (Y * Y).sum(axis=1)` gives output  `[[0.]]`\r\nwhile `np.sqrt(((X-Y) * (X-Y)).sum(axis=1))` gives output `[ 0.02290595]`\nIt is not clear what you are doing, partly because you are not posting a fully stand-alone snippet.\r\n\r\nQuickly looking at your last post the two things you are trying to compare `[[0.]]` and `[0.022...]` do not have the same dimensions (maybe a copy and paste problem but again hard to know because we don't have a full snippet).\nOk sorry my bad\r\n```\r\nimport numpy as np\r\nimport scipy\r\nfrom sklearn.metrics.pairwise import check_pairwise_arrays, row_norms\r\nfrom sklearn.utils.extmath import safe_sparse_dot\r\n\r\n# create 64-bit vectors a and b that are very similar to each other\r\na_64 = np.array([61.221637725830078125, 71.60662841796875,    -65.7512664794921875],  dtype=np.float64)\r\nb_64 = np.array([61.221637725830078125, 71.60894012451171875, -65.72847747802734375], dtype=np.float64)\r\n\r\n# create 32-bit versions of a and b\r\nX = a_64.astype(np.float32)\r\nY = b_64.astype(np.float32)\r\n\r\nX, Y = check_pairwise_arrays(X, Y)\r\nXX = row_norms(X, squared=True)[:, np.newaxis]\r\nYY = row_norms(Y, squared=True)[np.newaxis, :]\r\n\r\n#Euclidean distance computed using product-then-sum\r\ndistances = safe_sparse_dot(X, Y.T, dense_output=True)\r\ndistances *= -2\r\ndistances += XX\r\ndistances += YY\r\nprint(np.sqrt(distances))\r\n\r\n#Euclidean distance computed using (X-Y)^2\r\nprint(np.sqrt(row_norms(X-Y, squared=True)[:, np.newaxis]))\r\n\r\n```\r\n\r\n**OUTPUT**\r\n```\r\n[[ 0.03125]]\r\n[[ 0.02290595136582851409912109375]]\r\n```\r\nThe first method is how it is computed by the euclidean distance function. \r\nAlso to clarify what I meant above was the fact that sum-then-product has lower precision even when we use numpy functions to do it\r\n\nYes, I can replicate this. I see that doing the subtraction initially\nallows the precision of the difference to be maintained. Doing the dot\nproduct and then subtracting (or negating and adding), as we currently do,\nloses this precision as the most significant figures are much larger than\nthe differences.\n\nThe current implementation is more memory efficient for a high number of\nfeatures. But I suppose euclidean distance becomes increasingly irrelevant\nin high dimensions, so the memory is dominated by the number of output\nvalues.\n\nSo I vote for adopting the more numerically stable implementation over the\nd-asymptotically efficient implementation we currently have. An opinion,\n@ogrisel? @agramfort?\n\nAnd this is of course more of a concern since we recently allowed float32s\nto be more commonplace across estimators.\n\nSo for this example product-then-sum works perfectly fine for np.float64, so a possible solution could be to convert the input to float64 then compute the result and return the result converted back to float32. I guess this would be more efficient, but not sure if this would work fine for some other example.\nconverting to float64 won't be more efficient in memory usage than\nsubtraction.\n\nOh yeah you are right sorry about that, but I think using float64 and then doing product-then-sum would be more efficient computationally if not memory wise.\nAnd the reason for using product-then-sum was to have more computational efficiency and not memory efficiency.\nsure, but I don't believe there is any reason to assume that it is in fact\nmore computationally efficient except by way of not having to realise an\nintermediate array. Assuming we limit absolute working memory (e.g. by\nchunking), why would taking the dot product, doubling and subtracting norms\nbe much more efficient than subtracting and squaring?\n\nProvide benchmarks?\n\nOk so I created a python script to compare the time taken by subtraction-then-squaring and conversion to float64 then product-then-sum and it turns out if we choose an X and Y as very big vectors then the 2 results are very different. Also @jnothman you were right subtraction-then-squaring is faster. \r\nHere's the script that I wrote, if there's any problem please let me know \r\n\r\n```\r\nimport numpy as np\r\nimport scipy\r\nfrom sklearn.metrics.pairwise import check_pairwise_arrays, row_norms\r\nfrom sklearn.utils.extmath import safe_sparse_dot\r\nfrom timeit import default_timer as timer\r\n\r\nfor i in range(9):\r\n\tX = np.random.rand(1,3 * (10**i)).astype(np.float32)\r\n\tY = np.random.rand(1,3 * (10**i)).astype(np.float32)\r\n\r\n\tX, Y = check_pairwise_arrays(X, Y)\r\n\tXX = row_norms(X, squared=True)[:, np.newaxis]\r\n\tYY = row_norms(Y, squared=True)[np.newaxis, :]\r\n\r\n\t#Euclidean distance computed using product-then-sum\r\n\tdistances = safe_sparse_dot(X, Y.T, dense_output=True)\r\n\tdistances *= -2\r\n\tdistances += XX\r\n\tdistances += YY\r\n\r\n\tans1 = np.sqrt(distances)\r\n\r\n\tstart = timer()\r\n\tans2 = np.sqrt(row_norms(X-Y, squared=True)[:, np.newaxis])\r\n\tend = timer()\r\n\tif ans1 != ans2:\r\n\t\tprint(end-start)\r\n\r\n\t\tstart = timer()\r\n\t\tX = X.astype(np.float64)\r\n\t\tY = Y.astype(np.float64)\r\n\t\tX, Y = check_pairwise_arrays(X, Y)\r\n\t\tXX = row_norms(X, squared=True)[:, np.newaxis]\r\n\t\tYY = row_norms(Y, squared=True)[np.newaxis, :]\r\n\t\tdistances = safe_sparse_dot(X, Y.T, dense_output=True)\r\n\t\tdistances *= -2\r\n\t\tdistances += XX\r\n\t\tdistances += YY\r\n\t\tdistances = np.sqrt(distances)\r\n\t\tend = timer()\r\n\t\tprint(end-start)\r\n\t\tprint('')\r\n\t\tif abs(ans2 - distances) > 1e-3:\r\n\t\t\t# np.set_printoptions(precision=200)\r\n\t\t\tprint(ans2)\r\n\t\t\tprint(np.sqrt(distances))\r\n\r\n\t\t\tprint(X, Y)\r\n\t\t\tbreak\r\n```\nit's worth testing how it scales with the number of samples, not just the\nnumber of features... taking norms may have the benefit of computing some\nthings once per sample, not once per pair of samples\n\nOn 20 Oct 2017 2:39 am, \"Osaid Rehman Nasir\" <notifications@github.com>\nwrote:\n\n> Ok so I created a python script to compare the time taken by\n> subtraction-then-squaring and conversion to float64 then product-then-sum\n> and it turns out if we choose an X and Y as very big vectors then the 2\n> results are very different. Also @jnothman <https://github.com/jnothman>\n> you were right subtraction-then-squaring is faster.\n> Here's the script that I wrote, if there's any problem please let me know\n>\n> import numpy as np\n> import scipy\n> from sklearn.metrics.pairwise import check_pairwise_arrays, row_norms\n> from sklearn.utils.extmath import safe_sparse_dot\n> from timeit import default_timer as timer\n>\n> for i in range(9):\n> \tX = np.random.rand(1,3 * (10**i)).astype(np.float32)\n> \tY = np.random.rand(1,3 * (10**i)).astype(np.float32)\n>\n> \tX, Y = check_pairwise_arrays(X, Y)\n> \tXX = row_norms(X, squared=True)[:, np.newaxis]\n> \tYY = row_norms(Y, squared=True)[np.newaxis, :]\n>\n> \t#Euclidean distance computed using product-then-sum\n> \tdistances = safe_sparse_dot(X, Y.T, dense_output=True)\n> \tdistances *= -2\n> \tdistances += XX\n> \tdistances += YY\n>\n> \tans1 = np.sqrt(distances)\n>\n> \tstart = timer()\n> \tans2 = np.sqrt(row_norms(X-Y, squared=True)[:, np.newaxis])\n> \tend = timer()\n> \tif ans1 != ans2:\n> \t\tprint(end-start)\n>\n> \t\tstart = timer()\n> \t\tX = X.astype(np.float64)\n> \t\tY = Y.astype(np.float64)\n> \t\tX, Y = check_pairwise_arrays(X, Y)\n> \t\tXX = row_norms(X, squared=True)[:, np.newaxis]\n> \t\tYY = row_norms(Y, squared=True)[np.newaxis, :]\n> \t\tdistances = safe_sparse_dot(X, Y.T, dense_output=True)\n> \t\tdistances *= -2\n> \t\tdistances += XX\n> \t\tdistances += YY\n> \t\tdistances = np.sqrt(distances)\n> \t\tend = timer()\n> \t\tprint(end-start)\n> \t\tprint('')\n> \t\tif abs(ans2 - distances) > 1e-3:\n> \t\t\t# np.set_printoptions(precision=200)\n> \t\t\tprint(ans2)\n> \t\t\tprint(np.sqrt(distances))\n>\n> \t\t\tprint(X, Y)\n> \t\t\tbreak\n>\n> \u2014\n> You are receiving this because you were mentioned.\n> Reply to this email directly, view it on GitHub\n> <https://github.com/scikit-learn/scikit-learn/issues/9354#issuecomment-337948154>,\n> or mute the thread\n> <https://github.com/notifications/unsubscribe-auth/AAEz6z5o2Ao_7V5-Lflb4HosMrHCeOrVks5st209gaJpZM4OXbpZ>\n> .\n>\n\nanyway, would you like to submit a PR, @ragnerok?\nyeah sure, what do you want me to do ?\nprovide a more stable implementation, also a test that would fail under the\ncurrent implementation, and ideally a benchmark that shows we do not lose\nmuch from the change, in reasonable cases.\n\nI wanted to ask if it is possible to find distance between each pair of rows with vectorisation. I cannot think about how to do it vectorised.\nYou mean difference (not distance) between pairs of rows? Sure you can do that if you're working with numpy arrays. If you have arrays with shapes (n_samples1, n_features) and (n_samples2, n_features), you just need to reshape it to (n_samples1, 1, n_features) and (1, n_samples2, n_features) and do the subtraction:\r\n```python\r\n>>> X = np.random.randint(10, size=(10, 5))\r\n>>> Y = np.random.randint(10, size=(11, 5))\r\nX.reshape(-1, 1, X.shape[1]) - Y.reshape(1, -1, X.shape[1])\r\n```\nYeah thanks that really helped \ud83d\ude04 \nI also wanted to ask if I provide a more stable implementation I won't be using X_norm_squared and Y_norm_squared. So do I remove them from the arguments as well or should I warn about it not being of any use ?\nI think they will be deprecated, but we might need to first be assured that\nthere's no case where we should keep that version.\n\nwe're going to be quite careful in changing this. it's a widely used and\nlongstanding implementation. we should be sure not to slow any important\ncases. we might need to do the operation in chunks to avoid high memory\nusage (which is perhaps made trickier by the fact that this is called\nwithin functions that chunk to minimise the output memory retirement from\npairwise distances).\n\nI'd really like to hear from other core devs who know about computational\ncosts and numerical precision... @ogrisel, @lesteve, @rth...\n\nOn 5 Nov 2017 5:27 am, \"Osaid Rehman Nasir\" <notifications@github.com>\nwrote:\n\n> I also wanted to ask if I provide a more stable implementation I won't be\n> using X_norm_squared and Y_norm_squared. So do I remove them from the\n> arguments as well or should I warn about it not being of any use ?\n>\n> \u2014\n> You are receiving this because you were mentioned.\n> Reply to this email directly, view it on GitHub\n> <https://github.com/scikit-learn/scikit-learn/issues/9354#issuecomment-341919282>,\n> or mute the thread\n> <https://github.com/notifications/unsubscribe-auth/AAEz63izdpQGDEuW32m8Aob6rrsvV6q-ks5szKyHgaJpZM4OXbpZ>\n> .\n>\n\nbut it would be easier to discuss precisely if you open a PR\n\nOk I'll open up a PR then, with a very basic implementation of this function\nThe questions is what should be done about this for the 0.20 release. Could there be some simple / temporary improvements (event at the cost e.g. of memory usage) that could be considered?\r\n\r\nThe solution and analysis proposed in #11271 are definitely very valuable, but it might require some more discussion to make sure this is the optimal solution. In particular, I am concerned about the fact that now we have some pending discussion about the optimal global working memory in  https://github.com/scikit-learn/scikit-learn/issues/11506 depending on the CPU type etc while this would add yet another level of chunking and the complexity of the whole would be getting a bit of control IMO. But maybe it's just me, looking for a second opinion.\r\n\r\nWhat do you think should be done about this issue for the release @jnothman @amueller @ogrisel ?\nStability trumps efficiency. Stability issues should be fixed even when\nefficiency still needs tweaks.\n\nworking_memory's focus was to make things like silhouette with large sample\nsizes work. It also improved efficiency, but that can be tweaked down the\nline.\n\nI strongly believe we should try to get a fix for euclidean_distances with\nfloat32 in. We broke it in 0.19 by assuming that we could make\neuclidean_distances work on 32 bit in a naive way.\n\nI agree that we need a fix. My concern here is not efficiency but the added complexity in the code base.\r\n\r\nTaking a step back, scipy's euclidean implementation seems to be [10 lines of C code](https://github.com/scipy/scipy/blob/5e22b2e447cec5588fb42303a1ae796ab2bf852d/scipy/spatial/src/distance_impl.h#L49) and for 32 bit, simply cast them to 64bit. I understand that it's not the fastest but it's conceptually easy to follow and understand.  In scikit-learn, we use the trick to make computations faster in BLAS, then there are possible improvements due in https://github.com/scikit-learn/scikit-learn/pull/10212  and now the possible chunked solution to euclidean distance in 32 bit.\r\n\r\nI'm just looking for input about what the general direction on this topic should be (e.g try to upstream some of it to scipy etc). \nscipy doesn't seem concerned by copying the data...\n\nMove to 0.21 following the PR.\nRemove the blocker?\n`sqrt(dot(x, x) - 2 * dot(x, y) + dot(y, y))`\r\n\r\nis numerically unstable, if dot(x,x) and dot(y,y) are of similar magnitude as dot(x,y) because of what is known as **catastrophic cancellation**.\r\n\r\nThis not only affect FP32 precision, but it is of course more prominent, and will fail much earlier.\r\n\r\nHere is a simple test case that shows how bad this is even with double precision:\r\n```\r\nimport numpy\r\nfrom sklearn.metrics.pairwise import euclidean_distances\r\n\r\na = numpy.array([[100000001, 100000000]])\r\nb = numpy.array([[100000000, 100000001]])\r\n\r\nprint \"skelarn:\", euclidean_distances(a, b)[0,0]\r\nprint \"correct:\", numpy.sqrt(numpy.sum((a-b)**2))\r\n\r\na = numpy.array([[10001, 10000]], numpy.float32)\r\nb = numpy.array([[10000, 10001]], numpy.float32)\r\n\r\nprint \"skelarn:\", euclidean_distances(a, b)[0,0]\r\nprint \"correct:\", numpy.sqrt(numpy.sum((a-b)**2))\r\n```\r\nsklearn computes a distance of 0 here both times, rather than sqrt(2).\r\n\r\nA discussion of the numerical issues for variance and covariance - and this trivially carries over to this approach of accelerating euclidean distance - can be found here:\r\n\r\n> Erich Schubert, and Michael Gertz.\r\n> **Numerically Stable Parallel Computation of (Co-)Variance.**\r\n> In: Proceedings of the 30th International Conference on Scientific and Statistical Database Management (SSDBM), Bolzano-Bozen, Italy. 2018, 10:1\u201310:12\r\n\nActually the y coordinate can be removed from that test case, the correct distance then trivially becomes 1. I made a pull request that triggers this numeric problem:\r\n```\r\n    XA = np.array([[10000]], np.float32)\r\n    XB = np.array([[10001]], np.float32)\r\n    assert_equal(euclidean_distances(XA, XB)[0,0], 1)\r\n```\r\nI don't think my paper mentioned above provides a solution for this problem - just compute Euclidean distance as sqrt(sum(power())) and it is single-pass and has reasonable precision. The loss is in using the squares already, i.e., dot(x,x) itself already losing the precision.\r\n\r\n@amueller as the problem may be more sever than expected, I suggest re-adding the blocker label...\nThanks for this very simple example.\r\n\r\nThe reason it is implemented this way is because it's way faster. See below:\r\n```python\r\nx = np.random.random_sample((1000, 1000))\r\n\r\n%timeit euclidean_distances(x,x)\r\n20.6 ms \u00b1 452 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\n%timeit cdist(x,x)\r\n695 ms \u00b1 4.06 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n```\r\n\r\nAlthough the number of operations is of the same order in both methods (1.5x more in the second one), the speedup comes from the possibility to use well optimized BLAS libraries for matrix matrix multiplication.\r\n\r\nThis would be a huge slowdown for several estimators in scikit-learn.\nYes, but **just 3-4 digits of precision** with FP32, and 7-8 digits with FP64 *does* cause substantial imprecision, doesn't it? In particular, since such errors tend to amplify...\nWell I'm not saying that it's fine right now. :)\r\nI'm saying that we need to find a solution in between.\r\nThere is a PR (#11271) which proposes to cast on float64 to do the computations. In does not fix the problem for float64 but gives better precision for float32.\r\n\r\nDo you have an example where using an estimator which uses euclidean_distances gives wrong results due to the loss of precision ?\nI certainly still think this is a big deal and should be a blocker for 0.21. It was an issue introduced for 32 bit in 0.19, and it's not a nice state of affairs to leave. I wish we had resolved it earlier in 0.20, and I would be okay, or even keen, to see #11271 merged in the interim. The only issues in that PR that I know of surround optimisation of memory efficiency, which is a deep rabbit hole.\r\n\r\nWe've had this \"fast\" version for a long time, but always in float64. I know, @kno10, that it's got issues with precision. Do you have a good and fast heuristic for us to work out when that might be a problem and use a slower-but-surer solution?\n> Yes, but just 3-4 digits of precision with FP32, and 7-8 digits with FP64 does cause substantial imprecision, doesn't it\r\n\r\nThanks for illustrating this issue with very simple example!\r\n\r\nI don't think the issue is as widespread as you suggest, however -- it mostly affects samples whose mutual distance small with respect to their norms.\r\n\r\nThe below figure illustrates this, for 2e6 random sample pairs, where each 1D samples is in the interval [-100, 100]. The relative error between the scikit-learn and scipy implementation is plotted as a function of the distance between samples, normalized by their L2 norms, i.e.,\r\n```\r\nd_norm(A, B) = d(A, B) / sqrt(\u2016A\u2016\u2082*\u2016B\u2016\u2082)\r\n```\r\n(not sure it's the right parametrization, but just to get results somewhat invariant to the data scale),\r\n![euclidean_distance_precision_1d](https://user-images.githubusercontent.com/630936/45919546-41ea1880-be97-11e8-9707-9279dfac4f5b.png)\r\n\r\n\r\nFor instance, \r\n  1. if one takes `[10000]` and `[10001]` the L2 normalized distance is 1e-4 and the relative error on the distance calculation will be 1e-8 in 64 bit, and >1 in 32 bit (Or 1e-8 and >1 in absolute value respectively). In 32 bit this case is indeed quite terrible.\r\n  2. on the other hand for `[1]` and `[10001]`, the relative error will be ~1e-7 in 32 bit, or the maximum possible precision. \r\n\r\nThe question is how often the case 1. will happen in practice in ML applications. \r\n\r\nInterestingly, if we go to 2D, again with a uniform random distribution, it will be difficult to find points that are very close,\r\n![euclidean_distance_precision_2d](https://user-images.githubusercontent.com/630936/45919664-37308300-be99-11e8-8a01-5f936524aea5.png)\r\n\r\nOf course, in reality our data will not be uniformly sampled, but for any distribution because of the curse of dimensionality the distance between any two points will slowly converge to very similar values (different from 0) as the dimentionality increases. While it's a general ML issue, here it may mitigate somewhat this accuracy problem, even for relatively low dimensionality. Below the results for `n_features=5`,\r\n![euclidean_distance_precision_5d](https://user-images.githubusercontent.com/630936/45919716-3fd58900-be9a-11e8-9a5f-17c1a7c60102.png).\r\n\r\nSo for centered data, at least in 64 bit, it may not be so much of an issue in practice (assuming there are more then 2 features). The 50x computational speed-up (as illustrated above) may be worth it (in 64 bit). Of course one can always add 1e6 to some data normalized in [-1, 1] and say that the results are not accurate, but I would argue that the same applies to a number of numerical algorithms, and working with data expressed in the 6th significant digit is just looking for trouble.\r\n\r\n(The code for the above figures can be found [here](https://github.com/rth/ipynb/blob/master/sklearn/euclidean_distance_accuracy.ipynb)).\r\n\nAny fast approach using the dot(x,x)+dot(y,y)-2*dot(x,y) version will likely have the same issue for all I can tell, but you'd better ask some real expert on numerics for this. I believe you'll need to double the precision of the dot products to get to approx. the precision of the *input* data (and I'd assume that if a user provides float32 data, then they'll want float32 precision, with float64, they'll want float64 precision). You may be able to do this with some tricks (think of Kahan summation), but it will very likely cost you much more than you gained in the first place.\r\n\r\nI can't tell how much overhead you get from converting float32 to float64 on the fly for using this approach. At least for float32, to my understanding, doing all the computations and storing the dot products as float64 should be fine.\r\n\r\nIMHO, the performance gains (which are not exponential, just a constant factor) are not worth the loss in precision (which can bite you unexpectedly) and the proper way is to not use this problematic trick. It may, however, be well possible to further optimize code doing the \"traditional\" computation, for example to use AVX. Because sum( (x-y)**2 ) is all but difficult to implement in AVX.\r\nAt the minimum, I would suggest renaming the method to `approximate_euclidean_distances`, because of the sometimes low precision (which gets worse the closer two values are, which *may* be fine initially then begin to matter when converging to some optimum), so that users are aware of this issue.\n@rth thanks for the illustrations. But what if you are trying to optimize, e.g., x towards some optimum. Most likely the optimum will not be at zero (if it would always be your data center, life would be great), and eventually the deltas you are computing for gradients etc. may have some very small differences.\r\nSimilarly, in clustering, clusters will not all have their centers close to zero, but in particular with many clusters, x \u2248 center with a few digits is quite possible.\nOverall however, I agree this issue needs fixing. In any case we need to document the precision issues of the current implementation as soon as possible.\r\n\r\nIn general though I don't think the this discussion should happen in scikit-learn. Euclidean distance is used in various fields of scientific computing and IMO scipy mailing list or issues is a better place to discuss it: that community has also more experience with such numerical precision issues. In fact what we have here is a fast but somewhat approximate algorithm. We may have to implement some fixes workarounds in the short term, but in the long term it would be good to know that this will be contributed there.\r\n\r\nFor 32 bit, https://github.com/scikit-learn/scikit-learn/pull/11271 may indeed be a solution, I'm just not so keen of multiple levels of chunking all through the library as that increases code complexity, and want to make sure there is no better way around it.\nThanks for your response @kno10! (My above comments doesn't take it into account yet) I'll respond a bit later.\nYes, convergence to some point outside of the origin may be an issue.\r\n\r\n> IMHO, the performance gains (which are not exponential, just a constant factor) are not worth the loss in precision (which can bite you unexpectedly) and the proper way is to not use this problematic trick.\r\n\r\nWell a >10x slow down for their calculation in 64 bit will have a very real effect on users.\r\n\r\n> It may, however, be well possible to further optimize code doing the \"traditional\" computation, for example to use AVX. Because sum( (x-y)**2 ) is all but difficult to implement in AVX.\r\n\r\nTried a quick naive implementation with numba (which should use SSE),\r\n```py\r\n@numba.jit(nopython=True, fastmath=True)              \r\ndef pairwise_distance_naive(A, B):\r\n    n_samples_a, n_features_a = A.shape\r\n    n_samples_b, n_features_b = B.shape\r\n    assert n_features_a == n_features_b\r\n    distance = np.empty((n_samples_a, n_samples_b), dtype=A.dtype)\r\n    for i in range(n_samples_a):\r\n        for j in range(n_samples_b):\r\n            psum = 0.0\r\n            for k in range(n_features_a):\r\n                psum += (A[i, k] - B[j, k])**2\r\n            distance[i, j] = math.sqrt(psum)\r\n    return distance\r\n```\r\ngetting a similar speed to scipy `cdist` so far (but I'm not a numba expert), and also not sure about the effect of `fastmath`.\r\n\r\n>  using the dot(x,x)+dot(y,y)-2*dot(x,y) version\r\n\r\nJust for future reference, what we are currently doing is roughly the following (because there is a dimension that doesn't show in the above notation),\r\n```py\r\ndef quadratic_pairwise_distance(A, B):\r\n    A2 = np.einsum('ij,ij->i', A, A)\r\n    B2 = np.einsum('ij,ij->i', B, B)\r\n    return np.sqrt(A2[:, None] + B2[None, :] - 2*np.dot(A, B.T))\r\n```\r\nwhere both `einsum` and `dot` now use BLAS. I wonder, if aside from using BLAS, this also actually does the same number of mathematical operations as the first version above. \n>  I wonder, if aside from using BLAS, this also actually does the same number of mathematical operations as the first version above.\r\n\r\nNo. The ((x - y)**2.sum()) performs\r\n*n_samples_x * n_samples_y * n_features * (1 substraction + 1 addition + 1 multiplication)*\r\n whereas the x.x + y.y -2x.y performs \r\n*n_samples_x * n_samples_y * n_features * (1 addition + 1 multiplication)*.\r\nThere is a 2/3 ratio for the number of operations between the 2 versions.\nFollowing the above discussion,\r\n - Made a PR to optionally allow computing euclidean distances exactly https://github.com/scikit-learn/scikit-learn/pull/12136\r\n - Some WIP to see if we can detect and mitigate the problematic points in https://github.com/scikit-learn/scikit-learn/pull/12142\r\n\r\nFor 32 bit, we still need to merge https://github.com/scikit-learn/scikit-learn/pull/11271 in some form though IMO, the above PRs are somewhat orthogonal to it.\nFYI: when fixing some issues in OPTICS, and refreshing the test to use reference results from ELKI, these fail with `metric=\"euclidean\"` but succeed with `metric=\"minkowski\"`. The numerical differences are large enough to cause a different processing order (just decreasing the threshold is not enough).\r\n\r\nhttps://github.com/kno10/scikit-learn/blob/ab544709a392e4dc7b22e9fd60c4755baf3d3053/sklearn/cluster/tests/test_optics.py#L588\nI'm really not caught up on this, but I'm surprised there's no existing solution. This seems to be a very common computation and it looks like we're reinventing the wheel. Has anyone tried reaching out to the wider scientific computing community?\nNot yet, but I agree we should. The only thing I found about this in scipy was https://github.com/scipy/scipy/pull/2815 and linked issues.\nI feel @jeremiedbb might have an idea?\nUnfortunately not a satisfying one yet :(\r\n\r\nWe'd like to rely on a highly optimized library for this kind of computation, as we do for linear algebra with BLAS libraries such as OpenBLAS or MKL. But euclidean distance is not part of it. The dot trick is an attempt at doing that relying on BLAS level 3 matrix-matrix multiplication subroutine. But this is not precise and there is no way to make it more precise using the same method. We have to lower our expectancy either in term of speed or in term of precision.\r\n\r\nI think in some situations, full precision is not mandatory and keeping the fast method is fine. This is when the distances are used for \"find the closest\" tasks. The precision issues in the fast method appear when the distances between points is small compared to their norm (in a ratio ~< 1e-4 for float 32 and ~< 1e-8 for float64). First for this situation to happen, the dataset needs to be quite dense. Then to have an ordering error, you need to have the two closest points within almost the same distance. Moreover, in that case, in a ML point of view, both would lead to almost equally good fits.\r\n\r\nIn the above situation, there is something we can do to lower the frequency of these wrong ordering (down to 0 ?). In the pairwise distance argmin situation. We can move the misordering to points which are not the closest. Essentially using the fact that one of the norm is not necessary to find the argmin, see [comment](https://github.com/scikit-learn/scikit-learn/pull/11950#issuecomment-429916562). It has 2 advantages. It's a more robust (up to now I haven't found a wrong ordering yet) and it is even faster because it avoids some computations.\r\n\r\nOne drawback, still in the same situation, if at the end we want the actual distances to the closest points, the distances computed with the above method can't be used. They are only partially computed and they are not precise anyway. We need to re-compute the distances from each point to it's closest point. But this is fast because for each point there is only one distance to compute.\r\n\r\nI wonder what I described above covers all the use case of euclidean_distances in sklearn. But I suggest to do that wherever it can be applied. To do that we can add a new parameter to euclidean_distances to only compute the necessary part in order to chain it with argmin. Then use it in pairwise_distances_argmin and in pairwise_distances_argmin_min (re computing the actual min distances at the end in the latter).\r\n\r\nWhen we can't do that, fall back to the slow yet precise one, or add a switch like in #12136.\r\nWe can try to optimize it a bit to lower the performance drop cause I agree that [this](https://github.com/scikit-learn/scikit-learn/pull/12136#issuecomment-439097748) does not seem optimal. I have a few ideas for that.\r\n\r\nAnother possibility to keep using BLAS is combining `axpy` with `nrm2` but this is far from optimal. Both are BLAS level 1 functions, and it involves a copy. This would only be faster in dimension > 100.\r\nIdeally we'd like the euclidean distance to be included in BLAS...\r\n\r\nFinally, there is another solution, consisting in upcasting. This is done in #11271 for float32. The advantage is that the speed is just half the current one and precision is kept. It does not solve the problem for float64 however. Maybe we can find a way to do a similar thing in cython for float64. I don't know exactly how but using 2 float64 numbers to kind of simulate a float128. I can give it a try to see if it's somewhat doable.\n> Ideally we'd like the euclidean distance to be included in BLAS...\r\n\r\nIs that something the libraries would consider? If OpenBLAS does it we would be in a pretty good situation already...\r\n\r\nAlso, what's the exact differences between us doing it and the BLAS doing it? Detecting the CPU capabilities and deciding which implementation to use, or something like that? Or just having compiled versions for more diverse architectures?\r\nOr just more time/energy spend writing efficient implementations?\nThis is interesting: an alternative implementation of the fast unstable method but claiming to be much faster than sklearn:\r\nhttps://github.com/droyed/eucl_dist\r\n(doesn't solve this issue at all though lol)\nThis discussion seems related https://github.com/scipy/scipy/issues/5657\nHere's what julia does: https://github.com/JuliaStats/Distances.jl/blob/master/README.md#precision-for-euclidean-and-sqeuclidean\r\nIt allows setting a precision threshold to force recalculation.\nAnswering my own question: OpenBLAS has what looks like hand-written assembly for each processor (not architecture!) and heutistics to choose kernels for different problem sizes. So I don't think it's an issue of getting it into openblas as much as finding someone to write/optimize all those kernels...\nThanks for the additional thoughts!\r\n\r\nIn a partial response,\r\n\r\n> We'd like to rely on a highly optimized library for this kind of computation, as we do for linear algebra with BLAS libraries such as OpenBLAS or MKL.\r\n\r\nYeah, I also was hoping we could do more of this in BLAS. Last time I looked nothing in standard BLAS API looks close enough (but then I'm not an expert on those). [BLIS](https://github.com/flame/blis) might offer more flexibility but since we are not using it by default it's of somewhat limited use (though numpy might someday https://github.com/numpy/numpy/issues/7372) \r\n\r\n> Here's what julia does: It allows setting a precision threshold to force recalculation.\r\n\r\nGreat to know!\r\n\r\n\nShould we open a separate issue for the faster approximate computation linked above? Seems interesting\nTheir speedup on CPU of x2-x4 might be due to https://github.com/scikit-learn/scikit-learn/pull/10212 .\r\n\r\nI would rather open an issue on scipy once we have studied this question enough to come up with a reasonable solution there (and then possibly backport it) as I feel euclidean distance is something basic enough that should be of interest to many people outside of ML (and at the same time having the opinion of people there e.g. on accuracy issues would be helfpul).\nIt's up to 60x, right?\n> This is interesting: an alternative implementation of the fast unstable method but claiming to be much faster than sklearn\r\n\r\nhum not sure about that. They are benchmarking `%timeit pairwise_distances(a,b, 'sqeuclidean')`, which uses scipy's one. They should do `%timeit pairwise_distances(a,b, 'euclidean', metric_params={'squared': True})` and their speedup wouldn't be as good :)\r\nAs shown far earlier in the discussion, sklearn can be 35x faster than scipy\nYes, they benchmarks are only ~30% better better with `metric=\"euclidean\"` (instead of `squeclidean`),\r\n\r\n```py\r\nIn [1]: from eucl_dist.cpu_dist import dist                                                                                                                  \r\n    ... import numpy as np                                                                                                                                   \r\nIn [4]: rng = np.random.RandomState(1)                                                                                                                        \r\n    ... a = rng.rand(1000, 300)                                                                                                                              \r\n    ...b = rng.rand(1000, 300)                                                                                                                              \r\n\r\nIn [7]: from sklearn.metrics.pairwise import pairwise_distances                                                                                              \r\nIn [8]: %timeit pairwise_distances(a, b, 'sqeuclidean')                                                                                                      \r\n214 ms \u00b1 2.06 ms per loop (mean \u00b1 std. dev. of 7 runs, 1 loop each)\r\n\r\nIn [9]: %timeit pairwise_distances(a, b)                                                                                                                     \r\n27.4 ms \u00b1 2.48 ms per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\nIn [10]: from eucl_dist.cpu_dist import dist                                                                                                                 \r\nIn [11]: %timeit dist(a, b, matmul='gemm', method='ext', precision='float32')                                                                                \r\n20.8 ms \u00b1 330 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n\r\nIn [12]: %timeit dist(a, b, matmul='gemm', method='ext', precision='float64')                                                                                \r\n20.4 ms \u00b1 222 \u00b5s per loop (mean \u00b1 std. dev. of 7 runs, 10 loops each)\r\n```\n> Is that something the libraries would consider? If OpenBLAS does it we would be in a pretty good situation already...\r\n\r\nDoesn't sound straightforward. BLAS is a set of specs for linear algebra routines and there are several implementations of it. I don't know how open they are to adding new features not in the original specs. For that maybe blis would be more open but as said before, it's not the default for now.\nOpened https://github.com/scikit-learn/scikit-learn/issues/12600 on the `sqeuclidean` vs `euclidean` handling in `pairwise_distances`.\nI need some clarity about what we want for this. Do we want `pairwise_distances` to be close - in the sense of `all_close` - for both 'euclidean' and 'sqeuclidean' ?\r\n\r\nIt's a bit tricky. Because x is close to y does not mean x\u00b2 is close to y\u00b2. Precision is lost during squaring.\r\n\r\nThe julia workaround linked above is very interesting and is kind of straightforward to implement. However I suspect that it does not work as expected for 'sqeuclidean'. I suspect that you have to set the threshold way below to get the desired precision.\r\n\r\nThe issue with setting a very low threshold is that it induces a lot of re-computations and a huge drop of performances. However this is mitigated by the dimension of the dataset. The same threshold will trigger way less re-computations in high dimension (distances are bigger). \r\n\r\nMaybe we can have 2 implementations and switch depending on the dimension of the dataset. The slow but safe one for low dimensional ones (there not much difference between scipy and sklearn in that case anyway) and the fast + threshold one for high dimensional ones.\r\n\r\nThis will need some benchmarks to find when to switch, and set the threshold but this may be a glimmer of hope :)\nHere are some benchmarks for speed comparison between scipy and sklearn. The benchmarks compare `sklearn.metrics.pairwise.euclidean_distances(X,X)` with `scipy.spatial.distance.cdist(X,X)` for Xs of all sizes. Number of samples goes from 2\u2074 (16) to 2\u00b9\u00b3 (8192), and number of features goes from 2\u2070 (1) to 2\u00b9\u00b3 (8192).\r\n\r\nThe value in each cell is the speedup of sklearn vs scipy, i.e. below 1 sklearn is slower and above 1 sklearn is faster.\r\n\r\nThe first benchmark is using the MKL implementation of BLAS and a single core.\r\n![bench_euclidean_mkl_1](https://user-images.githubusercontent.com/34657725/48772816-c6092280-ecc5-11e8-94fe-68a7a5cdf304.png)\r\n\r\nThe second one is using the OpenBLAS implementation of BLAS and a single core. It's just to check that both MKL and OpenBLAS have the same behavior.\r\n![bench_euclidean_openblas_1](https://user-images.githubusercontent.com/34657725/48772823-cacdd680-ecc5-11e8-95f7-0f9ca8baca9e.png)\r\n\r\nThe third one is using the MKL implementation of BLAS and 4 cores. The thing is that `euclidean_distances` is parallelized through a BLAS LEVEL 3 function but `cdist` only uses a BLAS LEVEL 1 function. Interestingly it almost doesn't change the frontier.\r\n![bench_euclidean_mkl_4](https://user-images.githubusercontent.com/34657725/48774974-f18f0b80-eccb-11e8-925f-2a332891d957.png)\r\n\r\n\r\nWhen n_samples is not too low (>100), it seems that the frontier is around 32 features. We could decide to use cdist when n_features < 32 and euclidean_distances when n_features > 32. This is faster and there no precision issue. This also has the advantage that when n_features is small, the julia threshold leads to a lot of re-computations. Using cdist avoids that.\r\n\r\nWhen n_features > 32, we can keep the `euclidean_distances` implementation, updated with the julia threshold. Adding the threshold shouldn't slow `euclidean_distances` too much because the number of features is high enough so that only a few re-computations are necessary.\r\n\r\n\r\n\n@jeremiedbb great, thank you for the analysis. The conclusion sounds like a great way forward to me.\nOh, I assume this was all for float64, right? What do we do with float32? upcast always? upcast for >32 features?\nI've not read through the comments carefully (will soon), just FYI that float64 has it limitations, see #12128\n@qinhanmin2014 yes, float64 precision has limitations, but it is precise enough for producing reliable fp32 results for all I can tell. The question is at which parameters an upcast to fp64 is actually cheaper than using cdist from scipy.\r\nAs seen in above benchmarks, even multi-core BLAS is *not* generally faster. This seems to mostly hold for high dimensional data (over 64 dimensions; before that the benefit is usually not worth the effort IMHO) - and since Euclidean distances are not that reliable in dense high dimensional data, that use case IMHO is not of highest importance. Many users will have less than 10 dimensions. In these cases, cdist seems to usually be faster?\n> Oh, I assume this was all for float64, right?\r\n\r\nActually it's for both float32 and float64 (I mean very similar). I suggest to always use cdist when n_features < 32.\r\n\r\n> The question is at which parameters an upcast to fp64 is actually cheaper than using cdist from scipy.\r\n\r\nUpcasting will slowdown by a factor of ~2 so I guess around n_features=64.\r\n\r\n> Many users will have less than 10 dimensions. \r\n\r\nBut not everyone, so we still need to find a solution for high dimensional data.\r\n\nVery nice analysis @jeremiedbb !\r\n\r\nFor low dimensional data it would definitely make sense to use cdist then.\r\n\r\nAlso, FYI scipy's cdist upcasts float32 to float64 https://github.com/scipy/scipy/issues/8771#issuecomment-384015674, I'm not sure if this is due to accuracy issues or something else. \r\n\r\nOverall, I think it could make sense to add the \"algorithm\" parameter to `euclidean_distance` as suggested in https://github.com/scikit-learn/scikit-learn/pull/12601#pullrequestreview-176076355, possibly with a default to \"None\" so that it could also be set via a  global option as in https://github.com/scikit-learn/scikit-learn/pull/12136.\nThere's also an interesting approach in Eigen3 to compute stable norms: https://eigen.tuxfamily.org/dox/StableNorm_8h_source.html (that I haven't really grokked yet)\nGood Explanation, Improved my understanding\nWe haven't made any progress on this at the sprint and we probably should... and @rth is not around today.\nI can join remotely if you set a time. Maybe in the beginning of afternoon?\r\n\r\nTo summarize the situation,\r\n\r\nFor precision issues in Euclidean distance calculations,\r\n - in the low dimensional case, as @jeremiedbb showed above, we should probably use cdist\r\n - in the high dimensional case and float32, we could choose between,\r\n    - chunking, computing the distance in 64 bit and concatenating\r\n    - falling back to cdist in cases when precision is an issue (how is an open question -- reaching out e.g. to scipy might be useful https://github.com/scikit-learn/scikit-learn/issues/9354#issuecomment-438522881 )\r\n\r\nThen there are all the issues of inconsistencies between euclidean, sqeuclidean, minkowski, etc.\nIn terms of the precisions, @jeremiedbb, @amueller and I had a quick chat, mostly just milking Jeremie for his expertise. He is of the opinion that we don't need to worry so much about the instability issues in an ML context in high dimensions in float64. Jeremie also implied that it is hard to find an efficient test for whether good results have been returned (cf. #12142)\r\n\r\nSo I think we're happy with @rth's [preceding comment](https://github.com/scikit-learn/scikit-learn/issues/9354#issuecomment-468173901) with the upcasting for float32. Since cdist also upcasts to float64, we could reimplement cdist to take float32 (but with float64 accumulators?), or could use chunking, if we want less copying in low-dim float32.\r\n\r\nDoes @Celelibi want to change the PR in #11271, or should someone else (one of us?) produce a complete pull request?\r\n\r\nAnd once this has been fixed, I think we should make sqeuclidean and minkowski(p in {0,1}) use our implementations. We've not discussed discrepancy with NearestNeighbors. Another sprint :)\nAfter a quick discussion at the sprint we ended up on the following way:\r\n\r\n- in high dimensional case (> 32 or > 64 choose the best): upcast by chunks to float64 when it's float32 and keep the 'fast' method. For this kind of data, numerical issues, on float64, are almost negligible (I'll provide benchmarks for that)\r\n\r\n- in low dimensional case: implement the safe computation (instead of using scipy cdist because of the upcast) in sklearn.\r\n\n(It's tempting to throw upcasting float32 into 0.20.3 also)\nPing when you feel it's ready for review!\u200b\n\nThanks\n\n@jnothman, Now that all tests pass, I think it's ready for review.\n> This is certainly very precise, but perhaps not so elegant! I think it looks pretty good, but I'll have to look again later.\r\n\r\nThis is indeed not my proudest code. I'm open to any suggestion to refactor the code in addition to the small fix you suggested.\r\n\r\nBTW, shall I make a new pull request with the changes in a new branch?\r\nMay I modify my branch and force push it?\r\nOr maybe just add new commits to the current branch?\r\n\r\n> Could you report some benchmarks here please?\r\n\r\nHere you go.\r\n\r\n### Optimal memory size\r\nHere are the plots I used to choose the amount of 10MB of temporary memory. It measures the computation time with some various number of samples and features. Distinct X and Y are passed, no squared norm.\r\n![multiplot_memsize](https://user-images.githubusercontent.com/6136274/41529630-0f92c430-72ee-11e8-9dad-c4c3f30498fa.png)\r\nFor 100 features, the optimal memory size seems to be about 5MB, but the computation time is quite short. While for 1000 features, it seems to be more between 10MB and 30MB. I thought about computing the optimal amount of memory from the shape of X and Y. But I'm not sure it's worth the added complexity.\r\n\r\nHm. after further investigation, it looks like optimal memory size is the one that produce a block size around 2048. So... maybe I could just add `bs = min(bs, 2048)` so that we get both a maximum of 10MB and a fast block size for small number of features?\r\n\r\n### Norm squared precomputing\r\nHere are some plots to see whether it's worth precomputing the norm squared of X and Y. The 3 plots on the left have a fixed number of samples (shown above the plots) and vary the number of features. The 3 plots on the right have a fixed number of features and vary the number of samples.\r\n![multiplot_precompute_full](https://user-images.githubusercontent.com/6136274/41533633-c7a3da66-72fb-11e8-8d7f-159f87d3e4a9.png)\r\nThe reason why varying the number of features produce so much variations in the performance might be because it makes the block size vary too.\r\n\r\nLet's zoom on the right part of the plots to see whether it's worth precomputing the squared norm.\r\n\r\n![multiplot_precompute_zoom](https://user-images.githubusercontent.com/6136274/41533980-0b2499c8-72fd-11e8-9c63-e12ede299753.png)\r\nFor a small number of features and samples, it doesn't really matter. But if the number of samples or features is large, precomputing the squared norm of X does have a noticeable impact on the performance. On the other hand, precomputing the squared norm of Y doesn't change anything. It would indeed be computed anyway by the code for float64.\r\n\r\nHowever, a possible improvement not implemented here could be to use some of the allowed additional memory to precompute and cache the norm squared of Y for some blocks (if not all). So that they could be reused during the next iteration over the blocks of X.\r\n\r\n### Casting the given norm squared\r\nWhen both `X_norm_squared` and `Y_norm_squared` are given, is it worth casting them to float64?\r\n![multiplot_cast_zoom](https://user-images.githubusercontent.com/6136274/41535401-75be86f4-7302-11e8-8ce0-9457d0d6980e.png)\r\nIt seems pretty clear that it's always worth casting the squared norms when they are given. At least when the numbrer of samples is large enough. Otherwise it doesn't matter.\r\n\r\nHowever, I'm not exactly sure why casting `Y_norm_squared` makes such a difference. It looks like the broadcasting+casting in `distances += YY` is suboptimal.\r\n\r\nAs before, a possible improvement not implemented could be to cache the casted blocks of the squared norm of `Y_norm_squared` so that they could be reused during the next iteration over the blocks of X.\r\n\r\n### Swapping X and Y\r\nIs it worth swapping X and Y when only `X_norm_squared` is given?\r\nLet's plot the time taken when either `X_norm_squared` or `Y_norm_squared` is given and casted to float64, while the other is precomputed.\r\n![multiplot_swap_zoom](https://user-images.githubusercontent.com/6136274/41536751-c4910104-7306-11e8-9c56-793e2f41a648.png)\r\nI think it's pretty clear for a large number of features or samples that X and Y should be swapped when only `X_norm_squared` is given.\r\n\r\nIs there any other benchmark you would want to see?\r\n\r\nOverall, the gain provided by these optimizations is small, but real and consistent. It's up to you to decide whether it's worth the complexity of the code. ^^\n> BTW, shall I make a new pull request with the changes in a new branch?\r\n> May I modify my branch and force push it?\r\n> Or maybe just add new commits to the current branch?\r\n\r\nI had to rebase my branch and force push it anyway for the auto-merge to succeed and the tests to pass.\r\n\r\n@jnothman wanna have a look at the benchmarks and discuss the mergability of those commits?\nyes, this got forgotten, I'll admit.\n\nbut I may not find time over the next week. ping if necessary\n\n@rth, you may be interested in this PR, btw.\n\nIMO, we broke euclidean distances for float32 in 0.19 (thinking that\navoiding the upcast was a good idea), and should prioritise fixing it.\n\nVery nice benchmarks and PR @Celelibi !\r\n\r\nIt would be useful to also test the net effect of this PR  on performance e.g. of KMeans / Birch as suggested in https://github.com/scikit-learn/scikit-learn/pull/10069#issuecomment-342347548 \r\n\r\nI'm not yet  sure how this would interact with `pairwise_distances_chunked(.., metric=\"euclidean\")` -- I'm wondering if could be possible to reuse some of that work, or at least make sure we don't chunk twice in this case. In any case it might make sense to use `with sklearn.config_context(working_memory=128):` context manager to defined the amount of memory per block.\n> I'm not yet sure how this would interact with pairwise_distances_chunked(.., metric=\"euclidean\")\r\n\r\nI didn't forsee this. Well, they might chunk twice, which may have a bad impact on performance.\r\n\r\n> I'm wondering if could be possible to reuse some of that work, or at least make sure we don't chunk twice in this case.\r\n\r\nIt wouldn't be easy to have the chunking done at only one place in the code. I mean the current code always use `Y` as a whole. Which means it should be casted entirely. Even if we fixed it to chunk both `X` and `Y`, the chunking code of `pairwise_distances_chunked` isn't really meant to be intermixed with some kind of preprocessing (nor should it IMO).\r\n\r\nThe best solution I could see right now would be to have some specialized chunked implementations for some metrics. Kind of the same way `pairwise_distance` only rely on `scipy.distance.{p,c}dist` when there isn't a better implementation.\r\nWhat do you think about it?\r\n\r\nBTW `pairwise_distances` might currently use `scipy.spatial.{c,p}dist`, which (in addition to being slow) handle float32 by casting first and returning a float64 result. This might be a problem with `sqeuclidean` metric which then behave differently from `euclidean` in that regard in addition to being a problem with the general support of float32.\r\n\r\n> In any case it might make sense to use `with sklearn.config_context(working_memory=128):` context manager to defined the amount of memory per block.\r\n\r\nInteresting, I didn't know about that. However, it looks like `utils.get_chunk_n_rows` is the only function to ever use that setting. Unfortunately I can't use that function since I have to _at least_ take into account the casted copy of `X` and the result chunk. But I could still use the amount of working memory that is set instead of a magic value.\r\n\r\n> It would be useful to also test the net effect of this PR on performance e.g. of KMeans / Birch as suggested in #10069 (comment)\r\n\r\nThat comment was about deprecating `{X,Y}_norm_squared` and its impact on performance on the algorithms using it. But ok, why not. I haven't made a benchmark comparing the older code.\nI think given that we seem to see that this operation works well with 10MB\nworking mem and the default working memory is 1GB, we should consider this\na negligible addition, and not use the working_memory business with it.\u200b\n\nI also think it's important to focus upon this as a bug fix, rather than\nsomething that needs to be perfected in one shot.\n\n@Celelibi Thanks for the detailed response!\r\n\r\n> I think given that we seem to see that this operation works well with 10MB\r\nworking mem and the default working memory is 1GB we should consider this\r\na negligible addition, and not use the working_memory business with it.\u200b\r\n\r\n\r\n@jeremiedbb, @ogrisel mentioned that you run some benchmarks demonstrating that using a smaller working memory had higher performance on your system. Would you be able to share those results (the original benchmarks are in https://github.com/scikit-learn/scikit-learn/pull/10280#issuecomment-356419843)? Maybe in a separate issue. Thanks!\nfrom my understanding this will take some more work. untagging 0.20.\nYes, it's pretty bad. Integrated these tests into https://github.com/scikit-learn/scikit-learn/pull/12142\r\n\r\nAlso (for other readers) most of the discussion about this is happening in https://github.com/scikit-learn/scikit-learn/issues/9354",
+  "created_at": "2019-04-01T14:41:03Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[dense-dense-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[dense-sparse-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[sparse-dense-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[sparse-sparse-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_extreme_values[1-float32-0.0001-1e-05]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_extreme_values[1000000-float32-0.0001-1e-05]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_sym[dense-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_sym[sparse-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_with_norms[dense-float32]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_with_norms[sparse-float32]\"]",
+  "PASS_TO_PASS": "[\"sklearn/metrics/tests/test_pairwise.py::test_check_XB_returned\", \"sklearn/metrics/tests/test_pairwise.py::test_check_dense_matrices\", \"sklearn/metrics/tests/test_pairwise.py::test_check_different_dimensions\", \"sklearn/metrics/tests/test_pairwise.py::test_check_invalid_dimensions\", \"sklearn/metrics/tests/test_pairwise.py::test_check_preserve_type\", \"sklearn/metrics/tests/test_pairwise.py::test_check_sparse_arrays\", \"sklearn/metrics/tests/test_pairwise.py::test_check_tuple_input\", \"sklearn/metrics/tests/test_pairwise.py::test_chi_square_kernel\", \"sklearn/metrics/tests/test_pairwise.py::test_cosine_distances\", \"sklearn/metrics/tests/test_pairwise.py::test_cosine_similarity\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[dense-dense-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[dense-sparse-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[sparse-dense-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances[sparse-sparse-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_known_result[dense-dense]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_known_result[dense-sparse]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_known_result[sparse-dense]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_known_result[sparse-sparse]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_sym[dense-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_sym[sparse-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_with_norms[dense-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_euclidean_distances_with_norms[sparse-float64]\", \"sklearn/metrics/tests/test_pairwise.py::test_haversine_distances\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[cosine_similarity]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[laplacian_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[linear_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[polynomial_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[rbf_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_sparse[sigmoid_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[cosine_similarity]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[laplacian_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[linear_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[polynomial_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[rbf_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_kernel_symmetry[sigmoid_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_laplacian_kernel\", \"sklearn/metrics/tests/test_pairwise.py::test_linear_kernel\", \"sklearn/metrics/tests/test_pairwise.py::test_no_data_conversion_warning\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[cityblock-paired_manhattan_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[cosine-paired_cosine_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[euclidean-paired_euclidean_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[l1-paired_manhattan_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[l2-paired_euclidean_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances[manhattan-paired_manhattan_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_distances_callable\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_euclidean_distances\", \"sklearn/metrics/tests/test_pairwise.py::test_paired_manhattan_distances\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[dice]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[jaccard]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[kulsinski]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[matching]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[rogerstanimoto]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[russellrao]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[sokalmichener]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[sokalsneath]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_boolean_distance[yule]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_callable_nonstrict_metric\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_argmin_min\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_diagonal[euclidean]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_diagonal[l2]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_diagonal[sqeuclidean]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_invalid[<lambda>-TypeError-,\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_invalid[<lambda>-TypeError-returned\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_invalid[<lambda>-ValueError-length\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_valid[<lambda>0]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_valid[<lambda>1]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_valid[<lambda>2]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_valid[<lambda>3]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_chunked_reduce_valid[<lambda>4]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_distances_data_derived_params[Y\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[additive_chi2]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[chi2]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[laplacian]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[linear]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[polynomial]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[rbf]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels[sigmoid]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels_callable\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_kernels_filter_param\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_parallel[pairwise_distances-euclidean-kwds0]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_parallel[pairwise_distances-wminkowski-kwds1]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_parallel[pairwise_distances-wminkowski-kwds2]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_parallel[pairwise_kernels-callable_rbf_kernel-kwds4]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_parallel[pairwise_kernels-polynomial-kwds3]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_precomputed[pairwise_distances]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_precomputed[pairwise_kernels]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_precomputed_non_negative\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_similarity_sparse_output[cosine-cosine_similarity]\", \"sklearn/metrics/tests/test_pairwise.py::test_pairwise_similarity_sparse_output[linear-linear_kernel]\", \"sklearn/metrics/tests/test_pairwise.py::test_rbf_kernel\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/metrics/pairwise.py"
+  ],
+  "test_patch_files": [
+    "sklearn/metrics/tests/test_pairwise.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/metrics/pairwise.py": {
+      "diffs": [
+        {
+          "start_line_old": 196,
+          "end_line_old": 196,
+          "file_pos": 1,
+          "file_context_length": 13865,
+          "pos": 1,
+          "context_length": 849
+        },
+        {
+          "start_line_old": 203,
+          "end_line_old": 203,
+          "file_pos": 1,
+          "file_context_length": 13865,
+          "pos": 1,
+          "context_length": 849
+        },
+        {
+          "start_line_old": 227,
+          "end_line_old": 227,
+          "file_pos": 1,
+          "file_context_length": 13865,
+          "pos": 1,
+          "context_length": 849
+        },
+        {
+          "start_line_old": 234,
+          "end_line_old": 234,
+          "file_pos": 1,
+          "file_context_length": 13865,
+          "pos": 1,
+          "context_length": 849
+        },
+        {
+          "start_line_old": 245,
+          "end_line_old": 254,
+          "file_pos": 1,
+          "file_context_length": 13865,
+          "pos": 1,
+          "context_length": 849
+        }
+      ]
+    }
+  },
+  "vectors": 2925,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_33_euclidean_distances.11.1",
+      "distance": 0.8030392527580261,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 164,
+      "end_line": 259,
+      "tokens": 849,
+      "context_length": 849,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_distances_chunked_pairwise_distances_chunked.1",
+      "distance": 0.8558191061019897,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1202,
+      "end_line": 1318,
+      "tokens": 1273,
+      "context_length": 2122,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_distances_chunked.n_samples_X_pairwise_distances_chunked.7.5",
+      "distance": 0.8811928033828735,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1319,
+      "end_line": 1360,
+      "tokens": 452,
+      "context_length": 2574,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_distances.2_pairwise_distances.4.1",
+      "distance": 0.8820762634277344,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1449,
+      "end_line": 1488,
+      "tokens": 401,
+      "context_length": 2975,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_41_paired_euclidean_distances.3.1",
+      "distance": 0.9345217347145081,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 599,
+      "end_line": 617,
+      "tokens": 114,
+      "context_length": 3089,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__argmin_min_reduce_pairwise_distances_argmin_min.9.1",
+      "distance": 0.9564533233642578,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 262,
+      "end_line": 361,
+      "tokens": 829,
+      "context_length": 3918,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_distances_argmin_pairwise_distances_argmin.3.1",
+      "distance": 0.9636868238449097,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 364,
+      "end_line": 441,
+      "tokens": 637,
+      "context_length": 4555,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__dist_wrapper__parallel_pairwise.8.1",
+      "distance": 0.9756454825401306,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1099,
+      "end_line": 1121,
+      "tokens": 212,
+      "context_length": 4767,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_29__return_float_dtype.5.1",
+      "distance": 0.97855544090271,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 36,
+      "end_line": 58,
+      "tokens": 157,
+      "context_length": 4924,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_67_PAIRWISE_KERNEL_FUNCTIONS.1",
+      "distance": 0.9836317300796509,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1491,
+      "end_line": 1517,
+      "tokens": 192,
+      "context_length": 5116,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_check_pairwise_arrays_check_pairwise_arrays.7.1",
+      "distance": 0.9912953972816467,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 61,
+      "end_line": 127,
+      "tokens": 630,
+      "context_length": 5746,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_56_PAIRWISE_DISTANCE_FUNCTIONS.1",
+      "distance": 0.9921174645423889,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1057,
+      "end_line": 1069,
+      "tokens": 121,
+      "context_length": 5867,
+      "file_pos": 1
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py_row_norms_row_norms.4.1",
+      "distance": 0.9968080520629883,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 48,
+      "end_line": 77,
+      "tokens": 195,
+      "context_length": 6062
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py_1_squared_norm.4.1",
+      "distance": 1.0016002655029297,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 201,
+      "context_length": 6263
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_1_30",
+      "distance": 1.0029597282409668,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 947,
+      "context_length": 7210
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_paired_distances_paired_distances.2.4.1",
+      "distance": 1.0056872367858887,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 678,
+      "end_line": 732,
+      "tokens": 433,
+      "context_length": 7643,
+      "file_pos": 3
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_paired_cosine_distances_PAIRED_DISTANCES.1",
+      "distance": 1.0083260536193848,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 644,
+      "end_line": 675,
+      "tokens": 219,
+      "context_length": 7862,
+      "file_pos": 3
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_distances_pairwise_distances.1",
+      "distance": 1.0099403858184814,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1363,
+      "end_line": 1448,
+      "tokens": 946,
+      "context_length": 8808,
+      "file_pos": 3
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_manhattan_distances_manhattan_distances.7.1",
+      "distance": 1.0103291273117065,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 489,
+      "end_line": 559,
+      "tokens": 629,
+      "context_length": 9437,
+      "file_pos": 3
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/optics_.py__set_reach_dist__set_reach_dist.15",
+      "distance": 1.0142565965652466,
+      "file_path": "sklearn/cluster/optics_.py",
+      "start_line": 457,
+      "end_line": 489,
+      "tokens": 348,
+      "context_length": 9785
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_1_DataConversionWarning",
+      "distance": 1.0194990634918213,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 163,
+      "context_length": 9948,
+      "file_pos": 4
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_haversine_distances_haversine_distances.3.1",
+      "distance": 1.0199018716812134,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 444,
+      "end_line": 486,
+      "tokens": 445,
+      "context_length": 10393,
+      "file_pos": 4
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_check_paired_arrays_check_paired_arrays.4.1",
+      "distance": 1.025291919708252,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 130,
+      "end_line": 161,
+      "tokens": 302,
+      "context_length": 10695,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_scalable_frobenius_norm_discrepancy_scalable_frobenius_norm_discrepancy.2.8.1",
+      "distance": 1.0253705978393555,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 281,
+      "end_line": 294,
+      "tokens": 168,
+      "context_length": 10863
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_RadiusNeighborsMixin.radius_neighbors.5_RadiusNeighborsMixin.radius_neighbors.6.2.4.5.1",
+      "distance": 1.0277001857757568,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 698,
+      "end_line": 777,
+      "tokens": 690,
+      "context_length": 11553
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_30",
+      "distance": 1.0374701023101807,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 754,
+      "context_length": 12307
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_1__check_weights.2.3.1",
+      "distance": 1.038386344909668,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 434,
+      "context_length": 12741
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__pairwise_callable__pairwise_callable.4.1",
+      "distance": 1.0443274974822998,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1124,
+      "end_line": 1153,
+      "tokens": 273,
+      "context_length": 13014,
+      "file_pos": 6
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/nmf.py_1__check_init.4.1",
+      "distance": 1.0486934185028076,
+      "file_path": "sklearn/decomposition/nmf.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 356,
+      "context_length": 13370
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/birch.py_warnings__iterate_sparse_X.6.5",
+      "distance": 1.0523419380187988,
+      "file_path": "sklearn/cluster/birch.py",
+      "start_line": 6,
+      "end_line": 35,
+      "tokens": 239,
+      "context_length": 13609
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_paired_manhattan_distances_paired_manhattan_distances.4.3.1.1",
+      "distance": 1.052442193031311,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 620,
+      "end_line": 641,
+      "tokens": 148,
+      "context_length": 13757,
+      "file_pos": 8
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_normalize.6_normalize.8.2.1.1",
+      "distance": 1.0547451972961426,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1614,
+      "end_line": 1644,
+      "tokens": 278,
+      "context_length": 14035
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_1_17.3.2",
+      "distance": 1.0553537607192993,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 195,
+      "context_length": 14230
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/cluster/bicluster.py_np__jaccard.5.1",
+      "distance": 1.0557775497436523,
+      "file_path": "sklearn/metrics/cluster/bicluster.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 228,
+      "context_length": 14458
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/manifold/mds.py__smacof_single.10__smacof_single.11.1",
+      "distance": 1.0563527345657349,
+      "file_path": "sklearn/manifold/mds.py",
+      "start_line": 92,
+      "end_line": 132,
+      "tokens": 424,
+      "context_length": 14882
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/__init__.py_1_get_scorer",
+      "distance": 1.060145378112793,
+      "file_path": "sklearn/metrics/__init__.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 547,
+      "context_length": 15429
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__VALID_METRICS__VALID_METRICS.1",
+      "distance": 1.0609581470489502,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1156,
+      "end_line": 1162,
+      "tokens": 137,
+      "context_length": 15566,
+      "file_pos": 13
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_scale.4_scale.5.1",
+      "distance": 1.067122459411621,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 142,
+      "end_line": 195,
+      "tokens": 596,
+      "context_length": 16162
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_parallel_pairwise.py_time_",
+      "distance": 1.0685842037200928,
+      "file_path": "benchmarks/bench_plot_parallel_pairwise.py",
+      "start_line": 3,
+      "end_line": 47,
+      "tokens": 299,
+      "context_length": 16461
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_agglomerative_clustering_metrics.py_29_",
+      "distance": 1.0693212747573853,
+      "file_path": "examples/cluster/plot_agglomerative_clustering_metrics.py",
+      "start_line": 92,
+      "end_line": 130,
+      "tokens": 363,
+      "context_length": 16824
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/k_means_.py__mini_batch_step.4__mini_batch_step.12.1",
+      "distance": 1.0695997476577759,
+      "file_path": "sklearn/cluster/k_means_.py",
+      "start_line": 1178,
+      "end_line": 1248,
+      "tokens": 767,
+      "context_length": 17591
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 1.069779396057129,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 142,
+      "end_line": 194,
+      "tokens": 532,
+      "context_length": 18123
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/optics_.py_compute_optics_graph.n_samples_compute_optics_graph.24.1",
+      "distance": 1.0713107585906982,
+      "file_path": "sklearn/cluster/optics_.py",
+      "start_line": 403,
+      "end_line": 454,
+      "tokens": 528,
+      "context_length": 18651
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_1_31",
+      "distance": 1.0732269287109375,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 784,
+      "context_length": 19435
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_NeighborsBase._fit_NeighborsBase._fit.15.3.2.self._fit_method.1",
+      "distance": 1.0733628273010254,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 163,
+      "end_line": 248,
+      "tokens": 761,
+      "context_length": 20196
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_42_122",
+      "distance": 1.0737662315368652,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 219,
+      "end_line": 310,
+      "tokens": 815,
+      "context_length": 21011
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_bench_a_bench_a.8",
+      "distance": 1.0776124000549316,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 297,
+      "end_line": 340,
+      "tokens": 517,
+      "context_length": 21528
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/optics_.py_11__compute_core_distances_.8.1",
+      "distance": 1.0794687271118164,
+      "file_path": "sklearn/cluster/optics_.py",
+      "start_line": 261,
+      "end_line": 296,
+      "tokens": 282,
+      "context_length": 21810
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/covariance/plot_mahalanobis_distances.py_emp_cov_55",
+      "distance": 1.079864263534546,
+      "file_path": "examples/covariance/plot_mahalanobis_distances.py",
+      "start_line": 79,
+      "end_line": 134,
+      "tokens": 726,
+      "context_length": 22536
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_KNeighborsMixin.kneighbors.10_KNeighborsMixin.kneighbors.12.2.4.12.1",
+      "distance": 1.0800882577896118,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 421,
+      "end_line": 492,
+      "tokens": 628,
+      "context_length": 23164
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/covariance/robust_covariance.py_fast_mcd.12_fast_mcd.13.1",
+      "distance": 1.0802415609359741,
+      "file_path": "sklearn/covariance/robust_covariance.py",
+      "start_line": 413,
+      "end_line": 509,
+      "tokens": 1054,
+      "context_length": 24218
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/cluster/unsupervised.py_silhouette_score_silhouette_score.1",
+      "distance": 1.0804998874664307,
+      "file_path": "sklearn/metrics/cluster/unsupervised.py",
+      "start_line": 38,
+      "end_line": 108,
+      "tokens": 737,
+      "context_length": 24955
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_kernels.4_",
+      "distance": 1.081463098526001,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1630,
+      "end_line": 1646,
+      "tokens": 185,
+      "context_length": 25140,
+      "file_pos": 21
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sgd_regression.py_np_",
+      "distance": 1.0838630199432373,
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "start_line": 4,
+      "end_line": 151,
+      "tokens": 1314,
+      "context_length": 26454
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/dbscan_.py_1_dbscan.1",
+      "distance": 1.085040807723999,
+      "file_path": "sklearn/cluster/dbscan_.py",
+      "start_line": 1,
+      "end_line": 138,
+      "tokens": 1234,
+      "context_length": 27688
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/plot_johnson_lindenstrauss_bound.py_sys_dists_50.1",
+      "distance": 1.0858079195022583,
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "start_line": 94,
+      "end_line": 168,
+      "tokens": 709,
+      "context_length": 28397
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/cluster/unsupervised.py_silhouette_samples_silhouette_samples.inter_clust_dists.1",
+      "distance": 1.0869603157043457,
+      "file_path": "sklearn/metrics/cluster/unsupervised.py",
+      "start_line": 152,
+      "end_line": 226,
+      "tokens": 757,
+      "context_length": 29154
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_assumptions.py_1_",
+      "distance": 1.0892258882522583,
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 511,
+      "context_length": 29665
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__precompute_metric_params__precompute_metric_params.4.1",
+      "distance": 1.090928554534912,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1184,
+      "end_line": 1199,
+      "tokens": 174,
+      "context_length": 29839,
+      "file_pos": 25
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_cosine_distances_cosine_distances.8.1",
+      "distance": 1.091483235359192,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 562,
+      "end_line": 596,
+      "tokens": 260,
+      "context_length": 30099,
+      "file_pos": 25
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 1.0923022031784058,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 741,
+      "context_length": 30840
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.23__lars_path_solver.23.10.3.AA.3",
+      "distance": 1.0947380065917969,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 475,
+      "end_line": 632,
+      "tokens": 1591,
+      "context_length": 32431
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_NeighborsBase._fit.16__tree_query_parallel_helper.2.1",
+      "distance": 1.0958878993988037,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 250,
+      "end_line": 291,
+      "tokens": 343,
+      "context_length": 32774
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_neighbors.py_barplot_neighbors_barplot_neighbors.19",
+      "distance": 1.096306562423706,
+      "file_path": "benchmarks/bench_plot_neighbors.py",
+      "start_line": 26,
+      "end_line": 109,
+      "tokens": 704,
+      "context_length": 33478
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/bicluster.py__bistochastic_normalize__bistochastic_normalize.7.1",
+      "distance": 1.0984034538269043,
+      "file_path": "sklearn/cluster/bicluster.py",
+      "start_line": 51,
+      "end_line": 70,
+      "tokens": 168,
+      "context_length": 33646
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/examples/manifold/plot_lle_digits.py_21_80",
+      "distance": 1.099302053451538,
+      "file_path": "examples/manifold/plot_lle_digits.py",
+      "start_line": 78,
+      "end_line": 169,
+      "tokens": 748,
+      "context_length": 34394
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_47_linear_kernel.3.1",
+      "distance": 1.0994596481323242,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 735,
+      "end_line": 759,
+      "tokens": 183,
+      "context_length": 34577,
+      "file_pos": 30
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_load_20news_",
+      "distance": 1.0997700691223145,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 370,
+      "end_line": 422,
+      "tokens": 514,
+      "context_length": 35091
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_svd.py_1_compute_bench.5.1",
+      "distance": 1.0999464988708496,
+      "file_path": "benchmarks/bench_plot_svd.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 388,
+      "context_length": 35479
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_1__norm.2.1",
+      "distance": 1.1000871658325195,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 287,
+      "context_length": 35766
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/dbscan_.py_DBSCAN_DBSCAN.1",
+      "distance": 1.1001209020614624,
+      "file_path": "sklearn/cluster/dbscan_.py",
+      "start_line": 193,
+      "end_line": 317,
+      "tokens": 1233,
+      "context_length": 36999
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/covariance/plot_mahalanobis_distances.py_1_19",
+      "distance": 1.1003525257110596,
+      "file_path": "examples/covariance/plot_mahalanobis_distances.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 789,
+      "context_length": 37788
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py_32__safe_accumulator_op.3.1",
+      "distance": 1.1008565425872803,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 660,
+      "end_line": 689,
+      "tokens": 258,
+      "context_length": 38046
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_distance_metrics_distance_metrics.2.1",
+      "distance": 1.1014147996902466,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1072,
+      "end_line": 1096,
+      "tokens": 198,
+      "context_length": 38244,
+      "file_pos": 32
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.23.11__lars_path_solver.24.3.1.2.1.1",
+      "distance": 1.101935863494873,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 634,
+      "end_line": 754,
+      "tokens": 1218,
+      "context_length": 39462
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py__incremental_mean_and_var__incremental_mean_and_var.11.1",
+      "distance": 1.1040534973144531,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 692,
+      "end_line": 767,
+      "tokens": 648,
+      "context_length": 40110
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sparsify.py_1_31",
+      "distance": 1.1053078174591064,
+      "file_path": "benchmarks/bench_sparsify.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 754,
+      "context_length": 40864
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_bench_c_bench_c.8",
+      "distance": 1.1056182384490967,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 380,
+      "end_line": 431,
+      "tokens": 540,
+      "context_length": 41404
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/__init__.py_1__IS_32BIT.1",
+      "distance": 1.1080939769744873,
+      "file_path": "sklearn/utils/__init__.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 606,
+      "context_length": 42010
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/k_means_.py__labels_inertia_precompute_dense__labels_inertia_precompute_dense.11.1",
+      "distance": 1.1086690425872803,
+      "file_path": "sklearn/cluster/k_means_.py",
+      "start_line": 581,
+      "end_line": 626,
+      "tokens": 368,
+      "context_length": 42378
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/cross_decomposition/plot_compare_cross_decomposition.py_1_48",
+      "distance": 1.112369418144226,
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 724,
+      "context_length": 43102
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_types_CROSS_DECOMPOSITION.1",
+      "distance": 1.1137282848358154,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 444,
+      "context_length": 43546
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tsne_mnist.py_23_",
+      "distance": 1.1141626834869385,
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "start_line": 69,
+      "end_line": 169,
+      "tokens": 1011,
+      "context_length": 44557
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_lof_outlier_detection.py_1_",
+      "distance": 1.1142992973327637,
+      "file_path": "examples/neighbors/plot_lof_outlier_detection.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 667,
+      "context_length": 45224
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/examples/cross_decomposition/plot_compare_cross_decomposition.py_49_",
+      "distance": 1.114667296409607,
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "start_line": 83,
+      "end_line": 156,
+      "tokens": 759,
+      "context_length": 45983
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/bicluster.py__scale_normalize__scale_normalize.8.1",
+      "distance": 1.1155939102172852,
+      "file_path": "sklearn/cluster/bicluster.py",
+      "start_line": 29,
+      "end_line": 48,
+      "tokens": 212,
+      "context_length": 46195
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_precision_recall.py_10_81",
+      "distance": 1.1166212558746338,
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "start_line": 101,
+      "end_line": 205,
+      "tokens": 770,
+      "context_length": 46965
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_svd.py_10_",
+      "distance": 1.117341160774231,
+      "file_path": "benchmarks/bench_plot_svd.py",
+      "start_line": 56,
+      "end_line": 83,
+      "tokens": 290,
+      "context_length": 47255
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/examples/plot_johnson_lindenstrauss_bound.py_51_",
+      "distance": 1.1193575859069824,
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "start_line": 170,
+      "end_line": 208,
+      "tokens": 376,
+      "context_length": 47631
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_40__rescale_data.8.1",
+      "distance": 1.120009183883667,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 177,
+      "end_line": 191,
+      "tokens": 155,
+      "context_length": 47786
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_nca_classification.py_1_",
+      "distance": 1.120915412902832,
+      "file_path": "examples/neighbors/plot_nca_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 727,
+      "context_length": 48513
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/metrics/pairwise.py",
+      "position": 1,
+      "tokens": 13865,
+      "context_length": 13865
+    },
+    {
+      "file_path": "sklearn/utils/extmath.py",
+      "position": 2,
+      "tokens": 6316,
+      "context_length": 20181
+    },
+    {
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "position": 3,
+      "tokens": 4380,
+      "context_length": 24561
+    },
+    {
+      "file_path": "sklearn/cluster/optics_.py",
+      "position": 4,
+      "tokens": 4902,
+      "context_length": 29463
+    },
+    {
+      "file_path": "sklearn/neighbors/base.py",
+      "position": 5,
+      "tokens": 7732,
+      "context_length": 37195
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 6,
+      "tokens": 1219,
+      "context_length": 38414
+    },
+    {
+      "file_path": "sklearn/decomposition/nmf.py",
+      "position": 7,
+      "tokens": 11907,
+      "context_length": 50321
+    },
+    {
+      "file_path": "sklearn/cluster/birch.py",
+      "position": 8,
+      "tokens": 5289,
+      "context_length": 55610
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 9,
+      "tokens": 25126,
+      "context_length": 80736
+    },
+    {
+      "file_path": "sklearn/utils/fixes.py",
+      "position": 10,
+      "tokens": 1840,
+      "context_length": 82576
+    },
+    {
+      "file_path": "sklearn/metrics/cluster/bicluster.py",
+      "position": 11,
+      "tokens": 717,
+      "context_length": 83293
+    },
+    {
+      "file_path": "sklearn/manifold/mds.py",
+      "position": 12,
+      "tokens": 3870,
+      "context_length": 87163
+    },
+    {
+      "file_path": "sklearn/metrics/__init__.py",
+      "position": 13,
+      "tokens": 955,
+      "context_length": 88118
+    },
+    {
+      "file_path": "benchmarks/bench_plot_parallel_pairwise.py",
+      "position": 14,
+      "tokens": 323,
+      "context_length": 88441
+    },
+    {
+      "file_path": "examples/cluster/plot_agglomerative_clustering_metrics.py",
+      "position": 15,
+      "tokens": 1118,
+      "context_length": 89559
+    },
+    {
+      "file_path": "sklearn/cluster/k_means_.py",
+      "position": 16,
+      "tokens": 15119,
+      "context_length": 104678
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 17,
+      "tokens": 1945,
+      "context_length": 106623
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 18,
+      "tokens": 3108,
+      "context_length": 109731
+    },
+    {
+      "file_path": "examples/covariance/plot_mahalanobis_distances.py",
+      "position": 19,
+      "tokens": 1663,
+      "context_length": 111394
+    },
+    {
+      "file_path": "sklearn/covariance/robust_covariance.py",
+      "position": 20,
+      "tokens": 7075,
+      "context_length": 118469
+    },
+    {
+      "file_path": "sklearn/metrics/cluster/unsupervised.py",
+      "position": 21,
+      "tokens": 3255,
+      "context_length": 121724
+    },
+    {
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "position": 22,
+      "tokens": 1341,
+      "context_length": 123065
+    },
+    {
+      "file_path": "sklearn/cluster/dbscan_.py",
+      "position": 23,
+      "tokens": 3571,
+      "context_length": 126636
+    },
+    {
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "position": 24,
+      "tokens": 1843,
+      "context_length": 128479
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "position": 25,
+      "tokens": 533,
+      "context_length": 129012
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 26,
+      "tokens": 1125,
+      "context_length": 130137
+    },
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 27,
+      "tokens": 16498,
+      "context_length": 146635
+    },
+    {
+      "file_path": "benchmarks/bench_plot_neighbors.py",
+      "position": 28,
+      "tokens": 1431,
+      "context_length": 148066
+    },
+    {
+      "file_path": "sklearn/cluster/bicluster.py",
+      "position": 29,
+      "tokens": 4905,
+      "context_length": 152971
+    },
+    {
+      "file_path": "examples/manifold/plot_lle_digits.py",
+      "position": 30,
+      "tokens": 2024,
+      "context_length": 154995
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 31,
+      "tokens": 3896,
+      "context_length": 158891
+    },
+    {
+      "file_path": "benchmarks/bench_plot_svd.py",
+      "position": 32,
+      "tokens": 679,
+      "context_length": 159570
+    },
+    {
+      "file_path": "benchmarks/bench_sparsify.py",
+      "position": 33,
+      "tokens": 907,
+      "context_length": 160477
+    },
+    {
+      "file_path": "sklearn/utils/__init__.py",
+      "position": 34,
+      "tokens": 6204,
+      "context_length": 166681
+    },
+    {
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "position": 35,
+      "tokens": 1483,
+      "context_length": 168164
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 36,
+      "tokens": 21875,
+      "context_length": 190039
+    },
+    {
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "position": 37,
+      "tokens": 1426,
+      "context_length": 191465
+    },
+    {
+      "file_path": "examples/neighbors/plot_lof_outlier_detection.py",
+      "position": 38,
+      "tokens": 667,
+      "context_length": 192132
+    },
+    {
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "position": 39,
+      "tokens": 2342,
+      "context_length": 194474
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 40,
+      "tokens": 4761,
+      "context_length": 199235
+    },
+    {
+      "file_path": "examples/neighbors/plot_nca_classification.py",
+      "position": 41,
+      "tokens": 735,
+      "context_length": 199970
+    }
+  ]
+}

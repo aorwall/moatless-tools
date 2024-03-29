@@ -1,0 +1,1254 @@
+{
+  "instance_id": "astropy__astropy-14995",
+  "model_patch": "diff --git a/astropy/nddata/mixins/ndarithmetic.py b/astropy/nddata/mixins/ndarithmetic.py\nindex 4153dfccb2..8ce47ac370 100644\n--- a/astropy/nddata/mixins/ndarithmetic.py\n+++ b/astropy/nddata/mixins/ndarithmetic.py\n@@ -513,14 +513,10 @@ class NDArithmeticMixin:\n             ``handle_mask`` must create (and copy) the returned mask.\n         \"\"\"\n         # If only one mask is present we need not bother about any type checks\n-        if (\n-            self.mask is None and operand is not None and operand.mask is None\n-        ) or handle_mask is None:\n-            return None\n-        elif self.mask is None and operand is not None:\n+        if self.mask is None and operand is not None:\n             # Make a copy so there is no reference in the result.\n             return deepcopy(operand.mask)\n-        elif operand is None:\n+        elif operand is None or operand.mask is None:\n             return deepcopy(self.mask)\n         else:\n             # Now lets calculate the resulting mask (operation enforces copy)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "astropy/nddata/mixins/ndarithmetic.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "b16c7d12ccbc7b2d20364b89fb44285bcbfede54",
+  "patch": "diff --git a/astropy/nddata/mixins/ndarithmetic.py b/astropy/nddata/mixins/ndarithmetic.py\n--- a/astropy/nddata/mixins/ndarithmetic.py\n+++ b/astropy/nddata/mixins/ndarithmetic.py\n@@ -520,10 +520,10 @@ def _arithmetic_mask(self, operation, operand, handle_mask, axis=None, **kwds):\n         elif self.mask is None and operand is not None:\n             # Make a copy so there is no reference in the result.\n             return deepcopy(operand.mask)\n-        elif operand is None:\n+        elif operand.mask is None:\n             return deepcopy(self.mask)\n         else:\n-            # Now lets calculate the resulting mask (operation enforces copy)\n+            # Now let's calculate the resulting mask (operation enforces copy)\n             return handle_mask(self.mask, operand.mask, **kwds)\n \n     def _arithmetic_wcs(self, operation, operand, compare_wcs, **kwds):\n",
+  "test_patch": "diff --git a/astropy/nddata/mixins/tests/test_ndarithmetic.py b/astropy/nddata/mixins/tests/test_ndarithmetic.py\n--- a/astropy/nddata/mixins/tests/test_ndarithmetic.py\n+++ b/astropy/nddata/mixins/tests/test_ndarithmetic.py\n@@ -1310,3 +1310,42 @@ def test_raise_method_not_supported():\n     # raise error for unsupported propagation operations:\n     with pytest.raises(ValueError):\n         ndd1.uncertainty.propagate(np.mod, ndd2, result, correlation)\n+\n+\n+def test_nddata_bitmask_arithmetic():\n+    # NDData.mask is usually assumed to be boolean, but could be\n+    # a bitmask. Ensure bitmask works:\n+    array = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])\n+    mask = np.array([[0, 1, 64], [8, 0, 1], [2, 1, 0]])\n+\n+    nref_nomask = NDDataRef(array)\n+    nref_masked = NDDataRef(array, mask=mask)\n+\n+    # multiply no mask by constant (no mask * no mask)\n+    assert nref_nomask.multiply(1.0, handle_mask=np.bitwise_or).mask is None\n+\n+    # multiply no mask by itself (no mask * no mask)\n+    assert nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask is None\n+\n+    # multiply masked by constant (mask * no mask)\n+    np.testing.assert_equal(\n+        nref_masked.multiply(1.0, handle_mask=np.bitwise_or).mask, mask\n+    )\n+\n+    # multiply masked by itself (mask * mask)\n+    np.testing.assert_equal(\n+        nref_masked.multiply(nref_masked, handle_mask=np.bitwise_or).mask, mask\n+    )\n+\n+    # multiply masked by no mask (mask * no mask)\n+    np.testing.assert_equal(\n+        nref_masked.multiply(nref_nomask, handle_mask=np.bitwise_or).mask, mask\n+    )\n+\n+    # check bitwise logic still works\n+    other_mask = np.array([[64, 1, 0], [2, 1, 0], [8, 0, 2]])\n+    nref_mask_other = NDDataRef(array, mask=other_mask)\n+    np.testing.assert_equal(\n+        nref_mask_other.multiply(nref_masked, handle_mask=np.bitwise_or).mask,\n+        np.bitwise_or(mask, other_mask),\n+    )\n",
+  "problem_statement": "In v5.3, NDDataRef mask propagation fails when one of the operand does not have a mask\n### Description\n\nThis applies to v5.3. \r\n\r\nIt looks like when one of the operand does not have a mask, the mask propagation when doing arithmetic, in particular with `handle_mask=np.bitwise_or` fails.  This is not a problem in v5.2.\r\n\r\nI don't know enough about how all that works, but it seems from the error that the operand without a mask is set as a mask of None's and then the bitwise_or tries to operate on an integer and a None and fails.\n\n### Expected behavior\n\nWhen one of the operand does not have mask, the mask that exists should just be copied over to the output.  Or whatever was done in that situation in v5.2 where there's no problem.\n\n### How to Reproduce\n\nThis is with v5.3.   With v5.2, there are no errors.\r\n\r\n```\r\n>>> import numpy as np\r\n>>> from astropy.nddata import NDDataRef\r\n\r\n>>> array = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])\r\n>>> mask = np.array([[0, 1, 64], [8, 0, 1], [2, 1, 0]])\r\n\r\n>>> nref_nomask = NDDataRef(array)\r\n>>> nref_mask = NDDataRef(array, mask=mask)\r\n\r\n# multiply no mask by constant (no mask * no mask)\r\n>>> nref_nomask.multiply(1., handle_mask=np.bitwise_or).mask   # returns nothing, no mask,  OK\r\n\r\n# multiply no mask by itself (no mask * no mask)\r\n>>> nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask # return nothing, no mask, OK\r\n\r\n# multiply mask by constant (mask * no mask)\r\n>>> nref_mask.multiply(1., handle_mask=np.bitwise_or).mask\r\n...\r\nTypeError: unsupported operand type(s) for |: 'int' and 'NoneType'\r\n\r\n# multiply mask by itself (mask * mask)\r\n>>> nref_mask.multiply(nref_mask, handle_mask=np.bitwise_or).mask\r\narray([[ 0,  1, 64],\r\n       [ 8,  0,  1],\r\n       [ 2,  1,  0]])\r\n\r\n# multiply mask by no mask (mask * no mask)\r\n>>> nref_mask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask\r\n...\r\nTypeError: unsupported operand type(s) for |: 'int' and 'NoneType'\r\n```\r\n\n\n### Versions\n\n>>> import sys; print(\"Python\", sys.version)\r\nPython 3.10.11 | packaged by conda-forge | (main, May 10 2023, 19:07:22) [Clang 14.0.6 ]\r\n>>> import astropy; print(\"astropy\", astropy.__version__)\r\nastropy 5.3\r\n>>> import numpy; print(\"Numpy\", numpy.__version__)\r\nNumpy 1.24.3\r\n>>> import erfa; print(\"pyerfa\", erfa.__version__)\r\npyerfa 2.0.0.3\r\n>>> import scipy; print(\"Scipy\", scipy.__version__)\r\nScipy 1.10.1\r\n>>> import matplotlib; print(\"Matplotlib\", matplotlib.__version__)\r\nMatplotlib 3.7.1\r\n\n",
+  "hints_text": "Welcome to Astropy \ud83d\udc4b and thank you for your first issue!\n\nA project member will respond to you as soon as possible; in the meantime, please double-check the [guidelines for submitting issues](https://github.com/astropy/astropy/blob/main/CONTRIBUTING.md#reporting-issues) and make sure you've provided the requested details.\n\nGitHub issues in the Astropy repository are used to track bug reports and feature requests; If your issue poses a question about how to use Astropy, please instead raise your question in the [Astropy Discourse user forum](https://community.openastronomy.org/c/astropy/8) and close this issue.\n\nIf you feel that this issue has not been responded to in a timely manner, please send a message directly to the [development mailing list](http://groups.google.com/group/astropy-dev).  If the issue is urgent or sensitive in nature (e.g., a security vulnerability) please send an e-mail directly to the private e-mail feedback@astropy.org.\n@bmorris3 , do you think this is related to that nddata feature you added in v5.3?\nHi @KathleenLabrie. I'm not sure this is a bug, because as far as I can tell the `mask` in NDData is assumed to be boolean: \r\n\r\nhttps://github.com/astropy/astropy/blob/83f6f002fb11853eacb689781d366be6aa170e0e/astropy/nddata/nddata.py#L51-L55\r\n\r\nThere are updates to the propagation logic in v5.3 that allow for more flexible and customizable mask propagation, see discussion in https://github.com/astropy/astropy/pull/14175.\r\n\r\nYou're using the `bitwise_or` operation, which is different from the default `logical_or` operation in important ways. I tested your example using `logical_or` and it worked as expected, with the caveat that your mask becomes booleans with `True` for non-zero initial mask values.\nWe are doing data reduction.  The nature of the \"badness\" of each pixel matters.  True or False does not cut it.  That why we need bits.  This is scientifically required.   A saturated pixel is different from a non-linear pixel, different from an unilliminated pixels, different .... etc. \r\n\r\nI don't see why a feature that had been there for a long time was removed without even a deprecation warning.\nBTW, I still think that something is broken, eg.\r\n```\r\n>>> bmask = np.array([[True, False, False], [False, True, False], [False, False, True]])\r\n>>> nref_bmask = NDDataRef(array, mask=bmask)\r\n>>> nref_bmask.multiply(1.).mask\r\narray([[True, None, None],\r\n       [None, True, None],\r\n       [None, None, True]], dtype=object)\r\n```\r\nThose `None`s should probably be `False`s not None's\nThere is *absolutely* a bug here. Here's a demonstration:\r\n\r\n```\r\n>>> data = np.arange(4).reshape(2,2)\r\n>>> mask = np.array([[1, 0], [0, 1]]))\r\n>>> nd1 = NDDataRef(data, mask=mask)\r\n>>> nd2 = NDDataRef(data, mask=None)\r\n>>> nd1.multiply(nd2, handle_mask=np.bitwise_or)\r\n...Exception...\r\n>>> nd2.multiply(nd1, handle_mask=np.bitwise_or)\r\nNDDataRef([[0, 1],\r\n           [4, 9]])\r\n```\r\n\r\nMultiplication is commutative and should still be here. In 5.2 the logic for arithmetic between two objects was that if one didn't have a `mask` or the `mask` was `None` then the output mask would be the `mask` of the other. That seems entirely sensible and I see no sensible argument for changing that. But in 5.3 the logic is that if the first operand has no mask then the output will be the mask of the second, but if the second operand has no mask then it sends both masks to the `handle_mask` function (instead of simply setting the output to the mask of the first as before).\r\n\r\nNote that this has an unwanted effect *even if the masks are boolean*:\r\n```\r\n>>> bool_mask = mask.astype(bool)\r\n>>> nd1 = NDDataRef(data, mask=bool_mask)\r\n>>> nd2.multiply(nd1).mask\r\narray([[False,  True],\r\n       [ True, False]])\r\n>>> nd1.multiply(nd2).mask\r\narray([[None, True],\r\n       [True, None]], dtype=object)\r\n```\r\nand, whoops, the `mask` isn't a nice happy numpy `bool` array anymore.\r\n\r\nSo it looks like somebody accidentally turned the lines\r\n\r\n```\r\nelif operand.mask is None:\r\n            return deepcopy(self.mask)\r\n```\r\n\r\ninto\r\n\r\n```\r\nelif operand is None:\r\n            return deepcopy(self.mask)\r\n```\r\n\n@chris-simpson I agree that line you suggested above is the culprit, which was [changed here](https://github.com/astropy/astropy/commit/feeb716b7412c477c694648ee1e93be2c4a73700#diff-5057de973eaa1e5036a0bef89e618b1b03fd45a9c2952655abb656822f4ddc2aL458-R498). I've reverted that specific line in a local astropy branch and verified that the existing tests still pass, and the bitmask example from @KathleenLabrie works after that line is swapped. I'll make a PR to fix this today, with a new test to make sure that we don't break this again going forward. \nMany thanks for working on this, @bmorris3.\r\n\r\nRegarding whether the `mask` is assumed to be Boolean, I had noticed in the past that some developers understood this to be the case, while others disagreed. When we discussed this back in 2016, however (as per the document you linked to in Slack), @eteq explained that the mask is just expected to be \"truthy\" in a NumPy sense of zero = False (unmasked) and non-zero = True (masked), which you'll see is consistent with the doc string you cited above, even if it's not entirely clear :slightly_frowning_face:.\nOf course I think that flexibility is great, but I think intentional ambiguity in docs is risky when only one of the two cases is tested. \ud83d\ude2c \nIndeed, I should probably have checked that there was a test for this upstream, since I was aware of some confusion; if only we could find more time to work on these important common bits that we depend on...",
+  "created_at": "2023-06-27T19:48:18Z",
+  "version": "5.2",
+  "FAIL_TO_PASS": "[\"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_nddata_bitmask_arithmetic\"]",
+  "PASS_TO_PASS": "[\"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data14-data24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data15-data25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data[data16-data26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_invalid\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[False-False]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[False-True]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[None-False]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[None-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[True-False]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[True-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[True-True]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask110-mask210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask111-mask211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask112-mask212]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask17-mask27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask18-mask28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks[mask19-mask29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_masks_invalid\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data14-data24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data15-data25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data16-data26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_identical[data17-data27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_not_identical[data10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_not_identical[data11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_not_identical[data12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_unit_not_identical[data13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_wcs[None-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_wcs[None-wcs21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_wcs[wcs12-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_wcs[wcs13-wcs23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_data_wcs[wcs14-wcs24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_handle_switches[ff]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_handle_switches[first_found]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.25-uncert116-data216]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.25-uncert12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.25-uncert123-data223]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.25-uncert19-data29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.5-uncert11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.5-uncert115-data215]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.5-uncert122-data222]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-0.5-uncert18-data28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-1-uncert10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-1-uncert114-data214]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-1-uncert121-data221]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[-1-uncert17-data27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0-uncert110-data210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0-uncert117-data217]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0-uncert124-data224]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0-uncert13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.25-uncert111-data211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.25-uncert118-data218]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.25-uncert125-data225]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.25-uncert14-data24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.5-uncert112-data212]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.5-uncert119-data219]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.5-uncert126-data226]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[0.5-uncert15-data25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[1-uncert113-data213]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[1-uncert120-data220]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[1-uncert127-data227]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_basic_with_correlation[1-uncert16-data26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[None-uncert22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[None-uncert23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert10-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert11-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert110-uncert210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert111-uncert211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert14-uncert24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert15-uncert25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert16-uncert26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert17-uncert27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert18-uncert28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_inversevarianceuncertainty_with_units[uncert19-uncert29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_mask_func\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_meta_func\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.25-uncert116-data216]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.25-uncert12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.25-uncert123-data223]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.25-uncert19-data29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.5-uncert11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.5-uncert115-data215]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.5-uncert122-data222]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-0.5-uncert18-data28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-1-uncert10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-1-uncert114-data214]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-1-uncert121-data221]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[-1-uncert17-data27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0-uncert110-data210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0-uncert117-data217]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0-uncert124-data224]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0-uncert13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.25-uncert111-data211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.25-uncert118-data218]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.25-uncert125-data225]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.25-uncert14-data24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.5-uncert112-data212]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.5-uncert119-data219]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.5-uncert126-data226]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[0.5-uncert15-data25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[1-uncert113-data213]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[1-uncert120-data220]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[1-uncert127-data227]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation[1-uncert16-data26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_basic_with_correlation_array\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_one_missing\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[None-uncert22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[None-uncert23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert10-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert11-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert110-uncert210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert111-uncert211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert14-uncert24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert15-uncert25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert16-uncert26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert17-uncert27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert18-uncert28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_stddevuncertainty_with_units[uncert19-uncert29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_unknown_uncertainties\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.25-uncert116-data216]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.25-uncert12-data22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.25-uncert123-data223]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.25-uncert19-data29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.5-uncert11-data21]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.5-uncert115-data215]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.5-uncert122-data222]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-0.5-uncert18-data28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-1-uncert10-data20]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-1-uncert114-data214]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-1-uncert121-data221]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[-1-uncert17-data27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0-uncert110-data210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0-uncert117-data217]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0-uncert124-data224]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0-uncert13-data23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.25-uncert111-data211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.25-uncert118-data218]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.25-uncert125-data225]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.25-uncert14-data24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.5-uncert112-data212]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.5-uncert119-data219]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.5-uncert126-data226]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[0.5-uncert15-data25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[1-uncert113-data213]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[1-uncert120-data220]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[1-uncert127-data227]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_basic_with_correlation[1-uncert16-data26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[None-uncert22]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[None-uncert23]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert10-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert11-None]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert110-uncert210]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert111-uncert211]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert14-uncert24]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert15-uncert25]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert16-uncert26]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert17-uncert27]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert18-uncert28]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_varianceuncertainty_with_units[uncert19-uncert29]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_wcs_func\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_arithmetics_with_correlation_unsupported\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_psf_warning\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_raise_method_not_supported\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage[add]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage[divide]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage[multiply]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage[subtract]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage_non_nddata_first_arg[add]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage_non_nddata_first_arg[divide]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage_non_nddata_first_arg[multiply]\", \"astropy/nddata/mixins/tests/test_ndarithmetic.py::test_two_argument_useage_non_nddata_first_arg[subtract]\"]",
+  "environment_setup_commit": "362f6df12abf9bd769d4915fabf955c993ea22cf",
+  "patch_files": [
+    "astropy/nddata/mixins/ndarithmetic.py"
+  ],
+  "test_patch_files": [
+    "astropy/nddata/mixins/tests/test_ndarithmetic.py"
+  ],
+  "patch_diff_details": {
+    "astropy/nddata/mixins/ndarithmetic.py": {
+      "diffs": [
+        {
+          "start_line_old": 523,
+          "end_line_old": 526,
+          "file_pos": 3,
+          "file_context_length": 19064,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_warnings__arit_doc.1",
+          "closest_snippet_line_distance": 426,
+          "pos": 12,
+          "context_length": 4281
+        }
+      ]
+    }
+  },
+  "vectors": 4619,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/nddata/compat.py_NDDataArray.10_NDDataArray.mask_12.2.3.self._mask.1",
+      "distance": 0.7331161499023438,
+      "file_path": "astropy/nddata/compat.py",
+      "start_line": 159,
+      "end_line": 180,
+      "tokens": 197,
+      "context_length": 197
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray._eq_simple_MaskedNDArray.__ne__.6.1",
+      "distance": 0.8102974891662598,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 643,
+      "end_line": 672,
+      "tokens": 302,
+      "context_length": 499
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray._not_implemented_or_raise_MaskedNDArray._not_implemented_or_raise.6.2.1.1",
+      "distance": 0.8245840072631836,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 913,
+      "end_line": 925,
+      "tokens": 181,
+      "context_length": 680
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.trace_MaskedNDArray.38.3.argmax.2.1",
+      "distance": 0.8271206617355347,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 969,
+      "end_line": 1027,
+      "tokens": 645,
+      "context_length": 1325
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.std_MaskedNDArray.__format__.2.3.1.1",
+      "distance": 0.8361903429031372,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1183,
+      "end_line": 1220,
+      "tokens": 357,
+      "context_length": 1682
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.__array_function___MaskedNDArray.__array_function__.3.6.2.1.1",
+      "distance": 0.8410522937774658,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 865,
+      "end_line": 911,
+      "tokens": 379,
+      "context_length": 2061
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_builtins_get__doc__.1",
+      "distance": 0.8506579399108887,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 18,
+      "end_line": 40,
+      "tokens": 137,
+      "context_length": 2198
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_warnings__arit_doc.1",
+      "distance": 0.8510442972183228,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 4,
+      "end_line": 100,
+      "tokens": 931,
+      "context_length": 3129,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.var_MaskedNDArray.var.15.1",
+      "distance": 0.8532507419586182,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1158,
+      "end_line": 1181,
+      "tokens": 259,
+      "context_length": 3388
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.shape_14_MaskedNDArray.shape_14.5.2.7.2.2",
+      "distance": 0.8559505343437195,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 619,
+      "end_line": 641,
+      "tokens": 241,
+      "context_length": 3629
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.mean_MaskedNDArray.mean.is_float16_result.14.1",
+      "distance": 0.8561161756515503,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1126,
+      "end_line": 1156,
+      "tokens": 317,
+      "context_length": 3946
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._arithmetic_mask_NDArithmeticMixin._arithmetic_mask.3.4.2.1",
+      "distance": 0.8726349472999573,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 485,
+      "end_line": 527,
+      "tokens": 335,
+      "context_length": 4281,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked._set_mask_Masked._set_mask.4.4.self._mask.1",
+      "distance": 0.8803600072860718,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 227,
+      "end_line": 244,
+      "tokens": 173,
+      "context_length": 4454
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedRecarray_",
+      "distance": 0.8930041193962097,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1223,
+      "end_line": 1248,
+      "tokens": 237,
+      "context_length": 4691
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.__array_ufunc__.10_MaskedNDArray.__array_ufunc__.16.1",
+      "distance": 0.8969340324401855,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 730,
+      "end_line": 863,
+      "tokens": 1254,
+      "context_length": 5945
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray._masked_result_MaskedNDArray._masked_result.8.1",
+      "distance": 0.8991308212280273,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 927,
+      "end_line": 951,
+      "tokens": 267,
+      "context_length": 6212
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_20_dispatched_function.1",
+      "distance": 0.8994427919387817,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 84,
+      "end_line": 161,
+      "tokens": 756,
+      "context_length": 6968
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.__array_finalize___MaskedNDArray.__array_finalize__.2.7.self.info.1",
+      "distance": 0.9054082036018372,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 581,
+      "end_line": 598,
+      "tokens": 193,
+      "context_length": 7161
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.__array_ufunc___MaskedNDArray.__array_ufunc__.9",
+      "distance": 0.9155780076980591,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 705,
+      "end_line": 728,
+      "tokens": 252,
+      "context_length": 7413
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._arithmetic.8_NDArithmeticMixin._arithmetic.19.1",
+      "distance": 0.9273754358291626,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 250,
+      "end_line": 321,
+      "tokens": 753,
+      "context_length": 8166,
+      "file_pos": 4
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.shape_MaskedNDArray.shape.3.1",
+      "distance": 0.9645004272460938,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 600,
+      "end_line": 617,
+      "tokens": 166,
+      "context_length": 8332
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked._apply_Masked.__setitem__.3",
+      "distance": 0.9649701118469238,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 280,
+      "end_line": 300,
+      "tokens": 200,
+      "context_length": 8532
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._arithmetic.20_NDArithmeticMixin._arithmetic.23.1",
+      "distance": 0.9650558233261108,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 323,
+      "end_line": 352,
+      "tokens": 325,
+      "context_length": 8857,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/nddata/compat.py_NDDataArray.__init___NDDataArray.uncertainty.1.1",
+      "distance": 0.9654550552368164,
+      "file_path": "astropy/nddata/compat.py",
+      "start_line": 82,
+      "end_line": 109,
+      "tokens": 238,
+      "context_length": 9095
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.5_MaskedNDArray._baseclass.2.1",
+      "distance": 0.9707460403442383,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 511,
+      "end_line": 554,
+      "tokens": 350,
+      "context_length": 9445
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_bitfield_to_boolean_mask.1_bitfield_to_boolean_mask.1",
+      "distance": 0.9729354381561279,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 483,
+      "end_line": 684,
+      "tokens": 2741,
+      "context_length": 12186
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/nddata/nddata_withmixins.py_NDArithmeticMixin_",
+      "distance": 0.9858182668685913,
+      "file_path": "astropy/nddata/nddata_withmixins.py",
+      "start_line": 8,
+      "end_line": 73,
+      "tokens": 605,
+      "context_length": 12791
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked._get_data_and_masks_Masked._get_mask.2.1",
+      "distance": 0.9878528118133545,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 211,
+      "end_line": 225,
+      "tokens": 117,
+      "context_length": 12908
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArrayInfo._represent_as_dict_MaskedNDArrayInfo._construct_from_dict.5",
+      "distance": 0.9878931045532227,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 341,
+      "end_line": 375,
+      "tokens": 304,
+      "context_length": 13212
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/io/votable/converters.py__make_masked_array__make_masked_array.3.2.1.1",
+      "distance": 0.9896390438079834,
+      "file_path": "astropy/io/votable/converters.py",
+      "start_line": 80,
+      "end_line": 91,
+      "tokens": 114,
+      "context_length": 13326
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/nddata/compat.py_np_NDDataArray.1",
+      "distance": 0.9901348352432251,
+      "file_path": "astropy/nddata/compat.py",
+      "start_line": 5,
+      "end_line": 80,
+      "tokens": 704,
+      "context_length": 14030
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_1__SUPPORTED_FLAGS.1",
+      "distance": 0.9913738965988159,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 117,
+      "context_length": 14147
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_np_19",
+      "distance": 1.0031818151474,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 12,
+      "end_line": 83,
+      "tokens": 537,
+      "context_length": 14684
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py__comparison_method__comparison_method.3.1",
+      "distance": 1.0062251091003418,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 394,
+      "end_line": 410,
+      "tokens": 126,
+      "context_length": 14810
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin.add_NDArithmeticMixin.max.propagate_uncertainties.2.1",
+      "distance": 1.0139918327331543,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 603,
+      "end_line": 651,
+      "tokens": 455,
+      "context_length": 15265,
+      "file_pos": 7
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_bitfield_to_boolean_mask.bitfield_",
+      "distance": 1.0191872119903564,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 685,
+      "end_line": 715,
+      "tokens": 276,
+      "context_length": 15541
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.28_MaskedNDArray._reduce_defaults.4.1",
+      "distance": 1.0215237140655518,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 953,
+      "end_line": 967,
+      "tokens": 170,
+      "context_length": 15711
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin_NDArithmeticMixin.1",
+      "distance": 1.021974802017212,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 103,
+      "end_line": 164,
+      "tokens": 559,
+      "context_length": 16270,
+      "file_pos": 7
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked_Masked.5",
+      "distance": 1.0252429246902466,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 43,
+      "end_line": 68,
+      "tokens": 195,
+      "context_length": 16465
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked.__new___Masked.__new__.1.3.2.1",
+      "distance": 1.0296660661697388,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 70,
+      "end_line": 80,
+      "tokens": 131,
+      "context_length": 16596
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_masked_nanfunc_masked_nanfunc.nanfunc.5.1",
+      "distance": 1.0297629833221436,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 1023,
+      "end_line": 1040,
+      "tokens": 162,
+      "context_length": 16758
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_masked_nanfunc.doc_masked_nanfunc.8.1",
+      "distance": 1.0354900360107422,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 1042,
+      "end_line": 1063,
+      "tokens": 187,
+      "context_length": 16945
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/nddata/nddata.py_NDData.__init___NDData.__init__.5",
+      "distance": 1.0378336906433105,
+      "file_path": "astropy/nddata/nddata.py",
+      "start_line": 126,
+      "end_line": 296,
+      "tokens": 1367,
+      "context_length": 18312
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/nddata/nddata.py_3__meta_doc.1",
+      "distance": 1.0390545129776,
+      "file_path": "astropy/nddata/nddata.py",
+      "start_line": 5,
+      "end_line": 21,
+      "tokens": 147,
+      "context_length": 18459
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/nddata/nddata.py_NDData.__str___NDData.wcs.2.1",
+      "distance": 1.0408035516738892,
+      "file_path": "astropy/nddata/nddata.py",
+      "start_line": 298,
+      "end_line": 344,
+      "tokens": 294,
+      "context_length": 18753
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py__get_data_and_masks_masked_arr_helper.2.1",
+      "distance": 1.044527530670166,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 164,
+      "end_line": 231,
+      "tokens": 599,
+      "context_length": 19352
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked.8_Masked._get_masked_instance.4.1",
+      "distance": 1.0448353290557861,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 110,
+      "end_line": 125,
+      "tokens": 174,
+      "context_length": 19526
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_interpret_bit_flags.has_flip_bits_bitfield_to_boolean_mask",
+      "distance": 1.0462985038757324,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 352,
+      "end_line": 714,
+      "tokens": 914,
+      "context_length": 20440
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.view_MaskedNDArray.view.6.1",
+      "distance": 1.0500234365463257,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 556,
+      "end_line": 579,
+      "tokens": 206,
+      "context_length": 20646
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray_MaskedNDArray.__init_subclass__.5.cls.info.1",
+      "distance": 1.0507373809814453,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 469,
+      "end_line": 509,
+      "tokens": 376,
+      "context_length": 21022
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._arithmetic_NDArithmeticMixin._arithmetic.7",
+      "distance": 1.0517840385437012,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 166,
+      "end_line": 249,
+      "tokens": 693,
+      "context_length": 21715,
+      "file_pos": 8
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._prepare_then_do_arithmetic_",
+      "distance": 1.0569813251495361,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 653,
+      "end_line": 751,
+      "tokens": 817,
+      "context_length": 22532,
+      "file_pos": 8
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py__is_bit_flag_InvalidBitFlag.2",
+      "distance": 1.061295747756958,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 26,
+      "end_line": 58,
+      "tokens": 196,
+      "context_length": 22728
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/astropy/astropy/utils/compat/numpycompat.py_np_",
+      "distance": 1.062786340713501,
+      "file_path": "astropy/utils/compat/numpycompat.py",
+      "start_line": 7,
+      "end_line": 29,
+      "tokens": 246,
+      "context_length": 22974
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_percentile_array_equal.5.1",
+      "distance": 1.069476842880249,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 654,
+      "end_line": 669,
+      "tokens": 156,
+      "context_length": 23130
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked.mask_Masked.filled.4.1",
+      "distance": 1.070057988166809,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 246,
+      "end_line": 278,
+      "tokens": 204,
+      "context_length": 23334
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/astropy/astropy/table/column.py__convert_sequence_data_to_array__convert_sequence_data_to_array.9.3",
+      "distance": 1.075466513633728,
+      "file_path": "astropy/table/column.py",
+      "start_line": 161,
+      "end_line": 236,
+      "tokens": 731,
+      "context_length": 24065
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_array_equiv_where.8.1",
+      "distance": 1.0831853151321411,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 672,
+      "end_line": 691,
+      "tokens": 139,
+      "context_length": 24204
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_interpret_bit_flags_interpret_bit_flags.1",
+      "distance": 1.083838939666748,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 273,
+      "end_line": 351,
+      "tokens": 972,
+      "context_length": 25176
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_packbits_unpackbits.5.1",
+      "distance": 1.095642328262329,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 386,
+      "end_line": 399,
+      "tokens": 136,
+      "context_length": 25312
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/astropy/astropy/nddata/__init__.py_3_17",
+      "distance": 1.098750352859497,
+      "file_path": "astropy/nddata/__init__.py",
+      "start_line": 11,
+      "end_line": 26,
+      "tokens": 103,
+      "context_length": 25415
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/astropy/astropy/nddata/compat.py_NDDataArray.7_NDDataArray.unit_9.3.2.self._unit.1",
+      "distance": 1.102684497833252,
+      "file_path": "astropy/nddata/compat.py",
+      "start_line": 132,
+      "end_line": 157,
+      "tokens": 189,
+      "context_length": 25604
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_putmask_putmask.6",
+      "distance": 1.102770209312439,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 330,
+      "end_line": 345,
+      "tokens": 142,
+      "context_length": 25746
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.sort_MaskedNDArray.cumprod.2.1",
+      "distance": 1.1036427021026611,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1079,
+      "end_line": 1103,
+      "tokens": 307,
+      "context_length": 26053
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/astropy/astropy/nddata/compat.py_NDDataArray.uncertainty_6_NDDataArray.uncertainty_6.1.2.self._uncertainty.1",
+      "distance": 1.1045987606048584,
+      "file_path": "astropy/nddata/compat.py",
+      "start_line": 111,
+      "end_line": 130,
+      "tokens": 171,
+      "context_length": 26224
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/astropy/astropy/nddata/nddata.py_NDData_NDData.meta.1",
+      "distance": 1.1046231985092163,
+      "file_path": "astropy/nddata/nddata.py",
+      "start_line": 24,
+      "end_line": 124,
+      "tokens": 885,
+      "context_length": 27109
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_base64__resize.5.1",
+      "distance": 1.1077827215194702,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 5,
+      "end_line": 132,
+      "tokens": 590,
+      "context_length": 27699
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_BitFlagNameMeta.__getattr___BitFlagNameMeta.__repr__.1.1",
+      "distance": 1.10806405544281,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 156,
+      "end_line": 198,
+      "tokens": 344,
+      "context_length": 28043
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/astropy/astropy/nddata/nduncertainty.py_weakref_collapse_to_variance_mapping.1",
+      "distance": 1.1111600399017334,
+      "file_path": "astropy/nddata/nduncertainty.py",
+      "start_line": 3,
+      "end_line": 27,
+      "tokens": 141,
+      "context_length": 28184
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndslicing.py_3_NDSlicingMixin.__getitem__.2.4.1",
+      "distance": 1.1117267608642578,
+      "file_path": "astropy/nddata/mixins/ndslicing.py",
+      "start_line": 5,
+      "end_line": 65,
+      "tokens": 509,
+      "context_length": 28693
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked._get_masked_cls_Masked._get_masked_cls.5.1",
+      "distance": 1.1127861738204956,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 127,
+      "end_line": 167,
+      "tokens": 376,
+      "context_length": 29069
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_block_block.8",
+      "distance": 1.1161926984786987,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 476,
+      "end_line": 498,
+      "tokens": 303,
+      "context_length": 29372
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/astropy/astropy/time/core.py__check_for_masked_and_fill.get_as_filled_ndarray__check_for_masked_and_fill.6.1",
+      "distance": 1.1172826290130615,
+      "file_path": "astropy/time/core.py",
+      "start_line": 3232,
+      "end_line": 3266,
+      "tokens": 310,
+      "context_length": 29682
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/astropy/astropy/nddata/mixins/ndarithmetic.py_NDArithmeticMixin._arithmetic_data_NDArithmeticMixin._arithmetic_data.4.1",
+      "distance": 1.1178596019744873,
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "start_line": 354,
+      "end_line": 397,
+      "tokens": 307,
+      "context_length": 29989,
+      "file_pos": 15
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray.clip_MaskedNDArray.clip.10.1",
+      "distance": 1.1189643144607544,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 1105,
+      "end_line": 1124,
+      "tokens": 260,
+      "context_length": 30249
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/astropy/astropy/io/votable/converters.py_Integer.output_Integer.filter_array.2.1",
+      "distance": 1.1197357177734375,
+      "file_path": "astropy/io/votable/converters.py",
+      "start_line": 877,
+      "end_line": 901,
+      "tokens": 151,
+      "context_length": 30400
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedInfoBase_MaskedInfoBase.__init__.4.self.serialize_method.1",
+      "distance": 1.120715856552124,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 303,
+      "end_line": 319,
+      "tokens": 124,
+      "context_length": 30524
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/astropy/astropy/nddata/decorators.py_support_nddata.support_nddata_decorator_",
+      "distance": 1.1219115257263184,
+      "file_path": "astropy/nddata/decorators.py",
+      "start_line": 147,
+      "end_line": 295,
+      "tokens": 1241,
+      "context_length": 31765
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/astropy/astropy/io/votable/converters.py_NumericArray.parse_parts_NumericArray.binoutput.3.1",
+      "distance": 1.1233241558074951,
+      "file_path": "astropy/io/votable/converters.py",
+      "start_line": 637,
+      "end_line": 667,
+      "tokens": 292,
+      "context_length": 32057
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/astropy/astropy/nddata/blocks.py_np__process_block_inputs.8.1",
+      "distance": 1.1234626770019531,
+      "file_path": "astropy/nddata/blocks.py",
+      "start_line": 6,
+      "end_line": 33,
+      "tokens": 211,
+      "context_length": 32268
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/astropy/astropy/time/core.py__check_for_masked_and_fill__check_for_masked_and_fill.1",
+      "distance": 1.126662254333496,
+      "file_path": "astropy/time/core.py",
+      "start_line": 3207,
+      "end_line": 3230,
+      "tokens": 177,
+      "context_length": 32445
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_zeros_like_ones_like.3.1",
+      "distance": 1.127291202545166,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 274,
+      "end_line": 295,
+      "tokens": 201,
+      "context_length": 32646
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_BitFlagNameMeta.__setattr___BitFlagNameMeta.__setattr__.6.1",
+      "distance": 1.1306283473968506,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 121,
+      "end_line": 154,
+      "tokens": 248,
+      "context_length": 32894
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_94_",
+      "distance": 1.130752682685852,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 1066,
+      "end_line": 1082,
+      "tokens": 133,
+      "context_length": 33027
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/astropy/astropy/utils/shapes.py_ShapedLikeNDArray.ndim_ShapedLikeNDArray.32",
+      "distance": 1.1322863101959229,
+      "file_path": "astropy/utils/shapes.py",
+      "start_line": 197,
+      "end_line": 291,
+      "tokens": 717,
+      "context_length": 33744
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_broadcast_arrays_broadcast_arrays.9.1",
+      "distance": 1.1393682956695557,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 501,
+      "end_line": 527,
+      "tokens": 280,
+      "context_length": 34024
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/astropy/astropy/nddata/ccddata.py__arithmetic.decorator__uncertainty_unit_equivalent_to_parent.2",
+      "distance": 1.1412572860717773,
+      "file_path": "astropy/nddata/ccddata.py",
+      "start_line": 55,
+      "end_line": 77,
+      "tokens": 226,
+      "context_length": 34250
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/astropy/astropy/nddata/nduncertainty.py_from_variance_for_mean_MissingDataAssociationException.1",
+      "distance": 1.142366647720337,
+      "file_path": "astropy/nddata/nduncertainty.py",
+      "start_line": 58,
+      "end_line": 84,
+      "tokens": 192,
+      "context_length": 34442
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_empty_like_empty_like.5.1",
+      "distance": 1.1426312923431396,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 252,
+      "end_line": 271,
+      "tokens": 164,
+      "context_length": 34606
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray._combine_masks_MaskedNDArray._combine_masks.7.1",
+      "distance": 1.1465163230895996,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 674,
+      "end_line": 703,
+      "tokens": 298,
+      "context_length": 34904
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_place_place.6",
+      "distance": 1.1486332416534424,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 348,
+      "end_line": 363,
+      "tokens": 138,
+      "context_length": 35042
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/astropy/astropy/nddata/decorators.py_support_nddata.2_support_nddata.all_returns.1",
+      "distance": 1.1498583555221558,
+      "file_path": "astropy/nddata/decorators.py",
+      "start_line": 129,
+      "end_line": 145,
+      "tokens": 208,
+      "context_length": 35250
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/astropy/astropy/units/quantity_helper/function_helpers.py_invariant_m_helper_place.2.3.1",
+      "distance": 1.1552873849868774,
+      "file_path": "astropy/units/quantity_helper/function_helpers.py",
+      "start_line": 190,
+      "end_line": 276,
+      "tokens": 771,
+      "context_length": 36021
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_median_median.4.4.1.1",
+      "distance": 1.155308485031128,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 577,
+      "end_line": 596,
+      "tokens": 162,
+      "context_length": 36183
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_itertools___doctest_requires__.1",
+      "distance": 1.1555289030075073,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2,
+      "end_line": 90,
+      "tokens": 660,
+      "context_length": 36843
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_FalseArray_FalseArray.__setitem__.2.1",
+      "distance": 1.1572039127349854,
+      "file_path": "astropy/table/column.py",
+      "start_line": 100,
+      "end_line": 126,
+      "tokens": 198,
+      "context_length": 37041
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/astropy/astropy/utils/shapes.py_ShapedLikeNDArray.__array_function___IncompatibleShapeError.__init__.1",
+      "distance": 1.1587157249450684,
+      "file_path": "astropy/utils/shapes.py",
+      "start_line": 292,
+      "end_line": 328,
+      "tokens": 353,
+      "context_length": 37394
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/__init__.py__",
+      "distance": 1.1602855920791626,
+      "file_path": "astropy/utils/masked/__init__.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 37394
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn.__setitem___",
+      "distance": 1.1603797674179077,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1808,
+      "end_line": 1835,
+      "tokens": 269,
+      "context_length": 37663
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.__getstate___Table._mask.2.1",
+      "distance": 1.163486361503601,
+      "file_path": "astropy/table/table.py",
+      "start_line": 929,
+      "end_line": 972,
+      "tokens": 307,
+      "context_length": 37970
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn.__new___MaskedColumn.__new__.22.1",
+      "distance": 1.1637325286865234,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1579,
+      "end_line": 1659,
+      "tokens": 685,
+      "context_length": 38655
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArrayInfo_MaskedNDArrayInfo._represent_as_dict_primary_data.1",
+      "distance": 1.1638761758804321,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 322,
+      "end_line": 339,
+      "tokens": 244,
+      "context_length": 38899
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/astropy/astropy/nddata/bitmask.py_BitFlagNameMeta_BitFlagNameMeta.__new__.8.1",
+      "distance": 1.1646487712860107,
+      "file_path": "astropy/nddata/bitmask.py",
+      "start_line": 82,
+      "end_line": 119,
+      "tokens": 296,
+      "context_length": 39195
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_Masked._get_data_and_mask_Masked._get_data_and_mask.4.1",
+      "distance": 1.1652812957763672,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 169,
+      "end_line": 209,
+      "tokens": 312,
+      "context_length": 39507
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_put_put.7",
+      "distance": 1.1674396991729736,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 311,
+      "end_line": 327,
+      "tokens": 164,
+      "context_length": 39671
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_MaskedConstant_MaskedConstant.__deepcopy__.1.1",
+      "distance": 1.167932391166687,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 161,
+      "end_line": 183,
+      "tokens": 186,
+      "context_length": 39857
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/nddata/compat.py",
+      "position": 1,
+      "tokens": 2143,
+      "context_length": 2143
+    },
+    {
+      "file_path": "astropy/utils/masked/core.py",
+      "position": 2,
+      "tokens": 10706,
+      "context_length": 12849
+    },
+    {
+      "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+      "position": 3,
+      "tokens": 6215,
+      "context_length": 19064
+    },
+    {
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "position": 4,
+      "tokens": 8907,
+      "context_length": 27971
+    },
+    {
+      "file_path": "astropy/nddata/bitmask.py",
+      "position": 5,
+      "tokens": 6727,
+      "context_length": 34698
+    },
+    {
+      "file_path": "astropy/nddata/nddata_withmixins.py",
+      "position": 6,
+      "tokens": 639,
+      "context_length": 35337
+    },
+    {
+      "file_path": "astropy/io/votable/converters.py",
+      "position": 7,
+      "tokens": 9940,
+      "context_length": 45277
+    },
+    {
+      "file_path": "astropy/nddata/nddata.py",
+      "position": 8,
+      "tokens": 3223,
+      "context_length": 48500
+    },
+    {
+      "file_path": "astropy/utils/compat/numpycompat.py",
+      "position": 9,
+      "tokens": 287,
+      "context_length": 48787
+    },
+    {
+      "file_path": "astropy/table/column.py",
+      "position": 10,
+      "tokens": 14820,
+      "context_length": 63607
+    },
+    {
+      "file_path": "astropy/nddata/__init__.py",
+      "position": 11,
+      "tokens": 355,
+      "context_length": 63962
+    },
+    {
+      "file_path": "astropy/io/votable/tree.py",
+      "position": 12,
+      "tokens": 29417,
+      "context_length": 93379
+    },
+    {
+      "file_path": "astropy/nddata/nduncertainty.py",
+      "position": 13,
+      "tokens": 9600,
+      "context_length": 102979
+    },
+    {
+      "file_path": "astropy/nddata/mixins/ndslicing.py",
+      "position": 14,
+      "tokens": 1086,
+      "context_length": 104065
+    },
+    {
+      "file_path": "astropy/time/core.py",
+      "position": 15,
+      "tokens": 28400,
+      "context_length": 132465
+    },
+    {
+      "file_path": "astropy/nddata/decorators.py",
+      "position": 16,
+      "tokens": 2281,
+      "context_length": 134746
+    },
+    {
+      "file_path": "astropy/nddata/blocks.py",
+      "position": 17,
+      "tokens": 1831,
+      "context_length": 136577
+    },
+    {
+      "file_path": "astropy/utils/shapes.py",
+      "position": 18,
+      "tokens": 3767,
+      "context_length": 140344
+    },
+    {
+      "file_path": "astropy/nddata/ccddata.py",
+      "position": 19,
+      "tokens": 6994,
+      "context_length": 147338
+    },
+    {
+      "file_path": "astropy/units/quantity_helper/function_helpers.py",
+      "position": 20,
+      "tokens": 10247,
+      "context_length": 157585
+    },
+    {
+      "file_path": "astropy/table/table.py",
+      "position": 21,
+      "tokens": 33423,
+      "context_length": 191008
+    },
+    {
+      "file_path": "astropy/utils/masked/__init__.py",
+      "position": 22,
+      "tokens": 84,
+      "context_length": 191092
+    },
+    {
+      "file_path": "astropy/io/ascii/core.py",
+      "position": 23,
+      "tokens": 13827,
+      "context_length": 204919
+    }
+  ]
+}

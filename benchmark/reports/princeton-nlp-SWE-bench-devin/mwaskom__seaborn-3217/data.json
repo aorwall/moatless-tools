@@ -1,0 +1,2759 @@
+{
+  "instance_id": "mwaskom__seaborn-3217",
+  "model_patch": "diff --git a/seaborn/distributions.py b/seaborn/distributions.py\nindex 9f0cfacb..3033e207 100644\n--- a/seaborn/distributions.py\n+++ b/seaborn/distributions.py\n@@ -279,13 +279,13 @@ class _DistributionPlotter(VectorPlotter):\n                 hist = curves[key].reset_index(name=\"heights\")\n                 level_idx = hue_levels.index(level)\n                 if self._log_scaled(self.data_variable):\n-                    log_min = np.log10(hist[\"edges\"])\n-                    log_max = np.log10(hist[\"edges\"] + hist[\"widths\"])\n-                    log_width = (log_max - log_min) / n\n-                    new_min = np.power(10, log_min + level_idx * log_width)\n-                    new_max = np.power(10, log_min + (level_idx + 1) * log_width)\n-                    hist[\"widths\"] = new_max - new_min\n-                    hist[\"edges\"] = new_min\n+                    log_base = np.log10(hist[\"edges\"])\n+                    log_increment = np.log10(hist[\"edges\"] + hist[\"widths\"]) - log_base\n+                    log_width = log_increment / n\n+                    new_min = log_base + log_width * level_idx\n+                    new_max = log_base + log_width * (level_idx + 1)\n+                    hist[\"widths\"] = np.power(10, new_max) - np.power(10, new_min)\n+                    hist[\"edges\"] = np.power(10, new_min)\n                 else:\n                     hist[\"widths\"] /= n\n                     hist[\"edges\"] += level_idx * hist[\"widths\"]\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "seaborn/distributions.py"
+  ],
+  "repo": "mwaskom/seaborn",
+  "base_commit": "623b0b723c671e99f04e8ababf19adc563f30168",
+  "patch": "diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py\n--- a/seaborn/_core/plot.py\n+++ b/seaborn/_core/plot.py\n@@ -1377,10 +1377,9 @@ def _unscale_coords(\n     ) -> DataFrame:\n         # TODO do we still have numbers in the variable name at this point?\n         coord_cols = [c for c in df if re.match(r\"^[xy]\\D*$\", str(c))]\n-        drop_cols = [*coord_cols, \"width\"] if \"width\" in df else coord_cols\n         out_df = (\n             df\n-            .drop(drop_cols, axis=1)\n+            .drop(coord_cols, axis=1)\n             .reindex(df.columns, axis=1)  # So unscaled columns retain their place\n             .copy(deep=False)\n         )\n@@ -1396,12 +1395,6 @@ def _unscale_coords(\n                 inverted = transform(values)\n                 out_df.loc[values.index, str(var)] = inverted\n \n-                if var == orient and \"width\" in view_df:\n-                    width = view_df[\"width\"]\n-                    out_df.loc[values.index, \"width\"] = (\n-                        transform(values + width / 2) - transform(values - width / 2)\n-                    )\n-\n         return out_df\n \n     def _generate_pairings(\ndiff --git a/seaborn/_marks/bar.py b/seaborn/_marks/bar.py\n--- a/seaborn/_marks/bar.py\n+++ b/seaborn/_marks/bar.py\n@@ -29,17 +29,23 @@ class BarBase(Mark):\n \n     def _make_patches(self, data, scales, orient):\n \n+        transform = scales[orient]._matplotlib_scale.get_transform()\n+        forward = transform.transform\n+        reverse = transform.inverted().transform\n+\n+        other = {\"x\": \"y\", \"y\": \"x\"}[orient]\n+\n+        pos = reverse(forward(data[orient]) - data[\"width\"] / 2)\n+        width = reverse(forward(data[orient]) + data[\"width\"] / 2) - pos\n+\n+        val = (data[other] - data[\"baseline\"]).to_numpy()\n+        base = data[\"baseline\"].to_numpy()\n+\n         kws = self._resolve_properties(data, scales)\n         if orient == \"x\":\n-            kws[\"x\"] = (data[\"x\"] - data[\"width\"] / 2).to_numpy()\n-            kws[\"y\"] = data[\"baseline\"].to_numpy()\n-            kws[\"w\"] = data[\"width\"].to_numpy()\n-            kws[\"h\"] = (data[\"y\"] - data[\"baseline\"]).to_numpy()\n+            kws.update(x=pos, y=base, w=width, h=val)\n         else:\n-            kws[\"x\"] = data[\"baseline\"].to_numpy()\n-            kws[\"y\"] = (data[\"y\"] - data[\"width\"] / 2).to_numpy()\n-            kws[\"w\"] = (data[\"x\"] - data[\"baseline\"]).to_numpy()\n-            kws[\"h\"] = data[\"width\"].to_numpy()\n+            kws.update(x=base, y=pos, w=val, h=width)\n \n         kws.pop(\"width\", None)\n         kws.pop(\"baseline\", None)\n",
+  "test_patch": "diff --git a/tests/_marks/test_bar.py b/tests/_marks/test_bar.py\n--- a/tests/_marks/test_bar.py\n+++ b/tests/_marks/test_bar.py\n@@ -200,3 +200,13 @@ def test_unfilled(self, x, y):\n         colors = p._theme[\"axes.prop_cycle\"].by_key()[\"color\"]\n         assert_array_equal(fcs, to_rgba_array([colors[0]] * len(x), 0))\n         assert_array_equal(ecs, to_rgba_array([colors[4]] * len(x), 1))\n+\n+    def test_log_scale(self):\n+\n+        x = y = [1, 10, 100, 1000]\n+        p = Plot(x, y).add(Bars()).scale(x=\"log\").plot()\n+        ax = p._figure.axes[0]\n+\n+        paths = ax.collections[0].get_paths()\n+        for a, b in zip(paths, paths[1:]):\n+            assert a.vertices[1, 0] == pytest.approx(b.vertices[0, 0])\n",
+  "problem_statement": "Width computation after histogram slightly wrong with log scale\nNote the slight overlap here:\r\n\r\n```python\r\n(\r\n    so.Plot(tips, \"total_bill\")\r\n    .add(so.Bars(alpha=.3, edgewidth=0), so.Hist(bins=4))\r\n    .scale(x=\"log\")\r\n)\r\n```\r\n![image](https://user-images.githubusercontent.com/315810/178975852-d8fd830e-ae69-487d-be22-36531fca3f8f.png)\r\n\r\nIt becomes nearly imperceptible with more bins:\r\n\r\n```\r\n(\r\n    so.Plot(tips, \"total_bill\")\r\n    .add(so.Bars(alpha=.3, edgewidth=0), so.Hist(bins=8))\r\n    .scale(x=\"log\")\r\n)\r\n```\r\n![image](https://user-images.githubusercontent.com/315810/178976113-7026b3ae-0b87-48df-adc0-00e90d5aea94.png)\r\n\r\nThis is not about `Bars`; `Bar` has it too:\r\n\r\n```python\r\n(\r\n    so.Plot(tips, \"total_bill\")\r\n    .add(so.Bar(alpha=.3, edgewidth=0, width=1), so.Hist(bins=4))\r\n    .scale(x=\"log\")\r\n)\r\n```\r\n![image](https://user-images.githubusercontent.com/315810/178975910-484df65f-4ce6-482e-9992-5d02faf6b9ea.png)\r\n\n",
+  "hints_text": "",
+  "created_at": "2023-01-10T12:37:28Z",
+  "version": "0.13",
+  "FAIL_TO_PASS": "[\"tests/_marks/test_bar.py::TestBars::test_log_scale\"]",
+  "PASS_TO_PASS": "[\"tests/_marks/test_bar.py::TestBar::test_artist_kws_clip\", \"tests/_marks/test_bar.py::TestBar::test_categorical_positions_horizontal\", \"tests/_marks/test_bar.py::TestBar::test_categorical_positions_vertical\", \"tests/_marks/test_bar.py::TestBar::test_mapped_properties\", \"tests/_marks/test_bar.py::TestBar::test_numeric_positions_horizontal\", \"tests/_marks/test_bar.py::TestBar::test_numeric_positions_vertical\", \"tests/_marks/test_bar.py::TestBar::test_set_properties\", \"tests/_marks/test_bar.py::TestBar::test_zero_height_skipped\", \"tests/_marks/test_bar.py::TestBars::test_auto_edgewidth\", \"tests/_marks/test_bar.py::TestBars::test_mapped_color_direct_alpha\", \"tests/_marks/test_bar.py::TestBars::test_mapped_edgewidth\", \"tests/_marks/test_bar.py::TestBars::test_positions\", \"tests/_marks/test_bar.py::TestBars::test_positions_horizontal\", \"tests/_marks/test_bar.py::TestBars::test_unfilled\", \"tests/_marks/test_bar.py::TestBars::test_width\"]",
+  "environment_setup_commit": "23860365816440b050e9211e1c395a966de3c403",
+  "patch_files": [
+    "seaborn/_core/plot.py",
+    "seaborn/_marks/bar.py"
+  ],
+  "test_patch_files": [
+    "tests/_marks/test_bar.py"
+  ],
+  "patch_diff_details": {
+    "seaborn/_core/plot.py": {
+      "diffs": [
+        {
+          "start_line_old": 1380,
+          "end_line_old": 1383,
+          "file_pos": 18,
+          "file_context_length": 73686,
+          "closest_snippet_id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._compute_stats_Plotter._compute_stats.4.8.9.2.data.frame.1",
+          "closest_snippet_line_distance": 251,
+          "pos": 87,
+          "context_length": 37875
+        },
+        {
+          "start_line_old": 1399,
+          "end_line_old": 1404,
+          "file_pos": 18,
+          "file_context_length": 73686,
+          "closest_snippet_id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._compute_stats_Plotter._compute_stats.4.8.9.2.data.frame.1",
+          "closest_snippet_line_distance": 272,
+          "pos": 87,
+          "context_length": 37875
+        }
+      ]
+    },
+    "seaborn/_marks/bar.py": {
+      "diffs": [
+        {
+          "start_line_old": 32,
+          "end_line_old": 40,
+          "file_pos": 1,
+          "file_context_length": 2123,
+          "closest_snippet_id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_Bars_Bars.12",
+          "closest_snippet_line_distance": 144,
+          "pos": 16,
+          "context_length": 9867
+        }
+      ]
+    }
+  },
+  "vectors": 661,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_Bars._plot_",
+      "distance": 0.8738826513290405,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 203,
+      "end_line": 251,
+      "tokens": 432,
+      "context_length": 432,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_univariate_histogram.kde_kws.39__DistributionPlotter.plot_univariate_histogram.kde_kws.49.3",
+      "distance": 0.8825658559799194,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 552,
+      "end_line": 742,
+      "tokens": 1491,
+      "context_length": 1923
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_bivariate_histogram__DistributionPlotter.plot_bivariate_histogram.cbar_kws.21.artist_kws.4",
+      "distance": 0.9157354831695557,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 744,
+      "end_line": 899,
+      "tokens": 1277,
+      "context_length": 3200
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_histplot.__doc___histplot.__doc__.1",
+      "distance": 0.920814037322998,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1468,
+      "end_line": 1594,
+      "tokens": 1103,
+      "context_length": 4303
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/seaborn/examples/histogram_stacked.py_1_",
+      "distance": 0.9296613931655884,
+      "file_path": "examples/histogram_stacked.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 152,
+      "context_length": 4455
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_Bar._plot_Bar._plot.2.6",
+      "distance": 0.9423823356628418,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 133,
+      "end_line": 173,
+      "tokens": 464,
+      "context_length": 4919,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_Bars_Bars.12",
+      "distance": 0.9570688009262085,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 176,
+      "end_line": 201,
+      "tokens": 238,
+      "context_length": 5157,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_univariate_histogram__DistributionPlotter.plot_univariate_histogram.kde_kws.38",
+      "distance": 0.9599005579948425,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 379,
+      "end_line": 551,
+      "tokens": 1323,
+      "context_length": 6480
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalStatPlotter__CategoricalStatPlotter.estimate_statistic.self.confint.1",
+      "distance": 0.9746713638305664,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1425,
+      "end_line": 1492,
+      "tokens": 490,
+      "context_length": 6970
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/seaborn/examples/part_whole_bars.py_1_",
+      "distance": 0.9751876592636108,
+      "file_path": "examples/part_whole_bars.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 216,
+      "context_length": 7186
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/seaborn/examples/joint_histogram.py_1_",
+      "distance": 0.9758303761482239,
+      "file_path": "examples/joint_histogram.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 192,
+      "context_length": 7378
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_36_histplot.11.1",
+      "distance": 0.9856160879135132,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1370,
+      "end_line": 1465,
+      "tokens": 608,
+      "context_length": 7986
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_distplot.27_",
+      "distance": 0.9864215850830078,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2494,
+      "end_line": 2547,
+      "tokens": 537,
+      "context_length": 8523
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_bivariate_density.14__DistributionPlotter.plot_bivariate_density.20.artist_kws.4",
+      "distance": 0.9884542226791382,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1134,
+      "end_line": 1220,
+      "tokens": 773,
+      "context_length": 9296
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist._get_bins_and_eval_Hist._eval.7.1",
+      "distance": 0.9970865249633789,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 165,
+      "end_line": 181,
+      "tokens": 163,
+      "context_length": 9459
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_BarBase_BarBase._make_patches.8.1",
+      "distance": 1.0111064910888672,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 28,
+      "end_line": 73,
+      "tokens": 408,
+      "context_length": 9867,
+      "file_pos": 7
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__BarPlotter.draw_bars__BarPlotter.plot.4.1",
+      "distance": 1.0111548900604248,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1542,
+      "end_line": 1589,
+      "tokens": 357,
+      "context_length": 10224
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_barplot_barplot.8.1",
+      "distance": 1.021307349205017,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2739,
+      "end_line": 2764,
+      "tokens": 232,
+      "context_length": 10456
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/seaborn/doc/tools/generate_logos.py_logo_logo.2",
+      "distance": 1.0255517959594727,
+      "file_path": "doc/tools/generate_logos.py",
+      "start_line": 61,
+      "end_line": 156,
+      "tokens": 938,
+      "context_length": 11394
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_barplot.__doc___barplot.__doc__.1",
+      "distance": 1.028533935546875,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2767,
+      "end_line": 2826,
+      "tokens": 387,
+      "context_length": 11781
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/seaborn/examples/three_variable_histogram.py__",
+      "distance": 1.0299649238586426,
+      "file_path": "examples/three_variable_histogram.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 0,
+      "context_length": 11781
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_Bar_Bar.12",
+      "distance": 1.031860589981079,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 106,
+      "end_line": 131,
+      "tokens": 239,
+      "context_length": 12020,
+      "file_pos": 9
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter._artist_kws__DistributionPlotter._artist_kws.4.1",
+      "distance": 1.0333937406539917,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 173,
+      "end_line": 194,
+      "tokens": 228,
+      "context_length": 12248
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_1__param_docs.1",
+      "distance": 1.0343027114868164,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1,
+      "end_line": 92,
+      "tokens": 618,
+      "context_length": 12866
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist.__call___",
+      "distance": 1.0371321439743042,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 201,
+      "end_line": 233,
+      "tokens": 316,
+      "context_length": 13182
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/seaborn/seaborn/_statistics.py_Histogram._eval_univariate_Histogram.__call__.2.2.1.1",
+      "distance": 1.0434774160385132,
+      "file_path": "seaborn/_statistics.py",
+      "start_line": 367,
+      "end_line": 398,
+      "tokens": 282,
+      "context_length": 13464
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_displot.24_displot.28",
+      "distance": 1.0476410388946533,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2187,
+      "end_line": 2277,
+      "tokens": 810,
+      "context_length": 14274
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/seaborn/seaborn/_statistics.py_Histogram._eval_bivariate_Histogram._eval_bivariate.9.1",
+      "distance": 1.0503273010253906,
+      "file_path": "seaborn/_statistics.py",
+      "start_line": 335,
+      "end_line": 365,
+      "tokens": 262,
+      "context_length": 14536
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/seaborn/seaborn/_statistics.py_Histogram._define_bin_edges_Histogram._define_bin_edges.4.1",
+      "distance": 1.0509895086288452,
+      "file_path": "seaborn/_statistics.py",
+      "start_line": 254,
+      "end_line": 273,
+      "tokens": 191,
+      "context_length": 14727
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_univariate_density__DistributionPlotter.plot_univariate_density.2.32.3",
+      "distance": 1.051543951034546,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 901,
+      "end_line": 1034,
+      "tokens": 937,
+      "context_length": 15664
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/seaborn/examples/faceted_histogram.py__",
+      "distance": 1.0542168617248535,
+      "file_path": "examples/faceted_histogram.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 15664
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_countplot.__doc___countplot.__doc__.1",
+      "distance": 1.0581579208374023,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2959,
+      "end_line": 3000,
+      "tokens": 236,
+      "context_length": 15900
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/seaborn/examples/smooth_bivariate_kde.py_1_",
+      "distance": 1.0663490295410156,
+      "file_path": "examples/smooth_bivariate_kde.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 131,
+      "context_length": 16031
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/seaborn/examples/grouped_boxplot.py_1_",
+      "distance": 1.0702811479568481,
+      "file_path": "examples/grouped_boxplot.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 103,
+      "context_length": 16134
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_boxenplot.__doc___boxenplot.__doc__.1",
+      "distance": 1.0721895694732666,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2419,
+      "end_line": 2492,
+      "tokens": 670,
+      "context_length": 16804
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/seaborn/seaborn/_statistics.py_Histogram.define_bin_params_Histogram.define_bin_params.4.1",
+      "distance": 1.0789482593536377,
+      "file_path": "seaborn/_statistics.py",
+      "start_line": 275,
+      "end_line": 333,
+      "tokens": 402,
+      "context_length": 17206
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist._normalize_Hist._normalize.4.1",
+      "distance": 1.0809061527252197,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 183,
+      "end_line": 199,
+      "tokens": 145,
+      "context_length": 17351
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/seaborn/seaborn/_statistics.py__percentile_interval_",
+      "distance": 1.081479549407959,
+      "file_path": "seaborn/_statistics.py",
+      "start_line": 519,
+      "end_line": 555,
+      "tokens": 257,
+      "context_length": 17608
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/seaborn/examples/horizontal_boxplot.py_1_",
+      "distance": 1.084458351135254,
+      "file_path": "examples/horizontal_boxplot.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 192,
+      "context_length": 17800
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist._define_bin_params_Hist._define_bin_params.9.1",
+      "distance": 1.086815595626831,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 143,
+      "end_line": 163,
+      "tokens": 201,
+      "context_length": 18001
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_49__freedman_diaconis_bins.8.2.1.1",
+      "distance": 1.0878031253814697,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2385,
+      "end_line": 2402,
+      "tokens": 168,
+      "context_length": 18169
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/seaborn/examples/grouped_barplot.py_1_",
+      "distance": 1.0895634889602661,
+      "file_path": "examples/grouped_barplot.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 122,
+      "context_length": 18291
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_bivariate_density__DistributionPlotter.plot_bivariate_density.13",
+      "distance": 1.0924333333969116,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1036,
+      "end_line": 1133,
+      "tokens": 692,
+      "context_length": 18983
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CountPlotter__LVPlotter.__init__.18",
+      "distance": 1.0932061672210693,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1741,
+      "end_line": 1786,
+      "tokens": 400,
+      "context_length": 19383
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist_Hist.__post_init__.2",
+      "distance": 1.0963163375854492,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 49,
+      "end_line": 120,
+      "tokens": 732,
+      "context_length": 20115
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_rugplot.__doc___rugplot.__doc__.1",
+      "distance": 1.0974690914154053,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2069,
+      "end_line": 2108,
+      "tokens": 222,
+      "context_length": 20337
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/seaborn/examples/marginal_ticks.py_1_",
+      "distance": 1.0990290641784668,
+      "file_path": "examples/marginal_ticks.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 144,
+      "context_length": 20481
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_displot.29_displot.33.1",
+      "distance": 1.1025959253311157,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2278,
+      "end_line": 2300,
+      "tokens": 296,
+      "context_length": 20777
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/seaborn/examples/wide_data_lineplot.py_1_",
+      "distance": 1.106896996498108,
+      "file_path": "examples/wide_data_lineplot.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 137,
+      "context_length": 20914
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/counting.py_Hist._define_bin_edges_Hist._define_bin_edges.6.1",
+      "distance": 1.110021948814392,
+      "file_path": "seaborn/_stats/counting.py",
+      "start_line": 122,
+      "end_line": 141,
+      "tokens": 163,
+      "context_length": 21077
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._setup_scales_Plotter._setup_scales.2.m.31.2.1",
+      "distance": 1.112417221069336,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1171,
+      "end_line": 1293,
+      "tokens": 1179,
+      "context_length": 22256,
+      "file_pos": 18
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/seaborn/examples/kde_ridgeplot.py_1_",
+      "distance": 1.1135971546173096,
+      "file_path": "examples/kde_ridgeplot.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 399,
+      "context_length": 22655
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_rugplot_rugplot.a.17.1",
+      "distance": 1.1154606342315674,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1989,
+      "end_line": 2066,
+      "tokens": 699,
+      "context_length": 23354
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/seaborn/examples/hexbin_marginals.py__",
+      "distance": 1.1162919998168945,
+      "file_path": "examples/hexbin_marginals.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 0,
+      "context_length": 23354
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_kdeplot_kdeplot.3.39.1",
+      "distance": 1.1179332733154297,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1597,
+      "end_line": 1746,
+      "tokens": 1320,
+      "context_length": 24674
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__LVPlotter._lvplot__LVPlotter._lvplot.box_kws.17.6.3",
+      "distance": 1.1183170080184937,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1842,
+      "end_line": 1976,
+      "tokens": 1205,
+      "context_length": 25879
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py__LinePlotter.plot.28__LinePlotter.plot.31.3.2",
+      "distance": 1.1197688579559326,
+      "file_path": "seaborn/relational.py",
+      "start_line": 423,
+      "end_line": 521,
+      "tokens": 818,
+      "context_length": 26697
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.estimate_densities__ViolinPlotter.estimate_densities.5",
+      "distance": 1.1202869415283203,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 927,
+      "end_line": 1031,
+      "tokens": 867,
+      "context_length": 27564
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py__make_log_transforms__make_log_transforms.5.1",
+      "distance": 1.1212974786758423,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 1024,
+      "end_line": 1046,
+      "tokens": 186,
+      "context_length": 27750
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/seaborn/examples/large_distributions.py_1_",
+      "distance": 1.1233359575271606,
+      "file_path": "examples/large_distributions.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 107,
+      "context_length": 27857
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.estimate_densities.6__ViolinPlotter.estimate_densities.self.density.1",
+      "distance": 1.123957872390747,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1032,
+      "end_line": 1050,
+      "tokens": 172,
+      "context_length": 28029
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__BarPlotter__BarPlotter.__init__.self.capsize.1",
+      "distance": 1.1250953674316406,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1523,
+      "end_line": 1540,
+      "tokens": 162,
+      "context_length": 28191
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Boolean._finalize_Boolean._finalize.ax.4.5",
+      "distance": 1.1262311935424805,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 202,
+      "end_line": 218,
+      "tokens": 188,
+      "context_length": 28379
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/seaborn/examples/wide_form_violinplot.py_1_",
+      "distance": 1.126293420791626,
+      "file_path": "examples/wide_form_violinplot.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 291,
+      "context_length": 28670
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py__make_symlog_transforms__make_symlog_transforms.4",
+      "distance": 1.1268675327301025,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 1049,
+      "end_line": 1066,
+      "tokens": 187,
+      "context_length": 28857
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Continuous._get_locators_Continuous._get_locators.4.1",
+      "distance": 1.1291979551315308,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 667,
+      "end_line": 721,
+      "tokens": 441,
+      "context_length": 29298
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/seaborn/doc/sphinxext/tutorial_builder.py_error_bars_error_bars.4.1",
+      "distance": 1.13150954246521,
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "start_line": 204,
+      "end_line": 214,
+      "tokens": 122,
+      "context_length": 29420
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.scale_count__ViolinPlotter.dwidth.1.3.1.1",
+      "distance": 1.1319279670715332,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1105,
+      "end_line": 1136,
+      "tokens": 241,
+      "context_length": 29661
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.14__DistributionPlotter.20",
+      "distance": 1.1353254318237305,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 297,
+      "end_line": 377,
+      "tokens": 516,
+      "context_length": 30177
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_jointplot_jointplot.scatterplot",
+      "distance": 1.1368131637573242,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 2179,
+      "end_line": 2339,
+      "tokens": 1464,
+      "context_length": 31641
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._compute_stats_Plotter._compute_stats.4.8.9.2.data.frame.1",
+      "distance": 1.1368763446807861,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1080,
+      "end_line": 1132,
+      "tokens": 357,
+      "context_length": 31998,
+      "file_pos": 26
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/seaborn/examples/errorband_lineplots.py__",
+      "distance": 1.1374011039733887,
+      "file_path": "examples/errorband_lineplots.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 0,
+      "context_length": 31998
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_box_lines__ViolinPlotter.draw_box_lines.8.4.3",
+      "distance": 1.137749433517456,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1327,
+      "end_line": 1359,
+      "tokens": 326,
+      "context_length": 32324
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/seaborn/examples/many_facets.py_1_",
+      "distance": 1.1378695964813232,
+      "file_path": "examples/many_facets.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 312,
+      "context_length": 32636
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter._resolve_multiple__DistributionPlotter._resolve_multiple.9.1",
+      "distance": 1.1379799842834473,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 230,
+      "end_line": 295,
+      "tokens": 638,
+      "context_length": 33274
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/seaborn/examples/grouped_violinplots.py_1_",
+      "distance": 1.1379961967468262,
+      "file_path": "examples/grouped_violinplots.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 121,
+      "context_length": 33395
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_violinplot.__doc___violinplot.__doc__.1",
+      "distance": 1.1384305953979492,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2317,
+      "end_line": 2396,
+      "tokens": 737,
+      "context_length": 34132
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalStatPlotter.draw_confints__CategoricalStatPlotter.draw_confints.2.1.3.2.2",
+      "distance": 1.1387619972229004,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1494,
+      "end_line": 1520,
+      "tokens": 322,
+      "context_length": 34454
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_BarBase._legend_artist_BarBase._legend_artist.key.4.1",
+      "distance": 1.1404938697814941,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 91,
+      "end_line": 103,
+      "tokens": 113,
+      "context_length": 34567,
+      "file_pos": 29
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_rug__DistributionPlotter.plot_rug.1.9.legend_artist.2",
+      "distance": 1.1422284841537476,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1291,
+      "end_line": 1323,
+      "tokens": 301,
+      "context_length": 34868
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_BarBase._resolve_properties_BarBase._resolve_properties.6.1",
+      "distance": 1.1447653770446777,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 75,
+      "end_line": 89,
+      "tokens": 146,
+      "context_length": 35014,
+      "file_pos": 29
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_distplot_distplot.26.1.4.1",
+      "distance": 1.1478266716003418,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2405,
+      "end_line": 2492,
+      "tokens": 724,
+      "context_length": 35738
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter.plot_univariate_ecdf__DistributionPlotter.plot_univariate_ecdf.14.4",
+      "distance": 1.1498777866363525,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1222,
+      "end_line": 1289,
+      "tokens": 577,
+      "context_length": 36315
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_ContinuousBase_ContinuousBase._setup.19.1",
+      "distance": 1.1502189636230469,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 415,
+      "end_line": 491,
+      "tokens": 577,
+      "context_length": 36892
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/seaborn/seaborn/_core/moves.py_Stack_Stack.__call__.groupers.2.1",
+      "distance": 1.1505860090255737,
+      "file_path": "seaborn/_core/moves.py",
+      "start_line": 153,
+      "end_line": 190,
+      "tokens": 304,
+      "context_length": 37196
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/seaborn/seaborn/_oldcore.py_VectorPlotter.comp_data_VectorPlotter.comp_data.4.1",
+      "distance": 1.150712251663208,
+      "file_path": "seaborn/_oldcore.py",
+      "start_line": 1093,
+      "end_line": 1137,
+      "tokens": 372,
+      "context_length": 37568
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._unscale_coords_Plotter._unscale_coords.coord_cols.5.1",
+      "distance": 1.1507127285003662,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1375,
+      "end_line": 1405,
+      "tokens": 307,
+      "context_length": 37875,
+      "file_pos": 31
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_PseudoAxis.convert_units_PseudoAxis.get_majorticklocs.1.1",
+      "distance": 1.1510818004608154,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 977,
+      "end_line": 994,
+      "tokens": 175,
+      "context_length": 38050
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_violins__ViolinPlotter.draw_violins.3.4.15.2.9.19.9.7.1",
+      "distance": 1.151968002319336,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1138,
+      "end_line": 1311,
+      "tokens": 1218,
+      "context_length": 39268
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/seaborn/seaborn/_oldcore.py_VectorPlotter._attach.17_VectorPlotter._attach.25",
+      "distance": 1.1536349058151245,
+      "file_path": "seaborn/_oldcore.py",
+      "start_line": 1217,
+      "end_line": 1295,
+      "tokens": 777,
+      "context_length": 40045
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_pointplot.__doc___pointplot.__doc__.1",
+      "distance": 1.154059648513794,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2851,
+      "end_line": 2916,
+      "tokens": 501,
+      "context_length": 40546
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_ecdfplot_ecdfplot.17.1",
+      "distance": 1.1555359363555908,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1877,
+      "end_line": 1930,
+      "tokens": 368,
+      "context_length": 40914
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_countplot_countplot.14.1",
+      "distance": 1.156040906906128,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2919,
+      "end_line": 2956,
+      "tokens": 267,
+      "context_length": 41181
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_quartiles__ViolinPlotter.draw_quartiles.5",
+      "distance": 1.1565139293670654,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1361,
+      "end_line": 1373,
+      "tokens": 188,
+      "context_length": 41369
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py_lineplot_lineplot.errorbar.16.1",
+      "distance": 1.1576690673828125,
+      "file_path": "seaborn/relational.py",
+      "start_line": 603,
+      "end_line": 646,
+      "tokens": 416,
+      "context_length": 41785
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/seaborn/seaborn/miscplot.py_np_palplot.10",
+      "distance": 1.159002423286438,
+      "file_path": "seaborn/miscplot.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 231,
+      "context_length": 42016
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/seaborn/examples/regression_marginals.py__",
+      "distance": 1.1605737209320068,
+      "file_path": "examples/regression_marginals.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 42016
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_pairplot.2_pairplot.23.2.plotter.1",
+      "distance": 1.1620161533355713,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 2087,
+      "end_line": 2154,
+      "tokens": 726,
+      "context_length": 42742
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/seaborn/examples/palette_generation.py_1_",
+      "distance": 1.1624479293823242,
+      "file_path": "examples/palette_generation.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 282,
+      "context_length": 43024
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_ClusterGrid.plot_matrix_ClusterGrid.plot_matrix.20.2.4",
+      "distance": 1.1627459526062012,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 1060,
+      "end_line": 1115,
+      "tokens": 562,
+      "context_length": 43586
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_to_density__ViolinPlotter.plot.4.1",
+      "distance": 1.1659396886825562,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1395,
+      "end_line": 1422,
+      "tokens": 295,
+      "context_length": 43881
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Continuous._parse_for_log_params_Continuous._parse_for_log_params.3.1",
+      "distance": 1.1670899391174316,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 653,
+      "end_line": 665,
+      "tokens": 138,
+      "context_length": 44019
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_points__ViolinPlotter.draw_stick_lines.2.1",
+      "distance": 1.1681230068206787,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1375,
+      "end_line": 1393,
+      "tokens": 174,
+      "context_length": 44193
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalPlotterNew.plot_swarms__CategoricalFacetPlotter.semantics.1",
+      "distance": 1.1692248582839966,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 321,
+      "end_line": 416,
+      "tokens": 718,
+      "context_length": 44911
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/seaborn/doc/tools/generate_logos.py_savefig_",
+      "distance": 1.1718556880950928,
+      "file_path": "doc/tools/generate_logos.py",
+      "start_line": 159,
+      "end_line": 225,
+      "tokens": 617,
+      "context_length": 45528
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__LVPlotter._lv_box_ends__LVPlotter._lv_box_ends.19.1",
+      "distance": 1.1725331544876099,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1788,
+      "end_line": 1824,
+      "tokens": 479,
+      "context_length": 46007
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__PointPlotter.draw_points__PointPlotter.plot.4.1",
+      "distance": 1.1732959747314453,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1646,
+      "end_line": 1738,
+      "tokens": 749,
+      "context_length": 46756
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_boxplot.__doc___boxplot.__doc__.1",
+      "distance": 1.173389196395874,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2243,
+      "end_line": 2294,
+      "tokens": 347,
+      "context_length": 47103
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__LVPlotter._width_functions__LVPlotter._width_functions.width_functions.2.1",
+      "distance": 1.175105094909668,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1835,
+      "end_line": 1840,
+      "tokens": 116,
+      "context_length": 47219
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py__param_docs__RelationalPlotter.add_legend_data.24.4.size_levels.size_formatted_levels.1",
+      "distance": 1.175166130065918,
+      "file_path": "seaborn/relational.py",
+      "start_line": 176,
+      "end_line": 284,
+      "tokens": 937,
+      "context_length": 48156
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_displot_displot.23",
+      "distance": 1.1752318143844604,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2111,
+      "end_line": 2185,
+      "tokens": 585,
+      "context_length": 48741
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/seaborn/examples/scatter_bubbles.py_1_",
+      "distance": 1.1765756607055664,
+      "file_path": "examples/scatter_bubbles.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 111,
+      "context_length": 48852
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_ecdfplot.__doc___ecdfplot.__doc__.1",
+      "distance": 1.1784632205963135,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1933,
+      "end_line": 1986,
+      "tokens": 340,
+      "context_length": 49192
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/seaborn/seaborn/regression.py_1___all__.1",
+      "distance": 1.1787902116775513,
+      "file_path": "seaborn/regression.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 121,
+      "context_length": 49313
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.scale_area__ViolinPlotter.scale_width.2.2.1.1.1",
+      "distance": 1.1788103580474854,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1073,
+      "end_line": 1103,
+      "tokens": 225,
+      "context_length": 49538
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/seaborn/seaborn/_oldcore.py_VectorPlotter._assign_variables_wideform.10_VectorPlotter._assign_variables_wideform.11.1",
+      "distance": 1.17972731590271,
+      "file_path": "seaborn/_oldcore.py",
+      "start_line": 759,
+      "end_line": 856,
+      "tokens": 787,
+      "context_length": 50325
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_boxenplot_boxenplot.4.1",
+      "distance": 1.1801496744155884,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2399,
+      "end_line": 2416,
+      "tokens": 191,
+      "context_length": 50516
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._setup_figure_Plotter._setup_figure.subplot_spec.10.11.4.title_text.1",
+      "distance": 1.1804111003875732,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 980,
+      "end_line": 1078,
+      "tokens": 902,
+      "context_length": 51418,
+      "file_pos": 37
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_boxplot_boxplot.5.1",
+      "distance": 1.1825153827667236,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2224,
+      "end_line": 2240,
+      "tokens": 146,
+      "context_length": 51564
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalPlotterNew._native_width__CategoricalPlotterNew.19",
+      "distance": 1.1844313144683838,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 226,
+      "end_line": 253,
+      "tokens": 273,
+      "context_length": 51837
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/seaborn/seaborn/_core/properties.py_PointSize_FontSize.default_range.3.1",
+      "distance": 1.1845850944519043,
+      "file_path": "seaborn/_core/properties.py",
+      "start_line": 275,
+      "end_line": 331,
+      "tokens": 420,
+      "context_length": 52257
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter._plot_single_rug__DistributionFacetPlotter.semantics.1",
+      "distance": 1.184861660003662,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1325,
+      "end_line": 1367,
+      "tokens": 351,
+      "context_length": 52608
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/seaborn/examples/jitter_stripplot.py_1_",
+      "distance": 1.1854419708251953,
+      "file_path": "examples/jitter_stripplot.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 278,
+      "context_length": 52886
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plot.26_Plot.scale.4.1",
+      "distance": 1.1857075691223145,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 603,
+      "end_line": 630,
+      "tokens": 301,
+      "context_length": 53187,
+      "file_pos": 39
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._plot_layer_Plotter._plot_layer.11.1",
+      "distance": 1.185875415802002,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1295,
+      "end_line": 1373,
+      "tokens": 768,
+      "context_length": 53955,
+      "file_pos": 39
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__BoxPlotter.draw_boxplot__BoxPlotter.draw_boxplot.5.1.3.offsets.2.2.11",
+      "distance": 1.1859835386276245,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 796,
+      "end_line": 856,
+      "tokens": 453,
+      "context_length": 54408
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_catplot_catplot.2.18",
+      "distance": 1.1864542961120605,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 3003,
+      "end_line": 3187,
+      "tokens": 1564,
+      "context_length": 55972
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/seaborn/seaborn/external/husl.py__hrad_extremum__hrad_extremum.7.1",
+      "distance": 1.1867966651916504,
+      "file_path": "seaborn/external/husl.py",
+      "start_line": 94,
+      "end_line": 114,
+      "tokens": 301,
+      "context_length": 56273
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/seaborn/seaborn/utils.py_despine.4_despine.4.5.xticks.4.7",
+      "distance": 1.187491536140442,
+      "file_path": "seaborn/utils.py",
+      "start_line": 318,
+      "end_line": 385,
+      "tokens": 645,
+      "context_length": 56918
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_pointplot_pointplot.5.1",
+      "distance": 1.1875865459442139,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2829,
+      "end_line": 2848,
+      "tokens": 198,
+      "context_length": 57116
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_Beeswarm_Beeswarm.__call__.37.2.1",
+      "distance": 1.1884498596191406,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 3352,
+      "end_line": 3422,
+      "tokens": 668,
+      "context_length": 57784
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/dot.py_DotBase._plot_DotBase._plot.4.4",
+      "distance": 1.1891905069351196,
+      "file_path": "seaborn/_marks/dot.py",
+      "start_line": 62,
+      "end_line": 85,
+      "tokens": 192,
+      "context_length": 57976
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_1__param_docs.1",
+      "distance": 1.1898082494735718,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 174,
+      "context_length": 58150
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/seaborn/doc/sphinxext/tutorial_builder.py_function_overview_function_overview.15.1",
+      "distance": 1.1904242038726807,
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "start_line": 130,
+      "end_line": 179,
+      "tokens": 620,
+      "context_length": 58770
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/seaborn/examples/pairgrid_dotplot.py_1_",
+      "distance": 1.1908663511276245,
+      "file_path": "examples/pairgrid_dotplot.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 268,
+      "context_length": 59038
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/seaborn/seaborn/utils.py_ci_to_errsize_ci_to_errsize.7.1",
+      "distance": 1.1914749145507812,
+      "file_path": "seaborn/utils.py",
+      "start_line": 25,
+      "end_line": 52,
+      "tokens": 191,
+      "context_length": 59229
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/seaborn/seaborn/_docstrings.py__seealso_blurbs_",
+      "distance": 1.1915489435195923,
+      "file_path": "seaborn/_docstrings.py",
+      "start_line": 137,
+      "end_line": 199,
+      "tokens": 393,
+      "context_length": 59622
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_kdeplot.__doc___kdeplot.__doc__.1",
+      "distance": 1.1915690898895264,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 1749,
+      "end_line": 1874,
+      "tokens": 1114,
+      "context_length": 60736
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_ClusterGrid.plot_colors_ClusterGrid.plot_colors.19.7.1",
+      "distance": 1.1917039155960083,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 995,
+      "end_line": 1058,
+      "tokens": 543,
+      "context_length": 61279
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/seaborn/examples/scatterplot_categorical.py__",
+      "distance": 1.1918989419937134,
+      "file_path": "examples/scatterplot_categorical.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 61279
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/seaborn/seaborn/_oldcore.py_VectorPlotter.23_VectorPlotter.scale_datetime.3",
+      "distance": 1.192609190940857,
+      "file_path": "seaborn/_oldcore.py",
+      "start_line": 1330,
+      "end_line": 1353,
+      "tokens": 198,
+      "context_length": 61477
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/seaborn/examples/scatterplot_sizes.py_1_",
+      "distance": 1.1932556629180908,
+      "file_path": "examples/scatterplot_sizes.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 164,
+      "context_length": 61641
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._repr_png__Plotter._repr_png_.19",
+      "distance": 1.1964514255523682,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 910,
+      "end_line": 947,
+      "tokens": 401,
+      "context_length": 62042,
+      "file_pos": 46
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_stripplot.__doc___stripplot.__doc__.1",
+      "distance": 1.1966781616210938,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2554,
+      "end_line": 2614,
+      "tokens": 471,
+      "context_length": 62513
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py__HeatMapper._skip_ticks__HeatMapper._skip_ticks.4.1",
+      "distance": 1.1971319913864136,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 265,
+      "end_line": 276,
+      "tokens": 123,
+      "context_length": 62636
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_violinplot_violinplot.4.1",
+      "distance": 1.1988545656204224,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2297,
+      "end_line": 2314,
+      "tokens": 166,
+      "context_length": 62802
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/seaborn/seaborn/regression.py_regplot_regplot.7.1",
+      "distance": 1.2022038698196411,
+      "file_path": "seaborn/regression.py",
+      "start_line": 736,
+      "end_line": 760,
+      "tokens": 279,
+      "context_length": 63081
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py__HeatMapper._determine_cmap_params__HeatMapper._determine_cmap_params.10.bad.15.1",
+      "distance": 1.2025322914123535,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 192,
+      "end_line": 247,
+      "tokens": 517,
+      "context_length": 63598
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/seaborn/examples/heat_scatter.py_1_",
+      "distance": 1.2026383876800537,
+      "file_path": "examples/heat_scatter.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 330,
+      "context_length": 63928
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/density.py_KDE.__call___",
+      "distance": 1.2027368545532227,
+      "file_path": "seaborn/_stats/density.py",
+      "start_line": 172,
+      "end_line": 215,
+      "tokens": 378,
+      "context_length": 64306
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_displot.__doc___displot.__doc__.1",
+      "distance": 1.2027781009674072,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 2303,
+      "end_line": 2382,
+      "tokens": 602,
+      "context_length": 64908
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/seaborn/seaborn/regression.py_17_lmplot.27.1",
+      "distance": 1.203948974609375,
+      "file_path": "seaborn/regression.py",
+      "start_line": 557,
+      "end_line": 641,
+      "tokens": 852,
+      "context_length": 65760
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._get_scale_Plotter._get_subplot_data.2.1",
+      "distance": 1.2039999961853027,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1134,
+      "end_line": 1169,
+      "tokens": 284,
+      "context_length": 66044,
+      "file_pos": 48
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_jointplot.__doc___",
+      "distance": 1.2057089805603027,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 2342,
+      "end_line": 2401,
+      "tokens": 413,
+      "context_length": 66457
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter__ViolinPlotter.__init__.self.linewidth.1",
+      "distance": 1.2078545093536377,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 894,
+      "end_line": 925,
+      "tokens": 273,
+      "context_length": 66730
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py__HeatMapper._auto_ticks__HeatMapper._auto_ticks.13.1",
+      "distance": 1.2083098888397217,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 278,
+      "end_line": 292,
+      "tokens": 172,
+      "context_length": 66902
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_ClusterGrid.dim_ratios_ClusterGrid.dim_ratios.6.1",
+      "distance": 1.2090144157409668,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 900,
+      "end_line": 916,
+      "tokens": 127,
+      "context_length": 67029
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_catplot.2.19_catplot.2.42.1",
+      "distance": 1.20933198928833,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 3188,
+      "end_line": 3262,
+      "tokens": 804,
+      "context_length": 67833
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/order.py_1__MethodKind.1",
+      "distance": 1.2108290195465088,
+      "file_path": "seaborn/_stats/order.py",
+      "start_line": 2,
+      "end_line": 34,
+      "tokens": 192,
+      "context_length": 68025
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalPlotterNew.plot_strips__CategoricalPlotterNew.plot_strips.14.3.1",
+      "distance": 1.2119624614715576,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 255,
+      "end_line": 319,
+      "tokens": 508,
+      "context_length": 68533
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_PairGrid._map_diag_iter_hue_PairGrid._map_diag_iter_hue.6.1",
+      "distance": 1.2144865989685059,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 1513,
+      "end_line": 1550,
+      "tokens": 279,
+      "context_length": 68812
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/seaborn/seaborn/external/husl.py_max_chroma_pastel_to_linear.2.2.1.1",
+      "distance": 1.2147845029830933,
+      "file_path": "seaborn/external/husl.py",
+      "start_line": 117,
+      "end_line": 153,
+      "tokens": 266,
+      "context_length": 69078
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__BoxPlotter.restyle_boxplot__BoxPlotter.plot.4.1",
+      "distance": 1.2150089740753174,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 858,
+      "end_line": 891,
+      "tokens": 281,
+      "context_length": 69359
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/seaborn/examples/faceted_lineplot.py_1_",
+      "distance": 1.2163196802139282,
+      "file_path": "examples/faceted_lineplot.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 140,
+      "context_length": 69499
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.fit_kde__ViolinPlotter.kde_support.4.1",
+      "distance": 1.2175045013427734,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1052,
+      "end_line": 1071,
+      "tokens": 210,
+      "context_length": 69709
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py__DistributionPlotter._quantile_to_level__DistributionPlotter._default_discrete.3.1",
+      "distance": 1.2179086208343506,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 196,
+      "end_line": 228,
+      "tokens": 406,
+      "context_length": 70115
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/seaborn/seaborn/_oldcore.py_VectorPlotter._log_scaled_VectorPlotter._log_scaled.7.1",
+      "distance": 1.2179299592971802,
+      "file_path": "seaborn/_oldcore.py",
+      "start_line": 1297,
+      "end_line": 1315,
+      "tokens": 136,
+      "context_length": 70251
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/density.py_1_KDE.cumulative.1",
+      "distance": 1.218595266342163,
+      "file_path": "seaborn/_stats/density.py",
+      "start_line": 1,
+      "end_line": 92,
+      "tokens": 856,
+      "context_length": 71107
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plot.share_Plot.share.4.1",
+      "distance": 1.219179391860962,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 632,
+      "end_line": 649,
+      "tokens": 136,
+      "context_length": 71243,
+      "file_pos": 50
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plotter._setup_split_generator_Plotter._setup_split_generator.5.1",
+      "distance": 1.2216570377349854,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 1471,
+      "end_line": 1543,
+      "tokens": 599,
+      "context_length": 71842,
+      "file_pos": 50
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_38__make_logit_transforms.4.1",
+      "distance": 1.2222871780395508,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 997,
+      "end_line": 1021,
+      "tokens": 139,
+      "context_length": 71981
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Scale._spacing_Scale._finalize.2",
+      "distance": 1.2229337692260742,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 98,
+      "end_line": 113,
+      "tokens": 134,
+      "context_length": 72115
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/seaborn/examples/layered_bivariate_plot.py_1_",
+      "distance": 1.2237226963043213,
+      "file_path": "examples/layered_bivariate_plot.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 186,
+      "context_length": 72301
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/seaborn/examples/anscombes_quartet.py_1_",
+      "distance": 1.2239583730697632,
+      "file_path": "examples/anscombes_quartet.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 124,
+      "context_length": 72425
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_JointGrid_JointGrid.__init__.f.36",
+      "distance": 1.2248979806900024,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 1673,
+      "end_line": 1761,
+      "tokens": 855,
+      "context_length": 73280
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_ContinuousBase._get_transform_ContinuousBase._get_transform.3.3.1.7.1",
+      "distance": 1.224937915802002,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 493,
+      "end_line": 524,
+      "tokens": 244,
+      "context_length": 73524
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_pairplot.24_pairplot.28.1",
+      "distance": 1.2255237102508545,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 2156,
+      "end_line": 2176,
+      "tokens": 257,
+      "context_length": 73781
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_stripplot_stripplot.19.1",
+      "distance": 1.227137804031372,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2495,
+      "end_line": 2551,
+      "tokens": 421,
+      "context_length": 74202
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_heatmap.2_heatmap.11.1",
+      "distance": 1.2292053699493408,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 445,
+      "end_line": 460,
+      "tokens": 226,
+      "context_length": 74428
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/seaborn/seaborn/palettes.py_MPL_QUAL_PALS_QUAL_PALETTES.1",
+      "distance": 1.2293113470077515,
+      "file_path": "seaborn/palettes.py",
+      "start_line": 48,
+      "end_line": 58,
+      "tokens": 152,
+      "context_length": 74580
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_swarmplot.__doc___swarmplot.__doc__.1",
+      "distance": 1.229866623878479,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2678,
+      "end_line": 2736,
+      "tokens": 424,
+      "context_length": 75004
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_ClusterGrid.plot_ClusterGrid.plot.3.10.1",
+      "distance": 1.2299681901931763,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 1117,
+      "end_line": 1143,
+      "tokens": 274,
+      "context_length": 75278
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Continuous._get_formatter_Continuous._get_formatter.5.1",
+      "distance": 1.2314949035644531,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 723,
+      "end_line": 760,
+      "tokens": 236,
+      "context_length": 75514
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Scale._get_scale_Scale._get_scale.4.1",
+      "distance": 1.2316429615020752,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 84,
+      "end_line": 96,
+      "tokens": 127,
+      "context_length": 75641
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py__DendrogramPlotter.plot__DendrogramPlotter.plot.19.1",
+      "distance": 1.2317240238189697,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 585,
+      "end_line": 639,
+      "tokens": 512,
+      "context_length": 76153
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_Beeswarm.add_gutters_",
+      "distance": 1.2326184511184692,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 3520,
+      "end_line": 3547,
+      "tokens": 245,
+      "context_length": 76398
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_swarmplot_swarmplot.18.1",
+      "distance": 1.2336297035217285,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 2617,
+      "end_line": 2675,
+      "tokens": 398,
+      "context_length": 76796
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plot._variables_Plot._variables.5.1",
+      "distance": 1.2345900535583496,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 329,
+      "end_line": 342,
+      "tokens": 136,
+      "context_length": 76932,
+      "file_pos": 53
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py__facet_docs__facet_docs.1",
+      "distance": 1.2346299886703491,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 304,
+      "end_line": 360,
+      "tokens": 503,
+      "context_length": 77435
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/seaborn/examples/paired_pointplots.py_1_",
+      "distance": 1.2363190650939941,
+      "file_path": "examples/paired_pointplots.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 153,
+      "context_length": 77588
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__ViolinPlotter.draw_single_observation__ViolinPlotter.draw_single_observation.3.2.1",
+      "distance": 1.236806869506836,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1313,
+      "end_line": 1325,
+      "tokens": 133,
+      "context_length": 77721
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/seaborn/seaborn/external/husl.py_max_chroma_max_chroma.8.1",
+      "distance": 1.236846923828125,
+      "file_path": "seaborn/external/husl.py",
+      "start_line": 71,
+      "end_line": 91,
+      "tokens": 287,
+      "context_length": 78008
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_1_18.Pipeline.1",
+      "distance": 1.2371885776519775,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 308,
+      "context_length": 78316
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py_warnings__relational_narrative.1",
+      "distance": 1.237576961517334,
+      "file_path": "seaborn/relational.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 384,
+      "context_length": 78700
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Boolean.tick_Boolean._get_formatter.2.1",
+      "distance": 1.2378166913986206,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 220,
+      "end_line": 238,
+      "tokens": 144,
+      "context_length": 78844
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/seaborn/doc/sphinxext/tutorial_builder.py_properties_properties.10.1",
+      "distance": 1.238147497177124,
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "start_line": 217,
+      "end_line": 243,
+      "tokens": 282,
+      "context_length": 79126
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_27_PseudoAxis.set_units.self.units.1",
+      "distance": 1.2389719486236572,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 873,
+      "end_line": 957,
+      "tokens": 603,
+      "context_length": 79729
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py_1___all__.1",
+      "distance": 1.239890217781067,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 252,
+      "context_length": 79981
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plot._plot_Plot._plot.plotter.21.1",
+      "distance": 1.2400484085083008,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 823,
+      "end_line": 857,
+      "tokens": 304,
+      "context_length": 80285,
+      "file_pos": 54
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/seaborn/seaborn/_core/moves.py_Norm_",
+      "distance": 1.2404555082321167,
+      "file_path": "seaborn/_core/moves.py",
+      "start_line": 221,
+      "end_line": 275,
+      "tokens": 329,
+      "context_length": 80614
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__BoxPlotter__BoxPlotter.__init__.self.linewidth.1",
+      "distance": 1.240736722946167,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 779,
+      "end_line": 794,
+      "tokens": 127,
+      "context_length": 80741
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/seaborn/seaborn/matrix.py_ClusterGrid.plot_dendrograms_ClusterGrid.plot_dendrograms.2.6",
+      "distance": 1.2418344020843506,
+      "file_path": "seaborn/matrix.py",
+      "start_line": 970,
+      "end_line": 993,
+      "tokens": 264,
+      "context_length": 81005
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__LVPlotter.draw_letter_value_plot_34",
+      "distance": 1.2420172691345215,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 1978,
+      "end_line": 2221,
+      "tokens": 539,
+      "context_length": 81544
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Nominal._setup.convert_units_Nominal._setup.31.1",
+      "distance": 1.2421303987503052,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 307,
+      "end_line": 324,
+      "tokens": 213,
+      "context_length": 81757
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_PairGrid.map_diag_PairGrid.map_diag.8.1",
+      "distance": 1.2421932220458984,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 1431,
+      "end_line": 1511,
+      "tokens": 616,
+      "context_length": 82373
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Boolean._setup.new._pipeline_Boolean._setup.13.1",
+      "distance": 1.2425494194030762,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 188,
+      "end_line": 200,
+      "tokens": 160,
+      "context_length": 82533
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalPlotter__CategoricalPlotter.establish_variables.self.plot_units.1",
+      "distance": 1.2425965070724487,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 419,
+      "end_line": 628,
+      "tokens": 1386,
+      "context_length": 83919
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/seaborn/seaborn/regression.py__RegressionPlotter.bin_predictor__RegressionPlotter.regress_out.7.1",
+      "distance": 1.2429873943328857,
+      "file_path": "seaborn/regression.py",
+      "start_line": 317,
+      "end_line": 338,
+      "tokens": 216,
+      "context_length": 84135
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/seaborn/seaborn/_core/data.py_PlotData._assign_variables.15_",
+      "distance": 1.244497299194336,
+      "file_path": "seaborn/_core/data.py",
+      "start_line": 181,
+      "end_line": 261,
+      "tokens": 726,
+      "context_length": 84861
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/seaborn/seaborn/widgets.py_choose_diverging_palette.choose_diverging_palette_choose_diverging_palette.6.1",
+      "distance": 1.2450168132781982,
+      "file_path": "seaborn/widgets.py",
+      "start_line": 345,
+      "end_line": 369,
+      "tokens": 236,
+      "context_length": 85097
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/seaborn/examples/palette_choices.py_1_",
+      "distance": 1.2451221942901611,
+      "file_path": "examples/palette_choices.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 314,
+      "context_length": 85411
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/seaborn/examples/simple_violinplots.py_1_",
+      "distance": 1.248002052307129,
+      "file_path": "examples/simple_violinplots.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 121,
+      "context_length": 85532
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/aggregation.py_Est_Est._process.res.2.1",
+      "distance": 1.248043179512024,
+      "file_path": "seaborn/_stats/aggregation.py",
+      "start_line": 52,
+      "end_line": 91,
+      "tokens": 345,
+      "context_length": 85877
+    },
+    {
+      "position": 214,
+      "id": "/tmp/repos/seaborn/examples/multiple_bivariate_kde.py_1_",
+      "distance": 1.2484207153320312,
+      "file_path": "examples/multiple_bivariate_kde.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 126,
+      "context_length": 86003
+    },
+    {
+      "position": 215,
+      "id": "/tmp/repos/seaborn/examples/multiple_ecdf.py_1_",
+      "distance": 1.249725103378296,
+      "file_path": "examples/multiple_ecdf.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 122,
+      "context_length": 86125
+    },
+    {
+      "position": 216,
+      "id": "/tmp/repos/seaborn/seaborn/distributions.py_31__DistributionPlotter.has_xy_data.3.1",
+      "distance": 1.250568151473999,
+      "file_path": "seaborn/distributions.py",
+      "start_line": 95,
+      "end_line": 136,
+      "tokens": 316,
+      "context_length": 86441
+    },
+    {
+      "position": 217,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py_relplot.30_relplot.53.1",
+      "distance": 1.2509965896606445,
+      "file_path": "seaborn/relational.py",
+      "start_line": 931,
+      "end_line": 991,
+      "tokens": 639,
+      "context_length": 87080
+    },
+    {
+      "position": 218,
+      "id": "/tmp/repos/seaborn/seaborn/_marks/bar.py_1_9.3",
+      "distance": 1.2539050579071045,
+      "file_path": "seaborn/_marks/bar.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 119,
+      "context_length": 87199,
+      "file_pos": 61
+    },
+    {
+      "position": 219,
+      "id": "/tmp/repos/seaborn/doc/sphinxext/tutorial_builder.py_objects_interface_objects_interface.13.1",
+      "distance": 1.2550630569458008,
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "start_line": 246,
+      "end_line": 271,
+      "tokens": 343,
+      "context_length": 87542
+    },
+    {
+      "position": 220,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py_relplot_relplot.29",
+      "distance": 1.2552510499954224,
+      "file_path": "seaborn/relational.py",
+      "start_line": 825,
+      "end_line": 929,
+      "tokens": 840,
+      "context_length": 88382
+    },
+    {
+      "position": 221,
+      "id": "/tmp/repos/seaborn/seaborn/widgets.py_np__show_cmap.7",
+      "distance": 1.2554774284362793,
+      "file_path": "seaborn/widgets.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 341,
+      "context_length": 88723
+    },
+    {
+      "position": 222,
+      "id": "/tmp/repos/seaborn/seaborn/relational.py__LinePlotter.plot__LinePlotter.plot.grouping_vars.1",
+      "distance": 1.2567870616912842,
+      "file_path": "seaborn/relational.py",
+      "start_line": 378,
+      "end_line": 422,
+      "tokens": 524,
+      "context_length": 89247
+    },
+    {
+      "position": 223,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/density.py_KDE._get_support_KDE._get_support.7.1",
+      "distance": 1.257495403289795,
+      "file_path": "seaborn/_stats/density.py",
+      "start_line": 122,
+      "end_line": 131,
+      "tokens": 126,
+      "context_length": 89373
+    },
+    {
+      "position": 224,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_PseudoAxis.update_units_PseudoAxis.update_units.3.7",
+      "distance": 1.2592799663543701,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 959,
+      "end_line": 975,
+      "tokens": 136,
+      "context_length": 89509
+    },
+    {
+      "position": 225,
+      "id": "/tmp/repos/seaborn/seaborn/_stats/order.py_Perc._percentile_",
+      "distance": 1.2600176334381104,
+      "file_path": "seaborn/_stats/order.py",
+      "start_line": 62,
+      "end_line": 79,
+      "tokens": 207,
+      "context_length": 89716
+    },
+    {
+      "position": 226,
+      "id": "/tmp/repos/seaborn/seaborn/_core/plot.py_Plot.limit_Plot.limit.4.1",
+      "distance": 1.2601184844970703,
+      "file_path": "seaborn/_core/plot.py",
+      "start_line": 651,
+      "end_line": 670,
+      "tokens": 146,
+      "context_length": 89862,
+      "file_pos": 61
+    },
+    {
+      "position": 227,
+      "id": "/tmp/repos/seaborn/doc/sphinxext/tutorial_builder.py_distributions_categorical.5.1",
+      "distance": 1.2605915069580078,
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "start_line": 287,
+      "end_line": 310,
+      "tokens": 195,
+      "context_length": 90057
+    },
+    {
+      "position": 228,
+      "id": "/tmp/repos/seaborn/seaborn/_core/scales.py_Boolean._setup_Boolean._setup.na_safe_cast.2.2.4.1",
+      "distance": 1.2607300281524658,
+      "file_path": "seaborn/_core/scales.py",
+      "start_line": 164,
+      "end_line": 186,
+      "tokens": 197,
+      "context_length": 90254
+    },
+    {
+      "position": 229,
+      "id": "/tmp/repos/seaborn/seaborn/axisgrid.py_PairGrid._plot_bivariate_iter_hue_PairGrid._plot_bivariate_iter_hue.7",
+      "distance": 1.2613334655761719,
+      "file_path": "seaborn/axisgrid.py",
+      "start_line": 1613,
+      "end_line": 1655,
+      "tokens": 327,
+      "context_length": 90581
+    },
+    {
+      "position": 230,
+      "id": "/tmp/repos/seaborn/seaborn/categorical.py__CategoricalPlotterNew._adjust_cat_axis__CategoricalPlotterNew._adjust_cat_axis.18.3.3",
+      "distance": 1.2620371580123901,
+      "file_path": "seaborn/categorical.py",
+      "start_line": 195,
+      "end_line": 224,
+      "tokens": 370,
+      "context_length": 90951
+    }
+  ],
+  "files": [
+    {
+      "file_path": "seaborn/_marks/bar.py",
+      "position": 1,
+      "tokens": 2123,
+      "context_length": 2123
+    },
+    {
+      "file_path": "seaborn/distributions.py",
+      "position": 2,
+      "tokens": 19627,
+      "context_length": 21750
+    },
+    {
+      "file_path": "examples/histogram_stacked.py",
+      "position": 3,
+      "tokens": 152,
+      "context_length": 21902
+    },
+    {
+      "file_path": "seaborn/categorical.py",
+      "position": 4,
+      "tokens": 28516,
+      "context_length": 50418
+    },
+    {
+      "file_path": "examples/part_whole_bars.py",
+      "position": 5,
+      "tokens": 216,
+      "context_length": 50634
+    },
+    {
+      "file_path": "examples/joint_histogram.py",
+      "position": 6,
+      "tokens": 192,
+      "context_length": 50826
+    },
+    {
+      "file_path": "seaborn/_stats/counting.py",
+      "position": 7,
+      "tokens": 1937,
+      "context_length": 52763
+    },
+    {
+      "file_path": "doc/tools/generate_logos.py",
+      "position": 8,
+      "tokens": 1925,
+      "context_length": 54688
+    },
+    {
+      "file_path": "examples/three_variable_histogram.py",
+      "position": 9,
+      "tokens": 88,
+      "context_length": 54776
+    },
+    {
+      "file_path": "seaborn/_statistics.py",
+      "position": 10,
+      "tokens": 4401,
+      "context_length": 59177
+    },
+    {
+      "file_path": "examples/faceted_histogram.py",
+      "position": 11,
+      "tokens": 85,
+      "context_length": 59262
+    },
+    {
+      "file_path": "examples/smooth_bivariate_kde.py",
+      "position": 12,
+      "tokens": 131,
+      "context_length": 59393
+    },
+    {
+      "file_path": "examples/grouped_boxplot.py",
+      "position": 13,
+      "tokens": 103,
+      "context_length": 59496
+    },
+    {
+      "file_path": "examples/horizontal_boxplot.py",
+      "position": 14,
+      "tokens": 192,
+      "context_length": 59688
+    },
+    {
+      "file_path": "examples/grouped_barplot.py",
+      "position": 15,
+      "tokens": 122,
+      "context_length": 59810
+    },
+    {
+      "file_path": "examples/marginal_ticks.py",
+      "position": 16,
+      "tokens": 144,
+      "context_length": 59954
+    },
+    {
+      "file_path": "examples/wide_data_lineplot.py",
+      "position": 17,
+      "tokens": 137,
+      "context_length": 60091
+    },
+    {
+      "file_path": "seaborn/_core/plot.py",
+      "position": 18,
+      "tokens": 13595,
+      "context_length": 73686
+    },
+    {
+      "file_path": "examples/kde_ridgeplot.py",
+      "position": 19,
+      "tokens": 399,
+      "context_length": 74085
+    },
+    {
+      "file_path": "examples/hexbin_marginals.py",
+      "position": 20,
+      "tokens": 92,
+      "context_length": 74177
+    },
+    {
+      "file_path": "seaborn/relational.py",
+      "position": 21,
+      "tokens": 8521,
+      "context_length": 82698
+    },
+    {
+      "file_path": "seaborn/_core/scales.py",
+      "position": 22,
+      "tokens": 7806,
+      "context_length": 90504
+    },
+    {
+      "file_path": "examples/large_distributions.py",
+      "position": 23,
+      "tokens": 107,
+      "context_length": 90611
+    },
+    {
+      "file_path": "examples/wide_form_violinplot.py",
+      "position": 24,
+      "tokens": 291,
+      "context_length": 90902
+    },
+    {
+      "file_path": "doc/sphinxext/tutorial_builder.py",
+      "position": 25,
+      "tokens": 3303,
+      "context_length": 94205
+    },
+    {
+      "file_path": "seaborn/axisgrid.py",
+      "position": 26,
+      "tokens": 19602,
+      "context_length": 113807
+    },
+    {
+      "file_path": "examples/errorband_lineplots.py",
+      "position": 27,
+      "tokens": 89,
+      "context_length": 113896
+    },
+    {
+      "file_path": "examples/many_facets.py",
+      "position": 28,
+      "tokens": 312,
+      "context_length": 114208
+    },
+    {
+      "file_path": "examples/grouped_violinplots.py",
+      "position": 29,
+      "tokens": 121,
+      "context_length": 114329
+    },
+    {
+      "file_path": "seaborn/_core/moves.py",
+      "position": 30,
+      "tokens": 1860,
+      "context_length": 116189
+    },
+    {
+      "file_path": "seaborn/_oldcore.py",
+      "position": 31,
+      "tokens": 13472,
+      "context_length": 129661
+    },
+    {
+      "file_path": "seaborn/miscplot.py",
+      "position": 32,
+      "tokens": 378,
+      "context_length": 130039
+    },
+    {
+      "file_path": "examples/regression_marginals.py",
+      "position": 33,
+      "tokens": 91,
+      "context_length": 130130
+    },
+    {
+      "file_path": "examples/palette_generation.py",
+      "position": 34,
+      "tokens": 282,
+      "context_length": 130412
+    },
+    {
+      "file_path": "seaborn/matrix.py",
+      "position": 35,
+      "tokens": 10604,
+      "context_length": 141016
+    },
+    {
+      "file_path": "examples/scatter_bubbles.py",
+      "position": 36,
+      "tokens": 111,
+      "context_length": 141127
+    },
+    {
+      "file_path": "seaborn/regression.py",
+      "position": 37,
+      "tokens": 7953,
+      "context_length": 149080
+    },
+    {
+      "file_path": "seaborn/_core/properties.py",
+      "position": 38,
+      "tokens": 6551,
+      "context_length": 155631
+    },
+    {
+      "file_path": "examples/jitter_stripplot.py",
+      "position": 39,
+      "tokens": 278,
+      "context_length": 155909
+    },
+    {
+      "file_path": "seaborn/external/husl.py",
+      "position": 40,
+      "tokens": 2670,
+      "context_length": 158579
+    },
+    {
+      "file_path": "seaborn/utils.py",
+      "position": 41,
+      "tokens": 6596,
+      "context_length": 165175
+    },
+    {
+      "file_path": "seaborn/_marks/dot.py",
+      "position": 42,
+      "tokens": 1515,
+      "context_length": 166690
+    },
+    {
+      "file_path": "examples/pairgrid_dotplot.py",
+      "position": 43,
+      "tokens": 268,
+      "context_length": 166958
+    },
+    {
+      "file_path": "seaborn/_docstrings.py",
+      "position": 44,
+      "tokens": 1438,
+      "context_length": 168396
+    },
+    {
+      "file_path": "examples/scatterplot_categorical.py",
+      "position": 45,
+      "tokens": 93,
+      "context_length": 168489
+    },
+    {
+      "file_path": "examples/scatterplot_sizes.py",
+      "position": 46,
+      "tokens": 164,
+      "context_length": 168653
+    },
+    {
+      "file_path": "examples/heat_scatter.py",
+      "position": 47,
+      "tokens": 330,
+      "context_length": 168983
+    },
+    {
+      "file_path": "seaborn/_stats/density.py",
+      "position": 48,
+      "tokens": 1956,
+      "context_length": 170939
+    },
+    {
+      "file_path": "seaborn/_stats/order.py",
+      "position": 49,
+      "tokens": 584,
+      "context_length": 171523
+    },
+    {
+      "file_path": "examples/faceted_lineplot.py",
+      "position": 50,
+      "tokens": 140,
+      "context_length": 171663
+    },
+    {
+      "file_path": "examples/layered_bivariate_plot.py",
+      "position": 51,
+      "tokens": 186,
+      "context_length": 171849
+    },
+    {
+      "file_path": "examples/anscombes_quartet.py",
+      "position": 52,
+      "tokens": 124,
+      "context_length": 171973
+    },
+    {
+      "file_path": "seaborn/palettes.py",
+      "position": 53,
+      "tokens": 7230,
+      "context_length": 179203
+    },
+    {
+      "file_path": "examples/paired_pointplots.py",
+      "position": 54,
+      "tokens": 153,
+      "context_length": 179356
+    },
+    {
+      "file_path": "seaborn/_core/data.py",
+      "position": 55,
+      "tokens": 1925,
+      "context_length": 181281
+    },
+    {
+      "file_path": "seaborn/widgets.py",
+      "position": 56,
+      "tokens": 3419,
+      "context_length": 184700
+    },
+    {
+      "file_path": "examples/palette_choices.py",
+      "position": 57,
+      "tokens": 314,
+      "context_length": 185014
+    },
+    {
+      "file_path": "examples/simple_violinplots.py",
+      "position": 58,
+      "tokens": 121,
+      "context_length": 185135
+    },
+    {
+      "file_path": "seaborn/_stats/aggregation.py",
+      "position": 59,
+      "tokens": 822,
+      "context_length": 185957
+    },
+    {
+      "file_path": "examples/multiple_bivariate_kde.py",
+      "position": 60,
+      "tokens": 126,
+      "context_length": 186083
+    },
+    {
+      "file_path": "examples/multiple_ecdf.py",
+      "position": 61,
+      "tokens": 122,
+      "context_length": 186205
+    }
+  ]
+}

@@ -1,0 +1,741 @@
+{
+  "instance_id": "sympy__sympy-11831",
+  "model_patch": "diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py\nindex 6b63adbe6c..8891210002 100644\n--- a/sympy/sets/sets.py\n+++ b/sympy/sets/sets.py\n@@ -663,7 +663,12 @@ def _measure(self):\n         return measure\n \n     def __len__(self):\n-        return Mul(*[len(s) for s in self.args])\n+        if any(s.is_infinite for s in self.args):\n+            raise ValueError(\"Cannot compute the length of an infinite set.\")\n+        try:\n+            return Mul(*[len(s) for s in self.args])\n+        except TypeError:\n+            raise ValueError(\"Cannot compute the length of an infinite set.\")\n \n \n class Interval(Set, EvalfMixin):\n@@ -1174,6 +1179,10 @@ def flatten(arg):\n         if len(args) == 0:\n             return S.EmptySet\n \n+        # args can't be ordered for Partition see issue #9608\n+        if 'Partition' not in [type(a).__name__ for a in args]:\n+            args = list(ordered(args, Set._infimum_key))\n+\n         # Reduce sets using known rules\n         if evaluate:\n             return Union.reduce(args)\n@@ -1497,9 +1506,9 @@ def _handle_finite_sets(args):\n                     else:\n                         pass  # for coverage\n \n-            other_sets = Intersection(*other)\n-            if not other_sets:\n-                return S.EmptySet  # b/c we use evaluate=False below\n+            other_sets = Intersection(*other, evaluate=False)\n+            if other_sets == S.EmptySet:\n+                return S.EmptySet\n             res += Intersection(\n                 FiniteSet(*unk),\n                 other_sets, evaluate=False)\n@@ -1574,6 +1583,14 @@ def as_relational(self, symbol):\n         \"\"\"Rewrite an Intersection in terms of equalities and logic operators\"\"\"\n         return And(*[set.as_relational(symbol) for set in self.args])\n \n+    def __len__(self):\n+        if any(s.is_infinite for s in self.args):\n+            raise ValueError(\"Cannot compute the length of an infinite set.\")\n+        try:\n+            return Mul(*[len(s) for s in self.args])\n+        except TypeError:\n+            raise ValueError(\"Cannot compute the length of an infinite set.\")\n+\n \n class Complement(Set, EvalfMixin):\n     \"\"\"Represents the set difference or relative complement of a set with\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/sets/sets.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "9ce74956ad542e069a9a7743bf0a751c5a26e727",
+  "patch": "diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py\n--- a/sympy/sets/sets.py\n+++ b/sympy/sets/sets.py\n@@ -665,6 +665,11 @@ def _measure(self):\n     def __len__(self):\n         return Mul(*[len(s) for s in self.args])\n \n+    def __bool__(self):\n+        return all([bool(s) for s in self.args])\n+\n+    __nonzero__ = __bool__\n+\n \n class Interval(Set, EvalfMixin):\n     \"\"\"\n",
+  "test_patch": "diff --git a/sympy/sets/tests/test_sets.py b/sympy/sets/tests/test_sets.py\n--- a/sympy/sets/tests/test_sets.py\n+++ b/sympy/sets/tests/test_sets.py\n@@ -963,6 +963,8 @@ def test_issue_Symbol_inter():\n     assert Intersection(FiniteSet(x**2, 1, sin(x)), FiniteSet(x**2, 2, sin(x)), r) == \\\n         Intersection(r, FiniteSet(x**2, sin(x)))\n \n+def test_issue_11827():\n+    assert S.Naturals0**4\n \n def test_issue_10113():\n     f = x**2/(x**2 - 4)\n",
+  "problem_statement": "set intersection gives TypeError: object of type 'Naturals0' has no len()\nThis is from https://stackoverflow.com/questions/40441532/how-to-restrict-sympy-finiteset-containing-symbol\r\n\r\n```\r\nIn [47]: d = symbols(\"d\")\r\n\r\nIn [48]: solution = sets.FiniteSet((d + 1, -d + 4, -d + 5, d))\r\n\r\nIn [49]: solution.intersect(S.Naturals0**4)\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-49-a152e62d0932> in <module>()\r\n----> 1 solution.intersect(S.Naturals0**4)\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in intersect(self, other)\r\n    106\r\n    107         \"\"\"\r\n--> 108         return Intersection(self, other)\r\n    109\r\n    110     def intersection(self, other):\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in __new__(cls, *args, **kwargs)\r\n   1401         # Reduce sets using known rules\r\n   1402         if evaluate:\r\n-> 1403             return Intersection.reduce(args)\r\n   1404\r\n   1405         return Basic.__new__(cls, *args)\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in reduce(args)\r\n   1525\r\n   1526         # Handle Finite sets\r\n-> 1527         rv = Intersection._handle_finite_sets(args)\r\n   1528         if rv is not None:\r\n   1529             return rv\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in _handle_finite_sets(args)\r\n   1499\r\n   1500             other_sets = Intersection(*other)\r\n-> 1501             if not other_sets:\r\n   1502                 return S.EmptySet  # b/c we use evaluate=False below\r\n   1503             res += Intersection(\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in __len__(self)\r\n    664\r\n    665     def __len__(self):\r\n--> 666         return Mul(*[len(s) for s in self.args])\r\n    667\r\n    668\r\n\r\n/Users/aaronmeurer/Documents/Python/sympy/sympy/sympy/sets/sets.py in <listcomp>(.0)\r\n    664\r\n    665     def __len__(self):\r\n--> 666         return Mul(*[len(s) for s in self.args])\r\n    667\r\n    668\r\n\r\nTypeError: object of type 'Naturals0' has no len()\r\n```\r\n\r\nOptimistically marking this as easy to fix (I could be wrong). \n",
+  "hints_text": "",
+  "created_at": "2016-11-09T17:16:28Z",
+  "version": "1.0",
+  "FAIL_TO_PASS": "[\"test_issue_11827\"]",
+  "PASS_TO_PASS": "[\"test_EmptySet\", \"test_Eq\", \"test_Finite_as_relational\", \"test_Intersection_as_relational\", \"test_Interval_as_relational\", \"test_Interval_free_symbols\", \"test_Interval_is_left_unbounded\", \"test_Interval_is_right_unbounded\", \"test_ProductSet_of_single_arg_is_arg\", \"test_SymmetricDifference\", \"test_Union_as_relational\", \"test_Union_of_ProductSets_shares\", \"test_boundary\", \"test_boundary_ProductSet\", \"test_boundary_ProductSet_line\", \"test_boundary_Union\", \"test_closure\", \"test_complement\", \"test_difference\", \"test_finite_basic\", \"test_image_EmptySet\", \"test_image_FiniteSet\", \"test_image_Union\", \"test_imageset\", \"test_interior\", \"test_intersect\", \"test_intersection\", \"test_interval_arguments\", \"test_interval_subs\", \"test_interval_symbolic\", \"test_interval_symbolic_end_points\", \"test_interval_to_mpi\", \"test_is_closed\", \"test_is_disjoint\", \"test_is_number\", \"test_is_open\", \"test_is_proper_subset\", \"test_is_proper_superset\", \"test_is_subset\", \"test_is_superset\", \"test_issue_10248\", \"test_issue_10326\", \"test_issue_10337\", \"test_issue_10931\", \"test_issue_2799\", \"test_issue_5724_7680\", \"test_issue_7841\", \"test_issue_8257\", \"test_issue_9447\", \"test_issue_9536\", \"test_issue_9623\", \"test_issue_9637\", \"test_issue_9706\", \"test_issue_9808\", \"test_issue_9956\", \"test_measure\", \"test_powerset\", \"test_product_basic\", \"test_supinf\", \"test_union\", \"test_union_contains\", \"test_union_iter\", \"test_universalset\"]",
+  "environment_setup_commit": "50b81f9f6be151014501ffac44e5dc6b2416938f",
+  "patch_files": [
+    "sympy/sets/sets.py"
+  ],
+  "test_patch_files": [
+    "sympy/sets/tests/test_sets.py"
+  ],
+  "patch_diff_details": {
+    "sympy/sets/sets.py": {
+      "diffs": [
+        {
+          "start_line_old": 668,
+          "end_line_old": 668
+        }
+      ]
+    }
+  },
+  "vectors": 6851,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._intersect_Range._intersect.5.10.1",
+      "distance": 0.7645142674446106,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 627,
+      "end_line": 653,
+      "tokens": 215,
+      "context_length": 215
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.add_intersection_complement_substitution.25",
+      "distance": 0.821681559085846,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1457,
+      "end_line": 1482,
+      "tokens": 273,
+      "context_length": 488
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Naturals_Naturals._boundary.1.1",
+      "distance": 0.8228126168251038,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 18,
+      "end_line": 72,
+      "tokens": 346,
+      "context_length": 834
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_1_13",
+      "distance": 0.8317610621452332,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 165,
+      "context_length": 999
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._intersect.6_Range._intersect.6.52.1",
+      "distance": 0.8351960182189941,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 655,
+      "end_line": 758,
+      "tokens": 881,
+      "context_length": 1880
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet._intersect.3_ImageSet._intersect.3.11.10.12.1",
+      "distance": 0.8371787667274475,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 418,
+      "end_line": 491,
+      "tokens": 597,
+      "context_length": 2477
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_solveset.f_solveset_complex.1.1",
+      "distance": 0.8498262166976929,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 835,
+      "end_line": 901,
+      "tokens": 478,
+      "context_length": 2955
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._contains_Range.__bool__.1",
+      "distance": 0.8521372079849243,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 760,
+      "end_line": 805,
+      "tokens": 318,
+      "context_length": 3273
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Naturals0_Naturals0._contains.1.3.1.1",
+      "distance": 0.858575701713562,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 75,
+      "end_line": 92,
+      "tokens": 123,
+      "context_length": 3396
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Integers._eval_imageset_Reals.__hash__.1.1",
+      "distance": 0.8617578744888306,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 171,
+      "end_line": 210,
+      "tokens": 321,
+      "context_length": 3717
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_linsolve.2__return_conditionset.condition_set.2.1",
+      "distance": 0.8648697137832642,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1237,
+      "end_line": 1306,
+      "tokens": 457,
+      "context_length": 4174
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py__solveset.14__solveset.16.1",
+      "distance": 0.8661840558052063,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 655,
+      "end_line": 734,
+      "tokens": 790,
+      "context_length": 4964
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.39_substitution.58.1",
+      "distance": 0.8729727268218994,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1785,
+      "end_line": 1845,
+      "tokens": 585,
+      "context_length": 5549
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet._contains_ImageSet._contains.10.1",
+      "distance": 0.8781726360321045,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 295,
+      "end_line": 381,
+      "tokens": 729,
+      "context_length": 6278
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet.is_iterable_ImageSet._intersect.2.3.16.1",
+      "distance": 0.8785697817802429,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 383,
+      "end_line": 416,
+      "tokens": 339,
+      "context_length": 6617
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_nonlinsolve.1_nonlinsolve.1",
+      "distance": 0.8877898454666138,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1920,
+      "end_line": 2074,
+      "tokens": 1939,
+      "context_length": 8556
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_54__handle_positive_dimensional.10.1",
+      "distance": 0.8920168280601501,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1846,
+      "end_line": 1871,
+      "tokens": 202,
+      "context_length": 8758
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ComplexRegion._intersect_",
+      "distance": 0.8938379287719727,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 1390,
+      "end_line": 1468,
+      "tokens": 571,
+      "context_length": 9329
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_linsolve_linsolve.1",
+      "distance": 0.9021434783935547,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1093,
+      "end_line": 1235,
+      "tokens": 1361,
+      "context_length": 10690
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_59_nonlinsolve",
+      "distance": 0.9056425094604492,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1887,
+      "end_line": 2131,
+      "tokens": 236,
+      "context_length": 10926
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.94_solve.108.1",
+      "distance": 0.9076329469680786,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1125,
+      "end_line": 1235,
+      "tokens": 834,
+      "context_length": 11760
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.30_substitution._append_eq.5.1",
+      "distance": 0.9142999649047852,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1557,
+      "end_line": 1580,
+      "tokens": 221,
+      "context_length": 11981
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_nonlinsolve.2_",
+      "distance": 0.9206126928329468,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 2075,
+      "end_line": 2132,
+      "tokens": 464,
+      "context_length": 12445
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/geometry/entity.py_GeometrySet._intersect_GeometrySet._intersect.8.1",
+      "distance": 0.9211387634277344,
+      "file_path": "sympy/geometry/entity.py",
+      "start_line": 493,
+      "end_line": 516,
+      "tokens": 202,
+      "context_length": 12647
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.43_solve.73",
+      "distance": 0.9257276654243469,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 962,
+      "end_line": 1058,
+      "tokens": 795,
+      "context_length": 13442
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem__.8_Range.__getitem__.8.2.7.1",
+      "distance": 0.9316356182098389,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 816,
+      "end_line": 923,
+      "tokens": 923,
+      "context_length": 14365
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/sets/conditionset.py_ConditionSet.__new___",
+      "distance": 0.9420726895332336,
+      "file_path": "sympy/sets/conditionset.py",
+      "start_line": 34,
+      "end_line": 61,
+      "tokens": 253,
+      "context_length": 14618
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_57__handle_zero_dimensional.result.7.1",
+      "distance": 0.9469666481018066,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1872,
+      "end_line": 1886,
+      "tokens": 149,
+      "context_length": 14767
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._eval_imageset_20.2.1",
+      "distance": 0.9482682943344116,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 925,
+      "end_line": 975,
+      "tokens": 313,
+      "context_length": 15080
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.1_solve.1",
+      "distance": 0.9494004845619202,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 358,
+      "end_line": 800,
+      "tokens": 4409,
+      "context_length": 19489
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.23_solve.newf.1",
+      "distance": 0.9503400921821594,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 888,
+      "end_line": 961,
+      "tokens": 703,
+      "context_length": 20192
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Integers_Integers._boundary.1.1",
+      "distance": 0.9513334035873413,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 95,
+      "end_line": 169,
+      "tokens": 441,
+      "context_length": 20633
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__solve.10__solve.10.9.2",
+      "distance": 0.9525607824325562,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1328,
+      "end_line": 1383,
+      "tokens": 448,
+      "context_length": 21081
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.intersection_AccumulationBounds.intersection.6.2.1.1",
+      "distance": 0.9535819888114929,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1129,
+      "end_line": 1171,
+      "tokens": 316,
+      "context_length": 21397
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_solveset_solveset.1",
+      "distance": 0.9591805338859558,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 737,
+      "end_line": 834,
+      "tokens": 764,
+      "context_length": 22161
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity._as_mpf_val_NegativeInfinity.__rmod__.1",
+      "distance": 0.9597896337509155,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2813,
+      "end_line": 2878,
+      "tokens": 481,
+      "context_length": 22642
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.27_substitution._check_exclude.5.1",
+      "distance": 0.9677189588546753,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1532,
+      "end_line": 1556,
+      "tokens": 290,
+      "context_length": 22932
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.11.1",
+      "distance": 0.9707969427108765,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 558,
+      "end_line": 605,
+      "tokens": 406,
+      "context_length": 23338
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py__domain_check__is_finite_with_finite_vars.4.1",
+      "distance": 0.9715844392776489,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 282,
+      "end_line": 310,
+      "tokens": 254,
+      "context_length": 23592
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.36_substitution._new_order_result.first_priority.5.1",
+      "distance": 0.9764850735664368,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1632,
+      "end_line": 1648,
+      "tokens": 174,
+      "context_length": 23766
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.2_solve.piece.1",
+      "distance": 0.9766794443130493,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 801,
+      "end_line": 887,
+      "tokens": 826,
+      "context_length": 24592
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NumberSymbol.__le___NumberSymbol.__hash__.1.1",
+      "distance": 0.9770973920822144,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3125,
+      "end_line": 3168,
+      "tokens": 336,
+      "context_length": 24928
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution.2_substitution.eqs_in_better_order.1",
+      "distance": 0.9778793454170227,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1400,
+      "end_line": 1455,
+      "tokens": 459,
+      "context_length": 25387
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py__solveset__solveset.result.1",
+      "distance": 0.9786121845245361,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 628,
+      "end_line": 653,
+      "tokens": 263,
+      "context_length": 25650
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__solve_system.12__solve_system.20.1",
+      "distance": 0.9806415438652039,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1745,
+      "end_line": 1837,
+      "tokens": 822,
+      "context_length": 26472
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.74_solve.93.solution.1",
+      "distance": 0.98097825050354,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1059,
+      "end_line": 1123,
+      "tokens": 597,
+      "context_length": 27069
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity._as_mpf_val_Infinity.__rmod__.1",
+      "distance": 0.9831801652908325,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2602,
+      "end_line": 2667,
+      "tokens": 477,
+      "context_length": 27546
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__solve.11__solve.21.1",
+      "distance": 0.9864546656608582,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1577,
+      "end_line": 1636,
+      "tokens": 515,
+      "context_length": 28061
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution._extract_main_soln_substitution._extract_main_soln.14.1",
+      "distance": 0.9905545115470886,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1484,
+      "end_line": 1531,
+      "tokens": 470,
+      "context_length": 28531
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_zoo_NumberSymbol.__ne__.1.1",
+      "distance": 0.9930849075317383,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3064,
+      "end_line": 3102,
+      "tokens": 231,
+      "context_length": 28762
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__simple_dens__simple_dens.dens.3.1",
+      "distance": 0.993232011795044,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 64,
+      "end_line": 76,
+      "tokens": 132,
+      "context_length": 28894
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_checksol.14_checksol.17",
+      "distance": 0.9941245913505554,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 217,
+      "end_line": 299,
+      "tokens": 688,
+      "context_length": 29582
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem___Range.__getitem__.ambiguous.1",
+      "distance": 0.997017502784729,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 807,
+      "end_line": 815,
+      "tokens": 137,
+      "context_length": 29719
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_not_empty_in_not_empty_in.10.2.1",
+      "distance": 0.9970953464508057,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 154,
+      "end_line": 221,
+      "tokens": 563,
+      "context_length": 30282
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__div___AccumulationBounds.__div__.2.1",
+      "distance": 1.0015791654586792,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 779,
+      "end_line": 833,
+      "tokens": 516,
+      "context_length": 30798
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_double_coset_can_rep.22_double_coset_can_rep.23.1",
+      "distance": 1.0050750970840454,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 417,
+      "end_line": 530,
+      "tokens": 1374,
+      "context_length": 32172
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__solve_system__solve_system.11.2.result.1",
+      "distance": 1.005155324935913,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 1639,
+      "end_line": 1743,
+      "tokens": 729,
+      "context_length": 32901
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution._solve_using_known_values_substitution._solve_using_known_values.9.1",
+      "distance": 1.0096957683563232,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1650,
+      "end_line": 1784,
+      "tokens": 1342,
+      "context_length": 34243
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__pow___AccumulationBounds.__pow__.3.1",
+      "distance": 1.0124045610427856,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 864,
+      "end_line": 933,
+      "tokens": 557,
+      "context_length": 34800
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity.__div___NegativeInfinity.__neg__.1.1",
+      "distance": 1.0137966871261597,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2746,
+      "end_line": 2775,
+      "tokens": 191,
+      "context_length": 34991
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet_ImageSet._is_multivariate.1.1",
+      "distance": 1.0173527002334595,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 213,
+      "end_line": 293,
+      "tokens": 639,
+      "context_length": 35630
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_1_16",
+      "distance": 1.0181941986083984,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 171,
+      "context_length": 35801
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_substitution_substitution.1",
+      "distance": 1.0219862461090088,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1309,
+      "end_line": 1398,
+      "tokens": 1009,
+      "context_length": 36810
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode.py_odesimp___remove_linear_redundancies.5.6.1.1",
+      "distance": 1.0221874713897705,
+      "file_path": "sympy/solvers/ode.py",
+      "start_line": 1988,
+      "end_line": 2571,
+      "tokens": 5849,
+      "context_length": 42659
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/sets/fancysets.py",
+      "position": 1,
+      "tokens": 11281,
+      "context_length": 11281
+    },
+    {
+      "file_path": "sympy/solvers/solveset.py",
+      "position": 2,
+      "tokens": 19161,
+      "context_length": 30442
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 3,
+      "tokens": 29583,
+      "context_length": 60025
+    },
+    {
+      "file_path": "sympy/geometry/entity.py",
+      "position": 4,
+      "tokens": 4552,
+      "context_length": 64577
+    },
+    {
+      "file_path": "sympy/sets/conditionset.py",
+      "position": 5,
+      "tokens": 489,
+      "context_length": 65066
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 6,
+      "tokens": 9210,
+      "context_length": 74276
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 7,
+      "tokens": 26879,
+      "context_length": 101155
+    },
+    {
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "position": 8,
+      "tokens": 13147,
+      "context_length": 114302
+    },
+    {
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "position": 9,
+      "tokens": 14461,
+      "context_length": 128763
+    },
+    {
+      "file_path": "sympy/solvers/ode.py",
+      "position": 10,
+      "tokens": 101307,
+      "context_length": 230070
+    }
+  ]
+}

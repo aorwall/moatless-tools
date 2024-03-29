@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from importlib import resources
 from typing import List, Tuple, Optional, Callable
@@ -134,8 +135,8 @@ class CodeParser:
             identifier=identifier,
             parameters=parameters,
             references=references,
-            start_line=node.start_point[0],
-            end_line=end_line,
+            start_line=node.start_point[0] + 1,
+            end_line=end_line + 1,
             pre_code=pre_code,
             content=code,
             language=self.language,
@@ -161,7 +162,7 @@ class CodeParser:
                     "query": "wrong_level_mode",
                     "tree_sitter_type": node.type,
                 },
-                start_line=node.start_point[0],
+                start_line=node.start_point[0] + 1,
                 end_line=end_line,
                 content="",
                 language=self.language
@@ -246,8 +247,8 @@ class CodeParser:
                 type=CodeBlockType.SPACE,
                 identifier=None,
                 pre_code=content_bytes[end_byte:node.end_byte].decode(self.encoding),
-                start_line=end_line,
-                end_line=node.end_point[0],
+                start_line=end_line + 1,
+                end_line=node.end_point[0] + 1,
                 content="",
             ))
 
@@ -486,6 +487,7 @@ class CodeParser:
 
         tree = self.tree_parser.parse(content_in_bytes)
         codeblock, _ = self.parse_code(content_in_bytes, tree.walk().node)
+
         codeblock.language = self.language
         return codeblock
 

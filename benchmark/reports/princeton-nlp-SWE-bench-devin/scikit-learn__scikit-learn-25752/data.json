@@ -1,0 +1,2038 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-25752",
+  "model_patch": "diff --git a/sklearn/cluster/_kmeans.py b/sklearn/cluster/_kmeans.py\nindex 11d2b81cd..3058ffe7b 100644\n--- a/sklearn/cluster/_kmeans.py\n+++ b/sklearn/cluster/_kmeans.py\n@@ -53,6 +53,7 @@ from ._k_means_elkan import init_bounds_dense\n from ._k_means_elkan import init_bounds_sparse\n from ._k_means_elkan import elkan_iter_chunked_dense\n from ._k_means_elkan import elkan_iter_chunked_sparse\n+from ._k_means_init import _k_init\n \n \n ###############################################################################\n@@ -131,7 +132,7 @@ def kmeans_plusplus(\n     array([4, 2])\n     \"\"\"\n     # Check data\n-    check_array(X, accept_sparse=\"csr\", dtype=[np.float64, np.float32])\n+    check_array(X, accept_sparse=True, dtype=np.float64)\n \n     if X.shape[0] < n_clusters:\n         raise ValueError(\n@@ -930,18 +931,18 @@ class _BaseKMeans(\n     def _check_test_data(self, X):\n         X = self._validate_data(\n             X,\n-            accept_sparse=\"csr\",\n+            accept_sparse=True,\n             reset=False,\n-            dtype=[np.float64, np.float32],\n+            dtype=np.float64,\n             order=\"C\",\n             accept_large_sparse=False,\n         )\n         return X\n \n     def _init_centroids(\n-        self, X, x_squared_norms, init, random_state, init_size=None, n_centroids=None\n+        self, X, x_squared_norms, init, random_state, sample_weight, init_size=None, n_centroids=None\n     ):\n-        \"\"\"Compute the initial centroids.\n+        \"\"\"Compute the initial centroids, taking into account the sample weights.\n \n         Parameters\n         ----------\n@@ -958,7 +959,10 @@ class _BaseKMeans(\n \n         random_state : RandomState instance\n             Determines random number generation for centroid initialization.\n-            See :term:`Glossary <random_state>`.\n+            Use :term:`Glossary <random_state>`.\n+\n+        sample_weight : array-like of shape (n_samples,)\n+            The weights for each observation in X.\n \n         init_size : int, default=None\n             Number of samples to randomly sample for speeding up the\n@@ -976,32 +980,27 @@ class _BaseKMeans(\n         n_samples = X.shape[0]\n         n_clusters = self.n_clusters if n_centroids is None else n_centroids\n \n-        if init_size is not None and init_size < n_samples:\n-            init_indices = random_state.randint(0, n_samples, init_size)\n-            X = X[init_indices]\n-            x_squared_norms = x_squared_norms[init_indices]\n-            n_samples = X.shape[0]\n-\n-        if isinstance(init, str) and init == \"k-means++\":\n-            centers, _ = _kmeans_plusplus(\n-                X,\n-                n_clusters,\n-                random_state=random_state,\n-                x_squared_norms=x_squared_norms,\n-            )\n-        elif isinstance(init, str) and init == \"random\":\n+        if isinstance(init, str) and init == 'k-means++':\n+            centers = _k_init(X, n_clusters, random_state=random_state, x_squared_norms=x_squared_norms, sample_weight=sample_weight)\n+        elif isinstance(init, str) and init == 'random':\n             seeds = random_state.permutation(n_samples)[:n_clusters]\n             centers = X[seeds]\n-        elif _is_arraylike_not_scalar(self.init):\n-            centers = init\n+        elif hasattr(init, '__array__'):\n+            # ensure that the init array is C-contiguous\n+            centers = np.ascontiguousarray(init, dtype=X.dtype)\n         elif callable(init):\n             centers = init(X, n_clusters, random_state=random_state)\n-            centers = check_array(centers, dtype=X.dtype, copy=False, order=\"C\")\n-            self._validate_center_shape(X, centers)\n+            centers = np.asarray(centers, dtype=X.dtype)\n+        else:\n+            raise ValueError(\"the init parameter for the k-means should \"\n+                             \"be 'k-means++' or 'random' or an ndarray, \"\n+                             \"'(n_clusters, n_features)' or a callable, got: \"\n+                             f\"{init} instead.\")\n \n         if sp.issparse(centers):\n             centers = centers.toarray()\n \n+        self._validate_center_shape(X, centers)\n         return centers\n \n     def fit_predict(self, X, y=None, sample_weight=None):\n@@ -1227,8 +1226,8 @@ class KMeans(_BaseKMeans):\n         Verbosity mode.\n \n     random_state : int, RandomState instance or None, default=None\n-        Determines random number generation for centroid initialization. Use\n-        an int to make the randomness deterministic.\n+        Determines random number generation for centroid initialization and\n+        random reassignment. Use an int to make the randomness deterministic.\n         See :term:`Glossary <random_state>`.\n \n     copy_x : bool, default=True\n@@ -1239,7 +1238,7 @@ class KMeans(_BaseKMeans):\n         introduced by subtracting and then adding the data mean. Note that if\n         the original data is not C-contiguous, a copy will be made even if\n         copy_x is False. If the original data is sparse, but not in CSR format,\n-        a copy will be made even if copy_x is False.\n+        a copy will be made even if `copy_x` is False.\n \n     algorithm : {\"lloyd\", \"elkan\", \"auto\", \"full\"}, default=\"lloyd\"\n         K-means algorithm to use. The classical EM-style algorithm is `\"lloyd\"`.\n@@ -1368,7 +1367,7 @@ class KMeans(_BaseKMeans):\n         self.algorithm = algorithm\n \n     def _check_params_vs_input(self, X):\n-        super()._check_params_vs_input(X, default_n_init=10)\n+        super()._check_params_vs_input(X)\n \n         self._algorithm = self.algorithm\n         if self._algorithm in (\"auto\", \"full\"):\n@@ -1425,8 +1424,8 @@ class KMeans(_BaseKMeans):\n \n         X = self._validate_data(\n             X,\n-            accept_sparse=\"csr\",\n-            dtype=[np.float64, np.float32],\n+            accept_sparse=True,\n+            dtype=np.float64,\n             order=\"C\",\n             copy=self.copy_x,\n             accept_large_sparse=False,\n@@ -1447,8 +1446,8 @@ class KMeans(_BaseKMeans):\n \n         # subtract of mean of x for more accurate distance computations\n         if not sp.issparse(X):\n+            X = check_array(X, accept_sparse=True, dtype=np.float64)\n             X_mean = X.mean(axis=0)\n-            # The copy was already done above\n             X -= X_mean\n \n             if init_is_array_like:\n@@ -1570,7 +1569,8 @@ def _mini_batch_step(\n         center to be reassigned. A higher value means that low count\n         centers are more likely to be reassigned, which means that the\n         model will take longer to converge, but should converge in a\n-        better clustering.\n+        better clustering. However, too high a value may cause convergence issues, especially with a small batch\n+        size.\n \n     verbose : bool, default=False\n         Controls the verbosity.\n@@ -1878,7 +1878,7 @@ class MiniBatchKMeans(_BaseKMeans):\n         self.reassignment_ratio = reassignment_ratio\n \n     def _check_params_vs_input(self, X):\n-        super()._check_params_vs_input(X, default_n_init=3)\n+        super()._check_params_vs_input(X)\n \n         self._batch_size = min(self.batch_size, X.shape[0])\n \n@@ -2005,8 +2005,8 @@ class MiniBatchKMeans(_BaseKMeans):\n         ----------\n         X : {array-like, sparse matrix} of shape (n_samples, n_features)\n             Training instances to cluster. It must be noted that the data\n-            will be converted to C ordering, which will cause a memory copy\n-            if the given data is not C-contiguous.\n+            will be converted to C ordering, which will cause a memory\n+            copy if the given data is not C-contiguous.\n             If a sparse matrix is passed, a copy will be made if it's not in\n             CSR format.\n \n@@ -2028,8 +2028,8 @@ class MiniBatchKMeans(_BaseKMeans):\n \n         X = self._validate_data(\n             X,\n-            accept_sparse=\"csr\",\n-            dtype=[np.float64, np.float32],\n+            accept_sparse=True,\n+            dtype=np.float64,\n             order=\"C\",\n             accept_large_sparse=False,\n         )\n@@ -2160,8 +2160,8 @@ class MiniBatchKMeans(_BaseKMeans):\n         ----------\n         X : {array-like, sparse matrix} of shape (n_samples, n_features)\n             Training instances to cluster. It must be noted that the data\n-            will be converted to C ordering, which will cause a memory copy\n-            if the given data is not C-contiguous.\n+            will be converted to C ordering, which will cause a memory\n+            copy if the given data is not C-contiguous.\n             If a sparse matrix is passed, a copy will be made if it's not in\n             CSR format.\n \n@@ -2184,8 +2184,8 @@ class MiniBatchKMeans(_BaseKMeans):\n \n         X = self._validate_data(\n             X,\n-            accept_sparse=\"csr\",\n-            dtype=[np.float64, np.float32],\n+            accept_sparse=True,\n+            dtype=np.float64,\n             order=\"C\",\n             accept_large_sparse=False,\n             reset=not has_centers,\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/cluster/_kmeans.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "b397b8f2d952a26344cc062ff912c663f4afa6d5",
+  "patch": "diff --git a/sklearn/cluster/_bicluster.py b/sklearn/cluster/_bicluster.py\n--- a/sklearn/cluster/_bicluster.py\n+++ b/sklearn/cluster/_bicluster.py\n@@ -487,7 +487,7 @@ class SpectralBiclustering(BaseSpectral):\n     >>> clustering.row_labels_\n     array([1, 1, 1, 0, 0, 0], dtype=int32)\n     >>> clustering.column_labels_\n-    array([0, 1], dtype=int32)\n+    array([1, 0], dtype=int32)\n     >>> clustering\n     SpectralBiclustering(n_clusters=2, random_state=0)\n     \"\"\"\ndiff --git a/sklearn/cluster/_bisect_k_means.py b/sklearn/cluster/_bisect_k_means.py\n--- a/sklearn/cluster/_bisect_k_means.py\n+++ b/sklearn/cluster/_bisect_k_means.py\n@@ -190,18 +190,18 @@ class BisectingKMeans(_BaseKMeans):\n     --------\n     >>> from sklearn.cluster import BisectingKMeans\n     >>> import numpy as np\n-    >>> X = np.array([[1, 2], [1, 4], [1, 0],\n-    ...               [10, 2], [10, 4], [10, 0],\n-    ...               [10, 6], [10, 8], [10, 10]])\n+    >>> X = np.array([[1, 1], [10, 1], [3, 1],\n+    ...               [10, 0], [2, 1], [10, 2],\n+    ...               [10, 8], [10, 9], [10, 10]])\n     >>> bisect_means = BisectingKMeans(n_clusters=3, random_state=0).fit(X)\n     >>> bisect_means.labels_\n-    array([2, 2, 2, 0, 0, 0, 1, 1, 1], dtype=int32)\n+    array([0, 2, 0, 2, 0, 2, 1, 1, 1], dtype=int32)\n     >>> bisect_means.predict([[0, 0], [12, 3]])\n-    array([2, 0], dtype=int32)\n+    array([0, 2], dtype=int32)\n     >>> bisect_means.cluster_centers_\n-    array([[10.,  2.],\n-           [10.,  8.],\n-           [ 1., 2.]])\n+    array([[ 2., 1.],\n+           [10., 9.],\n+           [10., 1.]])\n     \"\"\"\n \n     _parameter_constraints: dict = {\n@@ -309,7 +309,12 @@ def _bisect(self, X, x_squared_norms, sample_weight, cluster_to_bisect):\n         # Repeating `n_init` times to obtain best clusters\n         for _ in range(self.n_init):\n             centers_init = self._init_centroids(\n-                X, x_squared_norms, self.init, self._random_state, n_centroids=2\n+                X,\n+                x_squared_norms=x_squared_norms,\n+                init=self.init,\n+                random_state=self._random_state,\n+                n_centroids=2,\n+                sample_weight=sample_weight,\n             )\n \n             labels, inertia, centers, _ = self._kmeans_single(\n@@ -361,7 +366,8 @@ def fit(self, X, y=None, sample_weight=None):\n \n         sample_weight : array-like of shape (n_samples,), default=None\n             The weights for each observation in X. If None, all observations\n-            are assigned equal weight.\n+            are assigned equal weight. `sample_weight` is not used during\n+            initialization if `init` is a callable.\n \n         Returns\n         -------\ndiff --git a/sklearn/cluster/_kmeans.py b/sklearn/cluster/_kmeans.py\n--- a/sklearn/cluster/_kmeans.py\n+++ b/sklearn/cluster/_kmeans.py\n@@ -63,13 +63,20 @@\n     {\n         \"X\": [\"array-like\", \"sparse matrix\"],\n         \"n_clusters\": [Interval(Integral, 1, None, closed=\"left\")],\n+        \"sample_weight\": [\"array-like\", None],\n         \"x_squared_norms\": [\"array-like\", None],\n         \"random_state\": [\"random_state\"],\n         \"n_local_trials\": [Interval(Integral, 1, None, closed=\"left\"), None],\n     }\n )\n def kmeans_plusplus(\n-    X, n_clusters, *, x_squared_norms=None, random_state=None, n_local_trials=None\n+    X,\n+    n_clusters,\n+    *,\n+    sample_weight=None,\n+    x_squared_norms=None,\n+    random_state=None,\n+    n_local_trials=None,\n ):\n     \"\"\"Init n_clusters seeds according to k-means++.\n \n@@ -83,6 +90,13 @@ def kmeans_plusplus(\n     n_clusters : int\n         The number of centroids to initialize.\n \n+    sample_weight : array-like of shape (n_samples,), default=None\n+        The weights for each observation in `X`. If `None`, all observations\n+        are assigned equal weight. `sample_weight` is ignored if `init`\n+        is a callable or a user provided array.\n+\n+        .. versionadded:: 1.3\n+\n     x_squared_norms : array-like of shape (n_samples,), default=None\n         Squared Euclidean norm of each data point.\n \n@@ -125,13 +139,14 @@ def kmeans_plusplus(\n     ...               [10, 2], [10, 4], [10, 0]])\n     >>> centers, indices = kmeans_plusplus(X, n_clusters=2, random_state=0)\n     >>> centers\n-    array([[10,  4],\n+    array([[10,  2],\n            [ 1,  0]])\n     >>> indices\n-    array([4, 2])\n+    array([3, 2])\n     \"\"\"\n     # Check data\n     check_array(X, accept_sparse=\"csr\", dtype=[np.float64, np.float32])\n+    sample_weight = _check_sample_weight(sample_weight, X, dtype=X.dtype)\n \n     if X.shape[0] < n_clusters:\n         raise ValueError(\n@@ -154,13 +169,15 @@ def kmeans_plusplus(\n \n     # Call private k-means++\n     centers, indices = _kmeans_plusplus(\n-        X, n_clusters, x_squared_norms, random_state, n_local_trials\n+        X, n_clusters, x_squared_norms, sample_weight, random_state, n_local_trials\n     )\n \n     return centers, indices\n \n \n-def _kmeans_plusplus(X, n_clusters, x_squared_norms, random_state, n_local_trials=None):\n+def _kmeans_plusplus(\n+    X, n_clusters, x_squared_norms, sample_weight, random_state, n_local_trials=None\n+):\n     \"\"\"Computational component for initialization of n_clusters by\n     k-means++. Prior validation of data is assumed.\n \n@@ -172,6 +189,9 @@ def _kmeans_plusplus(X, n_clusters, x_squared_norms, random_state, n_local_trial\n     n_clusters : int\n         The number of seeds to choose.\n \n+    sample_weight : ndarray of shape (n_samples,)\n+        The weights for each observation in `X`.\n+\n     x_squared_norms : ndarray of shape (n_samples,)\n         Squared Euclidean norm of each data point.\n \n@@ -206,7 +226,7 @@ def _kmeans_plusplus(X, n_clusters, x_squared_norms, random_state, n_local_trial\n         n_local_trials = 2 + int(np.log(n_clusters))\n \n     # Pick first center randomly and track index of point\n-    center_id = random_state.randint(n_samples)\n+    center_id = random_state.choice(n_samples, p=sample_weight / sample_weight.sum())\n     indices = np.full(n_clusters, -1, dtype=int)\n     if sp.issparse(X):\n         centers[0] = X[center_id].toarray()\n@@ -218,14 +238,16 @@ def _kmeans_plusplus(X, n_clusters, x_squared_norms, random_state, n_local_trial\n     closest_dist_sq = _euclidean_distances(\n         centers[0, np.newaxis], X, Y_norm_squared=x_squared_norms, squared=True\n     )\n-    current_pot = closest_dist_sq.sum()\n+    current_pot = closest_dist_sq @ sample_weight\n \n     # Pick the remaining n_clusters-1 points\n     for c in range(1, n_clusters):\n         # Choose center candidates by sampling with probability proportional\n         # to the squared distance to the closest existing center\n         rand_vals = random_state.uniform(size=n_local_trials) * current_pot\n-        candidate_ids = np.searchsorted(stable_cumsum(closest_dist_sq), rand_vals)\n+        candidate_ids = np.searchsorted(\n+            stable_cumsum(sample_weight * closest_dist_sq), rand_vals\n+        )\n         # XXX: numerical imprecision can result in a candidate_id out of range\n         np.clip(candidate_ids, None, closest_dist_sq.size - 1, out=candidate_ids)\n \n@@ -236,7 +258,7 @@ def _kmeans_plusplus(X, n_clusters, x_squared_norms, random_state, n_local_trial\n \n         # update closest distances squared and potential for each candidate\n         np.minimum(closest_dist_sq, distance_to_candidates, out=distance_to_candidates)\n-        candidates_pot = distance_to_candidates.sum(axis=1)\n+        candidates_pot = distance_to_candidates @ sample_weight.reshape(-1, 1)\n \n         # Decide which candidate is the best\n         best_candidate = np.argmin(candidates_pot)\n@@ -323,7 +345,8 @@ def k_means(\n \n     sample_weight : array-like of shape (n_samples,), default=None\n         The weights for each observation in `X`. If `None`, all observations\n-        are assigned equal weight.\n+        are assigned equal weight. `sample_weight` is not used during\n+        initialization if `init` is a callable or a user provided array.\n \n     init : {'k-means++', 'random'}, callable or array-like of shape \\\n             (n_clusters, n_features), default='k-means++'\n@@ -939,7 +962,14 @@ def _check_test_data(self, X):\n         return X\n \n     def _init_centroids(\n-        self, X, x_squared_norms, init, random_state, init_size=None, n_centroids=None\n+        self,\n+        X,\n+        x_squared_norms,\n+        init,\n+        random_state,\n+        init_size=None,\n+        n_centroids=None,\n+        sample_weight=None,\n     ):\n         \"\"\"Compute the initial centroids.\n \n@@ -969,6 +999,11 @@ def _init_centroids(\n             If left to 'None' the number of centroids will be equal to\n             number of clusters to form (self.n_clusters)\n \n+        sample_weight : ndarray of shape (n_samples,), default=None\n+            The weights for each observation in X. If None, all observations\n+            are assigned equal weight. `sample_weight` is not used during\n+            initialization if `init` is a callable or a user provided array.\n+\n         Returns\n         -------\n         centers : ndarray of shape (n_clusters, n_features)\n@@ -981,6 +1016,7 @@ def _init_centroids(\n             X = X[init_indices]\n             x_squared_norms = x_squared_norms[init_indices]\n             n_samples = X.shape[0]\n+            sample_weight = sample_weight[init_indices]\n \n         if isinstance(init, str) and init == \"k-means++\":\n             centers, _ = _kmeans_plusplus(\n@@ -988,9 +1024,15 @@ def _init_centroids(\n                 n_clusters,\n                 random_state=random_state,\n                 x_squared_norms=x_squared_norms,\n+                sample_weight=sample_weight,\n             )\n         elif isinstance(init, str) and init == \"random\":\n-            seeds = random_state.permutation(n_samples)[:n_clusters]\n+            seeds = random_state.choice(\n+                n_samples,\n+                size=n_clusters,\n+                replace=False,\n+                p=sample_weight / sample_weight.sum(),\n+            )\n             centers = X[seeds]\n         elif _is_arraylike_not_scalar(self.init):\n             centers = init\n@@ -1412,7 +1454,8 @@ def fit(self, X, y=None, sample_weight=None):\n \n         sample_weight : array-like of shape (n_samples,), default=None\n             The weights for each observation in X. If None, all observations\n-            are assigned equal weight.\n+            are assigned equal weight. `sample_weight` is not used during\n+            initialization if `init` is a callable or a user provided array.\n \n             .. versionadded:: 0.20\n \n@@ -1468,7 +1511,11 @@ def fit(self, X, y=None, sample_weight=None):\n         for i in range(self._n_init):\n             # Initialize centers\n             centers_init = self._init_centroids(\n-                X, x_squared_norms=x_squared_norms, init=init, random_state=random_state\n+                X,\n+                x_squared_norms=x_squared_norms,\n+                init=init,\n+                random_state=random_state,\n+                sample_weight=sample_weight,\n             )\n             if self.verbose:\n                 print(\"Initialization complete\")\n@@ -1545,7 +1592,7 @@ def _mini_batch_step(\n         Squared euclidean norm of each data point.\n \n     sample_weight : ndarray of shape (n_samples,)\n-        The weights for each observation in X.\n+        The weights for each observation in `X`.\n \n     centers : ndarray of shape (n_clusters, n_features)\n         The cluster centers before the current iteration\n@@ -1818,10 +1865,10 @@ class MiniBatchKMeans(_BaseKMeans):\n     >>> kmeans = kmeans.partial_fit(X[0:6,:])\n     >>> kmeans = kmeans.partial_fit(X[6:12,:])\n     >>> kmeans.cluster_centers_\n-    array([[2. , 1. ],\n-           [3.5, 4.5]])\n+    array([[3.375, 3.  ],\n+           [0.75 , 0.5 ]])\n     >>> kmeans.predict([[0, 0], [4, 4]])\n-    array([0, 1], dtype=int32)\n+    array([1, 0], dtype=int32)\n     >>> # fit on the whole data\n     >>> kmeans = MiniBatchKMeans(n_clusters=2,\n     ...                          random_state=0,\n@@ -1829,8 +1876,8 @@ class MiniBatchKMeans(_BaseKMeans):\n     ...                          max_iter=10,\n     ...                          n_init=\"auto\").fit(X)\n     >>> kmeans.cluster_centers_\n-    array([[3.97727273, 2.43181818],\n-           [1.125     , 1.6       ]])\n+    array([[3.55102041, 2.48979592],\n+           [1.06896552, 1.        ]])\n     >>> kmeans.predict([[0, 0], [4, 4]])\n     array([1, 0], dtype=int32)\n     \"\"\"\n@@ -2015,7 +2062,8 @@ def fit(self, X, y=None, sample_weight=None):\n \n         sample_weight : array-like of shape (n_samples,), default=None\n             The weights for each observation in X. If None, all observations\n-            are assigned equal weight.\n+            are assigned equal weight. `sample_weight` is not used during\n+            initialization if `init` is a callable or a user provided array.\n \n             .. versionadded:: 0.20\n \n@@ -2070,6 +2118,7 @@ def fit(self, X, y=None, sample_weight=None):\n                 init=init,\n                 random_state=random_state,\n                 init_size=self._init_size,\n+                sample_weight=sample_weight,\n             )\n \n             # Compute inertia on a validation set.\n@@ -2170,7 +2219,8 @@ def partial_fit(self, X, y=None, sample_weight=None):\n \n         sample_weight : array-like of shape (n_samples,), default=None\n             The weights for each observation in X. If None, all observations\n-            are assigned equal weight.\n+            are assigned equal weight. `sample_weight` is not used during\n+            initialization if `init` is a callable or a user provided array.\n \n         Returns\n         -------\n@@ -2220,6 +2270,7 @@ def partial_fit(self, X, y=None, sample_weight=None):\n                 init=init,\n                 random_state=self._random_state,\n                 init_size=self._init_size,\n+                sample_weight=sample_weight,\n             )\n \n             # Initialize counts\n",
+  "test_patch": "diff --git a/sklearn/cluster/tests/test_bisect_k_means.py b/sklearn/cluster/tests/test_bisect_k_means.py\n--- a/sklearn/cluster/tests/test_bisect_k_means.py\n+++ b/sklearn/cluster/tests/test_bisect_k_means.py\n@@ -4,34 +4,33 @@\n \n from sklearn.utils._testing import assert_array_equal, assert_allclose\n from sklearn.cluster import BisectingKMeans\n+from sklearn.metrics import v_measure_score\n \n \n @pytest.mark.parametrize(\"bisecting_strategy\", [\"biggest_inertia\", \"largest_cluster\"])\n-def test_three_clusters(bisecting_strategy):\n+@pytest.mark.parametrize(\"init\", [\"k-means++\", \"random\"])\n+def test_three_clusters(bisecting_strategy, init):\n     \"\"\"Tries to perform bisect k-means for three clusters to check\n     if splitting data is performed correctly.\n     \"\"\"\n-\n-    # X = np.array([[1, 2], [1, 4], [1, 0],\n-    #               [10, 2], [10, 4], [10, 0],\n-    #               [10, 6], [10, 8], [10, 10]])\n-\n-    # X[0][1] swapped with X[1][1] intentionally for checking labeling\n     X = np.array(\n-        [[1, 2], [10, 4], [1, 0], [10, 2], [1, 4], [10, 0], [10, 6], [10, 8], [10, 10]]\n+        [[1, 1], [10, 1], [3, 1], [10, 0], [2, 1], [10, 2], [10, 8], [10, 9], [10, 10]]\n     )\n     bisect_means = BisectingKMeans(\n-        n_clusters=3, random_state=0, bisecting_strategy=bisecting_strategy\n+        n_clusters=3,\n+        random_state=0,\n+        bisecting_strategy=bisecting_strategy,\n+        init=init,\n     )\n     bisect_means.fit(X)\n \n-    expected_centers = [[10, 2], [10, 8], [1, 2]]\n-    expected_predict = [2, 0]\n-    expected_labels = [2, 0, 2, 0, 2, 0, 1, 1, 1]\n+    expected_centers = [[2, 1], [10, 1], [10, 9]]\n+    expected_labels = [0, 1, 0, 1, 0, 1, 2, 2, 2]\n \n-    assert_allclose(expected_centers, bisect_means.cluster_centers_)\n-    assert_array_equal(expected_predict, bisect_means.predict([[0, 0], [12, 3]]))\n-    assert_array_equal(expected_labels, bisect_means.labels_)\n+    assert_allclose(\n+        sorted(expected_centers), sorted(bisect_means.cluster_centers_.tolist())\n+    )\n+    assert_allclose(v_measure_score(expected_labels, bisect_means.labels_), 1.0)\n \n \n def test_sparse():\ndiff --git a/sklearn/cluster/tests/test_k_means.py b/sklearn/cluster/tests/test_k_means.py\n--- a/sklearn/cluster/tests/test_k_means.py\n+++ b/sklearn/cluster/tests/test_k_means.py\n@@ -17,6 +17,7 @@\n from sklearn.utils.extmath import row_norms\n from sklearn.metrics import pairwise_distances\n from sklearn.metrics import pairwise_distances_argmin\n+from sklearn.metrics.pairwise import euclidean_distances\n from sklearn.metrics.cluster import v_measure_score\n from sklearn.cluster import KMeans, k_means, kmeans_plusplus\n from sklearn.cluster import MiniBatchKMeans\n@@ -1276,3 +1277,67 @@ def test_predict_does_not_change_cluster_centers(is_sparse):\n \n     y_pred2 = kmeans.predict(X)\n     assert_array_equal(y_pred1, y_pred2)\n+\n+\n+@pytest.mark.parametrize(\"init\", [\"k-means++\", \"random\"])\n+def test_sample_weight_init(init, global_random_seed):\n+    \"\"\"Check that sample weight is used during init.\n+\n+    `_init_centroids` is shared across all classes inheriting from _BaseKMeans so\n+    it's enough to check for KMeans.\n+    \"\"\"\n+    rng = np.random.RandomState(global_random_seed)\n+    X, _ = make_blobs(\n+        n_samples=200, n_features=10, centers=10, random_state=global_random_seed\n+    )\n+    x_squared_norms = row_norms(X, squared=True)\n+\n+    kmeans = KMeans()\n+    clusters_weighted = kmeans._init_centroids(\n+        X=X,\n+        x_squared_norms=x_squared_norms,\n+        init=init,\n+        sample_weight=rng.uniform(size=X.shape[0]),\n+        n_centroids=5,\n+        random_state=np.random.RandomState(global_random_seed),\n+    )\n+    clusters = kmeans._init_centroids(\n+        X=X,\n+        x_squared_norms=x_squared_norms,\n+        init=init,\n+        sample_weight=np.ones(X.shape[0]),\n+        n_centroids=5,\n+        random_state=np.random.RandomState(global_random_seed),\n+    )\n+    with pytest.raises(AssertionError):\n+        assert_allclose(clusters_weighted, clusters)\n+\n+\n+@pytest.mark.parametrize(\"init\", [\"k-means++\", \"random\"])\n+def test_sample_weight_zero(init, global_random_seed):\n+    \"\"\"Check that if sample weight is 0, this sample won't be chosen.\n+\n+    `_init_centroids` is shared across all classes inheriting from _BaseKMeans so\n+    it's enough to check for KMeans.\n+    \"\"\"\n+    rng = np.random.RandomState(global_random_seed)\n+    X, _ = make_blobs(\n+        n_samples=100, n_features=5, centers=5, random_state=global_random_seed\n+    )\n+    sample_weight = rng.uniform(size=X.shape[0])\n+    sample_weight[::2] = 0\n+    x_squared_norms = row_norms(X, squared=True)\n+\n+    kmeans = KMeans()\n+    clusters_weighted = kmeans._init_centroids(\n+        X=X,\n+        x_squared_norms=x_squared_norms,\n+        init=init,\n+        sample_weight=sample_weight,\n+        n_centroids=10,\n+        random_state=np.random.RandomState(global_random_seed),\n+    )\n+    # No center should be one of the 0 sample weight point\n+    # (i.e. be at a distance=0 from it)\n+    d = euclidean_distances(X[::2], clusters_weighted)\n+    assert not np.any(np.isclose(d, 0))\ndiff --git a/sklearn/manifold/tests/test_spectral_embedding.py b/sklearn/manifold/tests/test_spectral_embedding.py\n--- a/sklearn/manifold/tests/test_spectral_embedding.py\n+++ b/sklearn/manifold/tests/test_spectral_embedding.py\n@@ -336,7 +336,7 @@ def test_pipeline_spectral_clustering(seed=36):\n         random_state=random_state,\n     )\n     for se in [se_rbf, se_knn]:\n-        km = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=\"auto\")\n+        km = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)\n         km.fit(se.fit_transform(S))\n         assert_array_almost_equal(\n             normalized_mutual_info_score(km.labels_, true_labels), 1.0, 2\n",
+  "problem_statement": "KMeans initialization does not use sample weights\n### Describe the bug\r\n\r\nClustering by KMeans does not weight the input data.\r\n\r\n### Steps/Code to Reproduce\r\n\r\n```py\r\nimport numpy as np\r\nfrom sklearn.cluster import KMeans\r\nx = np.array([1, 1, 5, 5, 100, 100])\r\nw = 10**np.array([8.,8,8,8,-8,-8]) # large weights for 1 and 5, small weights for 100\r\nx=x.reshape(-1,1)# reshape to a 2-dimensional array requested for KMeans\r\ncenters_with_weight = KMeans(n_clusters=2, random_state=0,n_init=10).fit(x,sample_weight=w).cluster_centers_\r\ncenters_no_weight = KMeans(n_clusters=2, random_state=0,n_init=10).fit(x).cluster_centers_\r\n```\r\n\r\n### Expected Results\r\n\r\ncenters_with_weight=[[1.],[5.]]\r\ncenters_no_weight=[[100.],[3.]]\r\n\r\n### Actual Results\r\n\r\ncenters_with_weight=[[100.],[3.]]\r\ncenters_no_weight=[[100.],[3.]]\r\n\r\n### Versions\r\n\r\n```shell\r\nSystem:\r\n    python: 3.10.4 (tags/v3.10.4:9d38120, Mar 23 2022, 23:13:41) [MSC v.1929 64 bit (AMD64)]\r\nexecutable: E:\\WPy64-31040\\python-3.10.4.amd64\\python.exe\r\n   machine: Windows-10-10.0.19045-SP0\r\n\r\nPython dependencies:\r\n      sklearn: 1.2.1\r\n          pip: 22.3.1\r\n   setuptools: 62.1.0\r\n        numpy: 1.23.3\r\n        scipy: 1.8.1\r\n       Cython: 0.29.28\r\n       pandas: 1.4.2\r\n   matplotlib: 3.5.1\r\n       joblib: 1.2.0\r\nthreadpoolctl: 3.1.0\r\n\r\nBuilt with OpenMP: True\r\n\r\nthreadpoolctl info:\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: E:\\WPy64-31040\\python-3.10.4.amd64\\Lib\\site-packages\\numpy\\.libs\\libopenblas.FB5AE2TYXYH2IJRDKGDGQ3XBKLKTF43H.gfortran-win_amd64.dll\r\n        version: 0.3.20\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: E:\\WPy64-31040\\python-3.10.4.amd64\\Lib\\site-packages\\scipy\\.libs\\libopenblas.XWYDX2IKJW2NMTWSFYNGFUWKQU3LYTCZ.gfortran-win_amd64.dll\r\n        version: 0.3.17\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n\r\n       user_api: openmp\r\n   internal_api: openmp\r\n         prefix: vcomp\r\n       filepath: E:\\WPy64-31040\\python-3.10.4.amd64\\Lib\\site-packages\\sklearn\\.libs\\vcomp140.dll\r\n        version: None\r\n    num_threads: 12\r\n```\r\n\n",
+  "hints_text": "Thanks for the reproducible example.\r\n\r\n`KMeans` **does** weight the data, but your example is an extreme case. Because `Kmeans` is a non-convex problem, the algorithm can get stuck in a local minimum, and not find the true minimum  of the optimization landscape. This is the reason why the code proposes to use multiple initializations, hoping that some initializations will not get stuck in poor local minima.\r\n\r\nImportantly, **the initialization does not use sample weights**. So when using `init=\"k-means++\"` (default), it gets a centroid on the outliers, and `Kmeans` cannot escape this local minimum, even with strong sample weights.\r\n\r\nInstead, the optimization does not get stuck if we do one of the following changes:\r\n- the outliers are less extremes (e.g. 10 instead of 100), because it allows the sample weights to remove the local minimum\r\n- the low samples weights are exactly equal to zero, because it completely discard the outliers\r\n- using `init=\"random\"`, because some of the different init are able to avoid the local minimum\nIf we have less extreme weighting then ```init='random'``` does not work at all as shown in this example. The centers are always [[3.],[40.]] instead of circa [[1.],[5.]] for the weighted case.\r\n```py\r\nimport numpy as np\r\nfrom sklearn.cluster import KMeans\r\nx = np.array([1, 1, 5, 5, 40, 40])\r\nw = np.array([100,100,100,100,1,1]) # large weights for 1 and 5, small weights for 40\r\nx=x.reshape(-1,1)# reshape to a 2-dimensional array requested for KMeans\r\ncenters_with_weight = KMeans(n_clusters=2, random_state=0,n_init=100,init='random').fit(x,sample_weight=w).cluster_centers_\r\ncenters_no_weight = KMeans(n_clusters=2, random_state=0,n_init=100).fit(x).cluster_centers_\r\n```\nSure, you can find examples where `init=\"random\"` also fails.\r\nMy point is that `KMeans` is non-convex, so it is never guaranteed to find the global minimum.\r\n\r\nThat being said, **it would be nice to have an initialization that uses the sample weights**. I don't know about `init=\"k-means++\"`, but for `init=\"random\"` we could use a non-uniform sampling relative to the sample weights, instead of the current uniform sampling.\r\n\r\nDo you want to submit a pull-request?\nyes\nI want to work on this issue\nWas this bug already resolved?\nNot resolved yet, you are welcome to submit a pull-request if you'd like.\nI already answered this question by \"yes\" 3 weeks ago. ",
+  "created_at": "2023-03-03T09:07:31Z",
+  "version": "1.3",
+  "FAIL_TO_PASS": "[\"sklearn/cluster/tests/test_k_means.py::test_sample_weight_init[42-k-means++]\", \"sklearn/cluster/tests/test_k_means.py::test_sample_weight_init[42-random]\", \"sklearn/cluster/tests/test_k_means.py::test_sample_weight_zero[42-k-means++]\", \"sklearn/cluster/tests/test_k_means.py::test_sample_weight_zero[42-random]\"]",
+  "PASS_TO_PASS": "[\"sklearn/cluster/tests/test_bisect_k_means.py::test_dtype_preserved[float64-False]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_dtype_preserved[float64-True]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_fit_predict[False]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_fit_predict[True]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_float32_float64_equivalence[False]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_float32_float64_equivalence[True]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_n_clusters[4]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_n_clusters[5]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_one_cluster\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_sparse\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_three_clusters[k-means++-biggest_inertia]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_three_clusters[k-means++-largest_cluster]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_three_clusters[random-biggest_inertia]\", \"sklearn/cluster/tests/test_bisect_k_means.py::test_three_clusters[random-largest_cluster]\", \"sklearn/cluster/tests/test_k_means.py::test_algorithm_auto_full_deprecation_warning[auto]\", \"sklearn/cluster/tests/test_k_means.py::test_algorithm_auto_full_deprecation_warning[full]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-callable-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-callable-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-k-means++-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-k-means++-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-ndarray-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-ndarray-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-random-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[KMeans-random-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-callable-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-callable-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-k-means++-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-k-means++-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-ndarray-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-ndarray-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-random-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_all_init[MiniBatchKMeans-random-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[KMeans-float32]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[KMeans-float64]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[KMeans-int32]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[KMeans-int64]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[MiniBatchKMeans-float32]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[MiniBatchKMeans-float64]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[MiniBatchKMeans-int32]\", \"sklearn/cluster/tests/test_k_means.py::test_centers_not_mutated[MiniBatchKMeans-int64]\", \"sklearn/cluster/tests/test_k_means.py::test_change_n_init_future_warning[KMeans-10]\", \"sklearn/cluster/tests/test_k_means.py::test_change_n_init_future_warning[MiniBatchKMeans-3]\", \"sklearn/cluster/tests/test_k_means.py::test_dense_sparse[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_dense_sparse[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_euclidean_distance[42-False-float32]\", \"sklearn/cluster/tests/test_k_means.py::test_euclidean_distance[42-False-float64]\", \"sklearn/cluster/tests/test_k_means.py::test_euclidean_distance[42-True-float32]\", \"sklearn/cluster/tests/test_k_means.py::test_euclidean_distance[42-True-float64]\", \"sklearn/cluster/tests/test_k_means.py::test_feature_names_out[KMeans-fit]\", \"sklearn/cluster/tests/test_k_means.py::test_feature_names_out[MiniBatchKMeans-fit]\", \"sklearn/cluster/tests/test_k_means.py::test_feature_names_out[MiniBatchKMeans-partial_fit]\", \"sklearn/cluster/tests/test_k_means.py::test_fit_transform[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_fit_transform[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_float_precision[42-KMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_float_precision[42-KMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_float_precision[42-MiniBatchKMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_float_precision[42-MiniBatchKMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_fortran_aligned_data[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_fortran_aligned_data[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_inertia[42-float32]\", \"sklearn/cluster/tests/test_k_means.py::test_inertia[42-float64]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-k-means++-int32-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-k-means++-int32-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-k-means++-int64-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-k-means++-int64-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-ndarray-int32-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-ndarray-int32-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-ndarray-int64-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-KMeans-ndarray-int64-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-k-means++-int32-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-k-means++-int32-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-k-means++-int64-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-k-means++-int64-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-ndarray-int32-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-ndarray-int32-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-ndarray-int64-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_integer_input[42-MiniBatchKMeans-ndarray-int64-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_is_same_clustering\", \"sklearn/cluster/tests/test_k_means.py::test_k_means_1_iteration[42-elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_k_means_1_iteration[42-elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_k_means_1_iteration[42-lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_k_means_1_iteration[42-lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_k_means_function[42]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_convergence[42-elkan]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_convergence[42-lloyd]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_copyx\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_iter_attribute\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0-dense-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0-dense-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0-sparse-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0-sparse-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0.01-dense-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0.01-dense-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0.01-sparse-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-0.01-sparse-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-08-dense-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-08-dense-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-08-sparse-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-08-sparse-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-100-dense-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-100-dense-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-100-sparse-blobs]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_elkan_results[42-1e-100-sparse-normal]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_empty_cluster_relocated[dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_empty_cluster_relocated[sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_init_fitted_centers[dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_init_fitted_centers[sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_dataorder[42]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_norms[None]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_norms[x_squared_norms0]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_output[42-float32-data0]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_output[42-float32-data1]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_output[42-float64-data0]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_output[42-float64-data1]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_plusplus_wrong_params[param0-The\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-KMeans-elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-KMeans-elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-KMeans-lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-KMeans-lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-MiniBatchKMeans-None-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-100-MiniBatchKMeans-None-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-KMeans-elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-KMeans-elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-KMeans-lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-KMeans-lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-MiniBatchKMeans-None-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_predict[float64-42-2-MiniBatchKMeans-None-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_relocated_clusters[elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_relocated_clusters[elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_relocated_clusters[lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_relocated_clusters[lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float32-elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float32-elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float32-lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float32-lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float64-elkan-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float64-elkan-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float64-lloyd-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_results[float64-lloyd-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_verbose[0-elkan]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_verbose[0-lloyd]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_verbose[0.01-elkan]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_verbose[0.01-lloyd]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_warns_less_centers_than_unique_points[42]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_with_array_like_or_np_scalar_init[kwargs0]\", \"sklearn/cluster/tests/test_k_means.py::test_kmeans_with_array_like_or_np_scalar_init[kwargs1]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_declared_convergence[0-10]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_declared_convergence[0.0001-None]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_iter_steps\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_init_size\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_partial_fit_init[callable]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_partial_fit_init[k-means++]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_partial_fit_init[ndarray]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_partial_fit_init[random]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_verbose\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_kmeans_warning_init_size\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_reassign[42-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_reassign[42-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_sensible_reassign[42]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_update_consistency[42]\", \"sklearn/cluster/tests/test_k_means.py::test_minibatch_with_many_reassignments\", \"sklearn/cluster/tests/test_k_means.py::test_n_init[42]\", \"sklearn/cluster/tests/test_k_means.py::test_n_init_auto[KMeans-10]\", \"sklearn/cluster/tests/test_k_means.py::test_n_init_auto[MiniBatchKMeans-3]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[KMeans-k-means++]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[KMeans-ndarray]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[KMeans-random]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[MiniBatchKMeans-k-means++]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[MiniBatchKMeans-ndarray]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_dense_sparse[MiniBatchKMeans-random]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_does_not_change_cluster_centers[False]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_does_not_change_cluster_centers[True]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_sample_weight_deprecation_warning[KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_predict_sample_weight_deprecation_warning[MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_relocate_empty_clusters[dense]\", \"sklearn/cluster/tests/test_k_means.py::test_relocate_empty_clusters[sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_result_equal_in_diff_n_threads[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_result_equal_in_diff_n_threads[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_sample_weight_unchanged[KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_sample_weight_unchanged[MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_scaled_weights[42-KMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_scaled_weights[42-KMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_scaled_weights[42-MiniBatchKMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_scaled_weights[42-MiniBatchKMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_score_max_iter[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_score_max_iter[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_transform[42-KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_transform[42-MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_unit_weights_vs_no_weights[42-KMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_unit_weights_vs_no_weights[42-KMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_unit_weights_vs_no_weights[42-MiniBatchKMeans-dense]\", \"sklearn/cluster/tests/test_k_means.py::test_unit_weights_vs_no_weights[42-MiniBatchKMeans-sparse]\", \"sklearn/cluster/tests/test_k_means.py::test_warning_elkan_1_cluster\", \"sklearn/cluster/tests/test_k_means.py::test_warning_n_init_precomputed_centers[KMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_warning_n_init_precomputed_centers[MiniBatchKMeans]\", \"sklearn/cluster/tests/test_k_means.py::test_weighted_vs_repeated[42]\", \"sklearn/cluster/tests/test_k_means.py::test_wrong_params[param0-n_samples.*\", \"sklearn/cluster/tests/test_k_means.py::test_wrong_params[param1-The\", \"sklearn/cluster/tests/test_k_means.py::test_wrong_params[param2-The\", \"sklearn/cluster/tests/test_k_means.py::test_wrong_params[param3-The\", \"sklearn/cluster/tests/test_k_means.py::test_wrong_params[param4-The\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_connectivity\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_error_pyamg_not_available\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_pipeline_spectral_clustering\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_precomputed_nearest_neighbors_filtering\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_sparse_graph_connected_component\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_eigen_tol_auto[arpack]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_eigen_tol_auto[lobpcg]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_callable_affinity[dense]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_callable_affinity[sparse]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_deterministic\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_first_eigen_vector\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float32-arpack-dense]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float32-arpack-sparse]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float32-lobpcg-dense]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float32-lobpcg-sparse]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float64-arpack-dense]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float64-arpack-sparse]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float64-lobpcg-dense]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_precomputed_affinity[float64-lobpcg-sparse]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_preserves_dtype[float32-arpack]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_preserves_dtype[float32-lobpcg]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_preserves_dtype[float64-arpack]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_preserves_dtype[float64-lobpcg]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_two_components[float32-arpack]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_two_components[float32-lobpcg]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_two_components[float64-arpack]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_two_components[float64-lobpcg]\", \"sklearn/manifold/tests/test_spectral_embedding.py::test_spectral_embedding_unnormalized\"]",
+  "environment_setup_commit": "1e8a5b833d1b58f3ab84099c4582239af854b23a",
+  "patch_files": [
+    "sklearn/cluster/_bicluster.py",
+    "sklearn/cluster/_bisect_k_means.py",
+    "sklearn/cluster/_kmeans.py"
+  ],
+  "test_patch_files": [
+    "sklearn/cluster/tests/test_bisect_k_means.py",
+    "sklearn/cluster/tests/test_k_means.py",
+    "sklearn/manifold/tests/test_spectral_embedding.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/cluster/_bicluster.py": {
+      "diffs": [
+        {
+          "start_line_old": 490,
+          "end_line_old": 490,
+          "file_pos": 25,
+          "file_context_length": 85469,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_bicluster.py_BaseSpectral._k_means_BaseSpectral._k_means.5.1",
+          "closest_snippet_line_distance": 291
+        }
+      ]
+    },
+    "sklearn/cluster/_bisect_k_means.py": {
+      "diffs": [
+        {
+          "start_line_old": 193,
+          "end_line_old": 204,
+          "file_pos": 7,
+          "file_context_length": 27848,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans._inertia_per_cluster_BisectingKMeans._inertia_per_cluster.5.1",
+          "closest_snippet_line_distance": 60,
+          "pos": 39,
+          "context_length": 21846
+        },
+        {
+          "start_line_old": 312,
+          "end_line_old": 312,
+          "file_pos": 7,
+          "file_context_length": 27848,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans.fit_BisectingKMeans.fit.24.1",
+          "closest_snippet_line_distance": 34,
+          "pos": 97,
+          "context_length": 50311
+        },
+        {
+          "start_line_old": 364,
+          "end_line_old": 364,
+          "file_pos": 7,
+          "file_context_length": 27848,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_1_StrOptions",
+          "closest_snippet_line_distance": 344,
+          "pos": 53,
+          "context_length": 29012
+        }
+      ]
+    },
+    "sklearn/cluster/_kmeans.py": {
+      "diffs": [
+        {
+          "start_line_old": 66,
+          "end_line_old": 66,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.fit_KMeans.fit.distinct_clusters.1",
+          "closest_snippet_line_distance": 1332,
+          "pos": 29,
+          "context_length": 16072
+        },
+        {
+          "start_line_old": 86,
+          "end_line_old": 86,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.fit_KMeans.fit.distinct_clusters.1",
+          "closest_snippet_line_distance": 1312,
+          "pos": 29,
+          "context_length": 16072
+        },
+        {
+          "start_line_old": 128,
+          "end_line_old": 131,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.fit_KMeans.fit.distinct_clusters.1",
+          "closest_snippet_line_distance": 1270,
+          "pos": 29,
+          "context_length": 16072
+        },
+        {
+          "start_line_old": 157,
+          "end_line_old": 163,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._mini_batch_convergence_MiniBatchKMeans._mini_batch_convergence.22.1",
+          "closest_snippet_line_distance": 1763
+        },
+        {
+          "start_line_old": 175,
+          "end_line_old": 175,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_47_kmeans_plusplus.6.2.x_squared_norms.1",
+          "closest_snippet_line_distance": 30,
+          "pos": 30,
+          "context_length": 16609
+        },
+        {
+          "start_line_old": 209,
+          "end_line_old": 209,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_47_kmeans_plusplus.6.2.x_squared_norms.1",
+          "closest_snippet_line_distance": 64,
+          "pos": 30,
+          "context_length": 16609
+        },
+        {
+          "start_line_old": 221,
+          "end_line_old": 228,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._mini_batch_convergence_MiniBatchKMeans._mini_batch_convergence.22.1",
+          "closest_snippet_line_distance": 1699
+        },
+        {
+          "start_line_old": 239,
+          "end_line_old": 239,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._random_reassign_MiniBatchKMeans._random_reassign.4.1",
+          "closest_snippet_line_distance": 1746,
+          "pos": 54,
+          "context_length": 29439
+        },
+        {
+          "start_line_old": 326,
+          "end_line_old": 326,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans.fit.33_MiniBatchKMeans.fit.39.1",
+          "closest_snippet_line_distance": 1779,
+          "pos": 24,
+          "context_length": 13822
+        },
+        {
+          "start_line_old": 942,
+          "end_line_old": 942,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._parameter_constraints_KMeans.__init__.self.algorithm.1",
+          "closest_snippet_line_distance": 394,
+          "pos": 15,
+          "context_length": 7565
+        },
+        {
+          "start_line_old": 972,
+          "end_line_old": 972,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._parameter_constraints_KMeans.__init__.self.algorithm.1",
+          "closest_snippet_line_distance": 364,
+          "pos": 15,
+          "context_length": 7565
+        },
+        {
+          "start_line_old": 984,
+          "end_line_old": 984,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._parameter_constraints_KMeans.__init__.self.algorithm.1",
+          "closest_snippet_line_distance": 352,
+          "pos": 15,
+          "context_length": 7565
+        },
+        {
+          "start_line_old": 991,
+          "end_line_old": 991,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._parameter_constraints_KMeans.__init__.self.algorithm.1",
+          "closest_snippet_line_distance": 345,
+          "pos": 15,
+          "context_length": 7565
+        },
+        {
+          "start_line_old": 1415,
+          "end_line_old": 1415,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._validate_center_shape__BaseKMeans._check_test_data.2.1",
+          "closest_snippet_line_distance": 476,
+          "pos": 27,
+          "context_length": 14975
+        },
+        {
+          "start_line_old": 1471,
+          "end_line_old": 1471,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._validate_center_shape__BaseKMeans._check_test_data.2.1",
+          "closest_snippet_line_distance": 532,
+          "pos": 27,
+          "context_length": 14975
+        },
+        {
+          "start_line_old": 1548,
+          "end_line_old": 1548,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__labels_inertia__labels_inertia.9.1",
+          "closest_snippet_line_distance": 746,
+          "pos": 33,
+          "context_length": 18054
+        },
+        {
+          "start_line_old": 1821,
+          "end_line_old": 1824,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1391,
+          "pos": 20,
+          "context_length": 11381
+        },
+        {
+          "start_line_old": 1832,
+          "end_line_old": 1833,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1400,
+          "pos": 20,
+          "context_length": 11381
+        },
+        {
+          "start_line_old": 2018,
+          "end_line_old": 2018,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1585,
+          "pos": 37,
+          "context_length": 20287
+        },
+        {
+          "start_line_old": 2073,
+          "end_line_old": 2073,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1640,
+          "pos": 37,
+          "context_length": 20287
+        },
+        {
+          "start_line_old": 2173,
+          "end_line_old": 2173,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1740,
+          "pos": 89,
+          "context_length": 47641
+        },
+        {
+          "start_line_old": 2223,
+          "end_line_old": 2223,
+          "file_pos": 1,
+          "file_context_length": 18021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+          "closest_snippet_line_distance": 1790,
+          "pos": 89,
+          "context_length": 47641
+        }
+      ]
+    }
+  },
+  "vectors": 3923,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means.est_k_means.3.2.1.1",
+      "distance": 0.7200407981872559,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 419,
+      "end_line": 433,
+      "tokens": 407,
+      "context_length": 407,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__mini_batch_step.9_MiniBatchKMeans",
+      "distance": 0.7497583031654358,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1610,
+      "end_line": 2256,
+      "tokens": 385,
+      "context_length": 792,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.1_KMeans.1",
+      "distance": 0.7594018578529358,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1171,
+      "end_line": 1334,
+      "tokens": 1622,
+      "context_length": 2414,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._check_params_vs_input_KMeans._warn_mkl_vcomp.2",
+      "distance": 0.7643961906433105,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1370,
+      "end_line": 1396,
+      "tokens": 256,
+      "context_length": 2670,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_single_elkan.18__kmeans_single_elkan.21.1",
+      "distance": 0.7663002014160156,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 530,
+      "end_line": 598,
+      "tokens": 467,
+      "context_length": 3137,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_1_elkan_iter_chunked_sparse",
+      "distance": 0.7924879789352417,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 392,
+      "context_length": 3529,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._check_params_vs_input__BaseKMeans._check_params_vs_input.2.9.self._n_init.1",
+      "distance": 0.7970477342605591,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 853,
+      "end_line": 888,
+      "tokens": 336,
+      "context_length": 3865,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_assumptions.py_1_61",
+      "distance": 0.8049964904785156,
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "start_line": 1,
+      "end_line": 85,
+      "tokens": 759,
+      "context_length": 4624
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_stability_low_dim_dense.py_24_",
+      "distance": 0.8055546283721924,
+      "file_path": "examples/cluster/plot_kmeans_stability_low_dim_dense.py",
+      "start_line": 69,
+      "end_line": 135,
+      "tokens": 543,
+      "context_length": 5167
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.fit.21_KMeans.fit.27.1",
+      "distance": 0.8060088157653809,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1507,
+      "end_line": 1521,
+      "tokens": 148,
+      "context_length": 5315,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_stability_low_dim_dense.py_1_n_clusters.1",
+      "distance": 0.819905161857605,
+      "file_path": "examples/cluster/plot_kmeans_stability_low_dim_dense.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 388,
+      "context_length": 5703
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_single_lloyd.14__kmeans_single_lloyd.16.1",
+      "distance": 0.8204430341720581,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 678,
+      "end_line": 732,
+      "tokens": 381,
+      "context_length": 6084,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_cluster_iris.py_1_",
+      "distance": 0.8214964866638184,
+      "file_path": "examples/cluster/plot_cluster_iris.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 737,
+      "context_length": 6821
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans._parameter_constraints_KMeans.__init__.self.algorithm.1",
+      "distance": 0.8257377743721008,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1336,
+      "end_line": 1368,
+      "tokens": 193,
+      "context_length": 7014,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._init_centroids__BaseKMeans._init_centroids.7.1",
+      "distance": 0.8266456127166748,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 941,
+      "end_line": 1005,
+      "tokens": 551,
+      "context_length": 7565,
+      "file_pos": 4
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_assumptions.py_common_params_y_pred_110.1",
+      "distance": 0.832840621471405,
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "start_line": 87,
+      "end_line": 154,
+      "tokens": 743,
+      "context_length": 8308
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_plusplus.py_1_",
+      "distance": 0.8429599404335022,
+      "file_path": "examples/cluster/plot_kmeans_plusplus.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 301,
+      "context_length": 8609
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_digits.py_30_centroids.1",
+      "distance": 0.8435320854187012,
+      "file_path": "examples/cluster/plot_kmeans_digits.py",
+      "start_line": 111,
+      "end_line": 183,
+      "tokens": 752,
+      "context_length": 9361
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_kmeans_plusplus.7_kmeans_plusplus.11.1",
+      "distance": 0.8515653610229492,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 147,
+      "end_line": 160,
+      "tokens": 235,
+      "context_length": 9596,
+      "file_pos": 6
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans.1_MiniBatchKMeans.1",
+      "distance": 0.8585261106491089,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1646,
+      "end_line": 1836,
+      "tokens": 1785,
+      "context_length": 11381,
+      "file_pos": 6
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_digits.py_bench_k_means_bench_k_means.14",
+      "distance": 0.8655551075935364,
+      "file_path": "examples/cluster/plot_kmeans_digits.py",
+      "start_line": 61,
+      "end_line": 108,
+      "tokens": 379,
+      "context_length": 11760
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._check_params_vs_input_MiniBatchKMeans._check_params_vs_input.8.1",
+      "distance": 0.8816392421722412,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1880,
+      "end_line": 1907,
+      "tokens": 257,
+      "context_length": 12017,
+      "file_pos": 6
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans.fit.33_MiniBatchKMeans.fit.39.1",
+      "distance": 0.8866320848464966,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 2105,
+      "end_line": 2154,
+      "tokens": 412,
+      "context_length": 12429,
+      "file_pos": 6
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_k_means_k_means.1",
+      "distance": 0.889769434928894,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 272,
+      "end_line": 418,
+      "tokens": 1393,
+      "context_length": 13822,
+      "file_pos": 6
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._validate_center_shape__BaseKMeans._check_test_data.2.1",
+      "distance": 0.8898141384124756,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 917,
+      "end_line": 939,
+      "tokens": 209,
+      "context_length": 14031,
+      "file_pos": 6
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_stability_low_dim_dense.py_make_data_make_data.7.1",
+      "distance": 0.8911969661712646,
+      "file_path": "examples/cluster/plot_kmeans_stability_low_dim_dense.py",
+      "start_line": 55,
+      "end_line": 66,
+      "tokens": 134,
+      "context_length": 14165
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_KMeans.fit_KMeans.fit.distinct_clusters.1",
+      "distance": 0.8951098918914795,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1398,
+      "end_line": 1506,
+      "tokens": 810,
+      "context_length": 14975,
+      "file_pos": 6
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans._parameter_constraints_BisectingKMeans._warn_mkl_vcomp.2",
+      "distance": 0.8955605626106262,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 207,
+      "end_line": 251,
+      "tokens": 336,
+      "context_length": 15311,
+      "file_pos": 7
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_47_kmeans_plusplus.6.2.x_squared_norms.1",
+      "distance": 0.9041219353675842,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 58,
+      "end_line": 145,
+      "tokens": 761,
+      "context_length": 16072,
+      "file_pos": 7
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_plusplus__kmeans_plusplus.14",
+      "distance": 0.910359263420105,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 163,
+      "end_line": 223,
+      "tokens": 537,
+      "context_length": 16609,
+      "file_pos": 7
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__labels_inertia__labels_inertia.9.1",
+      "distance": 0.9113404750823975,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 735,
+      "end_line": 802,
+      "tokens": 466,
+      "context_length": 17075,
+      "file_pos": 7
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/class_weight.py_compute_sample_weight.7_",
+      "distance": 0.9161030650138855,
+      "file_path": "sklearn/utils/class_weight.py",
+      "start_line": 149,
+      "end_line": 195,
+      "tokens": 354,
+      "context_length": 17429
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__mini_batch_step__mini_batch_step.8",
+      "distance": 0.9194219708442688,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1524,
+      "end_line": 1609,
+      "tokens": 625,
+      "context_length": 18054,
+      "file_pos": 8
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans._inertia_per_cluster_BisectingKMeans._inertia_per_cluster.5.1",
+      "distance": 0.9222408533096313,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 253,
+      "end_line": 283,
+      "tokens": 246,
+      "context_length": 18300,
+      "file_pos": 8
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_assumptions.py_111_",
+      "distance": 0.9224501252174377,
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "start_line": 155,
+      "end_line": 179,
+      "tokens": 251,
+      "context_length": 18551
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_silhouette_analysis.py_14_",
+      "distance": 0.9270693063735962,
+      "file_path": "examples/cluster/plot_kmeans_silhouette_analysis.py",
+      "start_line": 57,
+      "end_line": 160,
+      "tokens": 932,
+      "context_length": 19483
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans.fit_MiniBatchKMeans.fit.n_steps.1",
+      "distance": 0.9273955821990967,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 2001,
+      "end_line": 2103,
+      "tokens": 804,
+      "context_length": 20287,
+      "file_pos": 9
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._parameter_constraints_MiniBatchKMeans.__init__.self.reassignment_ratio.1",
+      "distance": 0.9274897575378418,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1838,
+      "end_line": 1878,
+      "tokens": 307,
+      "context_length": 20594,
+      "file_pos": 9
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans_BisectingKMeans.1",
+      "distance": 0.9294213056564331,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 76,
+      "end_line": 205,
+      "tokens": 1252,
+      "context_length": 21846,
+      "file_pos": 9
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_digits.py_1_28",
+      "distance": 0.931816041469574,
+      "file_path": "examples/cluster/plot_kmeans_digits.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 389,
+      "context_length": 22235
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification.12_make_classification.28",
+      "distance": 0.9335030317306519,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 237,
+      "end_line": 276,
+      "tokens": 804,
+      "context_length": 23039
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_mini_batch_kmeans.py_60_",
+      "distance": 0.9368194341659546,
+      "file_path": "examples/cluster/plot_mini_batch_kmeans.py",
+      "start_line": 111,
+      "end_line": 143,
+      "tokens": 311,
+      "context_length": 23350
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_birch_vs_minibatchkmeans.py_mbk_",
+      "distance": 0.9482997059822083,
+      "file_path": "examples/cluster/plot_birch_vs_minibatchkmeans.py",
+      "start_line": 85,
+      "end_line": 110,
+      "tokens": 257,
+      "context_length": 23607
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_clustering.py_original_space_centroids_",
+      "distance": 0.9513866901397705,
+      "file_path": "examples/text/plot_document_clustering.py",
+      "start_line": 334,
+      "end_line": 451,
+      "tokens": 1226,
+      "context_length": 24833
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_1_1_0.py_121_",
+      "distance": 0.9515620470046997,
+      "file_path": "examples/release_highlights/plot_release_highlights_1_1_0.py",
+      "start_line": 178,
+      "end_line": 227,
+      "tokens": 513,
+      "context_length": 25346
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_weighted_samples.py_6_",
+      "distance": 0.9541877508163452,
+      "file_path": "examples/svm/plot_weighted_samples.py",
+      "start_line": 45,
+      "end_line": 72,
+      "tokens": 248,
+      "context_length": 25594
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._random_reassign_MiniBatchKMeans._random_reassign.4.1",
+      "distance": 0.9560718536376953,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1985,
+      "end_line": 1999,
+      "tokens": 130,
+      "context_length": 25724,
+      "file_pos": 15
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_fastkmeans.py_8_",
+      "distance": 0.9571276307106018,
+      "file_path": "benchmarks/bench_plot_fastkmeans.py",
+      "start_line": 100,
+      "end_line": 143,
+      "tokens": 495,
+      "context_length": 26219
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_clustering.py_69_130",
+      "distance": 0.9597253799438477,
+      "file_path": "examples/text/plot_document_clustering.py",
+      "start_line": 153,
+      "end_line": 234,
+      "tokens": 775,
+      "context_length": 26994
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_silhouette_analysis.py_1_range_n_clusters.1",
+      "distance": 0.9611489772796631,
+      "file_path": "examples/cluster/plot_kmeans_silhouette_analysis.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 503,
+      "context_length": 27497
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/examples/mixture/plot_gmm_init.py_1_23",
+      "distance": 0.963502049446106,
+      "file_path": "examples/mixture/plot_gmm_init.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 619,
+      "context_length": 28116
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_1_StrOptions",
+      "distance": 0.9649049043655396,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 157,
+      "context_length": 28273,
+      "file_pos": 17
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans.fit_BisectingKMeans.fit.24.1",
+      "distance": 0.968212902545929,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 346,
+      "end_line": 437,
+      "tokens": 739,
+      "context_length": 29012,
+      "file_pos": 17
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_plusplus.15__tolerance.4.1",
+      "distance": 0.9692553281784058,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 224,
+      "end_line": 269,
+      "tokens": 427,
+      "context_length": 29439,
+      "file_pos": 17
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_mini_batch_kmeans.py_1_ax_59.1",
+      "distance": 0.9699606895446777,
+      "file_path": "examples/cluster/plot_mini_batch_kmeans.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 775,
+      "context_length": 30214
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_agglomerative_clustering.py_1_",
+      "distance": 0.9737614393234253,
+      "file_path": "examples/cluster/plot_agglomerative_clustering.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 681,
+      "context_length": 30895
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_ward_structured_vs_unstructured.py_1_",
+      "distance": 0.9747251272201538,
+      "file_path": "examples/cluster/plot_ward_structured_vs_unstructured.py",
+      "start_line": 1,
+      "end_line": 135,
+      "tokens": 854,
+      "context_length": 31749
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_cluster_comparison.py_36_",
+      "distance": 0.9748544096946716,
+      "file_path": "examples/cluster/plot_cluster_comparison.py",
+      "start_line": 130,
+      "end_line": 265,
+      "tokens": 964,
+      "context_length": 32713
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans.fit_predict__BaseKMeans.fit_predict.2.1",
+      "distance": 0.9808143377304077,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1007,
+      "end_line": 1030,
+      "tokens": 196,
+      "context_length": 32909,
+      "file_pos": 20
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_single_elkan__kmeans_single_elkan.strict_convergence.1",
+      "distance": 0.9838414192199707,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 436,
+      "end_line": 528,
+      "tokens": 695,
+      "context_length": 33604,
+      "file_pos": 20
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_1_config_context",
+      "distance": 0.9852758646011353,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 191,
+      "context_length": 33795
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__labels_inertia_threadpool_limit__BaseKMeans.__init__.self.random_state.1",
+      "distance": 0.987402081489563,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 805,
+      "end_line": 851,
+      "tokens": 354,
+      "context_length": 34149,
+      "file_pos": 21
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_clustering.py_1_evaluations_std.1",
+      "distance": 0.9884437918663025,
+      "file_path": "examples/text/plot_document_clustering.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 675,
+      "context_length": 34824
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_cluster_comparison.py_1_default_base.1",
+      "distance": 0.988950252532959,
+      "file_path": "examples/cluster/plot_cluster_comparison.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 632,
+      "context_length": 35456
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_fastkmeans.py_1_compute_bench.6.1",
+      "distance": 0.995596170425415,
+      "file_path": "benchmarks/bench_plot_fastkmeans.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 391,
+      "context_length": 35847
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans._warn_mkl_vcomp__BaseKMeans._check_mkl_vcomp.8.4.1",
+      "distance": 0.9970893859863281,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 890,
+      "end_line": 915,
+      "tokens": 304,
+      "context_length": 36151,
+      "file_pos": 21
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_digits.py_85_",
+      "distance": 0.9991456270217896,
+      "file_path": "examples/cluster/plot_kmeans_digits.py",
+      "start_line": 184,
+      "end_line": 202,
+      "tokens": 101,
+      "context_length": 36252
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_23_0.py_np_62_117",
+      "distance": 0.9996247887611389,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "start_line": 98,
+      "end_line": 175,
+      "tokens": 789,
+      "context_length": 37041
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_agglomerative.py_warnings_AgglomerationTransform",
+      "distance": 1.0043624639511108,
+      "file_path": "sklearn/cluster/_agglomerative.py",
+      "start_line": 10,
+      "end_line": 37,
+      "tokens": 215,
+      "context_length": 37256
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_optics.py_colors_42_",
+      "distance": 1.0044925212860107,
+      "file_path": "examples/cluster/plot_optics.py",
+      "start_line": 83,
+      "end_line": 108,
+      "tokens": 380,
+      "context_length": 37636
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans.predict__BaseKMeans.predict.6.1",
+      "distance": 1.0060248374938965,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1032,
+      "end_line": 1078,
+      "tokens": 371,
+      "context_length": 38007,
+      "file_pos": 24
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bicluster.py_BaseSpectral._k_means_BaseSpectral._k_means.5.1",
+      "distance": 1.007006287574768,
+      "file_path": "sklearn/cluster/_bicluster.py",
+      "start_line": 181,
+      "end_line": 199,
+      "tokens": 129,
+      "context_length": 38136,
+      "file_pos": 25
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_mean_shift.py_1_",
+      "distance": 1.0074211359024048,
+      "file_path": "examples/cluster/plot_mean_shift.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 410,
+      "context_length": 38546
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_bisect_kmeans.py_1_",
+      "distance": 1.0097378492355347,
+      "file_path": "examples/cluster/plot_bisect_kmeans.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 496,
+      "context_length": 39042
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_MeanShift_MeanShift.1",
+      "distance": 1.014874815940857,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 275,
+      "end_line": 407,
+      "tokens": 1117,
+      "context_length": 40159
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__kmeans_single_lloyd__kmeans_single_lloyd.13",
+      "distance": 1.0178124904632568,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 601,
+      "end_line": 677,
+      "tokens": 599,
+      "context_length": 40758,
+      "file_pos": 27
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py_ArgKminClassMode.compute.2_",
+      "distance": 1.0181207656860352,
+      "file_path": "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+      "start_line": 584,
+      "end_line": 621,
+      "tokens": 335,
+      "context_length": 41093
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/asv_benchmarks/benchmarks/cluster.py_1_KMeansBenchmark.make_scorers.self.test_scorer.1",
+      "distance": 1.0220470428466797,
+      "file_path": "asv_benchmarks/benchmarks/cluster.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 356,
+      "context_length": 41449
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/class_weight.py_compute_sample_weight_compute_sample_weight.expanded_class_weight.1",
+      "distance": 1.023003339767456,
+      "file_path": "sklearn/utils/class_weight.py",
+      "start_line": 79,
+      "end_line": 148,
+      "tokens": 701,
+      "context_length": 42150
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_MeanShift.fit_MeanShift.fit.36.1",
+      "distance": 1.0247266292572021,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 438,
+      "end_line": 530,
+      "tokens": 758,
+      "context_length": 42908
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_affinity_propagation.py_1_",
+      "distance": 1.0306183099746704,
+      "file_path": "examples/cluster/plot_affinity_propagation.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 554,
+      "context_length": 43462
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._warn_mkl_vcomp_MiniBatchKMeans._warn_mkl_vcomp.2",
+      "distance": 1.0337798595428467,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1909,
+      "end_line": 1918,
+      "tokens": 120,
+      "context_length": 43582,
+      "file_pos": 30
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_dbscan.py_1_unique_labels.1",
+      "distance": 1.0340468883514404,
+      "file_path": "examples/cluster/plot_dbscan.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 768,
+      "context_length": 44350
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_fastkmeans.py_compute_bench_2_compute_bench_2.9.1",
+      "distance": 1.0349740982055664,
+      "file_path": "benchmarks/bench_plot_fastkmeans.py",
+      "start_line": 57,
+      "end_line": 97,
+      "tokens": 330,
+      "context_length": 44680
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_cluster_comparison.py_datasets_datasets.1",
+      "distance": 1.0370745658874512,
+      "file_path": "examples/cluster/plot_cluster_comparison.py",
+      "start_line": 84,
+      "end_line": 128,
+      "tokens": 275,
+      "context_length": 44955
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_linkage_comparison.py_1_datasets.1",
+      "distance": 1.0382027626037598,
+      "file_path": "examples/cluster/plot_linkage_comparison.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 591,
+      "context_length": 45546
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_linkage_comparison.py_34_",
+      "distance": 1.0408084392547607,
+      "file_path": "examples/cluster/plot_linkage_comparison.py",
+      "start_line": 82,
+      "end_line": 176,
+      "tokens": 603,
+      "context_length": 46149
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_birch_vs_minibatchkmeans.py_1_29",
+      "distance": 1.0412492752075195,
+      "file_path": "examples/cluster/plot_birch_vs_minibatchkmeans.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 768,
+      "context_length": 46917
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans.partial_fit_",
+      "distance": 1.0437639951705933,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 2156,
+      "end_line": 2257,
+      "tokens": 724,
+      "context_length": 47641,
+      "file_pos": 32
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py_77_",
+      "distance": 1.046304702758789,
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "start_line": 100,
+      "end_line": 115,
+      "tokens": 176,
+      "context_length": 47817
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans.fit_transform__BaseKMeans.fit_transform.2.1",
+      "distance": 1.0465747117996216,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1080,
+      "end_line": 1102,
+      "tokens": 195,
+      "context_length": 48012,
+      "file_pos": 33
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_adjusted_for_chance_measures.py_56_103",
+      "distance": 1.046868085861206,
+      "file_path": "examples/cluster/plot_adjusted_for_chance_measures.py",
+      "start_line": 104,
+      "end_line": 205,
+      "tokens": 781,
+      "context_length": 48793
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/__init__.py_1_",
+      "distance": 1.0482134819030762,
+      "file_path": "sklearn/cluster/__init__.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 381,
+      "context_length": 49174
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_birch.py_Birch._check_fit_Birch.predict.4.1",
+      "distance": 1.0485639572143555,
+      "file_path": "sklearn/cluster/_birch.py",
+      "start_line": 641,
+      "end_line": 670,
+      "tokens": 203,
+      "context_length": 49377
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/examples/mixture/plot_gmm_init.py_24_",
+      "distance": 1.0512999296188354,
+      "file_path": "examples/mixture/plot_gmm_init.py",
+      "start_line": 77,
+      "end_line": 110,
+      "tokens": 298,
+      "context_length": 49675
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_birch.py_warnings_config_context",
+      "distance": 1.0557453632354736,
+      "file_path": "sklearn/cluster/_birch.py",
+      "start_line": 6,
+      "end_line": 25,
+      "tokens": 123,
+      "context_length": 49798
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans._bisect_BisectingKMeans._bisect.11",
+      "distance": 1.0568729639053345,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 285,
+      "end_line": 344,
+      "tokens": 513,
+      "context_length": 50311,
+      "file_pos": 36
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_agglomerative.py_AgglomerativeClustering._fit_AgglomerativeClustering._fit.29.1",
+      "distance": 1.0582189559936523,
+      "file_path": "sklearn/cluster/_agglomerative.py",
+      "start_line": 972,
+      "end_line": 1090,
+      "tokens": 910,
+      "context_length": 51221
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_agglomerative.py_AgglomerativeClustering._parameter_constraints_AgglomerativeClustering.__init__.self.compute_distances.1",
+      "distance": 1.0584032535552979,
+      "file_path": "sklearn/cluster/_agglomerative.py",
+      "start_line": 907,
+      "end_line": 948,
+      "tokens": 341,
+      "context_length": 51562
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_MeanShift._parameter_constraints_MeanShift.__init__.self.max_iter.1",
+      "distance": 1.0595622062683105,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 409,
+      "end_line": 436,
+      "tokens": 228,
+      "context_length": 51790
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py__check_sample_weight__check_sample_weight.6.1",
+      "distance": 1.0598421096801758,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 1716,
+      "end_line": 1788,
+      "tokens": 530,
+      "context_length": 52320
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_kde_1d.py_1_32",
+      "distance": 1.0604767799377441,
+      "file_path": "examples/neighbors/plot_kde_1d.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 745,
+      "context_length": 53065
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/scikit-learn/sklearn/dummy.py_warnings_class_distribution",
+      "distance": 1.0619316101074219,
+      "file_path": "sklearn/dummy.py",
+      "start_line": 6,
+      "end_line": 22,
+      "tokens": 136,
+      "context_length": 53201
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_agglomerative_clustering_metrics.py_29_",
+      "distance": 1.0627646446228027,
+      "file_path": "examples/cluster/plot_agglomerative_clustering_metrics.py",
+      "start_line": 97,
+      "end_line": 147,
+      "tokens": 430,
+      "context_length": 53631
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_adjusted_for_chance_measures.py_1_random_labels.1.1",
+      "distance": 1.0630154609680176,
+      "file_path": "examples/cluster/plot_adjusted_for_chance_measures.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 290,
+      "context_length": 53921
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_affinity_propagation.py_AffinityPropagation_AffinityPropagation.1",
+      "distance": 1.0630578994750977,
+      "file_path": "sklearn/cluster/_affinity_propagation.py",
+      "start_line": 294,
+      "end_line": 427,
+      "tokens": 1166,
+      "context_length": 55087
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/scikit-learn/asv_benchmarks/benchmarks/utils.py_np_",
+      "distance": 1.063778281211853,
+      "file_path": "asv_benchmarks/benchmarks/utils.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 333,
+      "context_length": 55420
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_agglomerative_clustering_metrics.py_1_28",
+      "distance": 1.0646896362304688,
+      "file_path": "examples/cluster/plot_agglomerative_clustering_metrics.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 771,
+      "context_length": 56191
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_itertools_DataConversionWarning",
+      "distance": 1.0660240650177002,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 10,
+      "end_line": 36,
+      "tokens": 204,
+      "context_length": 56395
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_dbscan.py_core_samples_mask_",
+      "distance": 1.068298578262329,
+      "file_path": "examples/cluster/plot_dbscan.py",
+      "start_line": 96,
+      "end_line": 129,
+      "tokens": 225,
+      "context_length": 56620
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_mean_shift_mean_shift.3.1",
+      "distance": 1.0693752765655518,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 122,
+      "end_line": 219,
+      "tokens": 773,
+      "context_length": 57393
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_regression.py_1_",
+      "distance": 1.0693998336791992,
+      "file_path": "examples/neighbors/plot_regression.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 285,
+      "context_length": 57678
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_estimators_131",
+      "distance": 1.0698857307434082,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 90,
+      "end_line": 193,
+      "tokens": 896,
+      "context_length": 58574
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/class_weight.py_np_compute_class_weight.6.1",
+      "distance": 1.0703068971633911,
+      "file_path": "sklearn/utils/class_weight.py",
+      "start_line": 5,
+      "end_line": 76,
+      "tokens": 576,
+      "context_length": 59150
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute/_knn.py_4_StrOptions",
+      "distance": 1.0711055994033813,
+      "file_path": "sklearn/impute/_knn.py",
+      "start_line": 5,
+      "end_line": 17,
+      "tokens": 111,
+      "context_length": 59261
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_hierarchical.py_1_compute_bench.5.1",
+      "distance": 1.0715783834457397,
+      "file_path": "benchmarks/bench_plot_hierarchical.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 249,
+      "context_length": 59510
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py__BaseKMeans.transform__BaseKMeans._transform.2.1",
+      "distance": 1.0718414783477783,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1104,
+      "end_line": 1128,
+      "tokens": 197,
+      "context_length": 59707,
+      "file_pos": 47
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/_classification.py_KNeighborsClassifier._parameter_constraints_KNeighborsClassifier.__init__.self.weights.1",
+      "distance": 1.0722908973693848,
+      "file_path": "sklearn/neighbors/_classification.py",
+      "start_line": 177,
+      "end_line": 204,
+      "tokens": 172,
+      "context_length": 59879
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_bisect_k_means.py_BisectingKMeans._predict_recursive_",
+      "distance": 1.074040174484253,
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "start_line": 471,
+      "end_line": 524,
+      "tokens": 403,
+      "context_length": 60282,
+      "file_pos": 48
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/scikit-learn/examples/bicluster/plot_bicluster_newsgroups.py_30_bicluster_ncut.9.1",
+      "distance": 1.074766993522644,
+      "file_path": "examples/bicluster/plot_bicluster_newsgroups.py",
+      "start_line": 104,
+      "end_line": 126,
+      "tokens": 231,
+      "context_length": 60513
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/scikit-learn/asv_benchmarks/benchmarks/cluster.py_MiniBatchKMeansBenchmark_",
+      "distance": 1.0754365921020508,
+      "file_path": "asv_benchmarks/benchmarks/cluster.py",
+      "start_line": 57,
+      "end_line": 105,
+      "tokens": 300,
+      "context_length": 60813
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_inductive_clustering.py_plot_scatter_",
+      "distance": 1.075732707977295,
+      "file_path": "examples/cluster/plot_inductive_clustering.py",
+      "start_line": 76,
+      "end_line": 130,
+      "tokens": 394,
+      "context_length": 61207
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_clustering.py_fit_and_evaluate_fit_and_evaluate.11",
+      "distance": 1.0764349699020386,
+      "file_path": "examples/text/plot_document_clustering.py",
+      "start_line": 114,
+      "end_line": 150,
+      "tokens": 356,
+      "context_length": 61563
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_kmeans.py_MiniBatchKMeans._mini_batch_convergence_MiniBatchKMeans._mini_batch_convergence.22.1",
+      "distance": 1.07651948928833,
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "start_line": 1920,
+      "end_line": 1983,
+      "tokens": 566,
+      "context_length": 62129,
+      "file_pos": 50
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/_classification.py_KNeighborsClassifier_KNeighborsClassifier.1",
+      "distance": 1.076616644859314,
+      "file_path": "sklearn/neighbors/_classification.py",
+      "start_line": 35,
+      "end_line": 175,
+      "tokens": 1326,
+      "context_length": 63455
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_kde_1d.py_33_",
+      "distance": 1.076708197593689,
+      "file_path": "examples/neighbors/plot_kde_1d.py",
+      "start_line": 71,
+      "end_line": 157,
+      "tokens": 789,
+      "context_length": 64244
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 1.0773863792419434,
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "start_line": 9,
+      "end_line": 56,
+      "tokens": 405,
+      "context_length": 64649
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_optics.py_1_41",
+      "distance": 1.0781428813934326,
+      "file_path": "examples/cluster/plot_optics.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 757,
+      "context_length": 65406
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_adjusted_for_chance_measures.py_104_",
+      "distance": 1.0792655944824219,
+      "file_path": "examples/cluster/plot_adjusted_for_chance_measures.py",
+      "start_line": 206,
+      "end_line": 231,
+      "tokens": 273,
+      "context_length": 65679
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_agglomerative.py_ward_tree.X_ward_tree.30",
+      "distance": 1.0821757316589355,
+      "file_path": "sklearn/cluster/_agglomerative.py",
+      "start_line": 268,
+      "end_line": 349,
+      "tokens": 734,
+      "context_length": 66413
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/_classification.py_KNeighborsClassifier.predict_proba.12_KNeighborsClassifier._more_tags.1.1",
+      "distance": 1.083216905593872,
+      "file_path": "sklearn/neighbors/_classification.py",
+      "start_line": 367,
+      "end_line": 388,
+      "tokens": 214,
+      "context_length": 66627
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mnist_filters.py_1_",
+      "distance": 1.08443284034729,
+      "file_path": "examples/neural_networks/plot_mnist_filters.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 663,
+      "context_length": 67290
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_mean_shift.py_19__mean_shift_single_seed.bandwidth.6.1",
+      "distance": 1.0844749212265015,
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "start_line": 98,
+      "end_line": 119,
+      "tokens": 232,
+      "context_length": 67522
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_color_quantization.py_1_",
+      "distance": 1.0847187042236328,
+      "file_path": "examples/cluster/plot_color_quantization.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 762,
+      "context_length": 68284
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/_nearest_centroid.py_NearestCentroid.fit.20_NearestCentroid.fit.21.1",
+      "distance": 1.086130142211914,
+      "file_path": "sklearn/neighbors/_nearest_centroid.py",
+      "start_line": 186,
+      "end_line": 210,
+      "tokens": 323,
+      "context_length": 68607
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/scikit-learn/sklearn/cluster/_optics.py__validate_size__compute_core_distances_.8.1",
+      "distance": 1.0877944231033325,
+      "file_path": "sklearn/cluster/_optics.py",
+      "start_line": 385,
+      "end_line": 427,
+      "tokens": 341,
+      "context_length": 68948
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/cluster/_kmeans.py",
+      "position": 1,
+      "tokens": 18021,
+      "context_length": 18021
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "position": 2,
+      "tokens": 1856,
+      "context_length": 19877
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_stability_low_dim_dense.py",
+      "position": 3,
+      "tokens": 1091,
+      "context_length": 20968
+    },
+    {
+      "file_path": "examples/cluster/plot_cluster_iris.py",
+      "position": 4,
+      "tokens": 745,
+      "context_length": 21713
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_plusplus.py",
+      "position": 5,
+      "tokens": 301,
+      "context_length": 22014
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_digits.py",
+      "position": 6,
+      "tokens": 1622,
+      "context_length": 23636
+    },
+    {
+      "file_path": "sklearn/cluster/_bisect_k_means.py",
+      "position": 7,
+      "tokens": 4212,
+      "context_length": 27848
+    },
+    {
+      "file_path": "sklearn/utils/class_weight.py",
+      "position": 8,
+      "tokens": 1629,
+      "context_length": 29477
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_silhouette_analysis.py",
+      "position": 9,
+      "tokens": 1435,
+      "context_length": 30912
+    },
+    {
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "position": 10,
+      "tokens": 15990,
+      "context_length": 46902
+    },
+    {
+      "file_path": "examples/cluster/plot_mini_batch_kmeans.py",
+      "position": 11,
+      "tokens": 1086,
+      "context_length": 47988
+    },
+    {
+      "file_path": "examples/cluster/plot_birch_vs_minibatchkmeans.py",
+      "position": 12,
+      "tokens": 1070,
+      "context_length": 49058
+    },
+    {
+      "file_path": "examples/text/plot_document_clustering.py",
+      "position": 13,
+      "tokens": 4166,
+      "context_length": 53224
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_1_1_0.py",
+      "position": 14,
+      "tokens": 2137,
+      "context_length": 55361
+    },
+    {
+      "file_path": "examples/svm/plot_weighted_samples.py",
+      "position": 15,
+      "tokens": 531,
+      "context_length": 55892
+    },
+    {
+      "file_path": "benchmarks/bench_plot_fastkmeans.py",
+      "position": 16,
+      "tokens": 1218,
+      "context_length": 57110
+    },
+    {
+      "file_path": "examples/mixture/plot_gmm_init.py",
+      "position": 17,
+      "tokens": 952,
+      "context_length": 58062
+    },
+    {
+      "file_path": "examples/cluster/plot_agglomerative_clustering.py",
+      "position": 18,
+      "tokens": 705,
+      "context_length": 58767
+    },
+    {
+      "file_path": "examples/cluster/plot_ward_structured_vs_unstructured.py",
+      "position": 19,
+      "tokens": 894,
+      "context_length": 59661
+    },
+    {
+      "file_path": "examples/cluster/plot_cluster_comparison.py",
+      "position": 20,
+      "tokens": 1871,
+      "context_length": 61532
+    },
+    {
+      "file_path": "sklearn/cluster/_mean_shift.py",
+      "position": 21,
+      "tokens": 4439,
+      "context_length": 65971
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "position": 22,
+      "tokens": 1782,
+      "context_length": 67753
+    },
+    {
+      "file_path": "sklearn/cluster/_agglomerative.py",
+      "position": 23,
+      "tokens": 11185,
+      "context_length": 78938
+    },
+    {
+      "file_path": "examples/cluster/plot_optics.py",
+      "position": 24,
+      "tokens": 1177,
+      "context_length": 80115
+    },
+    {
+      "file_path": "sklearn/cluster/_bicluster.py",
+      "position": 25,
+      "tokens": 5354,
+      "context_length": 85469
+    },
+    {
+      "file_path": "examples/cluster/plot_mean_shift.py",
+      "position": 26,
+      "tokens": 410,
+      "context_length": 85879
+    },
+    {
+      "file_path": "examples/cluster/plot_bisect_kmeans.py",
+      "position": 27,
+      "tokens": 496,
+      "context_length": 86375
+    },
+    {
+      "file_path": "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+      "position": 28,
+      "tokens": 4655,
+      "context_length": 91030
+    },
+    {
+      "file_path": "asv_benchmarks/benchmarks/cluster.py",
+      "position": 29,
+      "tokens": 656,
+      "context_length": 91686
+    },
+    {
+      "file_path": "examples/cluster/plot_affinity_propagation.py",
+      "position": 30,
+      "tokens": 554,
+      "context_length": 92240
+    },
+    {
+      "file_path": "examples/cluster/plot_dbscan.py",
+      "position": 31,
+      "tokens": 993,
+      "context_length": 93233
+    },
+    {
+      "file_path": "examples/cluster/plot_linkage_comparison.py",
+      "position": 32,
+      "tokens": 1194,
+      "context_length": 94427
+    },
+    {
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "position": 33,
+      "tokens": 987,
+      "context_length": 95414
+    },
+    {
+      "file_path": "examples/cluster/plot_adjusted_for_chance_measures.py",
+      "position": 34,
+      "tokens": 1958,
+      "context_length": 97372
+    },
+    {
+      "file_path": "sklearn/cluster/__init__.py",
+      "position": 35,
+      "tokens": 381,
+      "context_length": 97753
+    },
+    {
+      "file_path": "sklearn/cluster/_birch.py",
+      "position": 36,
+      "tokens": 5874,
+      "context_length": 103627
+    },
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 37,
+      "tokens": 16945,
+      "context_length": 120572
+    },
+    {
+      "file_path": "examples/neighbors/plot_kde_1d.py",
+      "position": 38,
+      "tokens": 1553,
+      "context_length": 122125
+    },
+    {
+      "file_path": "sklearn/dummy.py",
+      "position": 39,
+      "tokens": 5190,
+      "context_length": 127315
+    },
+    {
+      "file_path": "examples/cluster/plot_agglomerative_clustering_metrics.py",
+      "position": 40,
+      "tokens": 1222,
+      "context_length": 128537
+    },
+    {
+      "file_path": "sklearn/cluster/_affinity_propagation.py",
+      "position": 41,
+      "tokens": 4479,
+      "context_length": 133016
+    },
+    {
+      "file_path": "asv_benchmarks/benchmarks/utils.py",
+      "position": 42,
+      "tokens": 333,
+      "context_length": 133349
+    },
+    {
+      "file_path": "sklearn/metrics/pairwise.py",
+      "position": 43,
+      "tokens": 18893,
+      "context_length": 152242
+    },
+    {
+      "file_path": "examples/neighbors/plot_regression.py",
+      "position": 44,
+      "tokens": 345,
+      "context_length": 152587
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "position": 45,
+      "tokens": 2410,
+      "context_length": 154997
+    },
+    {
+      "file_path": "sklearn/impute/_knn.py",
+      "position": 46,
+      "tokens": 3137,
+      "context_length": 158134
+    },
+    {
+      "file_path": "benchmarks/bench_plot_hierarchical.py",
+      "position": 47,
+      "tokens": 616,
+      "context_length": 158750
+    },
+    {
+      "file_path": "sklearn/neighbors/_classification.py",
+      "position": 48,
+      "tokens": 6407,
+      "context_length": 165157
+    },
+    {
+      "file_path": "examples/bicluster/plot_bicluster_newsgroups.py",
+      "position": 49,
+      "tokens": 1384,
+      "context_length": 166541
+    },
+    {
+      "file_path": "examples/cluster/plot_inductive_clustering.py",
+      "position": 50,
+      "tokens": 912,
+      "context_length": 167453
+    },
+    {
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "position": 51,
+      "tokens": 19845,
+      "context_length": 187298
+    },
+    {
+      "file_path": "examples/neural_networks/plot_mnist_filters.py",
+      "position": 52,
+      "tokens": 663,
+      "context_length": 187961
+    },
+    {
+      "file_path": "examples/cluster/plot_color_quantization.py",
+      "position": 53,
+      "tokens": 816,
+      "context_length": 188777
+    },
+    {
+      "file_path": "sklearn/neighbors/_nearest_centroid.py",
+      "position": 54,
+      "tokens": 1987,
+      "context_length": 190764
+    },
+    {
+      "file_path": "sklearn/cluster/_optics.py",
+      "position": 55,
+      "tokens": 9786,
+      "context_length": 200550
+    }
+  ]
+}

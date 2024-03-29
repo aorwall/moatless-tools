@@ -1,0 +1,805 @@
+{
+  "instance_id": "matplotlib__matplotlib-21542",
+  "model_patch": "diff --git a/lib/matplotlib/colorbar.py b/lib/matplotlib/colorbar.py\nindex 0c3f915039..7f235fedef 100644\n--- a/lib/matplotlib/colorbar.py\n+++ b/lib/matplotlib/colorbar.py\n@@ -487,7 +487,7 @@ class Colorbar:\n             self.locator = ticks    # Handle default in _ticker()\n \n         if isinstance(format, str):\n-            self.formatter = ticker.FormatStrFormatter(format)\n+            self.formatter = ticker.StrMethodFormatter('{:.3f}')\n         else:\n             self.formatter = format  # Assume it is a Formatter or None\n         self.draw_all()\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/colorbar.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "f0632c0fc7339f68e992ed63ae4cfac76cd41aad",
+  "patch": "diff --git a/lib/matplotlib/colorbar.py b/lib/matplotlib/colorbar.py\n--- a/lib/matplotlib/colorbar.py\n+++ b/lib/matplotlib/colorbar.py\n@@ -352,6 +352,8 @@ class Colorbar:\n     ticks : `~matplotlib.ticker.Locator` or array-like of float\n \n     format : str or `~matplotlib.ticker.Formatter`\n+        If string, it supports '%' operator and `str.format` formats:\n+        e.g. ``\"%4.2e\"`` or ``\"{x:.2e}\"``.\n \n     drawedges : bool\n \n@@ -487,7 +489,12 @@ def __init__(self, ax, mappable=None, *, cmap=None,\n             self.locator = ticks    # Handle default in _ticker()\n \n         if isinstance(format, str):\n-            self.formatter = ticker.FormatStrFormatter(format)\n+            # Check format between FormatStrFormatter and StrMethodFormatter\n+            try:\n+                self.formatter = ticker.FormatStrFormatter(format)\n+                _ = self.formatter(0)\n+            except TypeError:\n+                self.formatter = ticker.StrMethodFormatter(format)\n         else:\n             self.formatter = format  # Assume it is a Formatter or None\n         self.draw_all()\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_colorbar.py b/lib/matplotlib/tests/test_colorbar.py\n--- a/lib/matplotlib/tests/test_colorbar.py\n+++ b/lib/matplotlib/tests/test_colorbar.py\n@@ -543,14 +543,15 @@ def test_colorbar_renorm():\n     assert np.isclose(cbar.vmax, z.max() * 1000)\n \n \n-def test_colorbar_format():\n+@pytest.mark.parametrize('fmt', ['%4.2e', '{x:.2e}'])\n+def test_colorbar_format(fmt):\n     # make sure that format is passed properly\n     x, y = np.ogrid[-4:4:31j, -4:4:31j]\n     z = 120000*np.exp(-x**2 - y**2)\n \n     fig, ax = plt.subplots()\n     im = ax.imshow(z)\n-    cbar = fig.colorbar(im, format='%4.2e')\n+    cbar = fig.colorbar(im, format=fmt)\n     fig.canvas.draw()\n     assert cbar.ax.yaxis.get_ticklabels()[4].get_text() == '8.00e+04'\n \n",
+  "problem_statement": "[ENH]: use new style format strings for colorbar ticks\n### Problem\n\nAt the moment, the default format strings in colorbar are old style ones, as in their init there is:\r\n\r\nhttps://github.com/matplotlib/matplotlib/blob/67e18148d87db04d2c8d4293ff12c56fbbb7fde8/lib/matplotlib/colorbar.py#L489-L492\r\n\r\nwhich is a different convention from the one of a normal axis, which was introduced in #16715. \n\n### Proposed solution\n\nAs in `update_ticks` we pass the colorbar's formatter to the long axis,\r\n\r\nhttps://github.com/matplotlib/matplotlib/blob/67e18148d87db04d2c8d4293ff12c56fbbb7fde8/lib/matplotlib/colorbar.py#L801\r\n\r\nthe `if` statement above may be removed to keep the default logic only in `Axis`. Right now one can pass a callable directly (although that's not documented), and the default behaviour from #16715 is triggered. However, I guess making this change for format strings would imply a deprecation cycle, as it breaks current behaviour. Another option would be to check in `Axis._set_formatter`  for what kind of string format we've been passed (unsure how, although there must be way).\n\n### Additional context and prior art\n\n_No response_\n",
+  "hints_text": "",
+  "created_at": "2021-11-04T22:23:30Z",
+  "version": "3.4",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_colorbar.py::test_colorbar_format[{x:.2e}]\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_colorbar.py::test_anchored_cbar_position_using_specgrid\", \"lib/matplotlib/tests/test_colorbar.py::test_aspects\", \"lib/matplotlib/tests/test_colorbar.py::test_axes_handles_same_functions[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_cbar_minorticks_for_rc_xyminortickvisible\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_autoticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_autotickslog\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_axes_kw\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_change_lim_scale[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_closed_patch[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_length[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_shape[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_format[%4.2e]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_get_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_get_ticks_2\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_int[clim0]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_int[clim1]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_inverted_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_label\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_log_minortick_labels\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[both]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[max]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[min]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_minorticks_on_off\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_positioning[png-False]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_positioning[png-True]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_powernorm_extension\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_renorm\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_scale_reset\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_single_scatter[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbarbase\", \"lib/matplotlib/tests/test_colorbar.py::test_gridspec_make_colorbar[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_inset_colorbar_layout\", \"lib/matplotlib/tests/test_colorbar.py::test_mappable_2d_alpha\", \"lib/matplotlib/tests/test_colorbar.py::test_mappable_no_alpha\", \"lib/matplotlib/tests/test_colorbar.py::test_proportional_colorbars[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_cb_whose_mappable_has_no_figure[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure[no\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure[with\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure_cl\", \"lib/matplotlib/tests/test_colorbar.py::test_twoslope_colorbar[png]\"]",
+  "environment_setup_commit": "f93c0a3dcb82feed0262d758626c90d4002685f3",
+  "patch_files": [
+    "lib/matplotlib/colorbar.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_colorbar.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/colorbar.py": {
+      "diffs": [
+        {
+          "start_line_old": 355,
+          "end_line_old": 355,
+          "file_pos": 1,
+          "file_context_length": 14249,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.minorticks_on_Colorbar.set_label.self.stale.1",
+          "closest_snippet_line_distance": 571,
+          "pos": 41,
+          "context_length": 25716
+        },
+        {
+          "start_line_old": 490,
+          "end_line_old": 490,
+          "file_pos": 1,
+          "file_context_length": 14249,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.update_ticks_Colorbar._get_ticker_locator_formatter.11",
+          "closest_snippet_line_distance": 303,
+          "pos": 9,
+          "context_length": 5976
+        }
+      ]
+    }
+  },
+  "vectors": 3882,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py___getattr____set_ticks_on_axis_warn.3",
+      "distance": 0.8150598406791687,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 197,
+      "end_line": 210,
+      "tokens": 183,
+      "context_length": 183,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.update_ticks_Colorbar._get_ticker_locator_formatter.11",
+      "distance": 0.8242111802101135,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 793,
+      "end_line": 846,
+      "tokens": 460,
+      "context_length": 643,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/examples/ticks/date_concise_formatter.py_1_64",
+      "distance": 0.8399190902709961,
+      "file_path": "examples/ticks/date_concise_formatter.py",
+      "start_line": 1,
+      "end_line": 109,
+      "tokens": 1031,
+      "context_length": 1674
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/examples/ticks/tick-formatters.py_5_",
+      "distance": 0.8455795049667358,
+      "file_path": "examples/ticks/tick-formatters.py",
+      "start_line": 37,
+      "end_line": 135,
+      "tokens": 963,
+      "context_length": 2637
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.set_minor_formatter_Axis._set_formatter.self.stale.1",
+      "distance": 0.8613961935043335,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1583,
+      "end_line": 1621,
+      "tokens": 300,
+      "context_length": 2937
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_base.py__process_plot_format__process_plot_format.12.1",
+      "distance": 0.8693394660949707,
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "start_line": 122,
+      "end_line": 209,
+      "tokens": 648,
+      "context_length": 3585
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.set_major_formatter_Axis.set_major_formatter.2",
+      "distance": 0.8786126971244812,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1557,
+      "end_line": 1581,
+      "tokens": 228,
+      "context_length": 3813
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/artists.py_axis_",
+      "distance": 0.8788127899169922,
+      "file_path": "tutorials/intermediate/artists.py",
+      "start_line": 616,
+      "end_line": 727,
+      "tokens": 1004,
+      "context_length": 4817
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.__init___Colorbar.__init__.self.ax.cla.1",
+      "distance": 0.888350248336792,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 369,
+      "end_line": 511,
+      "tokens": 1159,
+      "context_length": 5976,
+      "file_pos": 6
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/examples/ticks/tick-formatters.py_1_setup.15",
+      "distance": 0.8903317451477051,
+      "file_path": "examples/ticks/tick-formatters.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 272,
+      "context_length": 6248
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/tutorials/colors/colorbar_only.py_1_48",
+      "distance": 0.892490565776825,
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 748,
+      "context_length": 6996
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py__colormap_kw_doc__colormap_kw_doc.1",
+      "distance": 0.8969148993492126,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 63,
+      "end_line": 124,
+      "tokens": 616,
+      "context_length": 7612,
+      "file_pos": 7
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_gridspec.10_make_axes_gridspec.19.1",
+      "distance": 0.8994336128234863,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1510,
+      "end_line": 1568,
+      "tokens": 627,
+      "context_length": 8239,
+      "file_pos": 7
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.set_ticklabels_Colorbar.set_ticklabels.2",
+      "distance": 0.9012022018432617,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 889,
+      "end_line": 924,
+      "tokens": 301,
+      "context_length": 8540,
+      "file_pos": 7
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes.28_make_axes.34.1",
+      "distance": 0.9096019268035889,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1439,
+      "end_line": 1456,
+      "tokens": 180,
+      "context_length": 8720,
+      "file_pos": 7
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/examples/ticks/colorbar_tick_labelling_demo.py_1_",
+      "distance": 0.9120573997497559,
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 303,
+      "context_length": 9023
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis._translate_tick_kw_Axis._translate_tick_kw.kwkeys.18.1",
+      "distance": 0.9142857789993286,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 889,
+      "end_line": 932,
+      "tokens": 492,
+      "context_length": 9515
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/tutorials/colors/colorbar_only.py_cmap_49_",
+      "distance": 0.9183334112167358,
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "start_line": 89,
+      "end_line": 134,
+      "tokens": 387,
+      "context_length": 9902
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/colorbar_placement.py_1_cmaps_44.1",
+      "distance": 0.9243394732475281,
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 750,
+      "context_length": 10652
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/examples/ticks/scalarformatter.py_1_",
+      "distance": 0.9319840669631958,
+      "file_path": "examples/ticks/scalarformatter.py",
+      "start_line": 1,
+      "end_line": 85,
+      "tokens": 728,
+      "context_length": 11380
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/tutorials/toolkits/axisartist.py_1_",
+      "distance": 0.9346550703048706,
+      "file_path": "tutorials/toolkits/axisartist.py",
+      "start_line": 1,
+      "end_line": 564,
+      "tokens": 4724,
+      "context_length": 16104
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._do_extends_Colorbar._do_extends.18",
+      "distance": 0.936620831489563,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 640,
+      "end_line": 709,
+      "tokens": 712,
+      "context_length": 16816,
+      "file_pos": 11
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_make_axes.cax.1",
+      "distance": 0.937181830406189,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1356,
+      "end_line": 1438,
+      "tokens": 792,
+      "context_length": 17608,
+      "file_pos": 11
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_19_19",
+      "distance": 0.9376137852668762,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 126,
+      "end_line": 194,
+      "tokens": 642,
+      "context_length": 18250,
+      "file_pos": 11
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_26__normalize_location_orientation.4.1",
+      "distance": 0.9413659572601318,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1332,
+      "end_line": 1353,
+      "tokens": 322,
+      "context_length": 18572,
+      "file_pos": 11
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.set_ticklabels_Axis.set_ticklabels.9.1",
+      "distance": 0.9459110498428345,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1670,
+      "end_line": 1747,
+      "tokens": 708,
+      "context_length": 19280
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_1__make_axes_other_param_doc.1",
+      "distance": 0.9462818503379822,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 626,
+      "context_length": 19906,
+      "file_pos": 11
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/tutorials/text/text_intro.py_210_",
+      "distance": 0.9469780325889587,
+      "file_path": "tutorials/text/text_intro.py",
+      "start_line": 330,
+      "end_line": 423,
+      "tokens": 764,
+      "context_length": 20670
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/examples/ticks/date_concise_formatter.py_65_",
+      "distance": 0.9511478543281555,
+      "file_path": "examples/ticks/date_concise_formatter.py",
+      "start_line": 111,
+      "end_line": 182,
+      "tokens": 611,
+      "context_length": 21281
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/tutorials/introductory/lifecycle.py_36_111",
+      "distance": 0.955471396446228,
+      "file_path": "tutorials/introductory/lifecycle.py",
+      "start_line": 105,
+      "end_line": 198,
+      "tokens": 827,
+      "context_length": 22108
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/pyplot_formatstr.py_1_",
+      "distance": 0.9632354974746704,
+      "file_path": "examples/pyplots/pyplot_formatstr.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 128,
+      "context_length": 22236
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis._update_axisinfo_Axis._update_axisinfo.10",
+      "distance": 0.9653692245483398,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1448,
+      "end_line": 1480,
+      "tokens": 295,
+      "context_length": 22531
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.minorticks_on_Colorbar.set_label.self.stale.1",
+      "distance": 0.9655619859695435,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 926,
+      "end_line": 964,
+      "tokens": 309,
+      "context_length": 22840,
+      "file_pos": 14
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/date_index_formatter.py_1_",
+      "distance": 0.9683335423469543,
+      "file_path": "examples/text_labels_and_annotations/date_index_formatter.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 447,
+      "context_length": 23287
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axes_grid1/axes_grid.py_CbarAxesBase__cbaraxes_class_factory.1",
+      "distance": 0.9686285853385925,
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "start_line": 20,
+      "end_line": 51,
+      "tokens": 229,
+      "context_length": 23516
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/angle_helper.py_FormatterHMS_FormatterHMS.__call__.2.1",
+      "distance": 0.9711002111434937,
+      "file_path": "lib/mpl_toolkits/axisartist/angle_helper.py",
+      "start_line": 290,
+      "end_line": 307,
+      "tokens": 230,
+      "context_length": 23746
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_119_colorbar.3.1",
+      "distance": 0.9720016717910767,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2079,
+      "end_line": 2092,
+      "tokens": 138,
+      "context_length": 23884
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Tick._apply_params_Tick._get_text2_transform.1",
+      "distance": 0.9734662771224976,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 349,
+      "end_line": 404,
+      "tokens": 600,
+      "context_length": 24484
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.set_tick_params_Axis.set_tick_params.self.stale.1",
+      "distance": 0.9750484228134155,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 850,
+      "end_line": 887,
+      "tokens": 366,
+      "context_length": 24850
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axis_artist.py_AxisArtist._update_ticks_AxisArtist._update_ticks.dpi_cor.9",
+      "distance": 0.9759460687637329,
+      "file_path": "lib/mpl_toolkits/axisartist/axis_artist.py",
+      "start_line": 883,
+      "end_line": 908,
+      "tokens": 278,
+      "context_length": 25128
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar_Colorbar.3",
+      "distance": 0.9803117513656616,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 289,
+      "end_line": 367,
+      "tokens": 588,
+      "context_length": 25716,
+      "file_pos": 19
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/dollar_ticks.py_1_",
+      "distance": 0.9809265732765198,
+      "file_path": "examples/pyplots/dollar_ticks.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 207,
+      "context_length": 25923
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis._update_label_position_Axis.get_tick_space.3",
+      "distance": 0.9822089672088623,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1873,
+      "end_line": 1907,
+      "tokens": 292,
+      "context_length": 26215
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.colorbar_FigureBase.colorbar.11.1",
+      "distance": 0.9830235242843628,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1127,
+      "end_line": 1164,
+      "tokens": 384,
+      "context_length": 26599
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Tick.label_Tick._set_labelrotation.self._labelrotation.1",
+      "distance": 0.9871271848678589,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 185,
+      "end_line": 200,
+      "tokens": 134,
+      "context_length": 26733
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/engineering_formatter.py_1_",
+      "distance": 0.9880596399307251,
+      "file_path": "examples/text_labels_and_annotations/engineering_formatter.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 367,
+      "context_length": 27100
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/examples/color/colorbar_basics.py_1_",
+      "distance": 0.9880707263946533,
+      "file_path": "examples/color/colorbar_basics.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 513,
+      "context_length": 27613
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/angle_helper.py_FormatterDMS.__call___FormatterDMS.__call__.7.4.2.1",
+      "distance": 0.9900069832801819,
+      "file_path": "lib/mpl_toolkits/axisartist/angle_helper.py",
+      "start_line": 220,
+      "end_line": 287,
+      "tokens": 633,
+      "context_length": 28246
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis.get_tick_padding_Axis.draw.2.self.stale.1",
+      "distance": 0.9900283217430115,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1134,
+      "end_line": 1169,
+      "tokens": 279,
+      "context_length": 28525
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/floating_axes.py_FixedAxisArtistHelper.get_tick_iterators_FixedAxisArtistHelper.get_tick_iterators.12.15.labels_14.1",
+      "distance": 0.9921233654022217,
+      "file_path": "lib/mpl_toolkits/axisartist/floating_axes.py",
+      "start_line": 48,
+      "end_line": 115,
+      "tokens": 730,
+      "context_length": 29255
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Axis._update_ticks_Axis._get_ticklabel_bboxes.2.1",
+      "distance": 0.99285489320755,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 1034,
+      "end_line": 1082,
+      "tokens": 459,
+      "context_length": 29714
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/mplot3d/axis3d.py_Axis.get_major_ticks_Axis.get_rotate_label.1.2.1.1",
+      "distance": 0.993258535861969,
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "start_line": 136,
+      "end_line": 178,
+      "tokens": 353,
+      "context_length": 30067
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/examples/misc/custom_projection.py_GeoAxes.set_xlim_GeoAxes.format_coord.5.1",
+      "distance": 0.9938334822654724,
+      "file_path": "examples/misc/custom_projection.py",
+      "start_line": 259,
+      "end_line": 282,
+      "tokens": 200,
+      "context_length": 30267
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/tools/boilerplate.py_41_value_formatter.__repr__.1.1",
+      "distance": 0.994914710521698,
+      "file_path": "tools/boilerplate.py",
+      "start_line": 82,
+      "end_line": 108,
+      "tokens": 195,
+      "context_length": 30462
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_norm_105",
+      "distance": 0.9954349994659424,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 122,
+      "end_line": 194,
+      "tokens": 777,
+      "context_length": 31239
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/dates.py_ConciseDateFormatter.format_ticks_ConciseDateFormatter.format_data_short.1.1",
+      "distance": 0.9963041543960571,
+      "file_path": "lib/matplotlib/dates.py",
+      "start_line": 775,
+      "end_line": 854,
+      "tokens": 834,
+      "context_length": 32073
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/colorbar.py",
+      "position": 1,
+      "tokens": 14249,
+      "context_length": 14249
+    },
+    {
+      "file_path": "examples/ticks/date_concise_formatter.py",
+      "position": 2,
+      "tokens": 1642,
+      "context_length": 15891
+    },
+    {
+      "file_path": "examples/ticks/tick-formatters.py",
+      "position": 3,
+      "tokens": 1235,
+      "context_length": 17126
+    },
+    {
+      "file_path": "lib/matplotlib/axis.py",
+      "position": 4,
+      "tokens": 20216,
+      "context_length": 37342
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "position": 5,
+      "tokens": 39670,
+      "context_length": 77012
+    },
+    {
+      "file_path": "tutorials/intermediate/artists.py",
+      "position": 6,
+      "tokens": 7704,
+      "context_length": 84716
+    },
+    {
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "position": 7,
+      "tokens": 1135,
+      "context_length": 85851
+    },
+    {
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "position": 8,
+      "tokens": 303,
+      "context_length": 86154
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "position": 9,
+      "tokens": 886,
+      "context_length": 87040
+    },
+    {
+      "file_path": "examples/ticks/scalarformatter.py",
+      "position": 10,
+      "tokens": 728,
+      "context_length": 87768
+    },
+    {
+      "file_path": "tutorials/toolkits/axisartist.py",
+      "position": 11,
+      "tokens": 4724,
+      "context_length": 92492
+    },
+    {
+      "file_path": "tutorials/text/text_intro.py",
+      "position": 12,
+      "tokens": 3878,
+      "context_length": 96370
+    },
+    {
+      "file_path": "tutorials/introductory/lifecycle.py",
+      "position": 13,
+      "tokens": 2301,
+      "context_length": 98671
+    },
+    {
+      "file_path": "examples/pyplots/pyplot_formatstr.py",
+      "position": 14,
+      "tokens": 128,
+      "context_length": 98799
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/date_index_formatter.py",
+      "position": 15,
+      "tokens": 447,
+      "context_length": 99246
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "position": 16,
+      "tokens": 4889,
+      "context_length": 104135
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/angle_helper.py",
+      "position": 17,
+      "tokens": 3697,
+      "context_length": 107832
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 18,
+      "tokens": 26445,
+      "context_length": 134277
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/axis_artist.py",
+      "position": 19,
+      "tokens": 8058,
+      "context_length": 142335
+    },
+    {
+      "file_path": "examples/pyplots/dollar_ticks.py",
+      "position": 20,
+      "tokens": 207,
+      "context_length": 142542
+    },
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 21,
+      "tokens": 26267,
+      "context_length": 168809
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/engineering_formatter.py",
+      "position": 22,
+      "tokens": 367,
+      "context_length": 169176
+    },
+    {
+      "file_path": "examples/color/colorbar_basics.py",
+      "position": 23,
+      "tokens": 513,
+      "context_length": 169689
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/floating_axes.py",
+      "position": 24,
+      "tokens": 3233,
+      "context_length": 172922
+    },
+    {
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "position": 25,
+      "tokens": 5202,
+      "context_length": 178124
+    },
+    {
+      "file_path": "examples/misc/custom_projection.py",
+      "position": 26,
+      "tokens": 3839,
+      "context_length": 181963
+    },
+    {
+      "file_path": "tools/boilerplate.py",
+      "position": 27,
+      "tokens": 2863,
+      "context_length": 184826
+    },
+    {
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "position": 28,
+      "tokens": 6103,
+      "context_length": 190929
+    },
+    {
+      "file_path": "lib/matplotlib/dates.py",
+      "position": 29,
+      "tokens": 16778,
+      "context_length": 207707
+    }
+  ]
+}

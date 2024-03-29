@@ -1,0 +1,2653 @@
+{
+  "instance_id": "django__django-14441",
+  "model_patch": "diff --git a/django/core/files/images.py b/django/core/files/images.py\nindex 579c32e11c..799506ddee 100644\n--- a/django/core/files/images.py\n+++ b/django/core/files/images.py\n@@ -7,6 +7,7 @@ import struct\n import zlib\n \n from django.core.files import File\n+from PIL import ImageFile as PillowImageFile\n \n \n class ImageFile(File):\n@@ -36,16 +37,21 @@ def get_image_dimensions(file_or_path, close=False):\n     'close' to True to close the file at the end if it is initially in an open\n     state.\n     \"\"\"\n-    from PIL import ImageFile as PillowImageFile\n \n     p = PillowImageFile.Parser()\n-    if hasattr(file_or_path, 'read'):\n-        file = file_or_path\n-        file_pos = file.tell()\n-        file.seek(0)\n-    else:\n-        file = open(file_or_path, 'rb')\n-        close = True\n+    file = None\n+    file_pos = 0\n+    try:\n+        if hasattr(file_or_path, 'read'):\n+            file = file_or_path\n+            file_pos = file.tell()\n+            file.seek(0)\n+        else:\n+            file = open(file_or_path, 'rb')\n+            close = True\n+    except FileNotFoundError:\n+        return (None, None)\n+\n     try:\n         # Most of the time Pillow only needs a small chunk to parse the image\n         # and get the dimensions, but with some TIFF files Pillow needs to\n@@ -78,7 +84,7 @@ def get_image_dimensions(file_or_path, close=False):\n             chunk_size *= 2\n         return (None, None)\n     finally:\n-        if close:\n+        if file and close:\n             file.close()\n-        else:\n+        elif file:\n             file.seek(file_pos)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/core/files/images.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "c1d50b901b50672a46e7e5fe473c14da1616fc4e",
+  "patch": "diff --git a/django/core/files/images.py b/django/core/files/images.py\n--- a/django/core/files/images.py\n+++ b/django/core/files/images.py\n@@ -44,7 +44,10 @@ def get_image_dimensions(file_or_path, close=False):\n         file_pos = file.tell()\n         file.seek(0)\n     else:\n-        file = open(file_or_path, 'rb')\n+        try:\n+            file = open(file_or_path, 'rb')\n+        except OSError:\n+            return (None, None)\n         close = True\n     try:\n         # Most of the time Pillow only needs a small chunk to parse the image\n",
+  "test_patch": "diff --git a/tests/files/tests.py b/tests/files/tests.py\n--- a/tests/files/tests.py\n+++ b/tests/files/tests.py\n@@ -369,6 +369,10 @@ def test_valid_image(self):\n                 size = images.get_image_dimensions(fh)\n                 self.assertEqual(size, (None, None))\n \n+    def test_missing_file(self):\n+        size = images.get_image_dimensions('missing.png')\n+        self.assertEqual(size, (None, None))\n+\n     @unittest.skipUnless(HAS_WEBP, 'WEBP not installed')\n     def test_webp(self):\n         img_path = os.path.join(os.path.dirname(__file__), 'test.webp')\n",
+  "problem_statement": "Prevent get_image_dimensions() crash on nonexistent images.\nDescription\n\t\nWhen using the get_image_dimensions(), If a non existing file/path is passed, the function crashes\n",
+  "hints_text": "",
+  "created_at": "2021-05-24T15:21:01Z",
+  "version": "4.0",
+  "FAIL_TO_PASS": "[\"test_missing_file (files.tests.GetImageDimensionsTests)\"]",
+  "PASS_TO_PASS": "[\"#8149 - File objects with\", \"ContentFile can accept both bytes and strings and the retrieved content\", \"ContentFile.size changes after a write().\", \"File objects should yield lines when iterated over.\", \"Multiple calls of get_image_dimensions() should return the same size.\", \"Open files passed into get_image_dimensions() should stay opened.\", \"Regression test for #19457\", \"The constructor of ContentFile accepts 'name' (#16590).\", \"The symbol django.core.files.NamedTemporaryFile is assigned as\", \"The temporary file name has the same suffix as the original file.\", \"file_move_safe() ignores a copystat() EPERM PermissionError. This\", \"get_image_dimensions() called with a filename should closed the file.\", \"get_image_dimensions() should catch struct.error while feeding the PIL\", \"get_image_dimensions() should return (None, None) for the dimensions of\", \"line endings should yield lines\", \"test_content_file_default_name (files.tests.ContentFileTestCase)\", \"test_context_manager (files.tests.FileTests)\", \"test_exclusive_lock (files.tests.FileTests)\", \"test_file_iteration_mixed_newlines (files.tests.FileTests)\", \"test_file_iteration_with_mac_newline_at_chunk_boundary (files.tests.FileTests)\", \"test_file_iteration_with_text (files.tests.FileTests)\", \"test_file_iteration_with_unix_newline_at_chunk_boundary (files.tests.FileTests)\", \"test_file_iteration_with_windows_newline_at_chunk_boundary (files.tests.FileTests)\", \"test_file_mode (files.tests.FileTests)\", \"test_file_move_overwrite (files.tests.FileMoveSafeTests)\", \"test_file_upload_temp_dir_pathlib (files.tests.TemporaryUploadedFileTests)\", \"test_in_memory_spooled_temp (files.tests.SpooledTempTests)\", \"test_io_wrapper (files.tests.FileTests)\", \"test_noname_file_default_name (files.tests.NoNameFileTestCase)\", \"test_noname_file_get_size (files.tests.NoNameFileTestCase)\", \"test_open_reopens_closed_file_and_returns_context_manager (files.tests.FileTests)\", \"test_open_resets_file_to_start_and_returns_context_manager (files.tests.ContentFileTestCase)\", \"test_open_resets_file_to_start_and_returns_context_manager (files.tests.InMemoryUploadedFileTests)\", \"test_open_resets_opened_file_to_start_and_returns_context_manager (files.tests.FileTests)\", \"test_readable (files.tests.FileTests)\", \"test_seekable (files.tests.FileTests)\", \"test_shared_lock (files.tests.FileTests)\", \"test_unicode_file_name (files.tests.FileTests)\", \"test_unicode_uploadedfile_name (files.tests.FileTests)\", \"test_webp (files.tests.GetImageDimensionsTests)\", \"test_writable (files.tests.FileTests)\", \"test_written_spooled_temp (files.tests.SpooledTempTests)\"]",
+  "environment_setup_commit": "475cffd1d64c690cdad16ede4d5e81985738ceb4",
+  "patch_files": [
+    "django/core/files/images.py"
+  ],
+  "test_patch_files": [
+    "tests/files/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/core/files/images.py": {
+      "diffs": [
+        {
+          "start_line_old": 47,
+          "end_line_old": 47,
+          "file_pos": 1,
+          "file_context_length": 539,
+          "pos": 1,
+          "context_length": 391
+        }
+      ]
+    }
+  },
+  "vectors": 3576,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/core/files/images.py_get_image_dimensions_",
+      "distance": 1.1544082164764404,
+      "file_path": "django/core/files/images.py",
+      "start_line": 33,
+      "end_line": 85,
+      "tokens": 391,
+      "context_length": 391,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/models/fields/files.py_ImageField_ImageField.contribute_to_class.6.1",
+      "distance": 1.3111262321472168,
+      "file_path": "django/db/models/fields/files.py",
+      "start_line": 372,
+      "end_line": 418,
+      "tokens": 373,
+      "context_length": 764
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/core/files/images.py_1_ImageFile._get_image_dimensions.2.1",
+      "distance": 1.3114192485809326,
+      "file_path": "django/core/files/images.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 147,
+      "context_length": 911,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/db/models/fields/files.py_ImageField.update_dimension_fields_",
+      "distance": 1.3545961380004883,
+      "file_path": "django/db/models/fields/files.py",
+      "start_line": 420,
+      "end_line": 482,
+      "tokens": 551,
+      "context_length": 1462
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/models/fields/files.py_ImageFileDescriptor_ImageFieldFile.delete.2.2",
+      "distance": 1.3827446699142456,
+      "file_path": "django/db/models/fields/files.py",
+      "start_line": 342,
+      "end_line": 369,
+      "tokens": 277,
+      "context_length": 1739
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/forms/fields.py_ImageField_ImageField.widget_attrs.3.1",
+      "distance": 1.394840955734253,
+      "file_path": "django/forms/fields.py",
+      "start_line": 612,
+      "end_line": 668,
+      "tokens": 438,
+      "context_length": 2177
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/raster.py_get_ds_metadata_",
+      "distance": 1.4118907451629639,
+      "file_path": "django/contrib/gis/gdal/prototypes/raster.py",
+      "start_line": 53,
+      "end_line": 102,
+      "tokens": 804,
+      "context_length": 2981
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/core/validators.py_get_available_image_extensions_",
+      "distance": 1.4194635152816772,
+      "file_path": "django/core/validators.py",
+      "start_line": 542,
+      "end_line": 578,
+      "tokens": 225,
+      "context_length": 3206
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/errcheck.py_check_sized_string_",
+      "distance": 1.4414267539978027,
+      "file_path": "django/contrib/gis/geos/prototypes/errcheck.py",
+      "start_line": 54,
+      "end_line": 84,
+      "tokens": 241,
+      "context_length": 3447
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/error.py__",
+      "distance": 1.4618624448776245,
+      "file_path": "django/contrib/gis/geos/error.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 3447
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/error.py_1_",
+      "distance": 1.4650452136993408,
+      "file_path": "django/contrib/gis/gdal/error.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 457,
+      "context_length": 3904
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_WKBReadFunc_WKBReadFunc.argtypes.errcheck.1",
+      "distance": 1.478245735168457,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 67,
+      "end_line": 75,
+      "tokens": 111,
+      "context_length": 4015
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/core/checks/files.py__",
+      "distance": 1.4842355251312256,
+      "file_path": "django/core/checks/files.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 0,
+      "context_length": 4015
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/core/files/storage.py_Storage.generate_filename_Storage.generate_filename.5.1",
+      "distance": 1.48543119430542,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 106,
+      "end_line": 115,
+      "tokens": 116,
+      "context_length": 4131
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage._save_FileSystemStorage._save.13.1",
+      "distance": 1.4937889575958252,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 240,
+      "end_line": 301,
+      "tokens": 534,
+      "context_length": 4665
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/base.py__",
+      "distance": 1.503469705581665,
+      "file_path": "django/contrib/gis/gdal/base.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 4665
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/core/files/uploadhandler.py_StopUpload_StopFutureHandlers.2",
+      "distance": 1.5035111904144287,
+      "file_path": "django/core/files/uploadhandler.py",
+      "start_line": 27,
+      "end_line": 58,
+      "tokens": 204,
+      "context_length": 4869
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/errcheck.py_12_",
+      "distance": 1.511371374130249,
+      "file_path": "django/contrib/gis/gdal/prototypes/errcheck.py",
+      "start_line": 66,
+      "end_line": 139,
+      "tokens": 536,
+      "context_length": 5405
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/libgdal.py_gdal_version_info_",
+      "distance": 1.511406421661377,
+      "file_path": "django/contrib/gis/gdal/libgdal.py",
+      "start_line": 93,
+      "end_line": 124,
+      "tokens": 245,
+      "context_length": 5650
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/generation.py_void_output_",
+      "distance": 1.5141085386276245,
+      "file_path": "django/contrib/gis/gdal/prototypes/generation.py",
+      "start_line": 136,
+      "end_line": 170,
+      "tokens": 237,
+      "context_length": 5887
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/core/files/utils.py_os_validate_file_name.2.3.1",
+      "distance": 1.5159335136413574,
+      "file_path": "django/core/files/utils.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 192,
+      "context_length": 6079
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/core/cache/utils.py__",
+      "distance": 1.5256223678588867,
+      "file_path": "django/core/cache/utils.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 6079
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/ds.py_get_fd_geom_type_",
+      "distance": 1.531951904296875,
+      "file_path": "django/contrib/gis/gdal/prototypes/ds.py",
+      "start_line": 51,
+      "end_line": 85,
+      "tokens": 637,
+      "context_length": 6716
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/core/checks/caches.py_check_file_based_cache_is_absolute_",
+      "distance": 1.5329244136810303,
+      "file_path": "django/core/checks/caches.py",
+      "start_line": 59,
+      "end_line": 73,
+      "tokens": 109,
+      "context_length": 6825
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/libgdal.py_logging_gdal_full_version.2.1",
+      "distance": 1.5350987911224365,
+      "file_path": "django/contrib/gis/gdal/libgdal.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 701,
+      "context_length": 7526
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/core/files/__init__.py__",
+      "distance": 1.535149097442627,
+      "file_path": "django/core/files/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 7526
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/oracle/features.py__",
+      "distance": 1.5367289781570435,
+      "file_path": "django/contrib/gis/db/backends/oracle/features.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 7526
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/errcheck.py_1_check_predicate.2.3.1",
+      "distance": 1.536870002746582,
+      "file_path": "django/contrib/gis/geos/prototypes/errcheck.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 373,
+      "context_length": 7899
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/features.py__",
+      "distance": 1.538722038269043,
+      "file_path": "django/contrib/gis/db/backends/postgis/features.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 7899
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/raster.py_1_set_ds_geotransform.1",
+      "distance": 1.5398311614990234,
+      "file_path": "django/contrib/gis/gdal/prototypes/raster.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 745,
+      "context_length": 8644
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/base.py__",
+      "distance": 1.5424847602844238,
+      "file_path": "django/contrib/gis/geos/base.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 8644
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/libgeos.py_load_geos_load_geos.2.25.1",
+      "distance": 1.542492389678955,
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "start_line": 21,
+      "end_line": 70,
+      "tokens": 513,
+      "context_length": 9157
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/contrib/postgres/functions.py__",
+      "distance": 1.544264554977417,
+      "file_path": "django/contrib/postgres/functions.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 9157
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/geometry.py_GEOSGeometryBase.valid_reason_GEOSGeometryBase.srid.3.2.1.1",
+      "distance": 1.5456531047821045,
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "start_line": 251,
+      "end_line": 342,
+      "tokens": 763,
+      "context_length": 9920
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/core/files/base.py_File.size_File.size.4",
+      "distance": 1.549177885055542,
+      "file_path": "django/core/files/base.py",
+      "start_line": 31,
+      "end_line": 46,
+      "tokens": 129,
+      "context_length": 10049
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/const.py_GDAL_COLOR_TYPES_",
+      "distance": 1.549842119216919,
+      "file_path": "django/contrib/gis/gdal/raster/const.py",
+      "start_line": 48,
+      "end_line": 80,
+      "tokens": 468,
+      "context_length": 10517
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py__get_non_gfk_field__get_non_gfk_field.6.1",
+      "distance": 1.549848198890686,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 289,
+      "end_line": 307,
+      "tokens": 175,
+      "context_length": 10692
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/checks.py__",
+      "distance": 1.549868106842041,
+      "file_path": "django/contrib/staticfiles/checks.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 10692
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/errcheck.py_check_string_check_string.6.1",
+      "distance": 1.550004482269287,
+      "file_path": "django/contrib/gis/gdal/prototypes/errcheck.py",
+      "start_line": 38,
+      "end_line": 64,
+      "tokens": 224,
+      "context_length": 10916
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/core/checks/caches.py_check_cache_location_not_exposed_check_cache_location_not_exposed.3.1",
+      "distance": 1.554072380065918,
+      "file_path": "django/core/checks/caches.py",
+      "start_line": 22,
+      "end_line": 56,
+      "tokens": 291,
+      "context_length": 11207
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/utils/itercompat.py__",
+      "distance": 1.5543551445007324,
+      "file_path": "django/utils/itercompat.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 11207
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/contrib/gis/views.py_1_",
+      "distance": 1.5555751323699951,
+      "file_path": "django/contrib/gis/views.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 155,
+      "context_length": 11362
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/errcheck.py_1_check_const_string.2.4.1.1",
+      "distance": 1.555832862854004,
+      "file_path": "django/contrib/gis/gdal/prototypes/errcheck.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 221,
+      "context_length": 11583
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/functions.py_SnapToGrid_SnapToGrid.__init__.4",
+      "distance": 1.5559524297714233,
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "start_line": 443,
+      "end_line": 459,
+      "tokens": 180,
+      "context_length": 11763
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage_FileSystemStorage.__init__.5",
+      "distance": 1.5585541725158691,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 183,
+      "end_line": 198,
+      "tokens": 151,
+      "context_length": 11914
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/oracle/base.py__",
+      "distance": 1.5631977319717407,
+      "file_path": "django/contrib/gis/db/backends/oracle/base.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 11914
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/mysql/base.py__",
+      "distance": 1.5638474225997925,
+      "file_path": "django/contrib/gis/db/backends/mysql/base.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 11914
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/libgeos.py_11_lgeos.1",
+      "distance": 1.5643309354782104,
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "start_line": 73,
+      "end_line": 131,
+      "tokens": 345,
+      "context_length": 12259
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/views/decorators/gzip.py__",
+      "distance": 1.5670528411865234,
+      "file_path": "django/views/decorators/gzip.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 12259
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/testing.py__",
+      "distance": 1.571349859237671,
+      "file_path": "django/contrib/staticfiles/testing.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 12259
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/source.py_GDALRaster.vsi_buffer_GDALRaster.vsi_buffer.7.1",
+      "distance": 1.572739601135254,
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "start_line": 218,
+      "end_line": 234,
+      "tokens": 134,
+      "context_length": 12393
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/core/checks/security/csrf.py_check_csrf_failure_view_",
+      "distance": 1.5728058815002441,
+      "file_path": "django/core/checks/security/csrf.py",
+      "start_line": 45,
+      "end_line": 68,
+      "tokens": 157,
+      "context_length": 12550
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/utils.py__",
+      "distance": 1.5731507539749146,
+      "file_path": "django/contrib/postgres/fields/utils.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 12550
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/http/request.py_HttpRequest._get_full_path_HttpRequest._get_full_path.3.1",
+      "distance": 1.5737355947494507,
+      "file_path": "django/http/request.py",
+      "start_line": 151,
+      "end_line": 158,
+      "tokens": 111,
+      "context_length": 12661
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/utils/_os.py_symlinks_supported_",
+      "distance": 1.5740978717803955,
+      "file_path": "django/utils/_os.py",
+      "start_line": 35,
+      "end_line": 60,
+      "tokens": 190,
+      "context_length": 12851
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_check_errors_raise_last_exception.2.1",
+      "distance": 1.5742154121398926,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 59,
+      "end_line": 87,
+      "tokens": 156,
+      "context_length": 13007
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py_label_for_field_label_for_field.4.2.1.1",
+      "distance": 1.5742864608764648,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 310,
+      "end_line": 367,
+      "tokens": 466,
+      "context_length": 13473
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/generation.py_geom_output_geom_output.5.1",
+      "distance": 1.5743287801742554,
+      "file_path": "django/contrib/gis/gdal/prototypes/generation.py",
+      "start_line": 40,
+      "end_line": 60,
+      "tokens": 149,
+      "context_length": 13622
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage._value_or_setting_FileSystemStorage._open.1.1",
+      "distance": 1.5767484903335571,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 212,
+      "end_line": 238,
+      "tokens": 215,
+      "context_length": 13837
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_WKBWriter_WKBWriter._handle_empty_point.3.1",
+      "distance": 1.5767817497253418,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 212,
+      "end_line": 232,
+      "tokens": 196,
+      "context_length": 14033
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/utils/cache.py__not_modified__not_modified.3.1",
+      "distance": 1.5780935287475586,
+      "file_path": "django/utils/cache.py",
+      "start_line": 135,
+      "end_line": 150,
+      "tokens": 190,
+      "context_length": 14223
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._handle_objects_preventing_db_destruction_DatabaseCreation._handle_objects_preventing_db_destruction.3",
+      "distance": 1.5785751342773438,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 130,
+      "end_line": 165,
+      "tokens": 399,
+      "context_length": 14622
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/geom.py_to_wkb_",
+      "distance": 1.5793434381484985,
+      "file_path": "django/contrib/gis/gdal/prototypes/geom.py",
+      "start_line": 67,
+      "end_line": 110,
+      "tokens": 694,
+      "context_length": 15316
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/source.py_GDALRaster.__del___GDALRaster._flush.4",
+      "distance": 1.5795444250106812,
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "start_line": 191,
+      "end_line": 216,
+      "tokens": 216,
+      "context_length": 15532
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/core/files/storage.py_Storage.get_available_name_Storage.get_available_name.11.1",
+      "distance": 1.5796427726745605,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 73,
+      "end_line": 104,
+      "tokens": 341,
+      "context_length": 15873
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/db/backends/dummy/features.py__",
+      "distance": 1.579756498336792,
+      "file_path": "django/db/backends/dummy/features.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 15873
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/contrib/gis/apps.py__",
+      "distance": 1.5798616409301758,
+      "file_path": "django/contrib/gis/apps.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 15873
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/core/files/uploadhandler.py_1_UploadFileException.2",
+      "distance": 1.5803003311157227,
+      "file_path": "django/core/files/uploadhandler.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 129,
+      "context_length": 16002
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/messages/storage/__init__.py__",
+      "distance": 1.580394983291626,
+      "file_path": "django/contrib/messages/storage/__init__.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 16002
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_97_filesizeformat.13.1",
+      "distance": 1.5831050872802734,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 821,
+      "end_line": 865,
+      "tokens": 378,
+      "context_length": 16380
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/contrib/messages/views.py__",
+      "distance": 1.5831656455993652,
+      "file_path": "django/contrib/messages/views.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 0,
+      "context_length": 16380
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/core/files/uploadedfile.py_UploadedFile._set_name_UploadedFile.name.1",
+      "distance": 1.5836434364318848,
+      "file_path": "django/core/files/uploadedfile.py",
+      "start_line": 39,
+      "end_line": 55,
+      "tokens": 142,
+      "context_length": 16522
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/apps.py__",
+      "distance": 1.5840601921081543,
+      "file_path": "django/contrib/staticfiles/apps.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 16522
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/core/checks/database.py__",
+      "distance": 1.5846434831619263,
+      "file_path": "django/core/checks/database.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 16522
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/client.py__",
+      "distance": 1.5847110748291016,
+      "file_path": "django/contrib/gis/db/backends/spatialite/client.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 16522
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_run_with_reloader_",
+      "distance": 1.585348129272461,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 633,
+      "end_line": 645,
+      "tokens": 117,
+      "context_length": 16639
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/proxy.py_1_SpatialProxy.__get__.6.1",
+      "distance": 1.5854425430297852,
+      "file_path": "django/contrib/gis/db/models/proxy.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 363,
+      "context_length": 17002
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_62_",
+      "distance": 1.585482120513916,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 288,
+      "end_line": 340,
+      "tokens": 407,
+      "context_length": 17409
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py__WKBReader__WKBReader.read.2.4.1",
+      "distance": 1.5865180492401123,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 142,
+      "end_line": 155,
+      "tokens": 131,
+      "context_length": 17540
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/contrib/gis/forms/__init__.py__",
+      "distance": 1.5874724388122559,
+      "file_path": "django/contrib/gis/forms/__init__.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 17540
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/core/checks/compatibility/django_4_0.py_1_",
+      "distance": 1.5875931978225708,
+      "file_path": "django/core/checks/compatibility/django_4_0.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 138,
+      "context_length": 17678
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/schema.py_PostGISSchemaEditor._alter_column_type_sql_",
+      "distance": 1.587956428527832,
+      "file_path": "django/contrib/gis/db/backends/postgis/schema.py",
+      "start_line": 49,
+      "end_line": 72,
+      "tokens": 195,
+      "context_length": 17873
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/exceptions.py__",
+      "distance": 1.5881664752960205,
+      "file_path": "django/contrib/admin/exceptions.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 17873
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/management/commands/collectstatic.py_Command.delete_file_Command.delete_file.3.1",
+      "distance": 1.5881853103637695,
+      "file_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+      "start_line": 244,
+      "end_line": 292,
+      "tokens": 477,
+      "context_length": 18350
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/srs.py_to_pretty_wkt_",
+      "distance": 1.5891273021697998,
+      "file_path": "django/contrib/gis/gdal/prototypes/srs.py",
+      "start_line": 63,
+      "end_line": 84,
+      "tokens": 317,
+      "context_length": 18667
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/template/backends/utils.py__",
+      "distance": 1.5896143913269043,
+      "file_path": "django/template/backends/utils.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 18667
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/utils.py_check_settings_",
+      "distance": 1.5897722244262695,
+      "file_path": "django/contrib/staticfiles/utils.py",
+      "start_line": 42,
+      "end_line": 64,
+      "tokens": 205,
+      "context_length": 18872
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/urls/exceptions.py__",
+      "distance": 1.589797854423523,
+      "file_path": "django/urls/exceptions.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 18872
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/const.py_1_14",
+      "distance": 1.592706561088562,
+      "file_path": "django/contrib/gis/gdal/raster/const.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 532,
+      "context_length": 19404
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/views/static.py_1_10",
+      "distance": 1.5937919616699219,
+      "file_path": "django/views/static.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 110,
+      "context_length": 19514
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/shortcuts.py_get_object_or_404_get_object_or_404.4.2.1",
+      "distance": 1.5952485799789429,
+      "file_path": "django/shortcuts.py",
+      "start_line": 57,
+      "end_line": 78,
+      "tokens": 216,
+      "context_length": 19730
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/core/files/storage.py_os___all__.1",
+      "distance": 1.5952539443969727,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 171,
+      "context_length": 19901
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/core/validators.py_ipaddress_EMPTY_VALUES.1",
+      "distance": 1.595674753189087,
+      "file_path": "django/core/validators.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 127,
+      "context_length": 20028
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/prototypes/ds.py_1_35",
+      "distance": 1.5957727432250977,
+      "file_path": "django/contrib/gis/gdal/prototypes/ds.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 750,
+      "context_length": 20778
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/functions.py_1_NUMERIC_TYPES.1",
+      "distance": 1.596555233001709,
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 120,
+      "context_length": 20898
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/threadsafe.py_GEOSFunc_",
+      "distance": 1.5967787504196167,
+      "file_path": "django/contrib/gis/geos/prototypes/threadsafe.py",
+      "start_line": 29,
+      "end_line": 78,
+      "tokens": 386,
+      "context_length": 21284
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/messages/utils.py__",
+      "distance": 1.5968469381332397,
+      "file_path": "django/contrib/messages/utils.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 21284
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/core/checks/templates.py_copy_",
+      "distance": 1.599764108657837,
+      "file_path": "django/core/checks/templates.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 259,
+      "context_length": 21543
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/functions.py_LineLocatePoint_Perimeter.as_sqlite.2.1",
+      "distance": 1.5998018980026245,
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "start_line": 380,
+      "end_line": 420,
+      "tokens": 294,
+      "context_length": 21837
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/core/files/locks.py_os_",
+      "distance": 1.6005208492279053,
+      "file_path": "django/core/files/locks.py",
+      "start_line": 19,
+      "end_line": 119,
+      "tokens": 779,
+      "context_length": 22616
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/core/files/storage.py_Storage.6_Storage.get_alternative_name.2.1",
+      "distance": 1.6008481979370117,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 56,
+      "end_line": 71,
+      "tokens": 138,
+      "context_length": 22754
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/core/files/base.py_os_File.__len__.1.1",
+      "distance": 1.6009198427200317,
+      "file_path": "django/core/files/base.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 174,
+      "context_length": 22928
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/views/__init__.py__",
+      "distance": 1.6016840934753418,
+      "file_path": "django/views/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 22928
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/contrib/postgres/aggregates/__init__.py__",
+      "distance": 1.6018483638763428,
+      "file_path": "django/contrib/postgres/aggregates/__init__.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 22928
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/core/checks/urls.py_check_url_namespaces_unique_check_url_namespaces_unique.10.1",
+      "distance": 1.6018511056900024,
+      "file_path": "django/core/checks/urls.py",
+      "start_line": 30,
+      "end_line": 50,
+      "tokens": 165,
+      "context_length": 23093
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/messages/constants.py__",
+      "distance": 1.6019651889801025,
+      "file_path": "django/contrib/messages/constants.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 0,
+      "context_length": 23093
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/coordseq.py_GEOSCoordSeq.9_GEOSCoordSeq.dims.2.1",
+      "distance": 1.6023929119110107,
+      "file_path": "django/contrib/gis/geos/coordseq.py",
+      "start_line": 66,
+      "end_line": 162,
+      "tokens": 830,
+      "context_length": 23923
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/storage.py_HashedFilesMixin._url_HashedFilesMixin.url.2.1",
+      "distance": 1.6026512384414673,
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "start_line": 130,
+      "end_line": 165,
+      "tokens": 307,
+      "context_length": 24230
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_59_WKTWriter.precision_13.2.2",
+      "distance": 1.6031675338745117,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 158,
+      "end_line": 209,
+      "tokens": 377,
+      "context_length": 24607
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/finders.py_FileSystemFinder.check_FileSystemFinder.check.4.1",
+      "distance": 1.603515863418579,
+      "file_path": "django/contrib/staticfiles/finders.py",
+      "start_line": 70,
+      "end_line": 100,
+      "tokens": 251,
+      "context_length": 24858
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/geometries.py_OGRGeometry.wkb_OGRGeometry.wkb.8.1",
+      "distance": 1.6036107540130615,
+      "file_path": "django/contrib/gis/gdal/geometries.py",
+      "start_line": 340,
+      "end_line": 352,
+      "tokens": 144,
+      "context_length": 25002
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/fields.py_BaseSpatialField.get_db_prep_value_BaseSpatialField.get_raster_prep_value.2.3.1.2.1",
+      "distance": 1.6040316820144653,
+      "file_path": "django/contrib/gis/db/models/fields.py",
+      "start_line": 143,
+      "end_line": 170,
+      "tokens": 205,
+      "context_length": 25207
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_raw_id_fields_item_BaseModelAdminChecks._check_raw_id_fields_item.2.3.2.2.2.1.1",
+      "distance": 1.6045877933502197,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 232,
+      "end_line": 253,
+      "tokens": 208,
+      "context_length": 25415
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_ReadOnlyPasswordHashField_UsernameField.widget_attrs.1.1",
+      "distance": 1.6052556037902832,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 57,
+      "end_line": 75,
+      "tokens": 124,
+      "context_length": 25539
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/contrib/sites/checks.py__",
+      "distance": 1.6074988842010498,
+      "file_path": "django/contrib/sites/checks.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 25539
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_functools_is_django_path.2.1",
+      "distance": 1.6075868606567383,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 287,
+      "context_length": 25826
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/core/management/base.py_CommandError_SystemCheckError.2",
+      "distance": 1.6079988479614258,
+      "file_path": "django/core/management/base.py",
+      "start_line": 22,
+      "end_line": 43,
+      "tokens": 165,
+      "context_length": 25991
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/mysql/operations.py_MySQLOperations.disallowed_aggregates_MySQLOperations.unsupported_functions.3.1",
+      "distance": 1.608229160308838,
+      "file_path": "django/contrib/gis/db/backends/mysql/operations.py",
+      "start_line": 57,
+      "end_line": 77,
+      "tokens": 225,
+      "context_length": 26216
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/utils/cache.py__if_unmodified_since_passes__if_none_match_passes.2.4.target_etag.3.1",
+      "distance": 1.6085580587387085,
+      "file_path": "django/utils/cache.py",
+      "start_line": 217,
+      "end_line": 241,
+      "tokens": 235,
+      "context_length": 26451
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage.delete_",
+      "distance": 1.609078049659729,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 303,
+      "end_line": 374,
+      "tokens": 470,
+      "context_length": 26921
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/views/defaults.py_bad_request_bad_request.4.1",
+      "distance": 1.6094810962677002,
+      "file_path": "django/views/defaults.py",
+      "start_line": 102,
+      "end_line": 121,
+      "tokens": 149,
+      "context_length": 27070
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/creation.py_DatabaseCreation._execute_create_test_db_DatabaseCreation._execute_create_test_db.1.3.1.3.3",
+      "distance": 1.609776496887207,
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "start_line": 39,
+      "end_line": 54,
+      "tokens": 173,
+      "context_length": 27243
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/views/debug.py_functools_CallableSettingWrapper.__repr__.1.1",
+      "distance": 1.6098415851593018,
+      "file_path": "django/views/debug.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 351,
+      "context_length": 27594
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/oracle/introspection.py_cx_Oracle_",
+      "distance": 1.6104481220245361,
+      "file_path": "django/contrib/gis/db/backends/oracle/introspection.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 391,
+      "context_length": 27985
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/band.py_GDALBand.nodata_value_GDALBand.nodata_value.6.1",
+      "distance": 1.610852599143982,
+      "file_path": "django/contrib/gis/gdal/raster/band.py",
+      "start_line": 134,
+      "end_line": 147,
+      "tokens": 125,
+      "context_length": 28110
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_get_child_arguments_get_child_arguments.9.1",
+      "distance": 1.6114907264709473,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 213,
+      "end_line": 248,
+      "tokens": 376,
+      "context_length": 28486
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/core/checks/caches.py_pathlib_check_default_cache_is_configured.2.1",
+      "distance": 1.612595558166504,
+      "file_path": "django/core/checks/caches.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 119,
+      "context_length": 28605
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_WKBWriter.9_WKBWriter.srid_19.1",
+      "distance": 1.6136547327041626,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 254,
+      "end_line": 285,
+      "tokens": 271,
+      "context_length": 28876
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminReadonlyField_AdminReadonlyField.get_admin_url.2.3.1.1",
+      "distance": 1.6138606071472168,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 160,
+      "end_line": 209,
+      "tokens": 437,
+      "context_length": 29313
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/geometry.py_GEOSGeometryBase.simplify_GEOSGeometryBase.simplify.2.2.1.1",
+      "distance": 1.6153178215026855,
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "start_line": 563,
+      "end_line": 578,
+      "tokens": 177,
+      "context_length": 29490
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_wkb_reader_read__WKTReader.read.2.1",
+      "distance": 1.6153391599655151,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 78,
+      "end_line": 139,
+      "tokens": 591,
+      "context_length": 30081
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.cleanse_special_types_SafeExceptionReporterFilter.cleanse_special_types.3.1",
+      "distance": 1.6155107021331787,
+      "file_path": "django/views/debug.py",
+      "start_line": 189,
+      "end_line": 201,
+      "tokens": 143,
+      "context_length": 30224
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/template/loaders/app_directories.py__",
+      "distance": 1.6155118942260742,
+      "file_path": "django/template/loaders/app_directories.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 30224
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/core/cache/backends/base.py_memcache_key_warnings_",
+      "distance": 1.6157329082489014,
+      "file_path": "django/core/cache/backends/base.py",
+      "start_line": 280,
+      "end_line": 293,
+      "tokens": 112,
+      "context_length": 30336
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/db/migrations/graph.py_DummyNode_DummyNode.raise_error.1",
+      "distance": 1.6160378456115723,
+      "file_path": "django/db/migrations/graph.py",
+      "start_line": 44,
+      "end_line": 58,
+      "tokens": 121,
+      "context_length": 30457
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/core/signals.py__",
+      "distance": 1.6173607110977173,
+      "file_path": "django/core/signals.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 30457
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/fields.py_GeometryField.deconstruct_GeometryField.deconstruct.7.1",
+      "distance": 1.617600440979004,
+      "file_path": "django/contrib/gis/db/models/fields.py",
+      "start_line": 243,
+      "end_line": 254,
+      "tokens": 148,
+      "context_length": 30605
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/contrib/gis/forms/fields.py_GeometryField.clean_GeometryField.clean.9.1",
+      "distance": 1.617601752281189,
+      "file_path": "django/contrib/gis/forms/fields.py",
+      "start_line": 62,
+      "end_line": 85,
+      "tokens": 204,
+      "context_length": 30809
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/source.py_GDALRaster.geotransform_19_GDALRaster.skew.2.1",
+      "distance": 1.6189039945602417,
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "start_line": 325,
+      "end_line": 354,
+      "tokens": 219,
+      "context_length": 31028
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/adapter.py__",
+      "distance": 1.6193783283233643,
+      "file_path": "django/contrib/gis/db/backends/spatialite/adapter.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 31028
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/core/validators.py_FileExtensionValidator_FileExtensionValidator.__eq__.1.1",
+      "distance": 1.6194639205932617,
+      "file_path": "django/core/validators.py",
+      "start_line": 503,
+      "end_line": 539,
+      "tokens": 255,
+      "context_length": 31283
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/creation.py_os_DatabaseCreation._get_test_db_name.3.1",
+      "distance": 1.619693398475647,
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 140,
+      "context_length": 31423
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/views/debug.py_ExceptionReporter._get_explicit_or_implicit_cause_ExceptionReporter.get_traceback_frames.exceptions.11.1",
+      "distance": 1.61983323097229,
+      "file_path": "django/views/debug.py",
+      "start_line": 427,
+      "end_line": 464,
+      "tokens": 298,
+      "context_length": 31721
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/sql/__init__.py__",
+      "distance": 1.6199575662612915,
+      "file_path": "django/contrib/gis/db/models/sql/__init__.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 31721
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/views/debug.py_ExceptionReporter.get_exception_traceback_frames_ExceptionReporter.get_exception_traceback_frames.4.3.tb_11.1",
+      "distance": 1.6203234195709229,
+      "file_path": "django/views/debug.py",
+      "start_line": 466,
+      "end_line": 510,
+      "tokens": 429,
+      "context_length": 32150
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/operations.py_re_BILATERAL.1",
+      "distance": 1.620877742767334,
+      "file_path": "django/contrib/gis/db/backends/postgis/operations.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 216,
+      "context_length": 32366
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/source.py_GDALRaster.warp_GDALRaster.warp.23.1",
+      "distance": 1.6209429502487183,
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "start_line": 376,
+      "end_line": 429,
+      "tokens": 519,
+      "context_length": 32885
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/sessions/exceptions.py__",
+      "distance": 1.6216166019439697,
+      "file_path": "django/contrib/sessions/exceptions.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 32885
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/prepared.py_1_",
+      "distance": 1.6216810941696167,
+      "file_path": "django/contrib/gis/geos/prototypes/prepared.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 282,
+      "context_length": 33167
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/core/files/uploadedfile.py_TemporaryUploadedFile_TemporaryUploadedFile.close.1.2.4",
+      "distance": 1.6219018697738647,
+      "file_path": "django/core/files/uploadedfile.py",
+      "start_line": 58,
+      "end_line": 78,
+      "tokens": 181,
+      "context_length": 33348
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/geom.py_1_",
+      "distance": 1.6219558715820312,
+      "file_path": "django/contrib/gis/geos/prototypes/geom.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 814,
+      "context_length": 34162
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/db/utils.py_pkgutil_NotSupportedError.1",
+      "distance": 1.621976375579834,
+      "file_path": "django/db/utils.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 177,
+      "context_length": 34339
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/utils/cache.py_get_conditional_response_get_conditional_response.2.19.1",
+      "distance": 1.6221301555633545,
+      "file_path": "django/utils/cache.py",
+      "start_line": 153,
+      "end_line": 193,
+      "tokens": 453,
+      "context_length": 34792
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/views/csrf.py_CSRF_FAILURE_TEMPLATE_NAME_",
+      "distance": 1.6222658157348633,
+      "file_path": "django/views/csrf.py",
+      "start_line": 101,
+      "end_line": 155,
+      "tokens": 577,
+      "context_length": 35369
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/geometry.py_GEOSGeometryBase.from_ewkt_GEOSGeometryBase.from_ewkt.6.1",
+      "distance": 1.6228821277618408,
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "start_line": 116,
+      "end_line": 131,
+      "tokens": 169,
+      "context_length": 35538
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/core/exceptions.py_ValidationError_",
+      "distance": 1.6230673789978027,
+      "file_path": "django/core/exceptions.py",
+      "start_line": 107,
+      "end_line": 218,
+      "tokens": 752,
+      "context_length": 36290
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/core/checks/urls.py_get_warning_for_invalid_pattern_",
+      "distance": 1.6231746673583984,
+      "file_path": "django/core/checks/urls.py",
+      "start_line": 71,
+      "end_line": 111,
+      "tokens": 264,
+      "context_length": 36554
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/io.py_WKBWriter.write_WKBWriter.write.6.1",
+      "distance": 1.6232845783233643,
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "start_line": 234,
+      "end_line": 243,
+      "tokens": 147,
+      "context_length": 36701
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/libgeos.py_1_logger.1",
+      "distance": 1.6233457326889038,
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 126,
+      "context_length": 36827
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.7.1",
+      "distance": 1.6235997676849365,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 65,
+      "end_line": 128,
+      "tokens": 640,
+      "context_length": 37467
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/core/mail/backends/dummy.py__",
+      "distance": 1.623640537261963,
+      "file_path": "django/core/mail/backends/dummy.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 37467
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.signal_connect_error__check_lazy_references.signal_connect_error.8.1",
+      "distance": 1.6238951683044434,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 155,
+      "end_line": 176,
+      "tokens": 263,
+      "context_length": 37730
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/__init__.py__",
+      "distance": 1.6239879131317139,
+      "file_path": "django/contrib/postgres/forms/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 37730
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/gis/utils/__init__.py_1_",
+      "distance": 1.6244758367538452,
+      "file_path": "django/contrib/gis/utils/__init__.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 144,
+      "context_length": 37874
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/storage.py_HashedFilesMixin.stored_name_HashedFilesMixin.stored_name.10",
+      "distance": 1.625154972076416,
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "start_line": 374,
+      "end_line": 395,
+      "tokens": 230,
+      "context_length": 38104
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/core/files/uploadedfile.py_InMemoryUploadedFile_InMemoryUploadedFile.multiple_chunks.2.1",
+      "distance": 1.6251678466796875,
+      "file_path": "django/core/files/uploadedfile.py",
+      "start_line": 81,
+      "end_line": 99,
+      "tokens": 149,
+      "context_length": 38253
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/__init__.py_1_",
+      "distance": 1.6255210638046265,
+      "file_path": "django/contrib/gis/geos/prototypes/__init__.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 352,
+      "context_length": 38605
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/raster/source.py_GDALRaster.extent_GDALRaster.bands.1.1",
+      "distance": 1.6255404949188232,
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "start_line": 356,
+      "end_line": 374,
+      "tokens": 159,
+      "context_length": 38764
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/core/checks/messages.py_Debug_",
+      "distance": 1.625572919845581,
+      "file_path": "django/core/checks/messages.py",
+      "start_line": 54,
+      "end_line": 77,
+      "tokens": 161,
+      "context_length": 38925
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/urls.py__",
+      "distance": 1.6256133317947388,
+      "file_path": "django/contrib/staticfiles/urls.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 0,
+      "context_length": 38925
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/contrib/gis/geoip2/base.py_GeoIP2.MODE_AUTO._check_query_GeoIP2.MODE_AUTO._check_query.8.1",
+      "distance": 1.625880241394043,
+      "file_path": "django/contrib/gis/geoip2/base.py",
+      "start_line": 142,
+      "end_line": 162,
+      "tokens": 258,
+      "context_length": 39183
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_1_DatabaseValidation._check_sql_mode.2.1",
+      "distance": 1.6269254684448242,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 239,
+      "context_length": 39422
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.app_model_error__check_lazy_references.field_error.3.1",
+      "distance": 1.627663493156433,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 129,
+      "end_line": 153,
+      "tokens": 268,
+      "context_length": 39690
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_33__UninitializedOperatorsDescriptor.__get__.4.4.1",
+      "distance": 1.6277170181274414,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 60,
+      "end_line": 99,
+      "tokens": 328,
+      "context_length": 40018
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/const.py_1_",
+      "distance": 1.6279253959655762,
+      "file_path": "django/contrib/gis/db/backends/postgis/const.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 620,
+      "context_length": 40638
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/core/files/move.py_1__samefile.2.3.1",
+      "distance": 1.6282696723937988,
+      "file_path": "django/core/files/move.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 148,
+      "context_length": 40786
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/core/checks/security/csrf.py_inspect_check_csrf_cookie_secure.2.1",
+      "distance": 1.6284786462783813,
+      "file_path": "django/core/checks/security/csrf.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 304,
+      "context_length": 41090
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/db/models/fields/files.py_datetime_FieldFile.__setstate__.self.storage.1",
+      "distance": 1.6285055875778198,
+      "file_path": "django/db/models/fields/files.py",
+      "start_line": 1,
+      "end_line": 142,
+      "tokens": 952,
+      "context_length": 42042
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/utils/text.py_get_valid_filename_get_valid_filename.5.1",
+      "distance": 1.6289302110671997,
+      "file_path": "django/utils/text.py",
+      "start_line": 224,
+      "end_line": 238,
+      "tokens": 156,
+      "context_length": 42198
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/misc.py_1_",
+      "distance": 1.6290934085845947,
+      "file_path": "django/contrib/gis/geos/prototypes/misc.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 308,
+      "context_length": 42506
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField._check_fix_default_value_TimeField._check_fix_default_value.6.1",
+      "distance": 1.6291155815124512,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2188,
+      "end_line": 2208,
+      "tokens": 181,
+      "context_length": 42687
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/utils/baseconv.py_1_BASE64_ALPHABET.1",
+      "distance": 1.6293009519577026,
+      "file_path": "django/utils/baseconv.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 147,
+      "context_length": 42834
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/utils/archive.py_os_extract.2.1",
+      "distance": 1.6293296813964844,
+      "file_path": "django/utils/archive.py",
+      "start_line": 24,
+      "end_line": 51,
+      "tokens": 118,
+      "context_length": 42952
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_FilePathField_FilePathField._check_allowing_files_or_folders.2.1",
+      "distance": 1.6301660537719727,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1652,
+      "end_line": 1677,
+      "tokens": 206,
+      "context_length": 43158
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/forms/widgets.py_FileInput_FILE_INPUT_CONTRADICTION.1",
+      "distance": 1.6305336952209473,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 379,
+      "end_line": 399,
+      "tokens": 138,
+      "context_length": 43296
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/core/files/images.py",
+      "position": 1,
+      "tokens": 539,
+      "context_length": 539
+    },
+    {
+      "file_path": "django/db/models/fields/files.py",
+      "position": 2,
+      "tokens": 3833,
+      "context_length": 4372
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 3,
+      "tokens": 9421,
+      "context_length": 13793
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/raster.py",
+      "position": 4,
+      "tokens": 1549,
+      "context_length": 15342
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 5,
+      "tokens": 4699,
+      "context_length": 20041
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/errcheck.py",
+      "position": 6,
+      "tokens": 615,
+      "context_length": 20656
+    },
+    {
+      "file_path": "django/contrib/gis/geos/error.py",
+      "position": 7,
+      "tokens": 24,
+      "context_length": 20680
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/error.py",
+      "position": 8,
+      "tokens": 457,
+      "context_length": 21137
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/io.py",
+      "position": 9,
+      "tokens": 2951,
+      "context_length": 24088
+    },
+    {
+      "file_path": "django/core/checks/files.py",
+      "position": 10,
+      "tokens": 104,
+      "context_length": 24192
+    },
+    {
+      "file_path": "django/core/files/storage.py",
+      "position": 11,
+      "tokens": 2952,
+      "context_length": 27144
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/base.py",
+      "position": 12,
+      "tokens": 42,
+      "context_length": 27186
+    },
+    {
+      "file_path": "django/core/files/uploadhandler.py",
+      "position": 13,
+      "tokens": 1416,
+      "context_length": 28602
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/errcheck.py",
+      "position": 14,
+      "tokens": 983,
+      "context_length": 29585
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/libgdal.py",
+      "position": 15,
+      "tokens": 946,
+      "context_length": 30531
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/generation.py",
+      "position": 16,
+      "tokens": 1174,
+      "context_length": 31705
+    },
+    {
+      "file_path": "django/core/files/utils.py",
+      "position": 17,
+      "tokens": 571,
+      "context_length": 32276
+    },
+    {
+      "file_path": "django/core/cache/utils.py",
+      "position": 18,
+      "tokens": 79,
+      "context_length": 32355
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/ds.py",
+      "position": 19,
+      "tokens": 1388,
+      "context_length": 33743
+    },
+    {
+      "file_path": "django/core/checks/caches.py",
+      "position": 20,
+      "tokens": 521,
+      "context_length": 34264
+    },
+    {
+      "file_path": "django/core/files/__init__.py",
+      "position": 21,
+      "tokens": 15,
+      "context_length": 34279
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/oracle/features.py",
+      "position": 22,
+      "tokens": 112,
+      "context_length": 34391
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/features.py",
+      "position": 23,
+      "tokens": 96,
+      "context_length": 34487
+    },
+    {
+      "file_path": "django/contrib/gis/geos/base.py",
+      "position": 24,
+      "tokens": 42,
+      "context_length": 34529
+    },
+    {
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "position": 25,
+      "tokens": 1255,
+      "context_length": 35784
+    },
+    {
+      "file_path": "django/contrib/postgres/functions.py",
+      "position": 26,
+      "tokens": 53,
+      "context_length": 35837
+    },
+    {
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "position": 27,
+      "tokens": 5915,
+      "context_length": 41752
+    },
+    {
+      "file_path": "django/core/files/base.py",
+      "position": 28,
+      "tokens": 1052,
+      "context_length": 42804
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/raster/const.py",
+      "position": 29,
+      "tokens": 1002,
+      "context_length": 43806
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 30,
+      "tokens": 4158,
+      "context_length": 47964
+    },
+    {
+      "file_path": "django/contrib/staticfiles/checks.py",
+      "position": 31,
+      "tokens": 76,
+      "context_length": 48040
+    },
+    {
+      "file_path": "django/utils/itercompat.py",
+      "position": 32,
+      "tokens": 40,
+      "context_length": 48080
+    },
+    {
+      "file_path": "django/contrib/gis/views.py",
+      "position": 33,
+      "tokens": 155,
+      "context_length": 48235
+    },
+    {
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "position": 34,
+      "tokens": 3945,
+      "context_length": 52180
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/oracle/base.py",
+      "position": 35,
+      "tokens": 103,
+      "context_length": 52283
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/mysql/base.py",
+      "position": 36,
+      "tokens": 109,
+      "context_length": 52392
+    },
+    {
+      "file_path": "django/views/decorators/gzip.py",
+      "position": 37,
+      "tokens": 51,
+      "context_length": 52443
+    },
+    {
+      "file_path": "django/contrib/staticfiles/testing.py",
+      "position": 38,
+      "tokens": 93,
+      "context_length": 52536
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/raster/source.py",
+      "position": 39,
+      "tokens": 4030,
+      "context_length": 56566
+    },
+    {
+      "file_path": "django/core/checks/security/csrf.py",
+      "position": 40,
+      "tokens": 462,
+      "context_length": 57028
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/utils.py",
+      "position": 41,
+      "tokens": 23,
+      "context_length": 57051
+    },
+    {
+      "file_path": "django/http/request.py",
+      "position": 42,
+      "tokens": 5206,
+      "context_length": 62257
+    },
+    {
+      "file_path": "django/utils/_os.py",
+      "position": 43,
+      "tokens": 505,
+      "context_length": 62762
+    },
+    {
+      "file_path": "django/utils/autoreload.py",
+      "position": 44,
+      "tokens": 5098,
+      "context_length": 67860
+    },
+    {
+      "file_path": "django/utils/cache.py",
+      "position": 45,
+      "tokens": 3730,
+      "context_length": 71590
+    },
+    {
+      "file_path": "django/db/backends/oracle/creation.py",
+      "position": 46,
+      "tokens": 3893,
+      "context_length": 75483
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/geom.py",
+      "position": 47,
+      "tokens": 1474,
+      "context_length": 76957
+    },
+    {
+      "file_path": "django/db/backends/dummy/features.py",
+      "position": 48,
+      "tokens": 32,
+      "context_length": 76989
+    },
+    {
+      "file_path": "django/contrib/gis/apps.py",
+      "position": 49,
+      "tokens": 82,
+      "context_length": 77071
+    },
+    {
+      "file_path": "django/contrib/messages/storage/__init__.py",
+      "position": 50,
+      "tokens": 70,
+      "context_length": 77141
+    },
+    {
+      "file_path": "django/template/defaultfilters.py",
+      "position": 51,
+      "tokens": 6230,
+      "context_length": 83371
+    },
+    {
+      "file_path": "django/contrib/messages/views.py",
+      "position": 52,
+      "tokens": 96,
+      "context_length": 83467
+    },
+    {
+      "file_path": "django/core/files/uploadedfile.py",
+      "position": 53,
+      "tokens": 869,
+      "context_length": 84336
+    },
+    {
+      "file_path": "django/contrib/staticfiles/apps.py",
+      "position": 54,
+      "tokens": 89,
+      "context_length": 84425
+    },
+    {
+      "file_path": "django/core/checks/database.py",
+      "position": 55,
+      "tokens": 69,
+      "context_length": 84494
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/spatialite/client.py",
+      "position": 56,
+      "tokens": 29,
+      "context_length": 84523
+    },
+    {
+      "file_path": "django/contrib/gis/db/models/proxy.py",
+      "position": 57,
+      "tokens": 669,
+      "context_length": 85192
+    },
+    {
+      "file_path": "django/contrib/gis/forms/__init__.py",
+      "position": 58,
+      "tokens": 74,
+      "context_length": 85266
+    },
+    {
+      "file_path": "django/core/checks/compatibility/django_4_0.py",
+      "position": 59,
+      "tokens": 139,
+      "context_length": 85405
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/schema.py",
+      "position": 60,
+      "tokens": 659,
+      "context_length": 86064
+    },
+    {
+      "file_path": "django/contrib/admin/exceptions.py",
+      "position": 61,
+      "tokens": 67,
+      "context_length": 86131
+    },
+    {
+      "file_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+      "position": 62,
+      "tokens": 2818,
+      "context_length": 88949
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/prototypes/srs.py",
+      "position": 63,
+      "tokens": 1065,
+      "context_length": 90014
+    },
+    {
+      "file_path": "django/template/backends/utils.py",
+      "position": 64,
+      "tokens": 89,
+      "context_length": 90103
+    },
+    {
+      "file_path": "django/contrib/staticfiles/utils.py",
+      "position": 65,
+      "tokens": 449,
+      "context_length": 90552
+    },
+    {
+      "file_path": "django/urls/exceptions.py",
+      "position": 66,
+      "tokens": 25,
+      "context_length": 90577
+    },
+    {
+      "file_path": "django/views/static.py",
+      "position": 67,
+      "tokens": 1052,
+      "context_length": 91629
+    },
+    {
+      "file_path": "django/shortcuts.py",
+      "position": 68,
+      "tokens": 1097,
+      "context_length": 92726
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/threadsafe.py",
+      "position": 69,
+      "tokens": 555,
+      "context_length": 93281
+    },
+    {
+      "file_path": "django/contrib/messages/utils.py",
+      "position": 70,
+      "tokens": 50,
+      "context_length": 93331
+    },
+    {
+      "file_path": "django/core/checks/templates.py",
+      "position": 71,
+      "tokens": 260,
+      "context_length": 93591
+    },
+    {
+      "file_path": "django/core/files/locks.py",
+      "position": 72,
+      "tokens": 957,
+      "context_length": 94548
+    },
+    {
+      "file_path": "django/views/__init__.py",
+      "position": 73,
+      "tokens": 15,
+      "context_length": 94563
+    },
+    {
+      "file_path": "django/contrib/postgres/aggregates/__init__.py",
+      "position": 74,
+      "tokens": 20,
+      "context_length": 94583
+    },
+    {
+      "file_path": "django/core/checks/urls.py",
+      "position": 75,
+      "tokens": 701,
+      "context_length": 95284
+    },
+    {
+      "file_path": "django/contrib/messages/constants.py",
+      "position": 76,
+      "tokens": 96,
+      "context_length": 95380
+    },
+    {
+      "file_path": "django/contrib/gis/geos/coordseq.py",
+      "position": 77,
+      "tokens": 1765,
+      "context_length": 97145
+    },
+    {
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "position": 78,
+      "tokens": 3906,
+      "context_length": 101051
+    },
+    {
+      "file_path": "django/contrib/staticfiles/finders.py",
+      "position": 79,
+      "tokens": 2103,
+      "context_length": 103154
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/geometries.py",
+      "position": 80,
+      "tokens": 5817,
+      "context_length": 108971
+    },
+    {
+      "file_path": "django/contrib/gis/db/models/fields.py",
+      "position": 81,
+      "tokens": 3060,
+      "context_length": 112031
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 82,
+      "tokens": 9182,
+      "context_length": 121213
+    },
+    {
+      "file_path": "django/contrib/auth/forms.py",
+      "position": 83,
+      "tokens": 3126,
+      "context_length": 124339
+    },
+    {
+      "file_path": "django/contrib/sites/checks.py",
+      "position": 84,
+      "tokens": 79,
+      "context_length": 124418
+    },
+    {
+      "file_path": "django/core/management/base.py",
+      "position": 85,
+      "tokens": 4772,
+      "context_length": 129190
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/mysql/operations.py",
+      "position": 86,
+      "tokens": 888,
+      "context_length": 130078
+    },
+    {
+      "file_path": "django/views/defaults.py",
+      "position": 87,
+      "tokens": 1028,
+      "context_length": 131106
+    },
+    {
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "position": 88,
+      "tokens": 669,
+      "context_length": 131775
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 89,
+      "tokens": 4753,
+      "context_length": 136528
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/oracle/introspection.py",
+      "position": 90,
+      "tokens": 392,
+      "context_length": 136920
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/raster/band.py",
+      "position": 91,
+      "tokens": 1784,
+      "context_length": 138704
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 92,
+      "tokens": 3383,
+      "context_length": 142087
+    },
+    {
+      "file_path": "django/template/loaders/app_directories.py",
+      "position": 93,
+      "tokens": 59,
+      "context_length": 142146
+    },
+    {
+      "file_path": "django/core/cache/backends/base.py",
+      "position": 94,
+      "tokens": 2221,
+      "context_length": 144367
+    },
+    {
+      "file_path": "django/db/migrations/graph.py",
+      "position": 95,
+      "tokens": 2603,
+      "context_length": 146970
+    },
+    {
+      "file_path": "django/core/signals.py",
+      "position": 96,
+      "tokens": 27,
+      "context_length": 146997
+    },
+    {
+      "file_path": "django/contrib/gis/forms/fields.py",
+      "position": 97,
+      "tokens": 919,
+      "context_length": 147916
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/spatialite/adapter.py",
+      "position": 98,
+      "tokens": 66,
+      "context_length": 147982
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "position": 99,
+      "tokens": 851,
+      "context_length": 148833
+    },
+    {
+      "file_path": "django/contrib/gis/db/models/sql/__init__.py",
+      "position": 100,
+      "tokens": 35,
+      "context_length": 148868
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/operations.py",
+      "position": 101,
+      "tokens": 3603,
+      "context_length": 152471
+    },
+    {
+      "file_path": "django/contrib/sessions/exceptions.py",
+      "position": 102,
+      "tokens": 71,
+      "context_length": 152542
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/prepared.py",
+      "position": 103,
+      "tokens": 282,
+      "context_length": 152824
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/geom.py",
+      "position": 104,
+      "tokens": 814,
+      "context_length": 153638
+    },
+    {
+      "file_path": "django/db/utils.py",
+      "position": 105,
+      "tokens": 2007,
+      "context_length": 155645
+    },
+    {
+      "file_path": "django/views/csrf.py",
+      "position": 106,
+      "tokens": 1544,
+      "context_length": 157189
+    },
+    {
+      "file_path": "django/core/exceptions.py",
+      "position": 107,
+      "tokens": 1189,
+      "context_length": 158378
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 108,
+      "tokens": 2252,
+      "context_length": 160630
+    },
+    {
+      "file_path": "django/core/mail/backends/dummy.py",
+      "position": 109,
+      "tokens": 43,
+      "context_length": 160673
+    },
+    {
+      "file_path": "django/core/checks/model_checks.py",
+      "position": 110,
+      "tokens": 1785,
+      "context_length": 162458
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/__init__.py",
+      "position": 111,
+      "tokens": 31,
+      "context_length": 162489
+    },
+    {
+      "file_path": "django/contrib/gis/utils/__init__.py",
+      "position": 112,
+      "tokens": 145,
+      "context_length": 162634
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/__init__.py",
+      "position": 113,
+      "tokens": 353,
+      "context_length": 162987
+    },
+    {
+      "file_path": "django/core/checks/messages.py",
+      "position": 114,
+      "tokens": 577,
+      "context_length": 163564
+    },
+    {
+      "file_path": "django/contrib/staticfiles/urls.py",
+      "position": 115,
+      "tokens": 97,
+      "context_length": 163661
+    },
+    {
+      "file_path": "django/contrib/gis/geoip2/base.py",
+      "position": 116,
+      "tokens": 2016,
+      "context_length": 165677
+    },
+    {
+      "file_path": "django/db/backends/mysql/validation.py",
+      "position": 117,
+      "tokens": 520,
+      "context_length": 166197
+    },
+    {
+      "file_path": "django/db/backends/oracle/base.py",
+      "position": 118,
+      "tokens": 5068,
+      "context_length": 171265
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/const.py",
+      "position": 119,
+      "tokens": 621,
+      "context_length": 171886
+    },
+    {
+      "file_path": "django/core/files/move.py",
+      "position": 120,
+      "tokens": 684,
+      "context_length": 172570
+    },
+    {
+      "file_path": "django/utils/text.py",
+      "position": 121,
+      "tokens": 3385,
+      "context_length": 175955
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/misc.py",
+      "position": 122,
+      "tokens": 308,
+      "context_length": 176263
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 123,
+      "tokens": 18147,
+      "context_length": 194410
+    },
+    {
+      "file_path": "django/utils/baseconv.py",
+      "position": 124,
+      "tokens": 842,
+      "context_length": 195252
+    },
+    {
+      "file_path": "django/utils/archive.py",
+      "position": 125,
+      "tokens": 1610,
+      "context_length": 196862
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 126,
+      "tokens": 8110,
+      "context_length": 204972
+    }
+  ]
+}

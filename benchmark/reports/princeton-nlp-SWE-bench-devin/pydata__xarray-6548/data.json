@@ -1,0 +1,380 @@
+{
+  "instance_id": "pydata__xarray-6548",
+  "model_patch": "diff --git a/xarray/core/computation.py b/xarray/core/computation.py\nindex 1834622d..6135867b 100644\n--- a/xarray/core/computation.py\n+++ b/xarray/core/computation.py\n@@ -1863,7 +1863,22 @@ def polyval(coord, coeffs, degree_dim=\"degree\"):\n     from .dataarray import DataArray\n     from .missing import get_clean_interp_index\n \n-    x = get_clean_interp_index(coord, coord.name, strict=False)\n+    # Check if the coordinate has a name, and if not, create a temporary one\n+    if coord.name is None:\n+        # Generate a unique temporary name for the coordinate\n+        coord_name = \"temp_coord_name\"\n+        # Ensure the temporary name is not already in use\n+        while coord_name in coord.dims or coord_name in coord.coords:\n+            coord_name += \"_\"\n+    else:\n+        coord_name = coord.name\n+\n+    # Proceed with using coord_name for interpolation or curve fitting\n+    x = get_clean_interp_index(coord, coord_name, strict=False)\n+\n+    print(\"coord_name:\", coord_name)\n+    print(\"coord.dims:\", coord.dims)\n+    print(\"coord.coords:\", coord.coords)\n \n     deg_coord = coeffs[degree_dim]\n \ndiff --git a/xarray/core/missing.py b/xarray/core/missing.py\nindex 3d33631b..f0610a26 100644\n--- a/xarray/core/missing.py\n+++ b/xarray/core/missing.py\n@@ -248,10 +248,9 @@ def get_clean_interp_index(\n         axis = arr.get_axis_num(dim)\n         return np.arange(arr.shape[axis], dtype=np.float64)\n \n-    if use_coordinate is True:\n+    if use_coordinate is True and dim in arr.coords:\n         index = arr.get_index(dim)\n-\n-    else:  # string\n+    elif isinstance(use_coordinate, str) and use_coordinate in arr.coords:\n         index = arr.coords[use_coordinate]\n         if index.ndim != 1:\n             raise ValueError(\n@@ -259,6 +258,11 @@ def get_clean_interp_index(\n                 f\"{use_coordinate} is {index.ndim}D.\"\n             )\n         index = index.to_index()\n+    else:\n+        # If the dimension is not in the coordinates, create a new index\n+        axis = arr.get_axis_num(dim)\n+        index = np.arange(arr.shape[axis], dtype=np.float64)\n+        return Variable([dim], index)\n \n     # TODO: index.name is None for multiindexes\n     # set name for nice error messages below\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/computation.py",
+    "xarray/core/missing.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "126051f2bf2ddb7926a7da11b047b852d5ca6b87",
+  "patch": "diff --git a/asv_bench/benchmarks/polyfit.py b/asv_bench/benchmarks/polyfit.py\nnew file mode 100644\n--- /dev/null\n+++ b/asv_bench/benchmarks/polyfit.py\n@@ -0,0 +1,38 @@\n+import numpy as np\n+\n+import xarray as xr\n+\n+from . import parameterized, randn, requires_dask\n+\n+NDEGS = (2, 5, 20)\n+NX = (10**2, 10**6)\n+\n+\n+class Polyval:\n+    def setup(self, *args, **kwargs):\n+        self.xs = {nx: xr.DataArray(randn((nx,)), dims=\"x\", name=\"x\") for nx in NX}\n+        self.coeffs = {\n+            ndeg: xr.DataArray(\n+                randn((ndeg,)), dims=\"degree\", coords={\"degree\": np.arange(ndeg)}\n+            )\n+            for ndeg in NDEGS\n+        }\n+\n+    @parameterized([\"nx\", \"ndeg\"], [NX, NDEGS])\n+    def time_polyval(self, nx, ndeg):\n+        x = self.xs[nx]\n+        c = self.coeffs[ndeg]\n+        xr.polyval(x, c).compute()\n+\n+    @parameterized([\"nx\", \"ndeg\"], [NX, NDEGS])\n+    def peakmem_polyval(self, nx, ndeg):\n+        x = self.xs[nx]\n+        c = self.coeffs[ndeg]\n+        xr.polyval(x, c).compute()\n+\n+\n+class PolyvalDask(Polyval):\n+    def setup(self, *args, **kwargs):\n+        requires_dask()\n+        super().setup(*args, **kwargs)\n+        self.xs = {k: v.chunk({\"x\": 10000}) for k, v in self.xs.items()}\ndiff --git a/xarray/core/computation.py b/xarray/core/computation.py\n--- a/xarray/core/computation.py\n+++ b/xarray/core/computation.py\n@@ -17,12 +17,15 @@\n     Iterable,\n     Mapping,\n     Sequence,\n+    overload,\n )\n \n import numpy as np\n \n from . import dtypes, duck_array_ops, utils\n from .alignment import align, deep_align\n+from .common import zeros_like\n+from .duck_array_ops import datetime_to_numeric\n from .indexes import Index, filter_indexes_from_coords\n from .merge import merge_attrs, merge_coordinates_without_align\n from .options import OPTIONS, _get_keep_attrs\n@@ -1843,36 +1846,100 @@ def where(cond, x, y, keep_attrs=None):\n     )\n \n \n-def polyval(coord, coeffs, degree_dim=\"degree\"):\n+@overload\n+def polyval(coord: DataArray, coeffs: DataArray, degree_dim: Hashable) -> DataArray:\n+    ...\n+\n+\n+@overload\n+def polyval(coord: T_Xarray, coeffs: Dataset, degree_dim: Hashable) -> Dataset:\n+    ...\n+\n+\n+@overload\n+def polyval(coord: Dataset, coeffs: T_Xarray, degree_dim: Hashable) -> Dataset:\n+    ...\n+\n+\n+def polyval(\n+    coord: T_Xarray, coeffs: T_Xarray, degree_dim: Hashable = \"degree\"\n+) -> T_Xarray:\n     \"\"\"Evaluate a polynomial at specific values\n \n     Parameters\n     ----------\n-    coord : DataArray\n-        The 1D coordinate along which to evaluate the polynomial.\n-    coeffs : DataArray\n-        Coefficients of the polynomials.\n-    degree_dim : str, default: \"degree\"\n+    coord : DataArray or Dataset\n+        Values at which to evaluate the polynomial.\n+    coeffs : DataArray or Dataset\n+        Coefficients of the polynomial.\n+    degree_dim : Hashable, default: \"degree\"\n         Name of the polynomial degree dimension in `coeffs`.\n \n+    Returns\n+    -------\n+    DataArray or Dataset\n+        Evaluated polynomial.\n+\n     See Also\n     --------\n     xarray.DataArray.polyfit\n-    numpy.polyval\n+    numpy.polynomial.polynomial.polyval\n     \"\"\"\n-    from .dataarray import DataArray\n-    from .missing import get_clean_interp_index\n \n-    x = get_clean_interp_index(coord, coord.name, strict=False)\n+    if degree_dim not in coeffs._indexes:\n+        raise ValueError(\n+            f\"Dimension `{degree_dim}` should be a coordinate variable with labels.\"\n+        )\n+    if not np.issubdtype(coeffs[degree_dim].dtype, int):\n+        raise ValueError(\n+            f\"Dimension `{degree_dim}` should be of integer dtype. Received {coeffs[degree_dim].dtype} instead.\"\n+        )\n+    max_deg = coeffs[degree_dim].max().item()\n+    coeffs = coeffs.reindex(\n+        {degree_dim: np.arange(max_deg + 1)}, fill_value=0, copy=False\n+    )\n+    coord = _ensure_numeric(coord)\n+\n+    # using Horner's method\n+    # https://en.wikipedia.org/wiki/Horner%27s_method\n+    res = coeffs.isel({degree_dim: max_deg}, drop=True) + zeros_like(coord)\n+    for deg in range(max_deg - 1, -1, -1):\n+        res *= coord\n+        res += coeffs.isel({degree_dim: deg}, drop=True)\n \n-    deg_coord = coeffs[degree_dim]\n+    return res\n \n-    lhs = DataArray(\n-        np.vander(x, int(deg_coord.max()) + 1),\n-        dims=(coord.name, degree_dim),\n-        coords={coord.name: coord, degree_dim: np.arange(deg_coord.max() + 1)[::-1]},\n-    )\n-    return (lhs * coeffs).sum(degree_dim)\n+\n+def _ensure_numeric(data: T_Xarray) -> T_Xarray:\n+    \"\"\"Converts all datetime64 variables to float64\n+\n+    Parameters\n+    ----------\n+    data : DataArray or Dataset\n+        Variables with possible datetime dtypes.\n+\n+    Returns\n+    -------\n+    DataArray or Dataset\n+        Variables with datetime64 dtypes converted to float64.\n+    \"\"\"\n+    from .dataset import Dataset\n+\n+    def to_floatable(x: DataArray) -> DataArray:\n+        if x.dtype.kind in \"mM\":\n+            return x.copy(\n+                data=datetime_to_numeric(\n+                    x.data,\n+                    offset=np.datetime64(\"1970-01-01\"),\n+                    datetime_unit=\"ns\",\n+                ),\n+            )\n+        return x\n+\n+    if isinstance(data, Dataset):\n+        return data.map(to_floatable)\n+    else:\n+        return to_floatable(data)\n \n \n def _calc_idxminmax(\n",
+  "test_patch": "diff --git a/xarray/tests/test_computation.py b/xarray/tests/test_computation.py\n--- a/xarray/tests/test_computation.py\n+++ b/xarray/tests/test_computation.py\n@@ -1933,37 +1933,100 @@ def test_where_attrs() -> None:\n     assert actual.attrs == {}\n \n \n-@pytest.mark.parametrize(\"use_dask\", [True, False])\n-@pytest.mark.parametrize(\"use_datetime\", [True, False])\n-def test_polyval(use_dask, use_datetime) -> None:\n-    if use_dask and not has_dask:\n-        pytest.skip(\"requires dask\")\n-\n-    if use_datetime:\n-        xcoord = xr.DataArray(\n-            pd.date_range(\"2000-01-01\", freq=\"D\", periods=10), dims=(\"x\",), name=\"x\"\n-        )\n-        x = xr.core.missing.get_clean_interp_index(xcoord, \"x\")\n-    else:\n-        x = np.arange(10)\n-        xcoord = xr.DataArray(x, dims=(\"x\",), name=\"x\")\n-\n-    da = xr.DataArray(\n-        np.stack((1.0 + x + 2.0 * x**2, 1.0 + 2.0 * x + 3.0 * x**2)),\n-        dims=(\"d\", \"x\"),\n-        coords={\"x\": xcoord, \"d\": [0, 1]},\n-    )\n-    coeffs = xr.DataArray(\n-        [[2, 1, 1], [3, 2, 1]],\n-        dims=(\"d\", \"degree\"),\n-        coords={\"d\": [0, 1], \"degree\": [2, 1, 0]},\n-    )\n+@pytest.mark.parametrize(\"use_dask\", [False, True])\n+@pytest.mark.parametrize(\n+    [\"x\", \"coeffs\", \"expected\"],\n+    [\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.DataArray([2, 3, 4], dims=\"degree\", coords={\"degree\": [0, 1, 2]}),\n+            xr.DataArray([9, 2 + 6 + 16, 2 + 9 + 36], dims=\"x\"),\n+            id=\"simple\",\n+        ),\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.DataArray(\n+                [[0, 1], [0, 1]], dims=(\"y\", \"degree\"), coords={\"degree\": [0, 1]}\n+            ),\n+            xr.DataArray([[1, 2, 3], [1, 2, 3]], dims=(\"y\", \"x\")),\n+            id=\"broadcast-x\",\n+        ),\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.DataArray(\n+                [[0, 1], [1, 0], [1, 1]],\n+                dims=(\"x\", \"degree\"),\n+                coords={\"degree\": [0, 1]},\n+            ),\n+            xr.DataArray([1, 1, 1 + 3], dims=\"x\"),\n+            id=\"shared-dim\",\n+        ),\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.DataArray([1, 0, 0], dims=\"degree\", coords={\"degree\": [2, 1, 0]}),\n+            xr.DataArray([1, 2**2, 3**2], dims=\"x\"),\n+            id=\"reordered-index\",\n+        ),\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.DataArray([5], dims=\"degree\", coords={\"degree\": [3]}),\n+            xr.DataArray([5, 5 * 2**3, 5 * 3**3], dims=\"x\"),\n+            id=\"sparse-index\",\n+        ),\n+        pytest.param(\n+            xr.DataArray([1, 2, 3], dims=\"x\"),\n+            xr.Dataset(\n+                {\"a\": (\"degree\", [0, 1]), \"b\": (\"degree\", [1, 0])},\n+                coords={\"degree\": [0, 1]},\n+            ),\n+            xr.Dataset({\"a\": (\"x\", [1, 2, 3]), \"b\": (\"x\", [1, 1, 1])}),\n+            id=\"array-dataset\",\n+        ),\n+        pytest.param(\n+            xr.Dataset({\"a\": (\"x\", [1, 2, 3]), \"b\": (\"x\", [2, 3, 4])}),\n+            xr.DataArray([1, 1], dims=\"degree\", coords={\"degree\": [0, 1]}),\n+            xr.Dataset({\"a\": (\"x\", [2, 3, 4]), \"b\": (\"x\", [3, 4, 5])}),\n+            id=\"dataset-array\",\n+        ),\n+        pytest.param(\n+            xr.Dataset({\"a\": (\"x\", [1, 2, 3]), \"b\": (\"y\", [2, 3, 4])}),\n+            xr.Dataset(\n+                {\"a\": (\"degree\", [0, 1]), \"b\": (\"degree\", [1, 1])},\n+                coords={\"degree\": [0, 1]},\n+            ),\n+            xr.Dataset({\"a\": (\"x\", [1, 2, 3]), \"b\": (\"y\", [3, 4, 5])}),\n+            id=\"dataset-dataset\",\n+        ),\n+        pytest.param(\n+            xr.DataArray(pd.date_range(\"1970-01-01\", freq=\"s\", periods=3), dims=\"x\"),\n+            xr.DataArray([0, 1], dims=\"degree\", coords={\"degree\": [0, 1]}),\n+            xr.DataArray(\n+                [0, 1e9, 2e9],\n+                dims=\"x\",\n+                coords={\"x\": pd.date_range(\"1970-01-01\", freq=\"s\", periods=3)},\n+            ),\n+            id=\"datetime\",\n+        ),\n+    ],\n+)\n+def test_polyval(use_dask, x, coeffs, expected) -> None:\n     if use_dask:\n-        coeffs = coeffs.chunk({\"d\": 2})\n+        if not has_dask:\n+            pytest.skip(\"requires dask\")\n+        coeffs = coeffs.chunk({\"degree\": 2})\n+        x = x.chunk({\"x\": 2})\n+    with raise_if_dask_computes():\n+        actual = xr.polyval(x, coeffs)\n+    xr.testing.assert_allclose(actual, expected)\n \n-    da_pv = xr.polyval(da.x, coeffs)\n \n-    xr.testing.assert_allclose(da, da_pv.T)\n+def test_polyval_degree_dim_checks():\n+    x = (xr.DataArray([1, 2, 3], dims=\"x\"),)\n+    coeffs = xr.DataArray([2, 3, 4], dims=\"degree\", coords={\"degree\": [0, 1, 2]})\n+    with pytest.raises(ValueError):\n+        xr.polyval(x, coeffs.drop_vars(\"degree\"))\n+    with pytest.raises(ValueError):\n+        xr.polyval(x, coeffs.assign_coords(degree=coeffs.degree.astype(float)))\n \n \n @pytest.mark.parametrize(\"use_dask\", [False, True])\n",
+  "problem_statement": "xr.polyval first arg requires name attribute\n### What happened?\n\nI have some polynomial coefficients and want to evaluate them at some values using `xr.polyval`.\r\n\r\nAs described in the docstring/docu I created a 1D coordinate DataArray and pass it to `xr.polyval` but it raises a KeyError (see example).\r\n\n\n### What did you expect to happen?\n\nI expected that the polynomial would be evaluated at the given points.\n\n### Minimal Complete Verifiable Example\n\n```Python\nimport xarray as xr\r\n\r\ncoeffs = xr.DataArray([1, 2, 3], dims=\"degree\")\r\n\r\n# With a \"handmade\" coordinate it fails:\r\ncoord = xr.DataArray([0, 1, 2], dims=\"x\")\r\n\r\nxr.polyval(coord, coeffs)\r\n# raises:\r\n# Traceback (most recent call last):\r\n#   File \"<stdin>\", line 1, in <module>\r\n#   File \"xarray/core/computation.py\", line 1847, in polyval\r\n#     x = get_clean_interp_index(coord, coord.name, strict=False)\r\n#   File \"xarray/core/missing.py\", line 252, in get_clean_interp_index\r\n#     index = arr.get_index(dim)\r\n#   File \"xarray/core/common.py\", line 404, in get_index\r\n#     raise KeyError(key)\r\n# KeyError: None\r\n\r\n# If one adds a name to the coord that is called like the dimension:\r\ncoord2 = xr.DataArray([0, 1, 2], dims=\"x\", name=\"x\")\r\n\r\nxr.polyval(coord2, coeffs)\r\n# works\n```\n\n\n### Relevant log output\n\n_No response_\n\n### Anything else we need to know?\n\nI assume that the \"standard\" workflow is to obtain the `coord` argument from an existing DataArrays coordinate, where the name would be correctly set already.\r\nHowever, that is not clear from the description, and also prevents my \"manual\" workflow.\r\n\r\nIt could be that the problem will be solved by replacing the coord DataArray argument by an explicit Index in the future.\n\n### Environment\n\n<details>\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.9.10 (main, Mar 15 2022, 15:56:56) \r\n[GCC 7.5.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 3.10.0-1160.49.1.el7.x86_64\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_US.UTF-8\r\nLOCALE: ('en_US', 'UTF-8')\r\nlibhdf5: 1.12.0\r\nlibnetcdf: 4.7.4\r\n\r\nxarray: 2022.3.0\r\npandas: 1.4.2\r\nnumpy: 1.22.3\r\nscipy: None\r\nnetCDF4: 1.5.8\r\npydap: None\r\nh5netcdf: None\r\nh5py: None\r\nNio: None\r\nzarr: None\r\ncftime: 1.6.0\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: None\r\ndask: None\r\ndistributed: None\r\nmatplotlib: 3.5.1\r\ncartopy: 0.20.2\r\nseaborn: None\r\nnumbagg: None\r\nfsspec: None\r\ncupy: None\r\npint: None\r\nsparse: None\r\nsetuptools: 58.1.0\r\npip: 22.0.4\r\nconda: None\r\npytest: None\r\nIPython: 8.2.0\r\nsphinx: None\r\n\r\n</details>\r\n\n",
+  "hints_text": "Actually, I just realized that the second version also does not work since it uses the index of the `coord` argument and not its values. I guess that was meant by \"The 1D coordinate along which to evaluate the polynomial\".\r\n\r\nWould you be open to a PR that allows any DataArray as `coord` argument and evaluates the polynomial at its values? Maybe that would break backwards compatibility though.\n> Would you be open to a PR that allows any DataArray as coord argument and evaluates the polynomial at its values? \r\n\r\nI think yes. Note https://github.com/pydata/xarray/issues/4375 for the inverse problem.",
+  "created_at": "2022-04-30T14:50:53Z",
+  "version": "2022.03",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_computation.py::test_polyval[array-dataset-False]\", \"xarray/tests/test_computation.py::test_polyval[broadcast-x-False]\", \"xarray/tests/test_computation.py::test_polyval[dataset-array-False]\", \"xarray/tests/test_computation.py::test_polyval[dataset-dataset-False]\", \"xarray/tests/test_computation.py::test_polyval[datetime-False]\", \"xarray/tests/test_computation.py::test_polyval[reordered-index-False]\", \"xarray/tests/test_computation.py::test_polyval[shared-dim-False]\", \"xarray/tests/test_computation.py::test_polyval[simple-False]\", \"xarray/tests/test_computation.py::test_polyval[sparse-index-False]\", \"xarray/tests/test_computation.py::test_polyval_degree_dim_checks\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_computation.py::test_apply_1d_and_0d\", \"xarray/tests/test_computation.py::test_apply_exclude\", \"xarray/tests/test_computation.py::test_apply_groupby_add\", \"xarray/tests/test_computation.py::test_apply_identity\", \"xarray/tests/test_computation.py::test_apply_input_core_dimension\", \"xarray/tests/test_computation.py::test_apply_output_core_dimension\", \"xarray/tests/test_computation.py::test_apply_two_inputs\", \"xarray/tests/test_computation.py::test_apply_two_outputs\", \"xarray/tests/test_computation.py::test_autocov[None-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a4]\", \"xarray/tests/test_computation.py::test_broadcast_compat_data_1d\", \"xarray/tests/test_computation.py::test_broadcast_compat_data_2d\", \"xarray/tests/test_computation.py::test_collect_dict_values\", \"xarray/tests/test_computation.py::test_corr[None-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_corr[None-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_corr[None-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_corr[time-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_corr[time-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_corr[time-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_corr_only_dataarray\", \"xarray/tests/test_computation.py::test_cov[None-da_a0-da_b0-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a0-da_b0-1]\", \"xarray/tests/test_computation.py::test_cov[None-da_a1-da_b1-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a1-da_b1-1]\", \"xarray/tests/test_computation.py::test_cov[None-da_a2-da_b2-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a2-da_b2-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a0-da_b0-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a0-da_b0-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a1-da_b1-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a1-da_b1-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a2-da_b2-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a2-da_b2-1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_cross[a0-b0-ae0-be0-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a1-b1-ae1-be1-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a2-b2-ae2-be2-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a3-b3-ae3-be3-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a4-b4-ae4-be4-cartesian-1-False]\", \"xarray/tests/test_computation.py::test_cross[a5-b5-ae5-be5-cartesian--1-False]\", \"xarray/tests/test_computation.py::test_cross[a6-b6-ae6-be6-cartesian--1-False]\", \"xarray/tests/test_computation.py::test_dataset_join\", \"xarray/tests/test_computation.py::test_dot[False]\", \"xarray/tests/test_computation.py::test_dot_align_coords[False]\", \"xarray/tests/test_computation.py::test_join_dict_keys\", \"xarray/tests/test_computation.py::test_keep_attrs\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[override]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[False-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[False-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[True-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[True-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[default-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[default-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[no_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[no_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[override-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[override-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[override]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[override]\", \"xarray/tests/test_computation.py::test_ordered_set_intersection\", \"xarray/tests/test_computation.py::test_ordered_set_union\", \"xarray/tests/test_computation.py::test_output_wrong_dim_size\", \"xarray/tests/test_computation.py::test_output_wrong_dims\", \"xarray/tests/test_computation.py::test_output_wrong_number\", \"xarray/tests/test_computation.py::test_result_name\", \"xarray/tests/test_computation.py::test_signature_properties\", \"xarray/tests/test_computation.py::test_unified_dim_sizes\", \"xarray/tests/test_computation.py::test_vectorize\", \"xarray/tests/test_computation.py::test_vectorize_exclude_dims\", \"xarray/tests/test_computation.py::test_where\", \"xarray/tests/test_computation.py::test_where_attrs\"]",
+  "environment_setup_commit": "d7931f9014a26e712ff5f30c4082cf0261f045d3",
+  "patch_files": [
+    "asv_bench/benchmarks/polyfit.py",
+    "xarray/core/computation.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_computation.py"
+  ],
+  "patch_diff_details": {
+    "asv_bench/benchmarks/polyfit.py": {
+      "diffs": [
+        {
+          "start_line_old": 0,
+          "end_line_old": 0
+        }
+      ]
+    },
+    "xarray/core/computation.py": {
+      "diffs": [
+        {
+          "start_line_old": 20,
+          "end_line_old": 20,
+          "file_pos": 6,
+          "file_context_length": 50065,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_polyval_polyval.7.1",
+          "closest_snippet_line_distance": 1826
+        },
+        {
+          "start_line_old": 1846,
+          "end_line_old": 1875,
+          "file_pos": 6,
+          "file_context_length": 50065,
+          "pos": 6,
+          "context_length": 2757
+        }
+      ]
+    }
+  },
+  "vectors": 1307,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_tutorial_",
+      "distance": 0.8741468787193298,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 692,
+      "context_length": 692
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_1_MissingDimensionsError.3",
+      "distance": 0.8895639181137085,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 396,
+      "context_length": 1088
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 0.8915425539016724,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 738,
+      "context_length": 1826
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/interp.py_np_new_y_long.1",
+      "distance": 0.9040890336036682,
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 150,
+      "context_length": 1976
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_interp_func.4_interp_func.5.1",
+      "distance": 0.9105181694030762,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 696,
+      "end_line": 763,
+      "tokens": 566,
+      "context_length": 2542
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_polyval_polyval.7.1",
+      "distance": 0.9249085187911987,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 1846,
+      "end_line": 1875,
+      "tokens": 215,
+      "context_length": 2757,
+      "file_pos": 6
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py__interpnd__interpnd.10.1",
+      "distance": 0.9332565069198608,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 777,
+      "end_line": 790,
+      "tokens": 182,
+      "context_length": 2939
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_1__THIS_ARRAY.1",
+      "distance": 0.9434687495231628,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 163,
+      "context_length": 3102
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_1_29.T_Xarray",
+      "distance": 0.948682963848114,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 479,
+      "context_length": 3581
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 0.9493142366409302,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 132,
+      "tokens": 691,
+      "context_length": 4272
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py__interp1d__interp1d.2",
+      "distance": 0.9552265405654907,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 766,
+      "end_line": 774,
+      "tokens": 110,
+      "context_length": 4382
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.interp_DataArray.interp.4.1",
+      "distance": 0.9607523083686829,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1686,
+      "end_line": 1814,
+      "tokens": 1365,
+      "context_length": 5747
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataarray_missing.py_pd_make_bench_data.5.1",
+      "distance": 0.9658908843994141,
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 114,
+      "context_length": 5861
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py_1_20.Variable",
+      "distance": 0.9662234783172607,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 173,
+      "context_length": 6034
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.resample.2_DataWithCoords.resample.18.1",
+      "distance": 0.9662744998931885,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1121,
+      "end_line": 1182,
+      "tokens": 636,
+      "context_length": 6670
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+      "distance": 0.9675673246383667,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 243,
+      "context_length": 6913
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/rolling.py_np_randn_long.1",
+      "distance": 0.9735613465309143,
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 113,
+      "context_length": 7026
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_dt_broadcast_variables",
+      "distance": 0.9785915613174438,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 139,
+      "context_length": 7165
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_Base_Base.setup.self.ds.1",
+      "distance": 0.983598530292511,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 62,
+      "end_line": 76,
+      "tokens": 151,
+      "context_length": 7316
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/pandas.py_np_",
+      "distance": 0.9886903762817383,
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 167,
+      "context_length": 7483
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/nputils.py__nanpolyfit_1d_warn_on_deficient_rank.1.1",
+      "distance": 0.9902727603912354,
+      "file_path": "xarray/core/nputils.py",
+      "start_line": 163,
+      "end_line": 175,
+      "tokens": 150,
+      "context_length": 7633
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 0.9933620691299438,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 671,
+      "end_line": 919,
+      "tokens": 3129,
+      "context_length": 10762
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 1,
+      "tokens": 692,
+      "context_length": 692
+    },
+    {
+      "file_path": "xarray/core/variable.py",
+      "position": 2,
+      "tokens": 24117,
+      "context_length": 24809
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 3,
+      "tokens": 1501,
+      "context_length": 26310
+    },
+    {
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "position": 4,
+      "tokens": 451,
+      "context_length": 26761
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 5,
+      "tokens": 6191,
+      "context_length": 32952
+    },
+    {
+      "file_path": "xarray/core/computation.py",
+      "position": 6,
+      "tokens": 17113,
+      "context_length": 50065
+    },
+    {
+      "file_path": "xarray/core/coordinates.py",
+      "position": 7,
+      "tokens": 2812,
+      "context_length": 52877
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 8,
+      "tokens": 42522,
+      "context_length": 95399
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 9,
+      "tokens": 69323,
+      "context_length": 164722
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "position": 10,
+      "tokens": 501,
+      "context_length": 165223
+    },
+    {
+      "file_path": "xarray/core/indexing.py",
+      "position": 11,
+      "tokens": 12229,
+      "context_length": 177452
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 12,
+      "tokens": 15950,
+      "context_length": 193402
+    },
+    {
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "position": 13,
+      "tokens": 1275,
+      "context_length": 194677
+    },
+    {
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "position": 14,
+      "tokens": 167,
+      "context_length": 194844
+    },
+    {
+      "file_path": "xarray/core/nputils.py",
+      "position": 15,
+      "tokens": 1862,
+      "context_length": 196706
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 16,
+      "tokens": 8972,
+      "context_length": 205678
+    }
+  ]
+}

@@ -1,0 +1,637 @@
+{
+  "instance_id": "sphinx-doc__sphinx-7975",
+  "model_patch": "diff --git a/setup.py b/setup.py\nindex a404f1fa5..250ef5b61 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -21,7 +21,7 @@ install_requires = [\n     'sphinxcontrib-htmlhelp',\n     'sphinxcontrib-serializinghtml',\n     'sphinxcontrib-qthelp',\n-    'Jinja2>=2.3',\n+    'Jinja2<3.1',\n     'Pygments>=2.0',\n     'docutils>=0.12',\n     'snowballstemmer>=1.1',\ndiff --git a/sphinx/environment/adapters/indexentries.py b/sphinx/environment/adapters/indexentries.py\nindex 5af213932..bdde4829a 100644\n--- a/sphinx/environment/adapters/indexentries.py\n+++ b/sphinx/environment/adapters/indexentries.py\n@@ -165,11 +165,11 @@ class IndexEntries:\n                 if k.startswith('\\N{RIGHT-TO-LEFT MARK}'):\n                     k = k[1:]\n                 letter = unicodedata.normalize('NFD', k[0])[0].upper()\n-                if letter.isalpha() or letter == '_':\n-                    return letter\n-                else:\n-                    # get all other symbols under one heading\n+                if not letter.isalpha():\n+                    # get all non-alphabetic symbols under one heading\n                     return _('Symbols')\n+                else:\n+                    return letter\n             else:\n                 return v[2]\n         return [(key_, list(group))\ndiff --git a/tox.ini b/tox.ini\nindex bddd822a6..34baee205 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -27,7 +27,7 @@ extras =\n setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils\n commands=\n-    pytest --durations 25 {posargs}\n+    pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "setup.py",
+    "sphinx/environment/adapters/indexentries.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "4ec6cbe341fd84468c448e20082c778043bbea4b",
+  "patch": "diff --git a/sphinx/environment/adapters/indexentries.py b/sphinx/environment/adapters/indexentries.py\n--- a/sphinx/environment/adapters/indexentries.py\n+++ b/sphinx/environment/adapters/indexentries.py\n@@ -98,9 +98,8 @@ def keyfunc0(entry: Tuple[str, str]) -> Tuple[bool, str]:\n             for subentry in indexentry[1].values():\n                 subentry[0].sort(key=keyfunc0)  # type: ignore\n \n-        # sort the index entries; put all symbols at the front, even those\n-        # following the letters in ASCII, this is where the chr(127) comes from\n-        def keyfunc(entry: Tuple[str, List]) -> Tuple[str, str]:\n+        # sort the index entries\n+        def keyfunc(entry: Tuple[str, List]) -> Tuple[Tuple[int, str], str]:\n             key, (void, void, category_key) = entry\n             if category_key:\n                 # using specified category key to sort\n@@ -108,11 +107,16 @@ def keyfunc(entry: Tuple[str, List]) -> Tuple[str, str]:\n             lckey = unicodedata.normalize('NFD', key.lower())\n             if lckey.startswith('\\N{RIGHT-TO-LEFT MARK}'):\n                 lckey = lckey[1:]\n+\n             if lckey[0:1].isalpha() or lckey.startswith('_'):\n-                lckey = chr(127) + lckey\n+                # put non-symbol characters at the folloing group (1)\n+                sortkey = (1, lckey)\n+            else:\n+                # put symbols at the front of the index (0)\n+                sortkey = (0, lckey)\n             # ensure a determinstic order *within* letters by also sorting on\n             # the entry itself\n-            return (lckey, entry[0])\n+            return (sortkey, entry[0])\n         newlist = sorted(new.items(), key=keyfunc)\n \n         if group_entries:\n",
+  "test_patch": "diff --git a/tests/test_environment_indexentries.py b/tests/test_environment_indexentries.py\n--- a/tests/test_environment_indexentries.py\n+++ b/tests/test_environment_indexentries.py\n@@ -25,12 +25,14 @@ def test_create_single_index(app):\n             \".. index:: \u0451\u043b\u043a\u0430\\n\"\n             \".. index:: \u200f\u05ea\u05d9\u05e8\u05d1\u05e2\u200e\\n\"\n             \".. index:: 9-symbol\\n\"\n-            \".. index:: &-symbol\\n\")\n+            \".. index:: &-symbol\\n\"\n+            \".. index:: \u00a3100\\n\")\n     restructuredtext.parse(app, text)\n     index = IndexEntries(app.env).create_index(app.builder)\n     assert len(index) == 6\n     assert index[0] == ('Symbols', [('&-symbol', [[('', '#index-9')], [], None]),\n-                                    ('9-symbol', [[('', '#index-8')], [], None])])\n+                                    ('9-symbol', [[('', '#index-8')], [], None]),\n+                                    ('\u00a3100', [[('', '#index-10')], [], None])])\n     assert index[1] == ('D', [('docutils', [[('', '#index-0')], [], None])])\n     assert index[2] == ('P', [('pip', [[], [('install', [('', '#index-2')]),\n                                             ('upgrade', [('', '#index-3')])], None]),\n",
+  "problem_statement": "Two sections called Symbols in index\nWhen using index entries with the following leading characters: _@_, _\u00a3_, and _\u2190_ I get two sections called _Symbols_ in the HTML output, the first containing all _@_ entries before \u201dnormal\u201d words and the second containing _\u00a3_ and _\u2190_ entries after the \u201dnormal\u201d words.  Both have the same anchor in HTML so the links at the top of the index page contain two _Symbols_ links, one before the letters and one after, but both lead to the first section.\n\n",
+  "hints_text": "",
+  "created_at": "2020-07-18T06:39:32Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"tests/test_environment_indexentries.py::test_create_single_index\"]",
+  "PASS_TO_PASS": "[\"tests/test_environment_indexentries.py::test_create_index_by_key\", \"tests/test_environment_indexentries.py::test_create_index_with_name\", \"tests/test_environment_indexentries.py::test_create_main_index\", \"tests/test_environment_indexentries.py::test_create_pair_index\", \"tests/test_environment_indexentries.py::test_create_see_index\", \"tests/test_environment_indexentries.py::test_create_seealso_index\", \"tests/test_environment_indexentries.py::test_create_triple_index\"]",
+  "environment_setup_commit": "f92fa6443fe6f457ab0c26d41eb229e825fda5e1",
+  "patch_files": [
+    "sphinx/environment/adapters/indexentries.py"
+  ],
+  "test_patch_files": [
+    "tests/test_environment_indexentries.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/environment/adapters/indexentries.py": {
+      "diffs": [
+        {
+          "start_line_old": 101,
+          "end_line_old": 103,
+          "file_pos": 2,
+          "file_context_length": 5771,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.keyfunc_IndexEntries.create_index.keyfunc.8.1",
+          "closest_snippet_line_distance": 2
+        },
+        {
+          "start_line_old": 111,
+          "end_line_old": 114,
+          "file_pos": 2,
+          "file_context_length": 5771,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.newlist_IndexEntries.create_index.17",
+          "closest_snippet_line_distance": 5,
+          "pos": 44,
+          "context_length": 75485
+        }
+      ]
+    }
+  },
+  "vectors": 1498,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/util/smartypants.py_re_langquotes.1",
+      "distance": 1.0902554988861084,
+      "file_path": "sphinx/util/smartypants.py",
+      "start_line": 28,
+      "end_line": 123,
+      "tokens": 1414,
+      "context_length": 1414
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.domain_IndexEntries.create_index.11",
+      "distance": 1.1406986713409424,
+      "file_path": "sphinx/environment/adapters/indexentries.py",
+      "start_line": 57,
+      "end_line": 102,
+      "tokens": 583,
+      "context_length": 1997,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py__non_id_chars__non_id_translate_digraphs.1",
+      "distance": 1.1470873355865479,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 469,
+      "end_line": 512,
+      "tokens": 689,
+      "context_length": 2686
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_note_HTMLTranslator.visit_row.5",
+      "distance": 1.1582400798797607,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 697,
+      "end_line": 796,
+      "tokens": 803,
+      "context_length": 3489
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.keyfunc3_",
+      "distance": 1.182041049003601,
+      "file_path": "sphinx/environment/adapters/indexentries.py",
+      "start_line": 158,
+      "end_line": 177,
+      "tokens": 264,
+      "context_length": 3753,
+      "file_pos": 4
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_ASTTemplateParamTemplateType_Symbol._find_named_symbols.7.1",
+      "distance": 1.2005289793014526,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 3297,
+      "end_line": 4086,
+      "tokens": 6565,
+      "context_length": 10318
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_Symbol._symbol_lookup_DefinitionParser._simple_fundemental_types._parse_literal.20.1",
+      "distance": 1.2082449197769165,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 4088,
+      "end_line": 4851,
+      "tokens": 6558,
+      "context_length": 16876
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_re_ASTNestedName.num_templates.3.1",
+      "distance": 1.2129437923431396,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 11,
+      "end_line": 697,
+      "tokens": 6100,
+      "context_length": 22976
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_89_Symbol._find_named_symbols.2.12.1",
+      "distance": 1.2129764556884766,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 807,
+      "end_line": 1651,
+      "tokens": 6659,
+      "context_length": 29635
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.depart_emphasis_TextTranslator.visit_meta.2",
+      "distance": 1.2169115543365479,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 1045,
+      "end_line": 1154,
+      "tokens": 793,
+      "context_length": 30428
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_re_ASTDeclSpecs.describe_signature.7.6.1",
+      "distance": 1.2170757055282593,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 11,
+      "end_line": 804,
+      "tokens": 6434,
+      "context_length": 36862
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_DefinitionParser._simple_fundamental_types._parse_declarator_CXRefRole.process_link.4.1",
+      "distance": 1.2180863618850708,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 2720,
+      "end_line": 3500,
+      "tokens": 6534,
+      "context_length": 43396
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_char_literal_re.1",
+      "distance": 1.2193926572799683,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 766,
+      "context_length": 44162
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_production_TexinfoTranslator.depart_desc.3",
+      "distance": 1.2199733257293701,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 1292,
+      "end_line": 1375,
+      "tokens": 673,
+      "context_length": 44835
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_term_TexinfoTranslator.visit_admonition.2",
+      "distance": 1.221009612083435,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 968,
+      "end_line": 1085,
+      "tokens": 846,
+      "context_length": 45681
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_note_HTML5Translator.134",
+      "distance": 1.2224812507629395,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 634,
+      "end_line": 720,
+      "tokens": 686,
+      "context_length": 46367
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/search/zh.py_js_porter_stemmer_js_porter_stemmer.1",
+      "distance": 1.2277717590332031,
+      "file_path": "sphinx/search/zh.py",
+      "start_line": 36,
+      "end_line": 220,
+      "tokens": 1482,
+      "context_length": 47849
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_re_smart_capwords.4.1",
+      "distance": 1.2311170101165771,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 11,
+      "end_line": 112,
+      "tokens": 595,
+      "context_length": 48444
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/writers/manpage.py_ManualPageTranslator.visit_number_reference_ManualPageTranslator.81",
+      "distance": 1.2392017841339111,
+      "file_path": "sphinx/writers/manpage.py",
+      "start_line": 313,
+      "end_line": 411,
+      "tokens": 757,
+      "context_length": 49201
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_citation_TexinfoTranslator.depart_definition_list_item.1",
+      "distance": 1.2407058477401733,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 862,
+      "end_line": 966,
+      "tokens": 788,
+      "context_length": 49989
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py_process_index_entry_process_index_entry.9.1",
+      "distance": 1.2424163818359375,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 370,
+      "end_line": 405,
+      "tokens": 310,
+      "context_length": 50299
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_desc_parameterlist_HTMLTranslator.39",
+      "distance": 1.2425596714019775,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 171,
+      "end_line": 231,
+      "tokens": 562,
+      "context_length": 50861
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/addnodes.py_centered_manpage.1",
+      "distance": 1.2448387145996094,
+      "file_path": "sphinx/addnodes.py",
+      "start_line": 281,
+      "end_line": 380,
+      "tokens": 580,
+      "context_length": 51441
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_Symbol._symbol_lookup_DefinitionParser._simple_fundamental_types._parse_nested_name.7.1",
+      "distance": 1.245483636856079,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 1653,
+      "end_line": 2490,
+      "tokens": 6823,
+      "context_length": 58264
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator._visit_named_admonition_TexinfoTranslator.visit_caption.1.2.1",
+      "distance": 1.24611234664917,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 1087,
+      "end_line": 1186,
+      "tokens": 848,
+      "context_length": 59112
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.newlist_IndexEntries.create_index.17",
+      "distance": 1.2535593509674072,
+      "file_path": "sphinx/environment/adapters/indexentries.py",
+      "start_line": 116,
+      "end_line": 157,
+      "tokens": 417,
+      "context_length": 59529,
+      "file_pos": 13
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.54_HTMLTranslator.visit_title.4.1",
+      "distance": 1.254241704940796,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 354,
+      "end_line": 409,
+      "tokens": 472,
+      "context_length": 60001
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_number_reference_HTMLTranslator.depart_seealso.1",
+      "distance": 1.25509774684906,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 260,
+      "end_line": 282,
+      "tokens": 214,
+      "context_length": 60215
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/search/ja.py_DefaultSplitter.UW6___DefaultSplitter.49",
+      "distance": 1.2569677829742432,
+      "file_path": "sphinx/search/ja.py",
+      "start_line": 400,
+      "end_line": 423,
+      "tokens": 442,
+      "context_length": 60657
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_entry_",
+      "distance": 1.2571392059326172,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 798,
+      "end_line": 845,
+      "tokens": 462,
+      "context_length": 61119
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_reference_HTMLTranslator.visit_reference.8.1",
+      "distance": 1.2573316097259521,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 232,
+      "end_line": 258,
+      "tokens": 318,
+      "context_length": 61437
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/search/ja.py_DefaultSplitter.UC2___DefaultSplitter.UW1__.1",
+      "distance": 1.2593132257461548,
+      "file_path": "sphinx/search/ja.py",
+      "start_line": 271,
+      "end_line": 291,
+      "tokens": 631,
+      "context_length": 62068
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/writers/latex.py_LaTeXTranslator.visit_index_LaTeXTranslator.visit_index",
+      "distance": 1.2609257698059082,
+      "file_path": "sphinx/writers/latex.py",
+      "start_line": 1456,
+      "end_line": 1520,
+      "tokens": 863,
+      "context_length": 62931
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_ASTNestedName.get_id_ASTBracedInitList.describe_signature.6",
+      "distance": 1.2632415294647217,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 699,
+      "end_line": 1497,
+      "tokens": 6638,
+      "context_length": 69569
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/search/ja.py_DefaultSplitter.TQ3___DefaultSplitter.UC1__.1",
+      "distance": 1.2727965116500854,
+      "file_path": "sphinx/search/ja.py",
+      "start_line": 251,
+      "end_line": 270,
+      "tokens": 716,
+      "context_length": 70285
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/builders/_epub_base.py_html_ssp.1",
+      "distance": 1.2759151458740234,
+      "file_path": "sphinx/builders/_epub_base.py",
+      "start_line": 11,
+      "end_line": 102,
+      "tokens": 662,
+      "context_length": 70947
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_number_reference_HTML5Translator.depart_seealso.1",
+      "distance": 1.2763197422027588,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 232,
+      "end_line": 253,
+      "tokens": 208,
+      "context_length": 71155
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/util/texescape.py_re_10",
+      "distance": 1.2773343324661255,
+      "file_path": "sphinx/util/texescape.py",
+      "start_line": 11,
+      "end_line": 64,
+      "tokens": 623,
+      "context_length": 71778
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/doc/development/tutorials/examples/todo.py_TodoDirective_TodoDirective.has_content.run.8.1",
+      "distance": 1.2780613899230957,
+      "file_path": "doc/development/tutorials/examples/todo.py",
+      "start_line": 30,
+      "end_line": 53,
+      "tokens": 175,
+      "context_length": 71953
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_desc_parameterlist_HTML5Translator.39",
+      "distance": 1.2790499925613403,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 143,
+      "end_line": 203,
+      "tokens": 567,
+      "context_length": 72520
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/sphinx/search/en.py_2_",
+      "distance": 1.2842177152633667,
+      "file_path": "sphinx/search/en.py",
+      "start_line": 11,
+      "end_line": 226,
+      "tokens": 1665,
+      "context_length": 74185
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.visit_attention_TextTranslator.visit_emphasis.1",
+      "distance": 1.2871277332305908,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 930,
+      "end_line": 1043,
+      "tokens": 873,
+      "context_length": 75058
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/sphinx/search/__init__.py_24_js_index.1",
+      "distance": 1.2885478734970093,
+      "file_path": "sphinx/search/__init__.py",
+      "start_line": 160,
+      "end_line": 189,
+      "tokens": 194,
+      "context_length": 75252
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sphinx/sphinx/environment/adapters/indexentries.py_IndexEntries.create_index.keyfunc_IndexEntries.create_index.keyfunc.8.1",
+      "distance": 1.2894093990325928,
+      "file_path": "sphinx/environment/adapters/indexentries.py",
+      "start_line": 103,
+      "end_line": 115,
+      "tokens": 233,
+      "context_length": 75485,
+      "file_pos": 20
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/transforms.py_IndexInSectionTitleTransform_IndexInSectionTitleTransform.apply.1.1.1.2",
+      "distance": 1.290771245956421,
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "start_line": 566,
+      "end_line": 600,
+      "tokens": 226,
+      "context_length": 75711
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/util/smartypants.py",
+      "position": 1,
+      "tokens": 4111,
+      "context_length": 4111
+    },
+    {
+      "file_path": "sphinx/environment/adapters/indexentries.py",
+      "position": 2,
+      "tokens": 1660,
+      "context_length": 5771
+    },
+    {
+      "file_path": "sphinx/util/nodes.py",
+      "position": 3,
+      "tokens": 5426,
+      "context_length": 11197
+    },
+    {
+      "file_path": "sphinx/writers/html.py",
+      "position": 4,
+      "tokens": 7397,
+      "context_length": 18594
+    },
+    {
+      "file_path": "sphinx/domains/cpp.py",
+      "position": 5,
+      "tokens": 62566,
+      "context_length": 81160
+    },
+    {
+      "file_path": "sphinx/domains/c.py",
+      "position": 6,
+      "tokens": 30339,
+      "context_length": 111499
+    },
+    {
+      "file_path": "sphinx/writers/text.py",
+      "position": 7,
+      "tokens": 8956,
+      "context_length": 120455
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 8,
+      "tokens": 3503,
+      "context_length": 123958
+    },
+    {
+      "file_path": "sphinx/writers/texinfo.py",
+      "position": 9,
+      "tokens": 12179,
+      "context_length": 136137
+    },
+    {
+      "file_path": "sphinx/writers/html5.py",
+      "position": 10,
+      "tokens": 6934,
+      "context_length": 143071
+    },
+    {
+      "file_path": "sphinx/search/zh.py",
+      "position": 11,
+      "tokens": 2032,
+      "context_length": 145103
+    },
+    {
+      "file_path": "sphinx/writers/manpage.py",
+      "position": 12,
+      "tokens": 3511,
+      "context_length": 148614
+    },
+    {
+      "file_path": "sphinx/addnodes.py",
+      "position": 13,
+      "tokens": 2745,
+      "context_length": 151359
+    },
+    {
+      "file_path": "sphinx/search/ja.py",
+      "position": 14,
+      "tokens": 12640,
+      "context_length": 163999
+    },
+    {
+      "file_path": "sphinx/writers/latex.py",
+      "position": 15,
+      "tokens": 19907,
+      "context_length": 183906
+    },
+    {
+      "file_path": "sphinx/builders/_epub_base.py",
+      "position": 16,
+      "tokens": 6721,
+      "context_length": 190627
+    },
+    {
+      "file_path": "sphinx/util/texescape.py",
+      "position": 17,
+      "tokens": 1769,
+      "context_length": 192396
+    },
+    {
+      "file_path": "doc/development/tutorials/examples/todo.py",
+      "position": 18,
+      "tokens": 908,
+      "context_length": 193304
+    },
+    {
+      "file_path": "sphinx/search/en.py",
+      "position": 19,
+      "tokens": 1721,
+      "context_length": 195025
+    },
+    {
+      "file_path": "sphinx/search/__init__.py",
+      "position": 20,
+      "tokens": 4042,
+      "context_length": 199067
+    },
+    {
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "position": 21,
+      "tokens": 4179,
+      "context_length": 203246
+    }
+  ]
+}

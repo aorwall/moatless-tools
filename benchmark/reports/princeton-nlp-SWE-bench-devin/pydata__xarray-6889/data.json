@@ -1,0 +1,474 @@
+{
+  "instance_id": "pydata__xarray-6889",
+  "model_patch": "",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [],
+  "repo": "pydata/xarray",
+  "base_commit": "790a444b11c244fd2d33e2d2484a590f8fc000ff",
+  "patch": "diff --git a/xarray/core/concat.py b/xarray/core/concat.py\n--- a/xarray/core/concat.py\n+++ b/xarray/core/concat.py\n@@ -490,7 +490,7 @@ def _dataset_concat(\n     )\n \n     # determine which variables to merge, and then merge them according to compat\n-    variables_to_merge = (coord_names | data_names) - concat_over - dim_names\n+    variables_to_merge = (coord_names | data_names) - concat_over - unlabeled_dims\n \n     result_vars = {}\n     result_indexes = {}\n",
+  "test_patch": "diff --git a/xarray/tests/test_concat.py b/xarray/tests/test_concat.py\n--- a/xarray/tests/test_concat.py\n+++ b/xarray/tests/test_concat.py\n@@ -513,6 +513,16 @@ def test_concat_multiindex(self) -> None:\n         assert expected.equals(actual)\n         assert isinstance(actual.x.to_index(), pd.MultiIndex)\n \n+    def test_concat_along_new_dim_multiindex(self) -> None:\n+        # see https://github.com/pydata/xarray/issues/6881\n+        level_names = [\"x_level_0\", \"x_level_1\"]\n+        x = pd.MultiIndex.from_product([[1, 2, 3], [\"a\", \"b\"]], names=level_names)\n+        ds = Dataset(coords={\"x\": x})\n+        concatenated = concat([ds], \"new\")\n+        actual = list(concatenated.xindexes.get_all_coords(\"x\"))\n+        expected = [\"x\"] + level_names\n+        assert actual == expected\n+\n     @pytest.mark.parametrize(\"fill_value\", [dtypes.NA, 2, 2.0, {\"a\": 2, \"b\": 1}])\n     def test_concat_fill_value(self, fill_value) -> None:\n         datasets = [\n",
+  "problem_statement": "Alignment of dataset with MultiIndex fails after applying xr.concat  \n### What happened?\n\nAfter applying the `concat` function to a dataset with a Multiindex, a lot of functions related to indexing are broken. For example, it is not possible to apply `reindex_like` to itself anymore. \r\n\r\nThe error is raised in the alignment module. It seems that the function `find_matching_indexes` does not find indexes that belong to the same dimension. \n\n### What did you expect to happen?\n\nI expected the alignment to be functional and that these basic functions work.  \n\n### Minimal Complete Verifiable Example\n\n```Python\nimport xarray as xr\r\nimport pandas as pd\r\n\r\nindex = pd.MultiIndex.from_product([[1,2], ['a', 'b']], names=('level1', 'level2'))\r\nindex.name = 'dim'\r\n\r\nvar = xr.DataArray(1, coords=[index])\r\nds = xr.Dataset({\"var\":var})\r\n\r\nnew = xr.concat([ds], dim='newdim')\r\nxr.Dataset(new) # breaks\r\nnew.reindex_like(new) # breaks\n```\n\n\n### MVCE confirmation\n\n- [X] Minimal example \u2014 the example is as focused as reasonably possible to demonstrate the underlying issue in xarray.\n- [X] Complete example \u2014 the example is self-contained, including all data and the text of any traceback.\n- [X] Verifiable example \u2014 the example copy & pastes into an IPython prompt or [Binder notebook](https://mybinder.org/v2/gh/pydata/xarray/main?urlpath=lab/tree/doc/examples/blank_template.ipynb), returning the result.\n- [X] New issue \u2014 a search of GitHub Issues suggests this is not a duplicate.\n\n### Relevant log output\n\n```Python\nTraceback (most recent call last):\r\n\r\n  File \"/tmp/ipykernel_407170/4030736219.py\", line 11, in <cell line: 11>\r\n    xr.Dataset(new) # breaks\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/dataset.py\", line 599, in __init__\r\n    variables, coord_names, dims, indexes, _ = merge_data_and_coords(\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/merge.py\", line 575, in merge_data_and_coords\r\n    return merge_core(\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/merge.py\", line 752, in merge_core\r\n    aligned = deep_align(\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/alignment.py\", line 827, in deep_align\r\n    aligned = align(\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/alignment.py\", line 764, in align\r\n    aligner.align()\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/alignment.py\", line 550, in align\r\n    self.assert_no_index_conflict()\r\n\r\n  File \"/home/fabian/.miniconda3/lib/python3.10/site-packages/xarray/core/alignment.py\", line 319, in assert_no_index_conflict\r\n    raise ValueError(\r\n\r\nValueError: cannot re-index or align objects with conflicting indexes found for the following dimensions: 'dim' (2 conflicting indexes)\r\nConflicting indexes may occur when\r\n- they relate to different sets of coordinate and/or dimension names\r\n- they don't have the same type\r\n- they may be used to reindex data along common dimensions\n```\n\n\n### Anything else we need to know?\n\n_No response_\n\n### Environment\n\n<details>\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.10.5 | packaged by conda-forge | (main, Jun 14 2022, 07:04:59) [GCC 10.3.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 5.15.0-41-generic\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_US.UTF-8\r\nLOCALE: ('en_US', 'UTF-8')\r\nlibhdf5: 1.12.1\r\nlibnetcdf: 4.8.1\r\n\r\nxarray: 2022.6.0\r\npandas: 1.4.2\r\nnumpy: 1.21.6\r\nscipy: 1.8.1\r\nnetCDF4: 1.6.0\r\npydap: None\r\nh5netcdf: None\r\nh5py: 3.6.0\r\nNio: None\r\nzarr: None\r\ncftime: 1.5.1.1\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: 1.2.10\r\ncfgrib: None\r\niris: None\r\nbottleneck: 1.3.4\r\ndask: 2022.6.1\r\ndistributed: 2022.6.1\r\nmatplotlib: 3.5.1\r\ncartopy: 0.20.2\r\nseaborn: 0.11.2\r\nnumbagg: None\r\nfsspec: 2022.3.0\r\ncupy: None\r\npint: None\r\nsparse: 0.13.0\r\nflox: None\r\nnumpy_groupies: None\r\nsetuptools: 61.2.0\r\npip: 22.1.2\r\nconda: 4.13.0\r\npytest: 7.1.2\r\nIPython: 7.33.0\r\nsphinx: 5.0.2\r\n/home/fabian/.miniconda3/lib/python3.10/site-packages/_distutils_hack/__init__.py:30: UserWarning: Setuptools is replacing distutils.\r\n  warnings.warn(\"Setuptools is replacing distutils.\")\r\n\r\n</details>\r\n\n",
+  "hints_text": "",
+  "created_at": "2022-08-08T13:12:45Z",
+  "version": "2022.06",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_concat.py::TestConcatDataset::test_concat_along_new_dim_multiindex\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_concat.py::TestConcatDataArray::test_concat\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_combine_attrs_kwarg\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_coord_name\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_encoding\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[2.0]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[2]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[fill_value0]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_join_kwarg\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_str_dtype[x1-bytes]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_str_dtype[x1-str]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_str_dtype[x2-bytes]\", \"xarray/tests/test_concat.py::TestConcatDataArray::test_concat_str_dtype[x2-str]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_2\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_autoalign\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[<lambda>-var1_attrs9-var2_attrs9-expected_attrs9-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[drop-var1_attrs4-var2_attrs4-expected_attrs4-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[drop_conflicts-var1_attrs8-var2_attrs8-expected_attrs8-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[identical-var1_attrs5-var2_attrs5-expected_attrs5-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[identical-var1_attrs6-var2_attrs6-expected_attrs6-True]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[no_conflicts-var1_attrs0-var2_attrs0-expected_attrs0-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[no_conflicts-var1_attrs1-var2_attrs1-expected_attrs1-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[no_conflicts-var1_attrs2-var2_attrs2-expected_attrs2-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[no_conflicts-var1_attrs3-var2_attrs3-expected_attrs3-True]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg[override-var1_attrs7-var2_attrs7-expected_attrs7-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[<lambda>-attrs19-attrs29-expected_attrs9-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[drop-attrs14-attrs24-expected_attrs4-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[drop_conflicts-attrs18-attrs28-expected_attrs8-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[identical-attrs15-attrs25-expected_attrs5-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[identical-attrs16-attrs26-expected_attrs6-True]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[no_conflicts-attrs10-attrs20-expected_attrs0-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[no_conflicts-attrs11-attrs21-expected_attrs1-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[no_conflicts-attrs12-attrs22-expected_attrs2-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[no_conflicts-attrs13-attrs23-expected_attrs3-True]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_combine_attrs_kwarg_variables[override-attrs17-attrs27-expected_attrs7-False]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_constant_index\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-all]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-different]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-minimal]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-all]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-different]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-minimal]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_data_vars\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_data_vars_typing\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_dim_is_dataarray\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_dim_is_variable\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_dim_precedence\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_do_not_promote\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_errors\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[2.0]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[2]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[fill_value0]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[fill_value3]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_join_kwarg\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_merge_variables_present_in_some_datasets\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_multiindex\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_promote_shape\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim1-different]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim1-minimal]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim2-different]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim2-minimal]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_size0\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_str_dtype[x1-bytes]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_str_dtype[x1-str]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_str_dtype[x2-bytes]\", \"xarray/tests/test_concat.py::TestConcatDataset::test_concat_str_dtype[x2-str]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr20-attr10]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr20-attr11]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr20-attr12]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr21-attr10]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr21-attr11]\", \"xarray/tests/test_concat.py::test_concat_attrs_first_variable[attr21-attr12]\", \"xarray/tests/test_concat.py::test_concat_compat\", \"xarray/tests/test_concat.py::test_concat_index_not_same_dim\", \"xarray/tests/test_concat.py::test_concat_merge_single_non_dim_coord\", \"xarray/tests/test_concat.py::test_concat_not_all_indexes\", \"xarray/tests/test_concat.py::test_concat_preserve_coordinate_order\", \"xarray/tests/test_concat.py::test_concat_typing_check\"]",
+  "environment_setup_commit": "50ea159bfd0872635ebf4281e741f3c87f0bef6b",
+  "patch_files": [
+    "xarray/core/concat.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_concat.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/concat.py": {
+      "diffs": [
+        {
+          "start_line_old": 493,
+          "end_line_old": 493,
+          "file_pos": 14,
+          "file_context_length": 189153,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/concat.py_1_12.JoinOptions",
+          "closest_snippet_line_distance": 471
+        }
+      ]
+    }
+  },
+  "vectors": 1285,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_align.1_align.4.1",
+      "distance": 0.6689625382423401,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 568,
+      "end_line": 765,
+      "tokens": 1982,
+      "context_length": 1982
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner.find_matching_indexes_Aligner.find_matching_unindexed_dims.self.unindexed_dim_sizes.1",
+      "distance": 0.7349472045898438,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 243,
+      "end_line": 285,
+      "tokens": 402,
+      "context_length": 2384
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_1_DataAlignable.1",
+      "distance": 0.7355241775512695,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 206,
+      "context_length": 2590
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_1_ReindexMethodOptions.1",
+      "distance": 0.7489248514175415,
+      "file_path": "xarray/core/types.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 771,
+      "context_length": 3361
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 0.7546351552009583,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 792,
+      "end_line": 1008,
+      "tokens": 2810,
+      "context_length": 6171
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasIndex.equals_PandasIndex.__getitem__.1.1",
+      "distance": 0.7700663805007935,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 430,
+      "end_line": 484,
+      "tokens": 454,
+      "context_length": 6625
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_1_30.T_XarrayOther.1",
+      "distance": 0.7706279754638672,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 638,
+      "context_length": 7263
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_tutorial_",
+      "distance": 0.772364616394043,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 692,
+      "context_length": 7955
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner.reindex_all_align",
+      "distance": 0.7818063497543335,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 534,
+      "end_line": 765,
+      "tokens": 233,
+      "context_length": 8188
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasMultiIndex.join_PandasMultiIndex.join.3.1",
+      "distance": 0.7861185073852539,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 918,
+      "end_line": 934,
+      "tokens": 147,
+      "context_length": 8335
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1_41",
+      "distance": 0.7914748787879944,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 134,
+      "tokens": 798,
+      "context_length": 9133
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_1_assert_chunks_compatible.3.1.1",
+      "distance": 0.7980936765670776,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 227,
+      "context_length": 9360
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 0.8040190935134888,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 674,
+      "end_line": 926,
+      "tokens": 3146,
+      "context_length": 12506
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner.assert_unindexed_dim_sizes_equal_Aligner.assert_unindexed_dim_sizes_equal.1.3.1",
+      "distance": 0.8045080900192261,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 440,
+      "end_line": 455,
+      "tokens": 156,
+      "context_length": 12662
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/reindexing.py_np_",
+      "distance": 0.8060657978057861,
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 415,
+      "context_length": 13077
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_reindex_like__get_broadcast_dims_map_common_coords.4.1",
+      "distance": 0.8061041831970215,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 890,
+      "end_line": 936,
+      "tokens": 319,
+      "context_length": 13396
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 0.807619571685791,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 738,
+      "context_length": 14134
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasMultiIndex.concat_PandasMultiIndex.concat.3.1",
+      "distance": 0.8108872175216675,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 586,
+      "end_line": 604,
+      "tokens": 156,
+      "context_length": 14290
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_1__THIS_ARRAY.1",
+      "distance": 0.8126285076141357,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 157,
+      "context_length": 14447
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_reindex_reindex.12.1",
+      "distance": 0.8201073408126831,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 851,
+      "end_line": 887,
+      "tokens": 286,
+      "context_length": 14733
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasMultiIndex.sel_PandasMultiIndex.sel.7.6.3.6.4.2.coords.indexer.1",
+      "distance": 0.8268958330154419,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 771,
+      "end_line": 875,
+      "tokens": 898,
+      "context_length": 15631
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_1_19.Dataset",
+      "distance": 0.8295199871063232,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 184,
+      "context_length": 15815
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner._reindex_one_Aligner._reindex_one.5.1",
+      "distance": 0.8306094408035278,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 514,
+      "end_line": 532,
+      "tokens": 138,
+      "context_length": 15953
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_1_IndexVars.1",
+      "distance": 0.8343420028686523,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 155,
+      "context_length": 16108
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner.assert_no_index_conflict_Aligner.assert_no_index_conflict.6.2.2",
+      "distance": 0.8378784656524658,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 287,
+      "end_line": 326,
+      "tokens": 416,
+      "context_length": 16524
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasIndex._concat_indexes_PandasIndex._concat_indexes.3.1",
+      "distance": 0.8422675132751465,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 284,
+      "end_line": 304,
+      "tokens": 178,
+      "context_length": 16702
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner_Aligner.__init__.self.results.1",
+      "distance": 0.8424866199493408,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 100,
+      "end_line": 179,
+      "tokens": 629,
+      "context_length": 17331
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner._get_dim_pos_indexers_Aligner._get_dim_pos_indexers.3.1",
+      "distance": 0.8531936407089233,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 476,
+      "end_line": 489,
+      "tokens": 133,
+      "context_length": 17464
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_Aligner._get_indexes_and_vars_Aligner._get_indexes_and_vars.4.1",
+      "distance": 0.8535007834434509,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 491,
+      "end_line": 512,
+      "tokens": 206,
+      "context_length": 17670
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/xarray/core/indexes.py_PandasMultiIndex.sel.8_PandasMultiIndex.sel.8.10.1.1",
+      "distance": 0.859268069267273,
+      "file_path": "xarray/core/indexes.py",
+      "start_line": 877,
+      "end_line": 916,
+      "tokens": 314,
+      "context_length": 17984
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/core/concat.py_1_12.JoinOptions",
+      "distance": 0.8600704073905945,
+      "file_path": "xarray/core/concat.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 140,
+      "context_length": 18124,
+      "file_pos": 14
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.reindex_like_DataArray.interp",
+      "distance": 0.8603684902191162,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1628,
+      "end_line": 1928,
+      "tokens": 1551,
+      "context_length": 19675
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_HugeAxisSmallSliceIndexing_",
+      "distance": 0.8615288734436035,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 133,
+      "end_line": 150,
+      "tokens": 145,
+      "context_length": 19820
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_1_check_reduce_dims.1.2.1",
+      "distance": 0.862151026725769,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 387,
+      "context_length": 20207
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/alignment.py",
+      "position": 1,
+      "tokens": 8510,
+      "context_length": 8510
+    },
+    {
+      "file_path": "xarray/core/types.py",
+      "position": 2,
+      "tokens": 985,
+      "context_length": 9495
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 3,
+      "tokens": 9270,
+      "context_length": 18765
+    },
+    {
+      "file_path": "xarray/core/indexes.py",
+      "position": 4,
+      "tokens": 10615,
+      "context_length": 29380
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 5,
+      "tokens": 51213,
+      "context_length": 80593
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 6,
+      "tokens": 692,
+      "context_length": 81285
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 7,
+      "tokens": 76321,
+      "context_length": 157606
+    },
+    {
+      "file_path": "xarray/core/parallel.py",
+      "position": 8,
+      "tokens": 5115,
+      "context_length": 162721
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 9,
+      "tokens": 9083,
+      "context_length": 171804
+    },
+    {
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "position": 10,
+      "tokens": 415,
+      "context_length": 172219
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 11,
+      "tokens": 1501,
+      "context_length": 173720
+    },
+    {
+      "file_path": "xarray/core/coordinates.py",
+      "position": 12,
+      "tokens": 3478,
+      "context_length": 177198
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 13,
+      "tokens": 6247,
+      "context_length": 183445
+    },
+    {
+      "file_path": "xarray/core/concat.py",
+      "position": 14,
+      "tokens": 5708,
+      "context_length": 189153
+    },
+    {
+      "file_path": "xarray/core/groupby.py",
+      "position": 15,
+      "tokens": 10930,
+      "context_length": 200083
+    }
+  ]
+}

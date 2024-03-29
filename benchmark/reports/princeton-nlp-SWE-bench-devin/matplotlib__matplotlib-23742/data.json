@@ -1,0 +1,921 @@
+{
+  "instance_id": "matplotlib__matplotlib-23742",
+  "model_patch": "diff --git a/lib/matplotlib/backends/backend_nbagg.py b/lib/matplotlib/backends/backend_nbagg.py\nindex 712f457359..34c1be6047 100644\n--- a/lib/matplotlib/backends/backend_nbagg.py\n+++ b/lib/matplotlib/backends/backend_nbagg.py\n@@ -65,6 +65,8 @@ class FigureManagerNbAgg(FigureManagerWebAgg):\n     _toolbar2_class = ToolbarCls = NavigationIPy\n \n     def __init__(self, canvas, num):\n+        print(\"Initializing FigureManagerNbAgg with canvas:\", canvas)\n+        print(\"Toolbar class type:\", self._toolbar2_class)\n         self._shown = False\n         super().__init__(canvas, num)\n \ndiff --git a/lib/matplotlib/backends/backend_webagg_core.py b/lib/matplotlib/backends/backend_webagg_core.py\nindex 141dbdcc2e..e0526cf6cc 100644\n--- a/lib/matplotlib/backends/backend_webagg_core.py\n+++ b/lib/matplotlib/backends/backend_webagg_core.py\n@@ -26,6 +26,10 @@ from matplotlib.backends import backend_agg\n from matplotlib.backend_bases import (\n     _Backend, KeyEvent, LocationEvent, MouseEvent, ResizeEvent)\n \n+import matplotlib\n+if matplotlib.__version__ < \"3.6\":\n+    from ipympl.backend_nbagg import Toolbar\n+\n _log = logging.getLogger(__name__)\n \n _SPECIAL_KEYS_LUT = {'Alt': 'alt',\n@@ -427,7 +431,10 @@ class NavigationToolbar2WebAgg(backend_bases.NavigationToolbar2):\n \n \n class FigureManagerWebAgg(backend_bases.FigureManagerBase):\n-    _toolbar2_class = ToolbarCls = NavigationToolbar2WebAgg\n+    if matplotlib.__version__ < \"3.6\":\n+        _toolbar2_class = ToolbarCls = Toolbar\n+    else:\n+        _toolbar2_class = ToolbarCls = NavigationToolbar2WebAgg\n \n     def __init__(self, canvas, num):\n         self.web_sockets = set()\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/backends/backend_nbagg.py",
+    "lib/matplotlib/backends/backend_webagg_core.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "942aa77a4ba1bd5b50e22c0246240b27ba925305",
+  "patch": "diff --git a/examples/user_interfaces/embedding_webagg_sgskip.py b/examples/user_interfaces/embedding_webagg_sgskip.py\n--- a/examples/user_interfaces/embedding_webagg_sgskip.py\n+++ b/examples/user_interfaces/embedding_webagg_sgskip.py\n@@ -30,7 +30,7 @@\n \n \n import matplotlib as mpl\n-from matplotlib.backends.backend_webagg_core import (\n+from matplotlib.backends.backend_webagg import (\n     FigureManagerWebAgg, new_figure_manager_given_figure)\n from matplotlib.figure import Figure\n \ndiff --git a/lib/matplotlib/backends/backend_webagg_core.py b/lib/matplotlib/backends/backend_webagg_core.py\n--- a/lib/matplotlib/backends/backend_webagg_core.py\n+++ b/lib/matplotlib/backends/backend_webagg_core.py\n@@ -427,7 +427,9 @@ def set_history_buttons(self):\n \n \n class FigureManagerWebAgg(backend_bases.FigureManagerBase):\n-    _toolbar2_class = ToolbarCls = NavigationToolbar2WebAgg\n+    # This must be None to not break ipympl\n+    _toolbar2_class = None\n+    ToolbarCls = NavigationToolbar2WebAgg\n \n     def __init__(self, canvas, num):\n         self.web_sockets = set()\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_backend_webagg.py b/lib/matplotlib/tests/test_backend_webagg.py\n--- a/lib/matplotlib/tests/test_backend_webagg.py\n+++ b/lib/matplotlib/tests/test_backend_webagg.py\n@@ -2,6 +2,7 @@\n import os\n import sys\n import pytest\n+import matplotlib.backends.backend_webagg_core\n \n \n @pytest.mark.parametrize(\"backend\", [\"webagg\", \"nbagg\"])\n@@ -25,3 +26,8 @@ def test_webagg_fallback(backend):\n     ret = subprocess.call([sys.executable, \"-c\", test_code], env=env)\n \n     assert ret == 0\n+\n+\n+def test_webagg_core_no_toolbar():\n+    fm = matplotlib.backends.backend_webagg_core.FigureManagerWebAgg\n+    assert fm._toolbar2_class is None\n",
+  "problem_statement": "[Bug]: Bug with toolbar instantiation in notebook\n### Bug summary\r\n\r\nIn MNE-Python we have an abstraction layer for widgets+toolbars. Until today's latest `pip --pre` install it was working fine. Now it fails with:\r\n\r\n```\r\nE   TraitError: The 'toolbar' trait of a Canvas instance expected a Toolbar or None, not the NavigationToolbar2WebAgg at '0x7fce12bf6f80'.\r\n```\r\n\r\nSee https://dev.azure.com/mne-tools/mne-python/_build/results?buildId=21230&view=logs&jobId=2b5832ae-6860-5681-a4e1-fd132048f8b4&j=2b5832ae-6860-5681-a4e1-fd132048f8b4&t=5b9d2bdb-d99e-53c3-c7bb-7166fe849ae1\r\n\r\n### Code for reproduction\r\n\r\nI'll work on boiling it down to a MWE tomorrow hopefully. Could also be a bug with traitlets. But the code that runs on the CIs is essentially this in a notebook I think:\r\n\r\n```python\r\nplt.ioff()\r\nfig, ax = plt.subplots()\r\n```\r\n\r\n\r\n### Actual outcome\r\n\r\n<details>\r\n<summary>Full traceback</summary>\r\n\r\n```\r\nE   nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:\r\nE   ------------------\r\nE   \"\"\"Test the GUI widgets abstraction in notebook.\"\"\"\r\nE   from mne.viz import set_3d_backend\r\nE   from mne.viz.backends.renderer import _get_backend\r\nE   from mne.viz.backends.tests.test_abstract import _do_widget_tests\r\nE   from IPython import get_ipython\r\nE   \r\nE   set_3d_backend('notebook')\r\nE   backend = _get_backend()\r\nE   \r\nE   ipython = get_ipython()\r\nE   ipython.magic('%matplotlib widget')\r\nE   \r\nE   _do_widget_tests(backend)\r\nE   ------------------\r\nE   \r\nE   ---------------------------------------------------------------------------\r\nE   TraitError                                Traceback (most recent call last)\r\nE   Input In [1], in <cell line: 13>()\r\nE        10 ipython = get_ipython()\r\nE        11 ipython.magic('%matplotlib widget')\r\nE   ---> 13 _do_widget_tests(backend)\r\nE   \r\nE   File ~/work/1/s/mne/viz/backends/tests/test_abstract.py:23, in _do_widget_tests(backend)\r\nE        21 renderer.sphere([0, 0, 0], 'red', 1)\r\nE        22 central_layout._add_widget(renderer.plotter)\r\nE   ---> 23 canvas = backend._Canvas(5, 5, 96)\r\nE        24 canvas.ax.plot(range(10), range(10), label='plot')\r\nE        25 central_layout._add_widget(canvas)\r\nE   \r\n```\r\n\r\n</details>\r\n\r\n### Expected outcome\r\n\r\nNo error\r\n\r\n### Additional information\r\n\r\n*EDIT*: ipympl 0.9.2\r\n\r\n### Operating system\r\n\r\nUbuntu (GH actions), or macOS M1 (locally)\r\n\r\n### Matplotlib Version\r\n\r\n3.6.0rc1\r\n\r\n### Matplotlib Backend\r\n\r\nNotebook\r\n\r\n### Python version\r\n\r\n3.10\r\n\r\n### Jupyter version\r\n\r\n*EDIT*: 6.4.11\r\n\r\n### Installation\r\n\r\npip\n",
+  "hints_text": "Okay I can replicate on 3.6.0.rc0 in a notebook with just:\r\n```\r\n%matplotlib widget\r\nimport matplotlib.pyplot as plt\r\nfig, ax = plt.subplots()\r\n```\r\n\r\n<details>\r\n<summary>Traceback</summary>\r\n\r\n```\r\n---------------------------------------------------------------------------\r\nTraitError                                Traceback (most recent call last)\r\nInput In [1], in <cell line: 3>()\r\n      1 get_ipython().run_line_magic('matplotlib', 'widget')\r\n      2 import matplotlib.pyplot as plt\r\n----> 3 fig, ax = plt.subplots()\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/pyplot.py:1430, in subplots(nrows, ncols, sharex, sharey, squeeze, width_ratios, height_ratios, subplot_kw, gridspec_kw, **fig_kw)\r\n   1284 def subplots(nrows=1, ncols=1, *, sharex=False, sharey=False, squeeze=True,\r\n   1285              width_ratios=None, height_ratios=None,\r\n   1286              subplot_kw=None, gridspec_kw=None, **fig_kw):\r\n   1287     \"\"\"\r\n   1288     Create a figure and a set of subplots.\r\n   1289 \r\n   (...)\r\n   1428 \r\n   1429     \"\"\"\r\n-> 1430     fig = figure(**fig_kw)\r\n   1431     axs = fig.subplots(nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey,\r\n   1432                        squeeze=squeeze, subplot_kw=subplot_kw,\r\n   1433                        gridspec_kw=gridspec_kw, height_ratios=height_ratios,\r\n   1434                        width_ratios=width_ratios)\r\n   1435     return fig, axs\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/_api/deprecation.py:454, in make_keyword_only.<locals>.wrapper(*args, **kwargs)\r\n    448 if len(args) > name_idx:\r\n    449     warn_deprecated(\r\n    450         since, message=\"Passing the %(name)s %(obj_type)s \"\r\n    451         \"positionally is deprecated since Matplotlib %(since)s; the \"\r\n    452         \"parameter will become keyword-only %(removal)s.\",\r\n    453         name=name, obj_type=f\"parameter of {func.__name__}()\")\r\n--> 454 return func(*args, **kwargs)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/pyplot.py:771, in figure(num, figsize, dpi, facecolor, edgecolor, frameon, FigureClass, clear, **kwargs)\r\n    761 if len(allnums) == max_open_warning >= 1:\r\n    762     _api.warn_external(\r\n    763         f\"More than {max_open_warning} figures have been opened. \"\r\n    764         f\"Figures created through the pyplot interface \"\r\n   (...)\r\n    768         f\"Consider using `matplotlib.pyplot.close()`.\",\r\n    769         RuntimeWarning)\r\n--> 771 manager = new_figure_manager(\r\n    772     num, figsize=figsize, dpi=dpi,\r\n    773     facecolor=facecolor, edgecolor=edgecolor, frameon=frameon,\r\n    774     FigureClass=FigureClass, **kwargs)\r\n    775 fig = manager.canvas.figure\r\n    776 if fig_label:\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/pyplot.py:347, in new_figure_manager(*args, **kwargs)\r\n    345 \"\"\"Create a new figure manager instance.\"\"\"\r\n    346 _warn_if_gui_out_of_main_thread()\r\n--> 347 return _get_backend_mod().new_figure_manager(*args, **kwargs)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/backend_bases.py:3505, in _Backend.new_figure_manager(cls, num, *args, **kwargs)\r\n   3503 fig_cls = kwargs.pop('FigureClass', Figure)\r\n   3504 fig = fig_cls(*args, **kwargs)\r\n-> 3505 return cls.new_figure_manager_given_figure(num, fig)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/ipympl/backend_nbagg.py:487, in _Backend_ipympl.new_figure_manager_given_figure(num, figure)\r\n    485 if 'nbagg.transparent' in rcParams and rcParams['nbagg.transparent']:\r\n    486     figure.patch.set_alpha(0)\r\n--> 487 manager = FigureManager(canvas, num)\r\n    489 if is_interactive():\r\n    490     _Backend_ipympl._to_show.append(figure)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/ipympl/backend_nbagg.py:459, in FigureManager.__init__(self, canvas, num)\r\n    458 def __init__(self, canvas, num):\r\n--> 459     FigureManagerWebAgg.__init__(self, canvas, num)\r\n    460     self.web_sockets = [self.canvas]\r\n    461     self.toolbar = Toolbar(self.canvas)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/backends/backend_webagg_core.py:434, in FigureManagerWebAgg.__init__(self, canvas, num)\r\n    432 def __init__(self, canvas, num):\r\n    433     self.web_sockets = set()\r\n--> 434     super().__init__(canvas, num)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/backend_bases.py:2796, in FigureManagerBase.__init__(self, canvas, num)\r\n   2791 self.toolmanager = (ToolManager(canvas.figure)\r\n   2792                     if mpl.rcParams['toolbar'] == 'toolmanager'\r\n   2793                     else None)\r\n   2794 if (mpl.rcParams[\"toolbar\"] == \"toolbar2\"\r\n   2795         and self._toolbar2_class):\r\n-> 2796     self.toolbar = self._toolbar2_class(self.canvas)\r\n   2797 elif (mpl.rcParams[\"toolbar\"] == \"toolmanager\"\r\n   2798         and self._toolmanager_toolbar_class):\r\n   2799     self.toolbar = self._toolmanager_toolbar_class(self.toolmanager)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/backends/backend_webagg_core.py:397, in NavigationToolbar2WebAgg.__init__(self, canvas)\r\n    395 self.message = ''\r\n    396 self._cursor = None  # Remove with deprecation.\r\n--> 397 super().__init__(canvas)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/matplotlib/backend_bases.py:2938, in NavigationToolbar2.__init__(self, canvas)\r\n   2936 def __init__(self, canvas):\r\n   2937     self.canvas = canvas\r\n-> 2938     canvas.toolbar = self\r\n   2939     self._nav_stack = cbook.Stack()\r\n   2940     # This cursor will be set after the initial draw.\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/traitlets/traitlets.py:712, in TraitType.__set__(self, obj, value)\r\n    710     raise TraitError('The \"%s\" trait is read-only.' % self.name)\r\n    711 else:\r\n--> 712     self.set(obj, value)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/traitlets/traitlets.py:686, in TraitType.set(self, obj, value)\r\n    685 def set(self, obj, value):\r\n--> 686     new_value = self._validate(obj, value)\r\n    687     try:\r\n    688         old_value = obj._trait_values[self.name]\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/traitlets/traitlets.py:718, in TraitType._validate(self, obj, value)\r\n    716     return value\r\n    717 if hasattr(self, \"validate\"):\r\n--> 718     value = self.validate(obj, value)  # type:ignore[attr-defined]\r\n    719 if obj._cross_validation_lock is False:\r\n    720     value = self._cross_validate(obj, value)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/traitlets/traitlets.py:2029, in Instance.validate(self, obj, value)\r\n   2027     return value\r\n   2028 else:\r\n-> 2029     self.error(obj, value)\r\n\r\nFile ~/opt/miniconda3/envs/mne/lib/python3.10/site-packages/traitlets/traitlets.py:824, in TraitType.error(self, obj, value, error, info)\r\n    818 else:\r\n    819     e = \"The '{}' trait expected {}, not {}.\".format(\r\n    820         self.name,\r\n    821         self.info(),\r\n    822         describe(\"the\", value),\r\n    823     )\r\n--> 824 raise TraitError(e)\r\n\r\nTraitError: The 'toolbar' trait of a Canvas instance expected a Toolbar or None, not the NavigationToolbar2WebAgg at '0x10f474310'.\r\n```\r\n\r\n</details>\nI have seen this error and even remember debugging it, but I do not remember if I found the problem or if I switch to an older environment with the plan to come back (because I was under time pressure for something else).  It is quite frustrating....\nhttps://github.com/matplotlib/ipympl/issues/426 and https://github.com/matplotlib/matplotlib/pull/22454 look related, but this has apparent come back?\n9369769ea7b4692043233b6f1463326a93120315 via https://github.com/matplotlib/matplotlib/pull/23498 un-did the fix in #22454 .\r\n\r\nLooking how to address both this issue and `examples/user_interfaces/embedding_webagg_sgskip.py`\nThe facts here are:\r\n\r\n - we re-organized the backends to pull as much of the toolbar initialization logic into one place as possible\r\n - the `Toolbar` class to used is controlled by the `_toolbar2_class` private attribute which if None the backend_bases does not try to make a toolbar\r\n - `ipympl` inherits from webagg_core and does not (yet) set this private attribute\r\n - the Canvas in ipympl uses traitlets and type-checks the toolbar to be its toolbar (which is in turn also a `DOMWidget` and has all of the sync mechanics with the js frontend)\r\n - therefor webagg_core's classes must not set `FigureManager._toolbar2_class` (this is what #22454 did)\r\n - that fix in turn broke an example which is what #23498 fixed ",
+  "created_at": "2022-08-26T01:13:33Z",
+  "version": "3.5",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_backend_webagg.py::test_webagg_core_no_toolbar\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_backend_webagg.py::test_webagg_fallback[nbagg]\", \"lib/matplotlib/tests/test_backend_webagg.py::test_webagg_fallback[webagg]\"]",
+  "environment_setup_commit": "de98877e3dc45de8dd441d008f23d88738dc015d",
+  "patch_files": [
+    "examples/user_interfaces/embedding_webagg_sgskip.py",
+    "lib/matplotlib/backends/backend_webagg_core.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_backend_webagg.py"
+  ],
+  "patch_diff_details": {
+    "examples/user_interfaces/embedding_webagg_sgskip.py": {
+      "diffs": [
+        {
+          "start_line_old": 33,
+          "end_line_old": 33
+        }
+      ]
+    },
+    "lib/matplotlib/backends/backend_webagg_core.py": {
+      "diffs": [
+        {
+          "start_line_old": 430,
+          "end_line_old": 430,
+          "file_pos": 2,
+          "file_context_length": 5548,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore.handle_button_press_FigureCanvasWebAggCore.handle_refresh.6",
+          "closest_snippet_line_distance": 97,
+          "pos": 51,
+          "context_length": 20752
+        }
+      ]
+    }
+  },
+  "vectors": 3926,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_macosx.py_NavigationToolbar2Mac_NavigationToolbar2Mac.prepare_configure_subplots.6.1",
+      "distance": 0.8216156363487244,
+      "file_path": "lib/matplotlib/backends/backend_macosx.py",
+      "start_line": 105,
+      "end_line": 142,
+      "tokens": 379,
+      "context_length": 379
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_NavigationToolbar2WebAgg_NavigationToolbar2WebAgg.toolitems.set_history_buttons.3",
+      "distance": 0.8428758978843689,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 381,
+      "end_line": 426,
+      "tokens": 407,
+      "context_length": 786,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_Toolbar_",
+      "distance": 0.8516884446144104,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 614,
+      "end_line": 630,
+      "tokens": 115,
+      "context_length": 901
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_NavigationToolbar2GTK3_NavigationToolbar2GTK3.win.1",
+      "distance": 0.8533887267112732,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 306,
+      "end_line": 357,
+      "tokens": 458,
+      "context_length": 1359
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk_NavigationToolbar2Tk.__init__.17.1",
+      "distance": 0.8613321781158447,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 562,
+      "end_line": 619,
+      "tokens": 511,
+      "context_length": 1870
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_gtk4_panzoom_sgskip.py_1_",
+      "distance": 0.8632426857948303,
+      "file_path": "examples/user_interfaces/embedding_in_gtk4_panzoom_sgskip.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 319,
+      "context_length": 2189
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_gtk3_panzoom_sgskip.py_1_",
+      "distance": 0.8669339418411255,
+      "file_path": "examples/user_interfaces/embedding_in_gtk3_panzoom_sgskip.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 273,
+      "context_length": 2462
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_NavigationToolbar2GTK4_NavigationToolbar2GTK4.win.1",
+      "distance": 0.8711928129196167,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 259,
+      "end_line": 304,
+      "tokens": 405,
+      "context_length": 2867
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_20_",
+      "distance": 0.8798925280570984,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 564,
+      "end_line": 580,
+      "tokens": 115,
+      "context_length": 2982
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_nbagg.py_FigureManagerNbAgg_FigureManagerNbAgg.display_js.4",
+      "distance": 0.886940598487854,
+      "file_path": "lib/matplotlib/backends/backend_nbagg.py",
+      "start_line": 64,
+      "end_line": 90,
+      "tokens": 197,
+      "context_length": 3179
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_1__log.1",
+      "distance": 0.8981422185897827,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 669,
+      "context_length": 3848
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_wx2_sgskip.py_1_",
+      "distance": 0.9028738737106323,
+      "file_path": "examples/user_interfaces/embedding_in_wx2_sgskip.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 423,
+      "context_length": 4271
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk.draw_rubberband_NavigationToolbar2Tk.lastrect.1",
+      "distance": 0.9044003486633301,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 668,
+      "end_line": 684,
+      "tokens": 203,
+      "context_length": 4474
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_gtk.py__NavigationToolbar2GTK__NavigationToolbar2GTK.set_history_buttons.4.1",
+      "distance": 0.9073997735977173,
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "start_line": 249,
+      "end_line": 289,
+      "tokens": 376,
+      "context_length": 4850
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_functools__log.1",
+      "distance": 0.9089071750640869,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 254,
+      "context_length": 5104
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_NavigationToolbar2GTK3.save_figure_NavigationToolbar2GTK3.save_figure.16.2.3",
+      "distance": 0.9145361185073853,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 359,
+      "end_line": 405,
+      "tokens": 430,
+      "context_length": 5534
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_SaveFigureTk_",
+      "distance": 0.9177248477935791,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 992,
+      "end_line": 1035,
+      "tokens": 292,
+      "context_length": 5826
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_gtk.py_RubberbandGTK_",
+      "distance": 0.9199303388595581,
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "start_line": 292,
+      "end_line": 326,
+      "tokens": 250,
+      "context_length": 6076
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_bases.py_key_press_handler_NavigationToolbar2.set_history_buttons.1",
+      "distance": 0.9211052656173706,
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "start_line": 2530,
+      "end_line": 3316,
+      "tokens": 6572,
+      "context_length": 12648
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_uuid_TK_PHOTO_COMPOSITE_SET.1",
+      "distance": 0.925149142742157,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 368,
+      "context_length": 13016
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_NavigationToolbar2GTK4.save_figure.on_response_NavigationToolbar2GTK4.save_figure.20",
+      "distance": 0.9274122714996338,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 343,
+      "end_line": 366,
+      "tokens": 223,
+      "context_length": 13239
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_macosx.py_FigureManagerMac_",
+      "distance": 0.9292097091674805,
+      "file_path": "lib/matplotlib/backends/backend_macosx.py",
+      "start_line": 145,
+      "end_line": 184,
+      "tokens": 258,
+      "context_length": 13497
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk._Button_NavigationToolbar2Tk._Spacer.s.3.1",
+      "distance": 0.9314643144607544,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 763,
+      "end_line": 795,
+      "tokens": 319,
+      "context_length": 13816
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_NavigationToolbar2QT._update_buttons_checked_NavigationToolbar2QT.configure_subplots.4.1",
+      "distance": 0.9362660646438599,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 715,
+      "end_line": 753,
+      "tokens": 337,
+      "context_length": 14153
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_NavigationToolbar2Wx.save_figure_NavigationToolbar2Wx.save_figure.2",
+      "distance": 0.936805009841919,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 1138,
+      "end_line": 1169,
+      "tokens": 347,
+      "context_length": 14500
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk.save_figure_NavigationToolbar2Tk.save_figure.20.3.1",
+      "distance": 0.9383785724639893,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 797,
+      "end_line": 835,
+      "tokens": 377,
+      "context_length": 14877
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_ToolbarTk_ToolbarTk._rescale.1.1",
+      "distance": 0.941259503364563,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 920,
+      "end_line": 940,
+      "tokens": 209,
+      "context_length": 15086
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4agg.py_np_",
+      "distance": 0.9434642791748047,
+      "file_path": "lib/matplotlib/backends/backend_gtk4agg.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 305,
+      "context_length": 15391
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_functools_backend_version",
+      "distance": 0.9455956816673279,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 217,
+      "context_length": 15608
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_RubberbandTk_SetCursorTk.set_cursor.1",
+      "distance": 0.947395920753479,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 899,
+      "end_line": 917,
+      "tokens": 192,
+      "context_length": 15800
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_nbagg.py_1_TimerAsyncio",
+      "distance": 0.9488917589187622,
+      "file_path": "lib/matplotlib/backends/backend_nbagg.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 174,
+      "context_length": 15974
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_nbagg.py__FONT_AWESOME_CLASSES_NavigationIPy.toolitems.1",
+      "distance": 0.9492127895355225,
+      "file_path": "lib/matplotlib/backends/backend_nbagg.py",
+      "start_line": 42,
+      "end_line": 61,
+      "tokens": 184,
+      "context_length": 16158
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_NavigationToolbar2GTK4.save_figure_NavigationToolbar2GTK4.save_figure.18",
+      "distance": 0.9496809244155884,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 306,
+      "end_line": 341,
+      "tokens": 318,
+      "context_length": 16476
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wxagg.py_wx_FigureFrameWxAgg.get_canvas.1.1",
+      "distance": 0.9531092643737793,
+      "file_path": "lib/matplotlib/backends/backend_wxagg.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 144,
+      "context_length": 16620
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk._update_buttons_checked_NavigationToolbar2Tk.set_message.1",
+      "distance": 0.9542676210403442,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 648,
+      "end_line": 666,
+      "tokens": 154,
+      "context_length": 16774
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore_FigureCanvasWebAggCore.draw_idle.1",
+      "distance": 0.9558250904083252,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 157,
+      "end_line": 200,
+      "tokens": 387,
+      "context_length": 17161,
+      "file_pos": 16
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_functools_PIXELS_PER_INCH.1",
+      "distance": 0.9564347267150879,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 10,
+      "end_line": 39,
+      "tokens": 196,
+      "context_length": 17357
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore.handle_button_press_FigureCanvasWebAggCore.handle_refresh.6",
+      "distance": 0.9573264122009277,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 309,
+      "end_line": 333,
+      "tokens": 242,
+      "context_length": 17599,
+      "file_pos": 16
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3agg.py_np_FigureCanvasGTK3Agg.on_draw_event.8.1",
+      "distance": 0.960815966129303,
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 375,
+      "context_length": 17974
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_ToolbarGTK4_ToolbarGTK4.__init__.20",
+      "distance": 0.9613919854164124,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 369,
+      "end_line": 395,
+      "tokens": 240,
+      "context_length": 18214
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_wx4_sgskip.py_1_MyNavigationToolbar._on_custom.ax.8",
+      "distance": 0.9622049331665039,
+      "file_path": "examples/user_interfaces/embedding_in_wx4_sgskip.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 301,
+      "context_length": 18515
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/mpl_with_glade3_sgskip.py_1_",
+      "distance": 0.9639031887054443,
+      "file_path": "examples/user_interfaces/mpl_with_glade3_sgskip.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 309,
+      "context_length": 18824
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_RubberbandWx_RubberbandWx.remove_rubberband.1",
+      "distance": 0.9654637575149536,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 1302,
+      "end_line": 1310,
+      "tokens": 113,
+      "context_length": 18937
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_tkagg.py__backend_tk_",
+      "distance": 0.9660705327987671,
+      "file_path": "lib/matplotlib/backends/backend_tkagg.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 160,
+      "context_length": 19097
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_ConfigureSubplotsWx_SetCursorWx.set_cursor.1",
+      "distance": 0.967426061630249,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 1282,
+      "end_line": 1299,
+      "tokens": 159,
+      "context_length": 19256
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_ToolbarTk._get_groupframe_ToolbarTk.set_message.1",
+      "distance": 0.9675329923629761,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 958,
+      "end_line": 989,
+      "tokens": 230,
+      "context_length": 19486
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_NavigationToolbar2Wx.draw_rubberband_NavigationToolbar2Wx.set_history_buttons.4.1",
+      "distance": 0.9681103229522705,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 1171,
+      "end_line": 1190,
+      "tokens": 215,
+      "context_length": 19701
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_NavigationToolbar2QT.edit_parameters_NavigationToolbar2QT.edit_parameters.3",
+      "distance": 0.970504105091095,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 685,
+      "end_line": 713,
+      "tokens": 272,
+      "context_length": 19973
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_wx3_sgskip.py_cm_PlotPanel.__init__.14",
+      "distance": 0.9717081785202026,
+      "file_path": "examples/user_interfaces/embedding_in_wx3_sgskip.py",
+      "start_line": 24,
+      "end_line": 54,
+      "tokens": 249,
+      "context_length": 20222
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3agg.py_FigureCanvasGTK3Agg.blit_",
+      "distance": 0.9720467329025269,
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "start_line": 50,
+      "end_line": 75,
+      "tokens": 246,
+      "context_length": 20468
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureManagerWebAgg_FigureManagerWebAgg.refresh_all.1.2.1.1",
+      "distance": 0.9756965637207031,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 429,
+      "end_line": 469,
+      "tokens": 284,
+      "context_length": 20752,
+      "file_pos": 21
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_SaveFigureGTK3_SetCursorGTK3.set_cursor.1",
+      "distance": 0.9772660732269287,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 489,
+      "end_line": 500,
+      "tokens": 114,
+      "context_length": 20866
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_13_FigureCanvasGTK4.set_cursor.2",
+      "distance": 0.9802796840667725,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 31,
+      "end_line": 89,
+      "tokens": 443,
+      "context_length": 21309
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3.scroll_event_FigureCanvasGTK3.size_allocate.6",
+      "distance": 0.9803644418716431,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 153,
+      "end_line": 202,
+      "tokens": 461,
+      "context_length": 21770
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_base.py_1__log.1",
+      "distance": 0.9806968569755554,
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 200,
+      "context_length": 21970
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/mathtext_wx_sgskip.py_CanvasFrame.add_toolbar_",
+      "distance": 0.9813005924224854,
+      "file_path": "examples/user_interfaces/mathtext_wx_sgskip.py",
+      "start_line": 97,
+      "end_line": 132,
+      "tokens": 262,
+      "context_length": 22232
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_gtk.py_1__shutdown_application.3._application.1",
+      "distance": 0.9843872785568237,
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 295,
+      "context_length": 22527
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4cairo.py_1_",
+      "distance": 0.9850584268569946,
+      "file_path": "lib/matplotlib/backends/backend_gtk4cairo.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 234,
+      "context_length": 22761
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3cairo.py_1_",
+      "distance": 0.9857864379882812,
+      "file_path": "lib/matplotlib/backends/backend_gtk3cairo.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 226,
+      "context_length": 22987
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_tkcairo.py_sys_",
+      "distance": 0.9874284267425537,
+      "file_path": "lib/matplotlib/backends/backend_tkcairo.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 224,
+      "context_length": 23211
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_RubberbandQt_RubberbandQt.remove_rubberband.1",
+      "distance": 0.9879847764968872,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 986,
+      "end_line": 994,
+      "tokens": 108,
+      "context_length": 23319
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/ci/check_wheel_licenses.py_1_",
+      "distance": 0.9892219305038452,
+      "file_path": "ci/check_wheel_licenses.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 213,
+      "context_length": 23532
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_bases.py_ToolContainerBase_",
+      "distance": 0.9900189638137817,
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "start_line": 3319,
+      "end_line": 3582,
+      "tokens": 1729,
+      "context_length": 25261
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wxcairo.py_wxcairo_FigureFrameWxCairo.get_canvas.1.1",
+      "distance": 0.9917520880699158,
+      "file_path": "lib/matplotlib/backends/backend_wxcairo.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 150,
+      "context_length": 25411
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/examples/user_interfaces/embedding_in_tk_sgskip.py_1_",
+      "distance": 0.9928215146064758,
+      "file_path": "examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 466,
+      "context_length": 25877
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_bases.py_GraphicsContextBase.get_dashes_FigureCanvasBase.scroll_pick_id.1",
+      "distance": 0.9933996796607971,
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "start_line": 810,
+      "end_line": 1660,
+      "tokens": 6378,
+      "context_length": 32255
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_ConfigureSubplotsQt_SetCursorQt.set_cursor.1",
+      "distance": 0.9944204092025757,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 962,
+      "end_line": 983,
+      "tokens": 180,
+      "context_length": 32435
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_functools__log.1",
+      "distance": 0.9952161312103271,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 284,
+      "context_length": 32719
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/backends/backend_macosx.py",
+      "position": 1,
+      "tokens": 1518,
+      "context_length": 1518
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "position": 2,
+      "tokens": 4030,
+      "context_length": 5548
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "position": 3,
+      "tokens": 5041,
+      "context_length": 10589
+    },
+    {
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "position": 4,
+      "tokens": 9294,
+      "context_length": 19883
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_gtk4_panzoom_sgskip.py",
+      "position": 5,
+      "tokens": 319,
+      "context_length": 20202
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_gtk3_panzoom_sgskip.py",
+      "position": 6,
+      "tokens": 273,
+      "context_length": 20475
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "position": 7,
+      "tokens": 4503,
+      "context_length": 24978
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_nbagg.py",
+      "position": 8,
+      "tokens": 1770,
+      "context_length": 26748
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 9,
+      "tokens": 27967,
+      "context_length": 54715
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_wx2_sgskip.py",
+      "position": 10,
+      "tokens": 423,
+      "context_length": 55138
+    },
+    {
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "position": 11,
+      "tokens": 2477,
+      "context_length": 57615
+    },
+    {
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "position": 12,
+      "tokens": 27977,
+      "context_length": 85592
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "position": 13,
+      "tokens": 8532,
+      "context_length": 94124
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "position": 14,
+      "tokens": 12182,
+      "context_length": 106306
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk4agg.py",
+      "position": 15,
+      "tokens": 306,
+      "context_length": 106612
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wxagg.py",
+      "position": 16,
+      "tokens": 518,
+      "context_length": 107130
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "position": 17,
+      "tokens": 596,
+      "context_length": 107726
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_wx4_sgskip.py",
+      "position": 18,
+      "tokens": 597,
+      "context_length": 108323
+    },
+    {
+      "file_path": "examples/user_interfaces/mpl_with_glade3_sgskip.py",
+      "position": 19,
+      "tokens": 309,
+      "context_length": 108632
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_tkagg.py",
+      "position": 20,
+      "tokens": 161,
+      "context_length": 108793
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_wx3_sgskip.py",
+      "position": 21,
+      "tokens": 1134,
+      "context_length": 109927
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "position": 22,
+      "tokens": 37990,
+      "context_length": 147917
+    },
+    {
+      "file_path": "examples/user_interfaces/mathtext_wx_sgskip.py",
+      "position": 23,
+      "tokens": 1060,
+      "context_length": 148977
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk4cairo.py",
+      "position": 24,
+      "tokens": 235,
+      "context_length": 149212
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3cairo.py",
+      "position": 25,
+      "tokens": 227,
+      "context_length": 149439
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_tkcairo.py",
+      "position": 26,
+      "tokens": 225,
+      "context_length": 149664
+    },
+    {
+      "file_path": "ci/check_wheel_licenses.py",
+      "position": 27,
+      "tokens": 257,
+      "context_length": 149921
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wxcairo.py",
+      "position": 28,
+      "tokens": 376,
+      "context_length": 150297
+    },
+    {
+      "file_path": "examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "position": 29,
+      "tokens": 466,
+      "context_length": 150763
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "position": 30,
+      "tokens": 73621,
+      "context_length": 224384
+    }
+  ]
+}

@@ -1,0 +1,1532 @@
+{
+  "instance_id": "django__django-15648",
+  "model_patch": "diff --git a/django/contrib/syndication/views.py b/django/contrib/syndication/views.py\nindex a9d1bff5cf..0ac5468027 100644\n--- a/django/contrib/syndication/views.py\n+++ b/django/contrib/syndication/views.py\n@@ -8,7 +8,7 @@ from django.utils.html import escape\n from django.utils.http import http_date\n from django.utils.timezone import get_default_timezone, is_naive, make_aware\n from django.utils.translation import get_language\n-\n+import inspect\n \n def add_domain(domain, url, secure=False):\n     protocol = \"https\" if secure else \"http\"\n@@ -79,14 +79,14 @@ class Feed:\n         except AttributeError:\n             return default\n         if callable(attr):\n-            # Check co_argcount rather than try/excepting the function and\n-            # catching the TypeError, because something inside the function\n-            # may raise the TypeError. This technique is more accurate.\n-            try:\n-                code = attr.__code__\n-            except AttributeError:\n-                code = attr.__call__.__code__\n-            if code.co_argcount == 2:  # one argument is 'self'\n+            # Instead of checking co_argcount, we'll use inspect.signature\n+            # which can handle functions with *args and **kwargs properly.\n+            sig = inspect.signature(attr)\n+            params = sig.parameters\n+            # We check if 'obj' can be a valid argument for the callable\n+            if 'obj' in params or any(\n+                p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params.values()\n+            ):\n                 return attr(obj)\n             else:\n                 return attr()\n@@ -164,7 +164,8 @@ class Feed:\n             except TemplateDoesNotExist:\n                 pass\n \n-        for item in self._get_dynamic_attr(\"items\", obj):\n+        items = self._get_dynamic_attr(\"items\", obj) or []\n+        for item in items:\n             context = self.get_context_data(\n                 item=item, site=current_site, obj=obj, request=request\n             )\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/contrib/syndication/views.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "7e4656e4b2189390a433a149091442d53a777e2b",
+  "patch": "diff --git a/django/contrib/syndication/views.py b/django/contrib/syndication/views.py\n--- a/django/contrib/syndication/views.py\n+++ b/django/contrib/syndication/views.py\n@@ -1,3 +1,5 @@\n+from inspect import getattr_static, unwrap\n+\n from django.contrib.sites.shortcuts import get_current_site\n from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist\n from django.http import Http404, HttpResponse\n@@ -82,10 +84,21 @@ def _get_dynamic_attr(self, attname, obj, default=None):\n             # Check co_argcount rather than try/excepting the function and\n             # catching the TypeError, because something inside the function\n             # may raise the TypeError. This technique is more accurate.\n+            func = unwrap(attr)\n             try:\n-                code = attr.__code__\n+                code = func.__code__\n             except AttributeError:\n-                code = attr.__call__.__code__\n+                func = unwrap(attr.__call__)\n+                code = func.__code__\n+            # If function doesn't have arguments and it is not a static method,\n+            # it was decorated without using @functools.wraps.\n+            if not code.co_argcount and not isinstance(\n+                getattr_static(self, func.__name__, None), staticmethod\n+            ):\n+                raise ImproperlyConfigured(\n+                    f\"Feed method {attname!r} decorated by {func.__name__!r} needs to \"\n+                    f\"use @functools.wraps.\"\n+                )\n             if code.co_argcount == 2:  # one argument is 'self'\n                 return attr(obj)\n             else:\n",
+  "test_patch": "diff --git a/tests/syndication_tests/feeds.py b/tests/syndication_tests/feeds.py\n--- a/tests/syndication_tests/feeds.py\n+++ b/tests/syndication_tests/feeds.py\n@@ -1,3 +1,5 @@\n+from functools import wraps\n+\n from django.contrib.syndication import views\n from django.utils import feedgenerator\n from django.utils.timezone import get_fixed_timezone\n@@ -5,6 +7,23 @@\n from .models import Article, Entry\n \n \n+def wraps_decorator(f):\n+    @wraps(f)\n+    def wrapper(*args, **kwargs):\n+        value = f(*args, **kwargs)\n+        return f\"{value} -- decorated by @wraps.\"\n+\n+    return wrapper\n+\n+\n+def common_decorator(f):\n+    def wrapper(*args, **kwargs):\n+        value = f(*args, **kwargs)\n+        return f\"{value} -- common decorated.\"\n+\n+    return wrapper\n+\n+\n class TestRss2Feed(views.Feed):\n     title = \"My blog\"\n     description = \"A more thorough description of my blog.\"\n@@ -47,11 +66,45 @@ def __call__(self):\n     ttl = TimeToLive()\n \n \n-class TestRss2FeedWithStaticMethod(TestRss2Feed):\n+class TestRss2FeedWithDecoratedMethod(TestRss2Feed):\n+    class TimeToLive:\n+        @wraps_decorator\n+        def __call__(self):\n+            return 800\n+\n+    @staticmethod\n+    @wraps_decorator\n+    def feed_copyright():\n+        return \"Copyright (c) 2022, John Doe\"\n+\n+    ttl = TimeToLive()\n+\n     @staticmethod\n     def categories():\n         return (\"javascript\", \"vue\")\n \n+    @wraps_decorator\n+    def title(self):\n+        return \"Overridden title\"\n+\n+    @wraps_decorator\n+    def item_title(self, item):\n+        return f\"Overridden item title: {item.title}\"\n+\n+    @wraps_decorator\n+    def description(self, obj):\n+        return \"Overridden description\"\n+\n+    @wraps_decorator\n+    def item_description(self):\n+        return \"Overridden item description\"\n+\n+\n+class TestRss2FeedWithWrongDecoratedMethod(TestRss2Feed):\n+    @common_decorator\n+    def item_description(self, item):\n+        return f\"Overridden item description: {item.title}\"\n+\n \n class TestRss2FeedWithGuidIsPermaLinkTrue(TestRss2Feed):\n     def item_guid_is_permalink(self, item):\ndiff --git a/tests/syndication_tests/tests.py b/tests/syndication_tests/tests.py\n--- a/tests/syndication_tests/tests.py\n+++ b/tests/syndication_tests/tests.py\n@@ -202,11 +202,38 @@ def test_rss2_feed_with_callable_object(self):\n         chan = doc.getElementsByTagName(\"rss\")[0].getElementsByTagName(\"channel\")[0]\n         self.assertChildNodeContent(chan, {\"ttl\": \"700\"})\n \n-    def test_rss2_feed_with_static_methods(self):\n-        response = self.client.get(\"/syndication/rss2/with-static-methods/\")\n+    def test_rss2_feed_with_decorated_methods(self):\n+        response = self.client.get(\"/syndication/rss2/with-decorated-methods/\")\n         doc = minidom.parseString(response.content)\n         chan = doc.getElementsByTagName(\"rss\")[0].getElementsByTagName(\"channel\")[0]\n         self.assertCategories(chan, [\"javascript\", \"vue\"])\n+        self.assertChildNodeContent(\n+            chan,\n+            {\n+                \"title\": \"Overridden title -- decorated by @wraps.\",\n+                \"description\": \"Overridden description -- decorated by @wraps.\",\n+                \"ttl\": \"800 -- decorated by @wraps.\",\n+                \"copyright\": \"Copyright (c) 2022, John Doe -- decorated by @wraps.\",\n+            },\n+        )\n+        items = chan.getElementsByTagName(\"item\")\n+        self.assertChildNodeContent(\n+            items[0],\n+            {\n+                \"title\": (\n+                    f\"Overridden item title: {self.e1.title} -- decorated by @wraps.\"\n+                ),\n+                \"description\": \"Overridden item description -- decorated by @wraps.\",\n+            },\n+        )\n+\n+    def test_rss2_feed_with_wrong_decorated_methods(self):\n+        msg = (\n+            \"Feed method 'item_description' decorated by 'wrapper' needs to use \"\n+            \"@functools.wraps.\"\n+        )\n+        with self.assertRaisesMessage(ImproperlyConfigured, msg):\n+            self.client.get(\"/syndication/rss2/with-wrong-decorated-methods/\")\n \n     def test_rss2_feed_guid_permalink_false(self):\n         \"\"\"\ndiff --git a/tests/syndication_tests/urls.py b/tests/syndication_tests/urls.py\n--- a/tests/syndication_tests/urls.py\n+++ b/tests/syndication_tests/urls.py\n@@ -7,7 +7,14 @@\n     path(\n         \"syndication/rss2/with-callable-object/\", feeds.TestRss2FeedWithCallableObject()\n     ),\n-    path(\"syndication/rss2/with-static-methods/\", feeds.TestRss2FeedWithStaticMethod()),\n+    path(\n+        \"syndication/rss2/with-decorated-methods/\",\n+        feeds.TestRss2FeedWithDecoratedMethod(),\n+    ),\n+    path(\n+        \"syndication/rss2/with-wrong-decorated-methods/\",\n+        feeds.TestRss2FeedWithWrongDecoratedMethod(),\n+    ),\n     path(\"syndication/rss2/articles/<int:entry_id>/\", feeds.TestGetObjectFeed()),\n     path(\n         \"syndication/rss2/guid_ispermalink_true/\",\n",
+  "problem_statement": "views.Feed methods cannot be decorated\nDescription\n\t\nIf one applies a decorator on a method which is called by __get_dynamic_attr a TypeError like this occurs:\nException Type: TypeError at /blog/feed/\nException Value: item_link() takes exactly 2 arguments (1 given)\nI think this is because __get_dynamic_attr tries to count the function's arguments, but decorators usally get defined with the *args, **kwargs syntax, so this trick does not work here.\n\t\t\tif code.co_argcount == 2:\t # one argument is 'self'\n\t\t\t\treturn attr(obj)\n\t\t\telse:\n\t\t\t\treturn attr()\nI think the best approach would be to remove one of the two methods. IMHO We should have either attr(item) or attr() not both, as \"there should be one, and preferably only one, obvious way to do it\".\n",
+  "hints_text": "Yes, that code is fragile.\nI reproduced it. I'm working now on fix.\nsample project, which show how patch works now\nI sended pull request. \u200bhttps://github.com/django/django/pull/2584 The problem is that methods without the 'item' argument (only with self) should be static now: @staticmethod def item_description(self): return force_text(item) But the decorators work now (sample project is in attachments)",
+  "created_at": "2022-05-02T03:46:31Z",
+  "version": "4.2",
+  "FAIL_TO_PASS": "[\"test_rss2_feed_with_decorated_methods (syndication_tests.tests.SyndicationFeedTest)\", \"test_rss2_feed_with_wrong_decorated_methods (syndication_tests.tests.SyndicationFeedTest)\"]",
+  "PASS_TO_PASS": "[\"An ImproperlyConfigured is raised if no link could be found for the\", \"Both the published and updated dates are\", \"Custom context data can be passed to templates for title\", \"Datetimes are correctly converted to the local time zone.\", \"Datetimes with timezones don't get trodden on.\", \"Test URLs are prefixed with https:// when feed is requested over HTTPS.\", \"Test if the 'isPermaLink' attribute of <guid> element of an item\", \"Test the structure and content of feeds generated by Atom1Feed.\", \"Test the structure and content of feeds generated by Rss201rev2Feed.\", \"Test the structure and content of feeds generated by RssUserland091Feed.\", \"Tests the Last-Modified header with aware publication dates.\", \"Tests the Last-Modified header with naive publication dates.\", \"The feed_url can be overridden.\", \"The item title and description can be overridden with templates.\", \"The published and updated elements are not\", \"Titles are escaped correctly in RSS feeds.\", \"add_domain() prefixes domains onto the correct URLs.\", \"test_atom_multiple_enclosures (syndication_tests.tests.SyndicationFeedTest)\", \"test_atom_single_enclosure (syndication_tests.tests.SyndicationFeedTest)\", \"test_custom_feed_generator (syndication_tests.tests.SyndicationFeedTest)\", \"test_feed_generator_language_attribute (syndication_tests.tests.SyndicationFeedTest)\", \"test_feed_no_content_self_closing_tag (syndication_tests.tests.SyndicationFeedTest)\", \"test_get_non_existent_object (syndication_tests.tests.SyndicationFeedTest)\", \"test_get_object (syndication_tests.tests.SyndicationFeedTest)\", \"test_rss2_feed_with_callable_object (syndication_tests.tests.SyndicationFeedTest)\", \"test_rss2_multiple_enclosures (syndication_tests.tests.SyndicationFeedTest)\", \"test_rss2_single_enclosure (syndication_tests.tests.SyndicationFeedTest)\"]",
+  "environment_setup_commit": "0fbdb9784da915fce5dcc1fe82bac9b4785749e5",
+  "patch_files": [
+    "django/contrib/syndication/views.py"
+  ],
+  "test_patch_files": [
+    "tests/syndication_tests/feeds.py",
+    "tests/syndication_tests/tests.py",
+    "tests/syndication_tests/urls.py"
+  ],
+  "patch_diff_details": {
+    "django/contrib/syndication/views.py": {
+      "diffs": [
+        {
+          "start_line_old": 1,
+          "end_line_old": 1,
+          "file_pos": 1,
+          "file_context_length": 1737,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed.get_feed_Feed.get_feed.9.1.2.1",
+          "closest_snippet_line_distance": 121,
+          "pos": 43,
+          "context_length": 11666
+        },
+        {
+          "start_line_old": 85,
+          "end_line_old": 87,
+          "file_pos": 1,
+          "file_context_length": 1737,
+          "pos": 1,
+          "context_length": 141
+        }
+      ]
+    }
+  },
+  "vectors": 3721,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed._get_dynamic_attr_Feed._get_dynamic_attr.3.1",
+      "distance": 0.871050238609314,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 76,
+      "end_line": 93,
+      "tokens": 141,
+      "context_length": 141,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed.item_title_Feed.item_enclosures.3.1",
+      "distance": 0.9603859186172485,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 49,
+      "end_line": 74,
+      "tokens": 202,
+      "context_length": 343,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed.get_feed.10_",
+      "distance": 0.9983553290367126,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 167,
+      "end_line": 222,
+      "tokens": 480,
+      "context_length": 823,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/utils/decorators.py__multi_decorate__multi_decorate.8.1",
+      "distance": 1.110684871673584,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 25,
+      "end_line": 53,
+      "tokens": 300,
+      "context_length": 1123
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_Atom1Feed_",
+      "distance": 1.1162090301513672,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 341,
+      "end_line": 448,
+      "tokens": 946,
+      "context_length": 2069
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed_Feed.__call__.6.1",
+      "distance": 1.1213194131851196,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 27,
+      "end_line": 47,
+      "tokens": 193,
+      "context_length": 2262,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/utils/decorators.py_method_decorator_method_decorator.13.1",
+      "distance": 1.1354055404663086,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 56,
+      "end_line": 89,
+      "tokens": 357,
+      "context_length": 2619
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_Rss201rev2Feed_Rss201rev2Feed._version.add_item_elements.13.1",
+      "distance": 1.1506068706512451,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 281,
+      "end_line": 338,
+      "tokens": 487,
+      "context_length": 3106
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_SyndicationFeed.add_item_SyndicationFeed.add_item.4",
+      "distance": 1.158928394317627,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 101,
+      "end_line": 149,
+      "tokens": 331,
+      "context_length": 3437
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/utils/decorators.py_1__update_method_wrapper.dummy.2",
+      "distance": 1.1654778718948364,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 142,
+      "context_length": 3579
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/views/decorators/http.py_condition.decorator_",
+      "distance": 1.1774929761886597,
+      "file_path": "django/views/decorators/http.py",
+      "start_line": 85,
+      "end_line": 133,
+      "tokens": 367,
+      "context_length": 3946
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_SyndicationFeed.num_items_SyndicationFeed.writeString.4.1",
+      "distance": 1.1854265928268433,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 151,
+      "end_line": 195,
+      "tokens": 259,
+      "context_length": 4205
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_8_",
+      "distance": 1.1932487487792969,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 136,
+      "end_line": 152,
+      "tokens": 128,
+      "context_length": 4333
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed.feed_extra_kwargs_Feed.get_context_data.2.1",
+      "distance": 1.2040199041366577,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 95,
+      "end_line": 120,
+      "tokens": 180,
+      "context_length": 4513,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_SyndicationFeed_SyndicationFeed.__init__",
+      "distance": 1.2122406959533691,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 59,
+      "end_line": 99,
+      "tokens": 265,
+      "context_length": 4778
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_RssFeed_RssFeed.write_items.1.3",
+      "distance": 1.223417043685913,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 224,
+      "end_line": 247,
+      "tokens": 185,
+      "context_length": 4963
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_W3CGeoFeed_W3CGeoFeed.add_root_elements.2",
+      "distance": 1.2267427444458008,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 121,
+      "end_line": 133,
+      "tokens": 136,
+      "context_length": 5099
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/views/decorators/http.py_condition_condition.1",
+      "distance": 1.2279930114746094,
+      "file_path": "django/views/decorators/http.py",
+      "start_line": 62,
+      "end_line": 83,
+      "tokens": 272,
+      "context_length": 5371
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_RssFeed.add_root_elements_RssUserland091Feed.add_item_elements.3.1",
+      "distance": 1.2325499057769775,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 249,
+      "end_line": 278,
+      "tokens": 309,
+      "context_length": 5680
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/utils/functional.py__lazy_proxy_unpickle_new_method_proxy",
+      "distance": 1.2382848262786865,
+      "file_path": "django/utils/functional.py",
+      "start_line": 215,
+      "end_line": 271,
+      "tokens": 323,
+      "context_length": 6003
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_GeoAtom1Feed_GeoAtom1Feed.add_root_elements.2",
+      "distance": 1.2388508319854736,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 106,
+      "end_line": 118,
+      "tokens": 115,
+      "context_length": 6118
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_4_GeoRSSFeed.add_root_elements.2",
+      "distance": 1.2402455806732178,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 90,
+      "end_line": 103,
+      "tokens": 123,
+      "context_length": 6241
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/template/base.py_FilterExpression.args_check_FilterExpression.__repr__.1.1",
+      "distance": 1.2505704164505005,
+      "file_path": "django/template/base.py",
+      "start_line": 749,
+      "end_line": 773,
+      "tokens": 210,
+      "context_length": 6451
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/admin/decorators.py_display_display.3.2.1.1",
+      "distance": 1.252485990524292,
+      "file_path": "django/contrib/admin/decorators.py",
+      "start_line": 34,
+      "end_line": 77,
+      "tokens": 271,
+      "context_length": 6722
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/views/decorators/clickjacking.py_1_xframe_options_deny.3.1",
+      "distance": 1.253668189048767,
+      "file_path": "django/views/decorators/clickjacking.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 140,
+      "context_length": 6862
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_sensitive_post_parameters.decorator_",
+      "distance": 1.2633941173553467,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 79,
+      "end_line": 97,
+      "tokens": 135,
+      "context_length": 6997
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_Feed.get_feed_Feed.get_feed.9.1.2.1",
+      "distance": 1.2763826847076416,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 122,
+      "end_line": 165,
+      "tokens": 357,
+      "context_length": 7354,
+      "file_pos": 10
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_70__property_resolver.2.3.1.1",
+      "distance": 1.2822731733322144,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 505,
+      "end_line": 545,
+      "tokens": 248,
+      "context_length": 7602
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/dispatch/dispatcher.py_receiver_",
+      "distance": 1.293478012084961,
+      "file_path": "django/dispatch/dispatcher.py",
+      "start_line": 283,
+      "end_line": 306,
+      "tokens": 139,
+      "context_length": 7741
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/views/decorators/clickjacking.py_xframe_options_sameorigin_",
+      "distance": 1.2985706329345703,
+      "file_path": "django/views/decorators/clickjacking.py",
+      "start_line": 25,
+      "end_line": 63,
+      "tokens": 243,
+      "context_length": 7984
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_GeoFeedMixin.add_georss_element_GeoFeedMixin.add_georss_element.4.1.4.gtype.2.2.4.3.1",
+      "distance": 1.2994792461395264,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 32,
+      "end_line": 87,
+      "tokens": 550,
+      "context_length": 8534
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/gis/views.py_1_",
+      "distance": 1.300205111503601,
+      "file_path": "django/contrib/gis/views.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 160,
+      "context_length": 8694
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_unordered_list.list_formatter_add.2.2.1.2.1.1",
+      "distance": 1.3034272193908691,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 697,
+      "end_line": 729,
+      "tokens": 217,
+      "context_length": 8911
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/views/decorators/http.py_1_require_safe.__doc__.1",
+      "distance": 1.3136026859283447,
+      "file_path": "django/views/decorators/http.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 358,
+      "context_length": 9269
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/utils/functional.py_copy_cached_property.__get__.4.1",
+      "distance": 1.314092993736267,
+      "file_path": "django/utils/functional.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 370,
+      "context_length": 9639
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_1_json_script.2.1",
+      "distance": 1.3212400674819946,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 559,
+      "context_length": 10198
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_SyndicationFeed.latest_post_date_Enclosure.__init__.self.url.1",
+      "distance": 1.3303802013397217,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 197,
+      "end_line": 221,
+      "tokens": 184,
+      "context_length": 10382
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/utils/deconstruct.py_1_",
+      "distance": 1.3314073085784912,
+      "file_path": "django/utils/deconstruct.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 403,
+      "context_length": 10785
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/utils/functional.py_classproperty_Promise.2",
+      "distance": 1.3336018323898315,
+      "file_path": "django/utils/functional.py",
+      "start_line": 61,
+      "end_line": 84,
+      "tokens": 123,
+      "context_length": 10908
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/contrib/admin/decorators.py_action_action.3.2.1.1",
+      "distance": 1.3348283767700195,
+      "file_path": "django/contrib/admin/decorators.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 181,
+      "context_length": 11089
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_1_GeoFeedMixin.georss_coords.2.1",
+      "distance": 1.3477221727371216,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 141,
+      "context_length": 11230
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/utils/asyncio.py_os_",
+      "distance": 1.35300612449646,
+      "file_path": "django/utils/asyncio.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 221,
+      "context_length": 11451
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/contrib/syndication/views.py_1_FeedDoesNotExist.1",
+      "distance": 1.3541367053985596,
+      "file_path": "django/contrib/syndication/views.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 215,
+      "context_length": 11666,
+      "file_pos": 15
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Widget_Widget.use_required_attribute.1.1",
+      "distance": 1.362032175064087,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 232,
+      "end_line": 315,
+      "tokens": 624,
+      "context_length": 12290
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/views/decorators/vary.py_1_",
+      "distance": 1.366426706314087,
+      "file_path": "django/views/decorators/vary.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 232,
+      "context_length": 12522
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__promise___lazy.4.1",
+      "distance": 1.3698811531066895,
+      "file_path": "django/utils/functional.py",
+      "start_line": 143,
+      "end_line": 212,
+      "tokens": 520,
+      "context_length": 13042
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/auth/decorators.py_login_required_",
+      "distance": 1.3737918138504028,
+      "file_path": "django/contrib/auth/decorators.py",
+      "start_line": 43,
+      "end_line": 83,
+      "tokens": 276,
+      "context_length": 13318
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/auth/decorators.py_1_user_passes_test.3.1",
+      "distance": 1.377411127090454,
+      "file_path": "django/contrib/auth/decorators.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 315,
+      "context_length": 13633
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/views/decorators/csrf.py_1_",
+      "distance": 1.3846365213394165,
+      "file_path": "django/views/decorators/csrf.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 462,
+      "context_length": 14095
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/utils/functional.py_LazyObject.33_unpickle_lazyobject.2.1",
+      "distance": 1.3858795166015625,
+      "file_path": "django/utils/functional.py",
+      "start_line": 373,
+      "end_line": 395,
+      "tokens": 201,
+      "context_length": 14296
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/core/checks/registry.py_CheckRegistry_CheckRegistry.register.3.2.2.1",
+      "distance": 1.3865333795547485,
+      "file_path": "django/core/checks/registry.py",
+      "start_line": 28,
+      "end_line": 69,
+      "tokens": 254,
+      "context_length": 14550
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/utils/html.py_html_safe_",
+      "distance": 1.3885557651519775,
+      "file_path": "django/utils/html.py",
+      "start_line": 403,
+      "end_line": 422,
+      "tokens": 168,
+      "context_length": 14718
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/contrib/admin/views/decorators.py_1_",
+      "distance": 1.392557978630066,
+      "file_path": "django/contrib/admin/views/decorators.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 137,
+      "context_length": 14855
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/utils/decorators.py_make_middleware_decorator_make_middleware_decorator",
+      "distance": 1.3929760456085205,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 117,
+      "end_line": 162,
+      "tokens": 321,
+      "context_length": 15176
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_dictsort_slice_filter.2.4.2",
+      "distance": 1.3955665826797485,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 548,
+      "end_line": 641,
+      "tokens": 525,
+      "context_length": 15701
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/views/decorators/cache.py_cache_control_cache_control",
+      "distance": 1.3959473371505737,
+      "file_path": "django/views/decorators/cache.py",
+      "start_line": 29,
+      "end_line": 46,
+      "tokens": 129,
+      "context_length": 15830
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/sitemaps/views.py_datetime_x_robots_tag.2.1",
+      "distance": 1.3970959186553955,
+      "file_path": "django/contrib/sitemaps/views.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 249,
+      "context_length": 16079
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/views/decorators/common.py_1_",
+      "distance": 1.397761583328247,
+      "file_path": "django/views/decorators/common.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 112,
+      "context_length": 16191
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/admin/actions.py_1_",
+      "distance": 1.3978941440582275,
+      "file_path": "django/contrib/admin/actions.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 647,
+      "context_length": 16838
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/views/decorators/cache.py_never_cache_",
+      "distance": 1.3980224132537842,
+      "file_path": "django/views/decorators/cache.py",
+      "start_line": 49,
+      "end_line": 67,
+      "tokens": 133,
+      "context_length": 16971
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_1_sensitive_variables.4.1",
+      "distance": 1.3983430862426758,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 273,
+      "context_length": 17244
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateFilterIndexView_TemplateFilterIndexView.get_context_data.3.1",
+      "distance": 1.3998428583145142,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 102,
+      "end_line": 138,
+      "tokens": 301,
+      "context_length": 17545
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.admin_view_AdminSite.admin_view.1",
+      "distance": 1.4000951051712036,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 205,
+      "end_line": 227,
+      "tokens": 167,
+      "context_length": 17712
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.deep_deconstruct_MigrationAutodetector.deep_deconstruct.2.8.1.1",
+      "distance": 1.4020934104919434,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 52,
+      "end_line": 88,
+      "tokens": 319,
+      "context_length": 18031
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.4027047157287598,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 114,
+      "tokens": 776,
+      "context_length": 18807
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_RenameMethodsBase_RenameMethodsBase.__new__.3.1",
+      "distance": 1.4050590991973877,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 42,
+      "end_line": 84,
+      "tokens": 339,
+      "context_length": 19146
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_unordered_list_unordered_list.walk_items.2.3.1",
+      "distance": 1.405958652496338,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 644,
+      "end_line": 695,
+      "tokens": 322,
+      "context_length": 19468
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__prepare_class___lazy.__proxy__.__prepare_class__.5.2.cls.__bytes__.1",
+      "distance": 1.4088616371154785,
+      "file_path": "django/utils/functional.py",
+      "start_line": 121,
+      "end_line": 141,
+      "tokens": 211,
+      "context_length": 19679
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_urlize_force_escape.2.1",
+      "distance": 1.4125218391418457,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 365,
+      "end_line": 452,
+      "tokens": 504,
+      "context_length": 20183
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_33_get_readable_field_data_type.2.1",
+      "distance": 1.4135723114013672,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 430,
+      "end_line": 451,
+      "tokens": 132,
+      "context_length": 20315
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_1_rfc3339_date.2.1",
+      "distance": 1.4140033721923828,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 321,
+      "context_length": 20636
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_floatformat.13_floatformat.24.1",
+      "distance": 1.4142379760742188,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 183,
+      "end_line": 204,
+      "tokens": 212,
+      "context_length": 20848
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/utils/decorators.py_decorator_from_middleware_with_args_decorator_from_middleware.2.1",
+      "distance": 1.4143078327178955,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 92,
+      "end_line": 114,
+      "tokens": 152,
+      "context_length": 21000
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_links_item_ModelAdminChecks._check_list_filter.1.2.1.1",
+      "distance": 1.415295124053955,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 955,
+      "end_line": 979,
+      "tokens": 197,
+      "context_length": 21197
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ViewDetailView_ViewDetailView._get_view_func.1.2.4.5",
+      "distance": 1.415841817855835,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 164,
+      "end_line": 181,
+      "tokens": 175,
+      "context_length": 21372
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_do_for_do_for.14.1",
+      "distance": 1.416953682899475,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 768,
+      "end_line": 866,
+      "tokens": 774,
+      "context_length": 22146
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_item_ModelAdminChecks._check_list_editable_item.1.3.1.7.1.1",
+      "distance": 1.4195590019226074,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1091,
+      "end_line": 1143,
+      "tokens": 430,
+      "context_length": 22576
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py__get_non_gfk_field__get_non_gfk_field.6.1",
+      "distance": 1.420156717300415,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 294,
+      "end_line": 320,
+      "tokens": 189,
+      "context_length": 22765
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/core/checks/templates.py_check_for_template_tags_with_the_same_name_",
+      "distance": 1.4207658767700195,
+      "file_path": "django/core/checks/templates.py",
+      "start_line": 50,
+      "end_line": 76,
+      "tokens": 166,
+      "context_length": 22931
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_ForNode.render_ForNode.render.3.1",
+      "distance": 1.4216440916061401,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 183,
+      "end_line": 245,
+      "tokens": 532,
+      "context_length": 23463
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_autoescape_comment.3.1",
+      "distance": 1.422358512878418,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 545,
+      "end_line": 569,
+      "tokens": 191,
+      "context_length": 23654
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/docs/_ext/djangodocs.py_DjangoHTMLTranslator_DjangoHTMLTranslator.visit_section.5",
+      "distance": 1.4244234561920166,
+      "file_path": "docs/_ext/djangodocs.py",
+      "start_line": 111,
+      "end_line": 175,
+      "tokens": 567,
+      "context_length": 24221
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_item_ModelAdminChecks._check_list_display_item.4.1",
+      "distance": 1.4262241125106812,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 894,
+      "end_line": 928,
+      "tokens": 222,
+      "context_length": 24443
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/admin/decorators.py_register_",
+      "distance": 1.4281997680664062,
+      "file_path": "django/contrib/admin/decorators.py",
+      "start_line": 80,
+      "end_line": 112,
+      "tokens": 142,
+      "context_length": 24585
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy_lazy.__proxy__.__repr__.1.1",
+      "distance": 1.4304416179656982,
+      "file_path": "django/utils/functional.py",
+      "start_line": 87,
+      "end_line": 119,
+      "tokens": 235,
+      "context_length": 24820
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_DebugNode_FirstOfNode.render.4.1",
+      "distance": 1.4305105209350586,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 117,
+      "end_line": 156,
+      "tokens": 236,
+      "context_length": 25056
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter_SafeExceptionReporterFilter.cleanse_setting.5.1",
+      "distance": 1.4305970668792725,
+      "file_path": "django/views/debug.py",
+      "start_line": 105,
+      "end_line": 140,
+      "tokens": 262,
+      "context_length": 25318
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_filter_item_ModelAdminChecks._check_list_filter_item.3.4.field.3.3.1.1",
+      "distance": 1.4313042163848877,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 981,
+      "end_line": 1038,
+      "tokens": 457,
+      "context_length": 25775
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/views/generic/__init__.py_1_",
+      "distance": 1.4314117431640625,
+      "file_path": "django/views/generic/__init__.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 204,
+      "context_length": 25979
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_asyncio_warn_about_renamed_method.__call__",
+      "distance": 1.4334588050842285,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 228,
+      "context_length": 26207
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_WithNode_WithNode.render.2.1.1",
+      "distance": 1.4335026741027832,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 527,
+      "end_line": 542,
+      "tokens": 142,
+      "context_length": 26349
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/contrib/gis/feeds.py_GeoFeedMixin.add_georss_point_GeoFeedMixin.add_georss_point.2.4.1",
+      "distance": 1.4350497722625732,
+      "file_path": "django/contrib/gis/feeds.py",
+      "start_line": 19,
+      "end_line": 30,
+      "tokens": 135,
+      "context_length": 26484
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_ModelAdminChecks._check_list_display.2.2.1.1",
+      "distance": 1.4350757598876953,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 879,
+      "end_line": 892,
+      "tokens": 121,
+      "context_length": 26605
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_sensitive_post_parameters_sensitive_post_parameters.2.1",
+      "distance": 1.4352359771728516,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 49,
+      "end_line": 77,
+      "tokens": 199,
+      "context_length": 26804
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/forms/utils.py_flatatt_flatatt.5.1",
+      "distance": 1.435451626777649,
+      "file_path": "django/forms/utils.py",
+      "start_line": 23,
+      "end_line": 45,
+      "tokens": 195,
+      "context_length": 26999
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._get_m2m_attr_ManyToManyField._get_m2m_attr.5.1.2.1",
+      "distance": 1.4355700016021729,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1830,
+      "end_line": 1849,
+      "tokens": 189,
+      "context_length": 27188
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_RelatedFieldWidgetWrapper.get_context_RelatedFieldWidgetWrapper.id_for_label.1.1",
+      "distance": 1.436890721321106,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 297,
+      "end_line": 343,
+      "tokens": 439,
+      "context_length": 27627
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.get_context_MultiWidget.get_context.12.1",
+      "distance": 1.4371047019958496,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 882,
+      "end_line": 915,
+      "tokens": 282,
+      "context_length": 27909
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/fields.py_GenericForeignKey.get_cache_name_GenericForeignKey.get_content_type.1.3.2",
+      "distance": 1.4382704496383667,
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "start_line": 160,
+      "end_line": 172,
+      "tokens": 125,
+      "context_length": 28034
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._get_m2m_reverse_attr_ManyToManyField._get_m2m_reverse_attr.7.1",
+      "distance": 1.4383442401885986,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1851,
+      "end_line": 1879,
+      "tokens": 275,
+      "context_length": 28309
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_DeprecationInstanceCheck_MiddlewareMixin.__call__.2.6.1",
+      "distance": 1.438589096069336,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 87,
+      "end_line": 140,
+      "tokens": 382,
+      "context_length": 28691
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.default_error_",
+      "distance": 1.4415814876556396,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 187,
+      "end_line": 228,
+      "tokens": 345,
+      "context_length": 29036
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/fields.py_GenericRelation.contribute_to_class_GenericRelation.contribute_to_class.12.2",
+      "distance": 1.4423774480819702,
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "start_line": 471,
+      "end_line": 498,
+      "tokens": 258,
+      "context_length": 29294
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateTagIndexView_TemplateTagIndexView.get_context_data.3.1",
+      "distance": 1.4431791305541992,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 65,
+      "end_line": 99,
+      "tokens": 297,
+      "context_length": 29591
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/views/decorators/cache.py_1_cache_page.2.1",
+      "distance": 1.443361759185791,
+      "file_path": "django/views/decorators/cache.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 211,
+      "context_length": 29802
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_links_ModelAdminChecks._check_list_display_links.4.1",
+      "distance": 1.4434471130371094,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 930,
+      "end_line": 953,
+      "tokens": 195,
+      "context_length": 29997
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.contribute_to_class_Options.contribute_to_class.16.self.db_table_2.1",
+      "distance": 1.4441450834274292,
+      "file_path": "django/db/models/options.py",
+      "start_line": 169,
+      "end_line": 232,
+      "tokens": 596,
+      "context_length": 30593
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select.use_required_attribute_Select.use_required_attribute.6.1",
+      "distance": 1.4460525512695312,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 745,
+      "end_line": 760,
+      "tokens": 122,
+      "context_length": 30715
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view_ModelAdmin._changeform_view.16.3.title.1",
+      "distance": 1.4466636180877686,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1752,
+      "end_line": 1855,
+      "tokens": 790,
+      "context_length": 31505
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_traceback_frame_variables_SafeExceptionReporterFilter.get_traceback_frame_variables.10.1",
+      "distance": 1.4477287530899048,
+      "file_path": "django/views/debug.py",
+      "start_line": 225,
+      "end_line": 277,
+      "tokens": 471,
+      "context_length": 31976
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/utils/html.py_MLStripper__strip_once.5.1",
+      "distance": 1.4480061531066895,
+      "file_path": "django/utils/html.py",
+      "start_line": 139,
+      "end_line": 165,
+      "tokens": 149,
+      "context_length": 32125
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/flatpages/templatetags/flatpages.py_1_FlatpageNode.render.9.1",
+      "distance": 1.4480879306793213,
+      "file_path": "django/contrib/flatpages/templatetags/flatpages.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 302,
+      "context_length": 32427
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_regroup_regroup.15.1",
+      "distance": 1.4494054317474365,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1164,
+      "end_line": 1229,
+      "tokens": 647,
+      "context_length": 33074
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_LoremNode_GroupedResult.1",
+      "distance": 1.44978928565979,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 327,
+      "end_line": 345,
+      "tokens": 151,
+      "context_length": 33225
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_cycle_cycle.21.1",
+      "distance": 1.449991226196289,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 572,
+      "end_line": 662,
+      "tokens": 812,
+      "context_length": 34037
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.get_filters_ChangeList.get_filters.14.3.1",
+      "distance": 1.450437068939209,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 153,
+      "end_line": 254,
+      "tokens": 863,
+      "context_length": 34900
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/db/models/query.py_get_prefetcher_get_prefetcher.10.1",
+      "distance": 1.45054292678833,
+      "file_path": "django/db/models/query.py",
+      "start_line": 2325,
+      "end_line": 2381,
+      "tokens": 483,
+      "context_length": 35383
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model_Model.__init__.cls.20",
+      "distance": 1.451078176498413,
+      "file_path": "django/db/models/base.py",
+      "start_line": 477,
+      "end_line": 590,
+      "tokens": 953,
+      "context_length": 36336
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/contrib/syndication/views.py",
+      "position": 1,
+      "tokens": 1737,
+      "context_length": 1737
+    },
+    {
+      "file_path": "django/utils/decorators.py",
+      "position": 2,
+      "tokens": 1412,
+      "context_length": 3149
+    },
+    {
+      "file_path": "django/utils/feedgenerator.py",
+      "position": 3,
+      "tokens": 3381,
+      "context_length": 6530
+    },
+    {
+      "file_path": "django/views/decorators/http.py",
+      "position": 4,
+      "tokens": 980,
+      "context_length": 7510
+    },
+    {
+      "file_path": "django/contrib/gis/feeds.py",
+      "position": 5,
+      "tokens": 1318,
+      "context_length": 8828
+    },
+    {
+      "file_path": "django/utils/functional.py",
+      "position": 6,
+      "tokens": 3283,
+      "context_length": 12111
+    },
+    {
+      "file_path": "django/template/base.py",
+      "position": 7,
+      "tokens": 8273,
+      "context_length": 20384
+    },
+    {
+      "file_path": "django/contrib/admin/decorators.py",
+      "position": 8,
+      "tokens": 654,
+      "context_length": 21038
+    },
+    {
+      "file_path": "django/views/decorators/clickjacking.py",
+      "position": 9,
+      "tokens": 385,
+      "context_length": 21423
+    },
+    {
+      "file_path": "django/views/decorators/debug.py",
+      "position": 10,
+      "tokens": 591,
+      "context_length": 22014
+    },
+    {
+      "file_path": "django/template/defaultfilters.py",
+      "position": 11,
+      "tokens": 6480,
+      "context_length": 28494
+    },
+    {
+      "file_path": "django/dispatch/dispatcher.py",
+      "position": 12,
+      "tokens": 2105,
+      "context_length": 30599
+    },
+    {
+      "file_path": "django/contrib/gis/views.py",
+      "position": 13,
+      "tokens": 160,
+      "context_length": 30759
+    },
+    {
+      "file_path": "django/utils/deconstruct.py",
+      "position": 14,
+      "tokens": 403,
+      "context_length": 31162
+    },
+    {
+      "file_path": "django/utils/asyncio.py",
+      "position": 15,
+      "tokens": 222,
+      "context_length": 31384
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 16,
+      "tokens": 8257,
+      "context_length": 39641
+    },
+    {
+      "file_path": "django/views/decorators/vary.py",
+      "position": 17,
+      "tokens": 233,
+      "context_length": 39874
+    },
+    {
+      "file_path": "django/contrib/auth/decorators.py",
+      "position": 18,
+      "tokens": 592,
+      "context_length": 40466
+    },
+    {
+      "file_path": "django/views/decorators/csrf.py",
+      "position": 19,
+      "tokens": 463,
+      "context_length": 40929
+    },
+    {
+      "file_path": "django/core/checks/registry.py",
+      "position": 20,
+      "tokens": 678,
+      "context_length": 41607
+    },
+    {
+      "file_path": "django/utils/html.py",
+      "position": 21,
+      "tokens": 3252,
+      "context_length": 44859
+    },
+    {
+      "file_path": "django/contrib/admin/views/decorators.py",
+      "position": 22,
+      "tokens": 138,
+      "context_length": 44997
+    },
+    {
+      "file_path": "django/views/decorators/cache.py",
+      "position": 23,
+      "tokens": 475,
+      "context_length": 45472
+    },
+    {
+      "file_path": "django/contrib/sitemaps/views.py",
+      "position": 24,
+      "tokens": 1159,
+      "context_length": 46631
+    },
+    {
+      "file_path": "django/views/decorators/common.py",
+      "position": 25,
+      "tokens": 113,
+      "context_length": 46744
+    },
+    {
+      "file_path": "django/contrib/admin/actions.py",
+      "position": 26,
+      "tokens": 647,
+      "context_length": 47391
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 27,
+      "tokens": 3482,
+      "context_length": 50873
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 28,
+      "tokens": 4452,
+      "context_length": 55325
+    },
+    {
+      "file_path": "django/db/migrations/autodetector.py",
+      "position": 29,
+      "tokens": 13363,
+      "context_length": 68688
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 30,
+      "tokens": 19267,
+      "context_length": 87955
+    },
+    {
+      "file_path": "django/utils/deprecation.py",
+      "position": 31,
+      "tokens": 1071,
+      "context_length": 89026
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 32,
+      "tokens": 9532,
+      "context_length": 98558
+    },
+    {
+      "file_path": "django/template/defaulttags.py",
+      "position": 33,
+      "tokens": 10773,
+      "context_length": 109331
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 34,
+      "tokens": 4206,
+      "context_length": 113537
+    },
+    {
+      "file_path": "django/core/checks/templates.py",
+      "position": 35,
+      "tokens": 479,
+      "context_length": 114016
+    },
+    {
+      "file_path": "docs/_ext/djangodocs.py",
+      "position": 36,
+      "tokens": 3224,
+      "context_length": 117240
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 37,
+      "tokens": 4746,
+      "context_length": 121986
+    },
+    {
+      "file_path": "django/views/generic/__init__.py",
+      "position": 38,
+      "tokens": 205,
+      "context_length": 122191
+    },
+    {
+      "file_path": "django/forms/utils.py",
+      "position": 39,
+      "tokens": 1719,
+      "context_length": 123910
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 40,
+      "tokens": 14612,
+      "context_length": 138522
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 41,
+      "tokens": 4184,
+      "context_length": 142706
+    },
+    {
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "position": 42,
+      "tokens": 5627,
+      "context_length": 148333
+    },
+    {
+      "file_path": "django/core/checks/model_checks.py",
+      "position": 43,
+      "tokens": 1810,
+      "context_length": 150143
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 44,
+      "tokens": 7502,
+      "context_length": 157645
+    },
+    {
+      "file_path": "django/contrib/flatpages/templatetags/flatpages.py",
+      "position": 45,
+      "tokens": 779,
+      "context_length": 158424
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 46,
+      "tokens": 4531,
+      "context_length": 162955
+    },
+    {
+      "file_path": "django/db/models/query.py",
+      "position": 47,
+      "tokens": 20173,
+      "context_length": 183128
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 48,
+      "tokens": 18545,
+      "context_length": 201673
+    }
+  ]
+}

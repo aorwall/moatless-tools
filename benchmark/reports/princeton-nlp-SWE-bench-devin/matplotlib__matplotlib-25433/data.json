@@ -1,0 +1,967 @@
+{
+  "instance_id": "matplotlib__matplotlib-25433",
+  "model_patch": "diff --git a/lib/matplotlib/widgets.py b/lib/matplotlib/widgets.py\nindex ebe5da43e2..a25e76d1bb 100644\n--- a/lib/matplotlib/widgets.py\n+++ b/lib/matplotlib/widgets.py\n@@ -600,7 +600,13 @@ class Slider(SliderBase):\n         int\n             Connection id (which can be used to disconnect *func*).\n         \"\"\"\n-        return self._observers.connect('changed', lambda val: func(val))\n+        # Wrap the original function to add debugging output\n+        def wrapper(val):\n+            print(f\"on_changed before func: val={val}, slider.val={self.val}\")\n+            func(val)\n+            print(f\"on_changed after func: val={val}, slider.val={self.val}\")\n+\n+        return self._observers.connect('changed', wrapper)\n \n \n class RangeSlider(SliderBase):\n@@ -983,7 +989,13 @@ class RangeSlider(SliderBase):\n         int\n             Connection id (which can be used to disconnect *func*).\n         \"\"\"\n-        return self._observers.connect('changed', lambda val: func(val))\n+        # Wrap the original function to add debugging output\n+        def wrapper(val):\n+            print(f\"RangeSlider on_changed before func: val={val}, slider.val={self.val}\")\n+            func(val)\n+            print(f\"RangeSlider on_changed after func: val={val}, slider.val={self.val}\")\n+\n+        return self._observers.connect('changed', wrapper)\n \n \n def _expand_text_props(props):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/widgets.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "7eafdd8af3c523c1c77b027d378fb337dd489f18",
+  "patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -931,6 +931,7 @@ def _break_share_link(ax, grouper):\n         self._axobservers.process(\"_axes_change_event\", self)\n         self.stale = True\n         self._localaxes.remove(ax)\n+        self.canvas.release_mouse(ax)\n \n         # Break link between any shared axes\n         for name in ax._axis_names:\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_backend_bases.py b/lib/matplotlib/tests/test_backend_bases.py\n--- a/lib/matplotlib/tests/test_backend_bases.py\n+++ b/lib/matplotlib/tests/test_backend_bases.py\n@@ -95,6 +95,16 @@ def test_non_gui_warning(monkeypatch):\n                 in str(rec[0].message))\n \n \n+def test_grab_clear():\n+    fig, ax = plt.subplots()\n+\n+    fig.canvas.grab_mouse(ax)\n+    assert fig.canvas.mouse_grabber == ax\n+\n+    fig.clear()\n+    assert fig.canvas.mouse_grabber is None\n+\n+\n @pytest.mark.parametrize(\n     \"x, y\", [(42, 24), (None, 42), (None, None), (200, 100.01), (205.75, 2.0)])\n def test_location_event_position(x, y):\n",
+  "problem_statement": "[Bug]: using clf and pyplot.draw in range slider on_changed callback blocks input to widgets\n### Bug summary\n\nWhen using clear figure, adding new widgets and then redrawing the current figure in the on_changed callback of a range slider the inputs to all the widgets in the figure are blocked. When doing the same in the button callback on_clicked, everything works fine.\n\n### Code for reproduction\n\n```python\nimport matplotlib.pyplot as pyplot\r\nimport matplotlib.widgets as widgets\r\n\r\ndef onchanged(values):\r\n    print(\"on changed\")\r\n    print(values)\r\n    pyplot.clf()\r\n    addElements()\r\n    pyplot.draw()\r\n\r\ndef onclick(e):\r\n    print(\"on click\")\r\n    pyplot.clf()\r\n    addElements()\r\n    pyplot.draw()\r\n\r\ndef addElements():\r\n    ax = pyplot.axes([0.1, 0.45, 0.8, 0.1])\r\n    global slider\r\n    slider = widgets.RangeSlider(ax, \"Test\", valmin=1, valmax=10, valinit=(1, 10))\r\n    slider.on_changed(onchanged)\r\n    ax = pyplot.axes([0.1, 0.30, 0.8, 0.1])\r\n    global button\r\n    button = widgets.Button(ax, \"Test\")\r\n    button.on_clicked(onclick)\r\n\r\naddElements()\r\n\r\npyplot.show()\n```\n\n\n### Actual outcome\n\nThe widgets can't receive any input from a mouse click, when redrawing in the on_changed callback of a range Slider. \r\nWhen using a button, there is no problem.\n\n### Expected outcome\n\nThe range slider callback on_changed behaves the same as the button callback on_clicked.\n\n### Additional information\n\nThe problem also occurred on Manjaro with:\r\n- Python version: 3.10.9\r\n- Matplotlib version: 3.6.2\r\n- Matplotlib backend: QtAgg\r\n- Installation of matplotlib via Linux package manager\r\n\n\n### Operating system\n\nWindows 10\n\n### Matplotlib Version\n\n3.6.2\n\n### Matplotlib Backend\n\nTkAgg\n\n### Python version\n\n3.11.0\n\n### Jupyter version\n\n_No response_\n\n### Installation\n\npip\n",
+  "hints_text": "A can confirm this behavior, but removing and recreating the objects that host the callbacks in the callbacks is definitely on the edge of the intended usage.  \r\n\r\nWhy are you doing this?  In your application can you get away with not destroying your slider?\nI think there could be a way to not destroy the slider. But I don't have the time to test that currently.\r\nMy workaround for the problem was using a button to redraw everything. With that everything is working fine.\r\n\r\nThat was the weird part for me as they are both callbacks, but in one everything works fine and in the other one all inputs are blocked. If what I'm trying doing is not the intended usage, that's fine for me. \r\nThanks for the answer.\nThe idiomatic way to destructively work on widgets that triggered an event in a UI toolkit is to do the destructive work in an idle callback:\r\n```python\r\ndef redraw():\r\n    pyplot.clf()\r\n    addElements()\r\n    pyplot.draw()\r\n    return False\r\n\r\ndef onchanged(values):\r\n    print(\"on changed\")\r\n    print(values)\r\n    pyplot.gcf().canvas.new_timer(redraw)\r\n```\nThanks for the answer. I tried that with the code in the original post.\r\nThe line:\r\n\r\n```python\r\npyplot.gcf().canvas.new_timer(redraw)\r\n```\r\ndoesn't work for me. After having a look at the documentation, I think the line should be:\r\n\r\n```python\r\npyplot.gcf().canvas.new_timer(callbacks=[(redraw, tuple(), dict())])\r\n```\r\n\r\nBut that still didn't work. The redraw callback doesn't seem to trigger.\nSorry, I mean to update that after testing and before posting, but forgot to. That line should be:\r\n```\r\n    pyplot.gcf().canvas.new_timer(callbacks=[redraw])\r\n```\nSorry for double posting; now I see that it didn't actually get called!\r\n\r\nThat's because I forgot to call `start` as well, and the timer was garbage collected at the end of the function. It should be called as you've said, but stored globally and started:\r\n```\r\nimport matplotlib.pyplot as pyplot\r\nimport matplotlib.widgets as widgets\r\n\r\n\r\ndef redraw():\r\n    print(\"redraw\")\r\n    pyplot.clf()\r\n    addElements()\r\n    pyplot.draw()\r\n    return False\r\n\r\n\r\ndef onchanged(values):\r\n    print(\"on changed\")\r\n    print(values)\r\n    global timer\r\n    timer = pyplot.gcf().canvas.new_timer(callbacks=[(redraw, (), {})])\r\n    timer.start()\r\n\r\n\r\ndef onclick(e):\r\n    print(\"on click\")\r\n    global timer\r\n    timer = pyplot.gcf().canvas.new_timer(callbacks=[(redraw, (), {})])\r\n    timer.start()\r\n\r\n\r\ndef addElements():\r\n    ax = pyplot.axes([0.1, 0.45, 0.8, 0.1])\r\n    global slider\r\n    slider = widgets.RangeSlider(ax, \"Test\", valmin=1, valmax=10, valinit=(1, 10))\r\n    slider.on_changed(onchanged)\r\n    ax = pyplot.axes([0.1, 0.30, 0.8, 0.1])\r\n    global button\r\n    button = widgets.Button(ax, \"Test\")\r\n    button.on_clicked(onclick)\r\n\r\n\r\naddElements()\r\n\r\npyplot.show()\r\n```\nThanks for the answer, the code works without errors, but I'm still able to break it when using the range slider. Then it results in the same problem as my original post. It seems like that happens when triggering the onchanged callback at the same time the timer callback gets called.\nAre you sure it's not working, or is it just that it got replaced by a new one that is using the same initial value again? For me, it moves, but once the callback runs, it's reset because the slider is created with `valinit=(1, 10)`.\nThe code redraws everything fine, but when the onchanged callback of the range slider gets called at the same time as the redraw callback of the timer, I'm not able to give any new inputs to the widgets. You can maybe reproduce that with changing the value of the slider the whole time, while waiting for the redraw.\nI think what is happening is that because you are destroying the slider every time the you are also destroying the state of what value you changed it to.  When you create it you re-create it at the default value which produces the effect that you can not seem to change it.  Put another way, the state of what the current value of the slider is is in the `Slider` object.   Replacing the slider object with a new one (correctly) forgets the old value.\r\n\r\n-----\r\n\r\nI agree it fails in surprising ways, but I think that this is best case \"undefined behavior\" and worst case incorrect usage of the tools.  In either case there is not much we can do upstream to address this (as if the user _did_ want to get fresh sliders that is not a case we should prevent from happening or warn on).\nThe \"forgetting the value\" is not the problem. My problem is, that the input just blocks for every widget in the figure. When that happens, you can click on any widget, but no callback gets triggered. That problem seems to happen when a callback of an object gets called that is/has been destroyed, but I don't know for sure.\r\n\r\nBut if that is from the incorrect usage of the tools, that's fine for me. I got a decent workaround that works currently, so I just have to keep that in my code for now.",
+  "created_at": "2023-03-11T08:36:32Z",
+  "version": "3.7",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_backend_bases.py::test_grab_clear\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_backend_bases.py::test_canvas_change\", \"lib/matplotlib/tests/test_backend_bases.py::test_canvas_ctor\", \"lib/matplotlib/tests/test_backend_bases.py::test_draw[pdf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_draw[pgf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_draw[ps]\", \"lib/matplotlib/tests/test_backend_bases.py::test_draw[svg]\", \"lib/matplotlib/tests/test_backend_bases.py::test_get_default_filename\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-1-expected2-horizontal-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-1-expected2-horizontal-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-1-expected2-vertical-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-1-expected2-vertical-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-3-expected3-horizontal-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-3-expected3-horizontal-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-3-expected3-vertical-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[pan-3-expected3-vertical-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-1-expected0-horizontal-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-1-expected0-horizontal-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-1-expected0-vertical-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-1-expected0-vertical-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-3-expected1-horizontal-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-3-expected1-horizontal-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-3-expected1-vertical-contourf]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_colorbar[zoom-3-expected1-vertical-imshow]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend0-expectedxlim0-expectedylim0]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend1-expectedxlim1-expectedylim1]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend2-expectedxlim2-expectedylim2]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend3-expectedxlim3-expectedylim3]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend4-expectedxlim4-expectedylim4]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend5-expectedxlim5-expectedylim5]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend6-expectedxlim6-expectedylim6]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[None-mouseend7-expectedxlim7-expectedylim7]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[control-mouseend16-expectedxlim16-expectedylim16]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[control-mouseend17-expectedxlim17-expectedylim17]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend10-expectedxlim10-expectedylim10]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend11-expectedxlim11-expectedylim11]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend12-expectedxlim12-expectedylim12]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend13-expectedxlim13-expectedylim13]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend8-expectedxlim8-expectedylim8]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[shift-mouseend9-expectedxlim9-expectedylim9]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[x-mouseend14-expectedxlim14-expectedylim14]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_pan[y-mouseend15-expectedxlim15-expectedylim15]\", \"lib/matplotlib/tests/test_backend_bases.py::test_interactive_zoom\", \"lib/matplotlib/tests/test_backend_bases.py::test_location_event_position[200-100.01]\", \"lib/matplotlib/tests/test_backend_bases.py::test_location_event_position[205.75-2.0]\", \"lib/matplotlib/tests/test_backend_bases.py::test_location_event_position[42-24]\", \"lib/matplotlib/tests/test_backend_bases.py::test_location_event_position[None-42]\", \"lib/matplotlib/tests/test_backend_bases.py::test_location_event_position[None-None]\", \"lib/matplotlib/tests/test_backend_bases.py::test_non_gui_warning\", \"lib/matplotlib/tests/test_backend_bases.py::test_pick\", \"lib/matplotlib/tests/test_backend_bases.py::test_toolbar_zoompan\", \"lib/matplotlib/tests/test_backend_bases.py::test_toolmanager_get_tool\", \"lib/matplotlib/tests/test_backend_bases.py::test_toolmanager_remove\", \"lib/matplotlib/tests/test_backend_bases.py::test_toolmanager_update_keymap\", \"lib/matplotlib/tests/test_backend_bases.py::test_uses_per_path\", \"lib/matplotlib/tests/test_backend_bases.py::test_widgetlock_zoompan\"]",
+  "environment_setup_commit": "0849036fd992a2dd133a0cffc3f84f58ccf1840f",
+  "patch_files": [
+    "lib/matplotlib/figure.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_backend_bases.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/figure.py": {
+      "diffs": [
+        {
+          "start_line_old": 934,
+          "end_line_old": 934,
+          "file_pos": 12,
+          "file_context_length": 115514,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_Figure.waitforbuttonpress_Figure.waitforbuttonpress.5.1",
+          "closest_snippet_line_distance": 2523
+        }
+      ]
+    }
+  },
+  "vectors": 3850,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_1_SliderBase.reset.2.1",
+      "distance": 0.8024961352348328,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 1,
+      "end_line": 331,
+      "tokens": 2375,
+      "context_length": 2375
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/range_slider.py_update_",
+      "distance": 0.8531730771064758,
+      "file_path": "galleries/examples/widgets/range_slider.py",
+      "start_line": 45,
+      "end_line": 72,
+      "tokens": 168,
+      "context_length": 2543
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_Slider_CheckButtons._clicked.5.2",
+      "distance": 0.8699936866760254,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 334,
+      "end_line": 1143,
+      "tokens": 6393,
+      "context_length": 8936
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3.scroll_event_FigureCanvasGTK3.size_allocate.6",
+      "distance": 0.8841238617897034,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 134,
+      "end_line": 194,
+      "tokens": 568,
+      "context_length": 9504
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/check_buttons.py_1_",
+      "distance": 0.9088919162750244,
+      "file_path": "galleries/examples/widgets/check_buttons.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 440,
+      "context_length": 9944
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_FigureCanvasTk.button_dblclick_event_FigureCanvasTk.scroll_event.3",
+      "distance": 0.9107518196105957,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 325,
+      "end_line": 343,
+      "tokens": 205,
+      "context_length": 10149
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/widgets.py_CheckButtons.set_active_SubplotTool._on_reset.4",
+      "distance": 0.9148330092430115,
+      "file_path": "lib/matplotlib/widgets.py",
+      "start_line": 1198,
+      "end_line": 1942,
+      "tokens": 6229,
+      "context_length": 16378
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_bases.py_FigureCanvasBase.get_default_filetype_NonGuiException.2",
+      "distance": 0.9217196702957153,
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "start_line": 2411,
+      "end_line": 2780,
+      "tokens": 2862,
+      "context_length": 19240
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/range_slider.py_1_upper_limit_line.1",
+      "distance": 0.9323205351829529,
+      "file_path": "galleries/examples/widgets/range_slider.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 340,
+      "context_length": 19580
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/slider_snap_demo.py_1_",
+      "distance": 0.9330101013183594,
+      "file_path": "galleries/examples/widgets/slider_snap_demo.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 584,
+      "context_length": 20164
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/pylab_with_gtk3_sgskip.py_1_",
+      "distance": 0.9481602311134338,
+      "file_path": "galleries/examples/user_interfaces/pylab_with_gtk3_sgskip.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 388,
+      "context_length": 20552
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_FigureCanvasGTK4.scroll_event_FigureCanvasGTK4.resize_event.7",
+      "distance": 0.9484339952468872,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 115,
+      "end_line": 176,
+      "tokens": 513,
+      "context_length": 21065
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/slider_demo.py_1_",
+      "distance": 0.9508485794067383,
+      "file_path": "galleries/examples/widgets/slider_demo.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 591,
+      "context_length": 21656
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/rectangle_selector.py_toggle_selector_",
+      "distance": 0.9563759565353394,
+      "file_path": "galleries/examples/widgets/rectangle_selector.py",
+      "start_line": 31,
+      "end_line": 75,
+      "tokens": 335,
+      "context_length": 21991
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_Figure.ginput.handler_Figure.ginput.9.1",
+      "distance": 0.9598581194877625,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 3413,
+      "end_line": 3455,
+      "tokens": 432,
+      "context_length": 22423,
+      "file_pos": 12
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_FigureCanvasTk.button_press_event_FigureCanvasTk.button_press_event.2",
+      "distance": 0.9674661159515381,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 313,
+      "end_line": 323,
+      "tokens": 137,
+      "context_length": 22560
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_FigureCanvasTk_FigureCanvasTk.__init__.self._rubberband_rect_white.1",
+      "distance": 0.9763951301574707,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 164,
+      "end_line": 235,
+      "tokens": 738,
+      "context_length": 23298
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/pylab_with_gtk4_sgskip.py_1_",
+      "distance": 0.9797633290290833,
+      "file_path": "galleries/examples/user_interfaces/pylab_with_gtk4_sgskip.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 335,
+      "context_length": 23633
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore.handle_button_press_FigureCanvasWebAggCore.handle_refresh.6",
+      "distance": 0.9807273745536804,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 309,
+      "end_line": 333,
+      "tokens": 240,
+      "context_length": 23873
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3.on_draw_event_FigureCanvasGTK3.flush_events.context.2.1",
+      "distance": 0.9818353652954102,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 273,
+      "end_line": 298,
+      "tokens": 172,
+      "context_length": 24045
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/galleries/examples/event_handling/ginput_manual_clabel_sgskip.py_1_",
+      "distance": 0.9882915019989014,
+      "file_path": "galleries/examples/event_handling/ginput_manual_clabel_sgskip.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 631,
+      "context_length": 24676
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3_FigureCanvasGTK3.set_cursor.window.2.3",
+      "distance": 0.9913959503173828,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 55,
+      "end_line": 110,
+      "tokens": 524,
+      "context_length": 25200
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/galleries/examples/event_handling/data_browser.py_4_",
+      "distance": 0.9946994781494141,
+      "file_path": "galleries/examples/event_handling/data_browser.py",
+      "start_line": 91,
+      "end_line": 111,
+      "tokens": 160,
+      "context_length": 25360
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3._post_draw_FigureCanvasGTK3._post_draw.22",
+      "distance": 0.9970845580101013,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 243,
+      "end_line": 271,
+      "tokens": 282,
+      "context_length": 25642
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/annotated_cursor.py_7_",
+      "distance": 0.9991556406021118,
+      "file_path": "galleries/examples/widgets/annotated_cursor.py",
+      "start_line": 288,
+      "end_line": 357,
+      "tokens": 568,
+      "context_length": 26210
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3agg.py_FigureCanvasGTK3Agg.blit_",
+      "distance": 1.0027706623077393,
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "start_line": 50,
+      "end_line": 75,
+      "tokens": 246,
+      "context_length": 26456
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/galleries/examples/event_handling/path_editor.py_PathInteractor.on_draw_PathInteractor.on_key_press.4",
+      "distance": 1.0036509037017822,
+      "file_path": "galleries/examples/event_handling/path_editor.py",
+      "start_line": 92,
+      "end_line": 123,
+      "tokens": 230,
+      "context_length": 26686
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore._handle_mouse_FigureCanvasWebAggCore._handle_mouse.10.5.1",
+      "distance": 1.0042604207992554,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 283,
+      "end_line": 308,
+      "tokens": 311,
+      "context_length": 26997
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_FigureCanvasGTK4.on_draw_event_FigureCanvasGTK4.flush_events.context.2.1",
+      "distance": 1.0061341524124146,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 262,
+      "end_line": 287,
+      "tokens": 172,
+      "context_length": 27169
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_FigureCanvasGTK4._post_draw_FigureCanvasGTK4._post_draw.24",
+      "distance": 1.0119990110397339,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 225,
+      "end_line": 260,
+      "tokens": 337,
+      "context_length": 27506
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3._get_key_FigureCanvasGTK3._draw_rubberband.3",
+      "distance": 1.0134382247924805,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 207,
+      "end_line": 241,
+      "tokens": 351,
+      "context_length": 27857
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/embedding_in_tk_sgskip.py_1_",
+      "distance": 1.0164198875427246,
+      "file_path": "galleries/examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 466,
+      "context_length": 28323
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py_8_",
+      "distance": 1.0165276527404785,
+      "file_path": "galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py",
+      "start_line": 69,
+      "end_line": 88,
+      "tokens": 140,
+      "context_length": 28463
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_SubplotToolQt._on_value_changed_SubplotToolQt._on_value_changed.5",
+      "distance": 1.0173485279083252,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 887,
+      "end_line": 895,
+      "tokens": 140,
+      "context_length": 28603
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/radio_buttons.py_1_",
+      "distance": 1.0177748203277588,
+      "file_path": "galleries/examples/widgets/radio_buttons.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 559,
+      "context_length": 29162
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/embedding_in_gtk3_sgskip.py_1_",
+      "distance": 1.0237011909484863,
+      "file_path": "galleries/examples/user_interfaces/embedding_in_gtk3_sgskip.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 246,
+      "context_length": 29408
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/mpl_with_glade3_sgskip.py_1_",
+      "distance": 1.0255335569381714,
+      "file_path": "galleries/examples/user_interfaces/mpl_with_glade3_sgskip.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 309,
+      "context_length": 29717
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_FigureCanvasGTK4_FigureCanvasGTK4.set_cursor.2",
+      "distance": 1.0256223678588867,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 33,
+      "end_line": 91,
+      "tokens": 466,
+      "context_length": 30183
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_gtk.py_RubberbandGTK_",
+      "distance": 1.0294513702392578,
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "start_line": 311,
+      "end_line": 333,
+      "tokens": 180,
+      "context_length": 30363
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/buttons.py_1_",
+      "distance": 1.0310155153274536,
+      "file_path": "galleries/examples/widgets/buttons.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 384,
+      "context_length": 30747
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py_on_draw_on_draw.5.2",
+      "distance": 1.0317997932434082,
+      "file_path": "galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py",
+      "start_line": 52,
+      "end_line": 66,
+      "tokens": 151,
+      "context_length": 30898
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/fourier_demo_wx_sgskip.py_SliderGroup_SliderGroup.setKnob.2",
+      "distance": 1.032268762588501,
+      "file_path": "galleries/examples/user_interfaces/fourier_demo_wx_sgskip.py",
+      "start_line": 68,
+      "end_line": 103,
+      "tokens": 299,
+      "context_length": 31197
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_qt.py_FigureCanvasQT.enterEvent_FigureCanvasQT.mouseReleaseEvent.2.1",
+      "distance": 1.0344154834747314,
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "start_line": 269,
+      "end_line": 313,
+      "tokens": 368,
+      "context_length": 31565
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/mplcvd.py__setup_qt__setup_qt.17",
+      "distance": 1.035109043121338,
+      "file_path": "galleries/examples/user_interfaces/mplcvd.py",
+      "start_line": 181,
+      "end_line": 211,
+      "tokens": 240,
+      "context_length": 31805
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/lasso_selector_demo_sgskip.py_6_",
+      "distance": 1.0370683670043945,
+      "file_path": "galleries/examples/widgets/lasso_selector_demo_sgskip.py",
+      "start_line": 76,
+      "end_line": 112,
+      "tokens": 239,
+      "context_length": 32044
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_Figure.waitforbuttonpress_Figure.waitforbuttonpress.5.1",
+      "distance": 1.037246823310852,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 3457,
+      "end_line": 3475,
+      "tokens": 153,
+      "context_length": 32197,
+      "file_pos": 30
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/qt_editor/figureoptions.py_figure_edit.apply_callback_",
+      "distance": 1.0379102230072021,
+      "file_path": "lib/matplotlib/backends/qt_editor/figureoptions.py",
+      "start_line": 177,
+      "end_line": 264,
+      "tokens": 735,
+      "context_length": 32932
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/embedding_in_gtk4_sgskip.py_1_",
+      "distance": 1.0386650562286377,
+      "file_path": "galleries/examples/user_interfaces/embedding_in_gtk4_sgskip.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 300,
+      "context_length": 33232
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/mplcvd.py__setup_tk__setup_tk.12",
+      "distance": 1.0406652688980103,
+      "file_path": "galleries/examples/user_interfaces/mplcvd.py",
+      "start_line": 214,
+      "end_line": 230,
+      "tokens": 157,
+      "context_length": 33389
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/galleries/examples/event_handling/zoom_window.py_1_",
+      "distance": 1.0424067974090576,
+      "file_path": "galleries/examples/event_handling/zoom_window.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 442,
+      "context_length": 33831
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/testing/widgets.py_1_mock_event.12.1",
+      "distance": 1.0438838005065918,
+      "file_path": "lib/matplotlib/testing/widgets.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 420,
+      "context_length": 34251
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/mplcvd.py__setup_gtk__setup_gtk.8",
+      "distance": 1.044713020324707,
+      "file_path": "galleries/examples/user_interfaces/mplcvd.py",
+      "start_line": 116,
+      "end_line": 178,
+      "tokens": 452,
+      "context_length": 34703
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/galleries/examples/event_handling/figure_axes_enter_leave.py_1_",
+      "distance": 1.0460532903671265,
+      "file_path": "galleries/examples/event_handling/figure_axes_enter_leave.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 323,
+      "context_length": 35026
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_FigureCanvasTk._get_key_FigureCanvasTk.set_cursor.1.2.1",
+      "distance": 1.046823501586914,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 387,
+      "end_line": 438,
+      "tokens": 419,
+      "context_length": 35445
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk4.py_FigureCanvasGTK4._update_device_pixel_ratio_FigureCanvasGTK4._draw_func.2",
+      "distance": 1.048251986503601,
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "start_line": 210,
+      "end_line": 223,
+      "tokens": 139,
+      "context_length": 35584
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/galleries/examples/user_interfaces/embedding_in_wx3_sgskip.py_wx_PlotPanel.__init__.14",
+      "distance": 1.048948049545288,
+      "file_path": "galleries/examples/user_interfaces/embedding_in_wx3_sgskip.py",
+      "start_line": 24,
+      "end_line": 55,
+      "tokens": 256,
+      "context_length": 35840
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/galleries/examples/widgets/annotated_cursor.py_AnnotatedCursor.clear_AnnotatedCursor._update.2.1",
+      "distance": 1.0514326095581055,
+      "file_path": "galleries/examples/widgets/annotated_cursor.py",
+      "start_line": 260,
+      "end_line": 285,
+      "tokens": 187,
+      "context_length": 36027
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_uuid_TK_PHOTO_COMPOSITE_SET.1",
+      "distance": 1.054462194442749,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 364,
+      "context_length": 36391
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_clf_draw.2",
+      "distance": 1.0558738708496094,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 994,
+      "end_line": 1016,
+      "tokens": 156,
+      "context_length": 36547
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_gtk.py__NavigationToolbar2GTK__NavigationToolbar2GTK.set_history_buttons.4.1",
+      "distance": 1.0563169717788696,
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "start_line": 268,
+      "end_line": 308,
+      "tokens": 376,
+      "context_length": 36923
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_FigureCanvasTk.scroll_event_windows_FigureCanvasTk.scroll_event_windows.8",
+      "distance": 1.0595824718475342,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 345,
+      "end_line": 357,
+      "tokens": 154,
+      "context_length": 37077
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_functools__create_wxapp.4.1",
+      "distance": 1.0628026723861694,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 10,
+      "end_line": 60,
+      "tokens": 343,
+      "context_length": 37420
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3.py_FigureCanvasGTK3._mpl_modifiers_FigureCanvasGTK3._mpl_modifiers.2.1",
+      "distance": 1.062949776649475,
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "start_line": 196,
+      "end_line": 205,
+      "tokens": 121,
+      "context_length": 37541
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_webagg_core.py_FigureCanvasWebAggCore_FigureCanvasWebAggCore.draw_idle.1",
+      "distance": 1.0649852752685547,
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "start_line": 157,
+      "end_line": 200,
+      "tokens": 387,
+      "context_length": 37928
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3cairo.py_1_",
+      "distance": 1.0657470226287842,
+      "file_path": "lib/matplotlib/backends/backend_gtk3cairo.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 226,
+      "context_length": 38154
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_tools.py_ToolZoom._release_ToolZoom._release.9",
+      "distance": 1.0679044723510742,
+      "file_path": "lib/matplotlib/backend_tools.py",
+      "start_line": 799,
+      "end_line": 837,
+      "tokens": 330,
+      "context_length": 38484
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_NavigationToolbar2Tk._update_buttons_checked_NavigationToolbar2Tk.set_message.1",
+      "distance": 1.068068504333496,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 688,
+      "end_line": 706,
+      "tokens": 154,
+      "context_length": 38638
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_tk.py_RubberbandTk_RubberbandTk.lastrect.1",
+      "distance": 1.0685436725616455,
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "start_line": 950,
+      "end_line": 961,
+      "tokens": 137,
+      "context_length": 38775
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/widgets.py",
+      "position": 1,
+      "tokens": 34490,
+      "context_length": 34490
+    },
+    {
+      "file_path": "galleries/examples/widgets/range_slider.py",
+      "position": 2,
+      "tokens": 508,
+      "context_length": 34998
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3.py",
+      "position": 3,
+      "tokens": 4994,
+      "context_length": 39992
+    },
+    {
+      "file_path": "galleries/examples/widgets/check_buttons.py",
+      "position": 4,
+      "tokens": 440,
+      "context_length": 40432
+    },
+    {
+      "file_path": "lib/matplotlib/backends/_backend_tk.py",
+      "position": 5,
+      "tokens": 9678,
+      "context_length": 50110
+    },
+    {
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "position": 6,
+      "tokens": 29039,
+      "context_length": 79149
+    },
+    {
+      "file_path": "galleries/examples/widgets/slider_snap_demo.py",
+      "position": 7,
+      "tokens": 584,
+      "context_length": 79733
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/pylab_with_gtk3_sgskip.py",
+      "position": 8,
+      "tokens": 388,
+      "context_length": 80121
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk4.py",
+      "position": 9,
+      "tokens": 4761,
+      "context_length": 84882
+    },
+    {
+      "file_path": "galleries/examples/widgets/slider_demo.py",
+      "position": 10,
+      "tokens": 591,
+      "context_length": 85473
+    },
+    {
+      "file_path": "galleries/examples/widgets/rectangle_selector.py",
+      "position": 11,
+      "tokens": 565,
+      "context_length": 86038
+    },
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 12,
+      "tokens": 29476,
+      "context_length": 115514
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/pylab_with_gtk4_sgskip.py",
+      "position": 13,
+      "tokens": 335,
+      "context_length": 115849
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_webagg_core.py",
+      "position": 14,
+      "tokens": 4026,
+      "context_length": 119875
+    },
+    {
+      "file_path": "galleries/examples/event_handling/ginput_manual_clabel_sgskip.py",
+      "position": 15,
+      "tokens": 631,
+      "context_length": 120506
+    },
+    {
+      "file_path": "galleries/examples/event_handling/data_browser.py",
+      "position": 16,
+      "tokens": 763,
+      "context_length": 121269
+    },
+    {
+      "file_path": "galleries/examples/widgets/annotated_cursor.py",
+      "position": 17,
+      "tokens": 2955,
+      "context_length": 124224
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "position": 18,
+      "tokens": 596,
+      "context_length": 124820
+    },
+    {
+      "file_path": "galleries/examples/event_handling/path_editor.py",
+      "position": 19,
+      "tokens": 1111,
+      "context_length": 125931
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/embedding_in_tk_sgskip.py",
+      "position": 20,
+      "tokens": 466,
+      "context_length": 126397
+    },
+    {
+      "file_path": "galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py",
+      "position": 21,
+      "tokens": 715,
+      "context_length": 127112
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_qt.py",
+      "position": 22,
+      "tokens": 8638,
+      "context_length": 135750
+    },
+    {
+      "file_path": "galleries/examples/widgets/radio_buttons.py",
+      "position": 23,
+      "tokens": 559,
+      "context_length": 136309
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/embedding_in_gtk3_sgskip.py",
+      "position": 24,
+      "tokens": 246,
+      "context_length": 136555
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/mpl_with_glade3_sgskip.py",
+      "position": 25,
+      "tokens": 309,
+      "context_length": 136864
+    },
+    {
+      "file_path": "lib/matplotlib/backends/_backend_gtk.py",
+      "position": 26,
+      "tokens": 2521,
+      "context_length": 139385
+    },
+    {
+      "file_path": "galleries/examples/widgets/buttons.py",
+      "position": 27,
+      "tokens": 384,
+      "context_length": 139769
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/fourier_demo_wx_sgskip.py",
+      "position": 28,
+      "tokens": 2127,
+      "context_length": 141896
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/mplcvd.py",
+      "position": 29,
+      "tokens": 2279,
+      "context_length": 144175
+    },
+    {
+      "file_path": "galleries/examples/widgets/lasso_selector_demo_sgskip.py",
+      "position": 30,
+      "tokens": 776,
+      "context_length": 144951
+    },
+    {
+      "file_path": "lib/matplotlib/backends/qt_editor/figureoptions.py",
+      "position": 31,
+      "tokens": 2176,
+      "context_length": 147127
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/embedding_in_gtk4_sgskip.py",
+      "position": 32,
+      "tokens": 300,
+      "context_length": 147427
+    },
+    {
+      "file_path": "galleries/examples/event_handling/zoom_window.py",
+      "position": 33,
+      "tokens": 442,
+      "context_length": 147869
+    },
+    {
+      "file_path": "lib/matplotlib/testing/widgets.py",
+      "position": 34,
+      "tokens": 888,
+      "context_length": 148757
+    },
+    {
+      "file_path": "galleries/examples/event_handling/figure_axes_enter_leave.py",
+      "position": 35,
+      "tokens": 323,
+      "context_length": 149080
+    },
+    {
+      "file_path": "galleries/examples/user_interfaces/embedding_in_wx3_sgskip.py",
+      "position": 36,
+      "tokens": 1141,
+      "context_length": 150221
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 37,
+      "tokens": 28710,
+      "context_length": 178931
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "position": 38,
+      "tokens": 12115,
+      "context_length": 191046
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3cairo.py",
+      "position": 39,
+      "tokens": 227,
+      "context_length": 191273
+    },
+    {
+      "file_path": "lib/matplotlib/backend_tools.py",
+      "position": 40,
+      "tokens": 7340,
+      "context_length": 198613
+    }
+  ]
+}

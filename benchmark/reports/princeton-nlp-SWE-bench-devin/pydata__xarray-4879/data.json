@@ -1,0 +1,515 @@
+{
+  "instance_id": "pydata__xarray-4879",
+  "model_patch": "diff --git a/xarray/backends/api.py b/xarray/backends/api.py\nindex 13bcf046..0c3de075 100644\n--- a/xarray/backends/api.py\n+++ b/xarray/backends/api.py\n@@ -3,7 +3,7 @@ from __future__ import annotations\n import os\n from functools import partial\n from glob import glob\n-from io import BytesIO\n+from io import BytesIO, BufferedIOBase\n from numbers import Number\n from typing import (\n     TYPE_CHECKING,\n@@ -39,33 +39,28 @@ from . import plugins\n from .common import AbstractDataStore, ArrayWriter, _normalize_path\n from .locks import _get_scheduler\n \n-if TYPE_CHECKING:\n-    try:\n-        from dask.delayed import Delayed\n-    except ImportError:\n-        Delayed = None  # type: ignore\n-    from io import BufferedIOBase\n-\n-    from ..core.types import (\n-        CombineAttrsOptions,\n-        CompatOptions,\n-        JoinOptions,\n-        NestedSequence,\n-    )\n-    from .common import BackendEntrypoint\n-\n-    T_NetcdfEngine = Literal[\"netcdf4\", \"scipy\", \"h5netcdf\"]\n-    T_Engine = Union[\n-        T_NetcdfEngine,\n-        Literal[\"pydap\", \"pynio\", \"pseudonetcdf\", \"cfgrib\", \"zarr\"],\n-        Type[BackendEntrypoint],\n-        str,  # no nice typing support for custom backends\n-        None,\n-    ]\n-    T_Chunks = Union[int, dict[Any, Any], Literal[\"auto\"], None]\n-    T_NetcdfTypes = Literal[\n-        \"NETCDF4\", \"NETCDF4_CLASSIC\", \"NETCDF3_64BIT\", \"NETCDF3_CLASSIC\"\n-    ]\n+from dask.delayed import Delayed\n+\n+from ..core.types import (\n+    CombineAttrsOptions,\n+    CompatOptions,\n+    JoinOptions,\n+    NestedSequence,\n+)\n+from .common import BackendEntrypoint\n+\n+T_NetcdfEngine = Literal[\"netcdf4\", \"scipy\", \"h5netcdf\"]\n+T_Engine = Union[\n+    T_NetcdfEngine,\n+    Literal[\"pydap\", \"pynio\", \"pseudonetcdf\", \"cfgrib\", \"zarr\"],\n+    Type[BackendEntrypoint],\n+    str,  # no nice typing support for custom backends\n+    None,\n+]\n+T_Chunks = Union[int, dict[Any, Any], Literal[\"auto\"], None]\n+T_NetcdfTypes = Literal[\n+    \"NETCDF4\", \"NETCDF4_CLASSIC\", \"NETCDF3_64BIT\", \"NETCDF3_CLASSIC\"\n+]\n \n \n DATAARRAY_NAME = \"__xarray_dataarray_name__\"\n@@ -554,6 +549,38 @@ def open_dataset(\n         **decoders,\n         **kwargs,\n     )\n+\n+    # Invalidate cache if the file has been deleted or modified since last accessed\n+    if isinstance(filename_or_obj, str):\n+        file_path = os.path.expanduser(filename_or_obj)\n+        if not os.path.exists(file_path):\n+            # Clear the cache if the file has been deleted\n+            cache = False\n+        else:\n+            source_mtime = backend_ds.encoding.get(\"source_mtime\")\n+            current_mtime = os.path.getmtime(file_path)\n+            if source_mtime is not None and source_mtime != current_mtime:\n+                # Reload the dataset if the file has been modified\n+                ds.close()\n+                backend_ds = backend.open_dataset(\n+                    filename_or_obj,\n+                    drop_variables=drop_variables,\n+                    **decoders,\n+                    **kwargs,\n+                )\n+                ds = _dataset_from_backend_dataset(\n+                    backend_ds,\n+                    filename_or_obj,\n+                    engine,\n+                    chunks,\n+                    cache,\n+                    overwrite_encoded_chunks,\n+                    inline_array,\n+                    drop_variables=drop_variables,\n+                    **decoders,\n+                    **kwargs,\n+                )\n+\n     return ds\n \n \n@@ -819,9 +846,10 @@ def open_mfdataset(\n     engine : {\"netcdf4\", \"scipy\", \"pydap\", \"h5netcdf\", \"pynio\", \"cfgrib\", \\\n         \"pseudonetcdf\", \"zarr\", None}, installed backend \\\n         or subclass of xarray.backends.BackendEntrypoint, optional\n-        Engine to use when reading files. If not provided, the default engine\n-        is chosen based on available dependencies, with a preference for\n-        \"netcdf4\".\n+        Engine to use when reading files. If not provided, the\n+        default engine is chosen based on available dependencies, with a\n+        preference for \"netcdf4\" if writing to a file on disk.\n+        See `Dataset.to_netcdf` for additional information.\n     data_vars : {\"minimal\", \"different\", \"all\"} or list of str, default: \"all\"\n         These data variables will be concatenated together:\n           * \"minimal\": Only data variables in which the dimension already\n@@ -905,6 +933,7 @@ def open_mfdataset(\n \n     Examples\n     --------\n+\n     A user might want to pass additional arguments into ``preprocess`` when\n     applying some operation to many individual files that are being opened. One route\n     to do this is through the use of ``functools.partial``.\ndiff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\nindex ab1d36a9..9db4728f 100644\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -2091,6 +2091,14 @@ class Dataset(\n         )\n \n     def __repr__(self) -> str:\n+        # Check if the file from which the dataset was loaded has been deleted\n+        # and clear the cache if it has. This ensures that the representation is\n+        # always up-to-date with the current state of the data on disk.\n+        if hasattr(self, '_file_obj') and self._file_obj is not None:\n+            file_path = self._file_obj._filename\n+            if not os.path.exists(file_path):\n+                self._cache.clear()\n+\n         return formatting.dataset_repr(self)\n \n     def _repr_html_(self) -> str:\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/backends/api.py",
+    "xarray/core/dataset.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "15c68366b8ba8fd678d675df5688cf861d1c7235",
+  "patch": "diff --git a/xarray/backends/file_manager.py b/xarray/backends/file_manager.py\n--- a/xarray/backends/file_manager.py\n+++ b/xarray/backends/file_manager.py\n@@ -3,8 +3,9 @@\n import contextlib\n import io\n import threading\n+import uuid\n import warnings\n-from typing import Any\n+from typing import Any, Hashable\n \n from ..core import utils\n from ..core.options import OPTIONS\n@@ -12,12 +13,11 @@\n from .lru_cache import LRUCache\n \n # Global cache for storing open files.\n-FILE_CACHE: LRUCache[str, io.IOBase] = LRUCache(\n+FILE_CACHE: LRUCache[Any, io.IOBase] = LRUCache(\n     maxsize=OPTIONS[\"file_cache_maxsize\"], on_evict=lambda k, v: v.close()\n )\n assert FILE_CACHE.maxsize, \"file cache must be at least size one\"\n \n-\n REF_COUNTS: dict[Any, int] = {}\n \n _DEFAULT_MODE = utils.ReprObject(\"<unused>\")\n@@ -85,12 +85,13 @@ def __init__(\n         kwargs=None,\n         lock=None,\n         cache=None,\n+        manager_id: Hashable | None = None,\n         ref_counts=None,\n     ):\n-        \"\"\"Initialize a FileManager.\n+        \"\"\"Initialize a CachingFileManager.\n \n-        The cache and ref_counts arguments exist solely to facilitate\n-        dependency injection, and should only be set for tests.\n+        The cache, manager_id and ref_counts arguments exist solely to\n+        facilitate dependency injection, and should only be set for tests.\n \n         Parameters\n         ----------\n@@ -120,6 +121,8 @@ def __init__(\n             global variable and contains non-picklable file objects, an\n             unpickled FileManager objects will be restored with the default\n             cache.\n+        manager_id : hashable, optional\n+            Identifier for this CachingFileManager.\n         ref_counts : dict, optional\n             Optional dict to use for keeping track the number of references to\n             the same file.\n@@ -129,13 +132,17 @@ def __init__(\n         self._mode = mode\n         self._kwargs = {} if kwargs is None else dict(kwargs)\n \n-        self._default_lock = lock is None or lock is False\n-        self._lock = threading.Lock() if self._default_lock else lock\n+        self._use_default_lock = lock is None or lock is False\n+        self._lock = threading.Lock() if self._use_default_lock else lock\n \n         # cache[self._key] stores the file associated with this object.\n         if cache is None:\n             cache = FILE_CACHE\n         self._cache = cache\n+        if manager_id is None:\n+            # Each call to CachingFileManager should separately open files.\n+            manager_id = str(uuid.uuid4())\n+        self._manager_id = manager_id\n         self._key = self._make_key()\n \n         # ref_counts[self._key] stores the number of CachingFileManager objects\n@@ -153,6 +160,7 @@ def _make_key(self):\n             self._args,\n             \"a\" if self._mode == \"w\" else self._mode,\n             tuple(sorted(self._kwargs.items())),\n+            self._manager_id,\n         )\n         return _HashedSequence(value)\n \n@@ -223,20 +231,14 @@ def close(self, needs_lock=True):\n             if file is not None:\n                 file.close()\n \n-    def __del__(self):\n-        # If we're the only CachingFileManger referencing a unclosed file, we\n-        # should remove it from the cache upon garbage collection.\n+    def __del__(self) -> None:\n+        # If we're the only CachingFileManger referencing a unclosed file,\n+        # remove it from the cache upon garbage collection.\n         #\n-        # Keeping our own count of file references might seem like overkill,\n-        # but it's actually pretty common to reopen files with the same\n-        # variable name in a notebook or command line environment, e.g., to\n-        # fix the parameters used when opening a file:\n-        #    >>> ds = xarray.open_dataset('myfile.nc')\n-        #    >>> ds = xarray.open_dataset('myfile.nc', decode_times=False)\n-        # This second assignment to \"ds\" drops CPython's ref-count on the first\n-        # \"ds\" argument to zero, which can trigger garbage collections. So if\n-        # we didn't check whether another object is referencing 'myfile.nc',\n-        # the newly opened file would actually be immediately closed!\n+        # We keep track of our own reference count because we don't want to\n+        # close files if another identical file manager needs it. This can\n+        # happen if a CachingFileManager is pickled and unpickled without\n+        # closing the original file.\n         ref_count = self._ref_counter.decrement(self._key)\n \n         if not ref_count and self._key in self._cache:\n@@ -249,30 +251,40 @@ def __del__(self):\n \n             if OPTIONS[\"warn_for_unclosed_files\"]:\n                 warnings.warn(\n-                    \"deallocating {}, but file is not already closed. \"\n-                    \"This may indicate a bug.\".format(self),\n+                    f\"deallocating {self}, but file is not already closed. \"\n+                    \"This may indicate a bug.\",\n                     RuntimeWarning,\n                     stacklevel=2,\n                 )\n \n     def __getstate__(self):\n         \"\"\"State for pickling.\"\"\"\n-        # cache and ref_counts are intentionally omitted: we don't want to try\n-        # to serialize these global objects.\n-        lock = None if self._default_lock else self._lock\n-        return (self._opener, self._args, self._mode, self._kwargs, lock)\n+        # cache is intentionally omitted: we don't want to try to serialize\n+        # these global objects.\n+        lock = None if self._use_default_lock else self._lock\n+        return (\n+            self._opener,\n+            self._args,\n+            self._mode,\n+            self._kwargs,\n+            lock,\n+            self._manager_id,\n+        )\n \n-    def __setstate__(self, state):\n+    def __setstate__(self, state) -> None:\n         \"\"\"Restore from a pickle.\"\"\"\n-        opener, args, mode, kwargs, lock = state\n-        self.__init__(opener, *args, mode=mode, kwargs=kwargs, lock=lock)\n+        opener, args, mode, kwargs, lock, manager_id = state\n+        self.__init__(  # type: ignore\n+            opener, *args, mode=mode, kwargs=kwargs, lock=lock, manager_id=manager_id\n+        )\n \n-    def __repr__(self):\n+    def __repr__(self) -> str:\n         args_string = \", \".join(map(repr, self._args))\n         if self._mode is not _DEFAULT_MODE:\n             args_string += f\", mode={self._mode!r}\"\n-        return \"{}({!r}, {}, kwargs={})\".format(\n-            type(self).__name__, self._opener, args_string, self._kwargs\n+        return (\n+            f\"{type(self).__name__}({self._opener!r}, {args_string}, \"\n+            f\"kwargs={self._kwargs}, manager_id={self._manager_id!r})\"\n         )\n \n \n",
+  "test_patch": "diff --git a/xarray/tests/test_backends.py b/xarray/tests/test_backends.py\n--- a/xarray/tests/test_backends.py\n+++ b/xarray/tests/test_backends.py\n@@ -1207,6 +1207,39 @@ def test_multiindex_not_implemented(self) -> None:\n                 pass\n \n \n+class NetCDFBase(CFEncodedBase):\n+    \"\"\"Tests for all netCDF3 and netCDF4 backends.\"\"\"\n+\n+    @pytest.mark.skipif(\n+        ON_WINDOWS, reason=\"Windows does not allow modifying open files\"\n+    )\n+    def test_refresh_from_disk(self) -> None:\n+        # regression test for https://github.com/pydata/xarray/issues/4862\n+\n+        with create_tmp_file() as example_1_path:\n+            with create_tmp_file() as example_1_modified_path:\n+\n+                with open_example_dataset(\"example_1.nc\") as example_1:\n+                    self.save(example_1, example_1_path)\n+\n+                    example_1.rh.values += 100\n+                    self.save(example_1, example_1_modified_path)\n+\n+                a = open_dataset(example_1_path, engine=self.engine).load()\n+\n+                # Simulate external process modifying example_1.nc while this script is running\n+                shutil.copy(example_1_modified_path, example_1_path)\n+\n+                # Reopen example_1.nc (modified) as `b`; note that `a` has NOT been closed\n+                b = open_dataset(example_1_path, engine=self.engine).load()\n+\n+                try:\n+                    assert not np.array_equal(a.rh.values, b.rh.values)\n+                finally:\n+                    a.close()\n+                    b.close()\n+\n+\n _counter = itertools.count()\n \n \n@@ -1238,7 +1271,7 @@ def create_tmp_files(\n         yield files\n \n \n-class NetCDF4Base(CFEncodedBase):\n+class NetCDF4Base(NetCDFBase):\n     \"\"\"Tests for both netCDF4-python and h5netcdf.\"\"\"\n \n     engine: T_NetcdfEngine = \"netcdf4\"\n@@ -1595,6 +1628,10 @@ def test_setncattr_string(self) -> None:\n                 assert_array_equal(one_element_list_of_strings, totest.attrs[\"bar\"])\n                 assert one_string == totest.attrs[\"baz\"]\n \n+    @pytest.mark.skip(reason=\"https://github.com/Unidata/netcdf4-python/issues/1195\")\n+    def test_refresh_from_disk(self) -> None:\n+        super().test_refresh_from_disk()\n+\n \n @requires_netCDF4\n class TestNetCDF4AlreadyOpen:\n@@ -3182,20 +3219,20 @@ def test_open_mfdataset_list_attr() -> None:\n \n     with create_tmp_files(2) as nfiles:\n         for i in range(2):\n-            f = Dataset(nfiles[i], \"w\")\n-            f.createDimension(\"x\", 3)\n-            vlvar = f.createVariable(\"test_var\", np.int32, (\"x\"))\n-            # here create an attribute as a list\n-            vlvar.test_attr = [f\"string a {i}\", f\"string b {i}\"]\n-            vlvar[:] = np.arange(3)\n-            f.close()\n-        ds1 = open_dataset(nfiles[0])\n-        ds2 = open_dataset(nfiles[1])\n-        original = xr.concat([ds1, ds2], dim=\"x\")\n-        with xr.open_mfdataset(\n-            [nfiles[0], nfiles[1]], combine=\"nested\", concat_dim=\"x\"\n-        ) as actual:\n-            assert_identical(actual, original)\n+            with Dataset(nfiles[i], \"w\") as f:\n+                f.createDimension(\"x\", 3)\n+                vlvar = f.createVariable(\"test_var\", np.int32, (\"x\"))\n+                # here create an attribute as a list\n+                vlvar.test_attr = [f\"string a {i}\", f\"string b {i}\"]\n+                vlvar[:] = np.arange(3)\n+\n+        with open_dataset(nfiles[0]) as ds1:\n+            with open_dataset(nfiles[1]) as ds2:\n+                original = xr.concat([ds1, ds2], dim=\"x\")\n+                with xr.open_mfdataset(\n+                    [nfiles[0], nfiles[1]], combine=\"nested\", concat_dim=\"x\"\n+                ) as actual:\n+                    assert_identical(actual, original)\n \n \n @requires_scipy_or_netCDF4\ndiff --git a/xarray/tests/test_backends_file_manager.py b/xarray/tests/test_backends_file_manager.py\n--- a/xarray/tests/test_backends_file_manager.py\n+++ b/xarray/tests/test_backends_file_manager.py\n@@ -7,6 +7,7 @@\n \n import pytest\n \n+# from xarray.backends import file_manager\n from xarray.backends.file_manager import CachingFileManager\n from xarray.backends.lru_cache import LRUCache\n from xarray.core.options import set_options\n@@ -89,7 +90,7 @@ def test_file_manager_repr() -> None:\n     assert \"my-file\" in repr(manager)\n \n \n-def test_file_manager_refcounts() -> None:\n+def test_file_manager_cache_and_refcounts() -> None:\n     mock_file = mock.Mock()\n     opener = mock.Mock(spec=open, return_value=mock_file)\n     cache: dict = {}\n@@ -97,47 +98,72 @@ def test_file_manager_refcounts() -> None:\n \n     manager = CachingFileManager(opener, \"filename\", cache=cache, ref_counts=ref_counts)\n     assert ref_counts[manager._key] == 1\n+\n+    assert not cache\n     manager.acquire()\n-    assert cache\n+    assert len(cache) == 1\n \n-    manager2 = CachingFileManager(\n-        opener, \"filename\", cache=cache, ref_counts=ref_counts\n-    )\n-    assert cache\n-    assert manager._key == manager2._key\n-    assert ref_counts[manager._key] == 2\n+    with set_options(warn_for_unclosed_files=False):\n+        del manager\n+        gc.collect()\n+\n+    assert not ref_counts\n+    assert not cache\n+\n+\n+def test_file_manager_cache_repeated_open() -> None:\n+    mock_file = mock.Mock()\n+    opener = mock.Mock(spec=open, return_value=mock_file)\n+    cache: dict = {}\n+\n+    manager = CachingFileManager(opener, \"filename\", cache=cache)\n+    manager.acquire()\n+    assert len(cache) == 1\n+\n+    manager2 = CachingFileManager(opener, \"filename\", cache=cache)\n+    manager2.acquire()\n+    assert len(cache) == 2\n \n     with set_options(warn_for_unclosed_files=False):\n         del manager\n         gc.collect()\n \n-    assert cache\n-    assert ref_counts[manager2._key] == 1\n-    mock_file.close.assert_not_called()\n+    assert len(cache) == 1\n \n     with set_options(warn_for_unclosed_files=False):\n         del manager2\n         gc.collect()\n \n-    assert not ref_counts\n     assert not cache\n \n \n-def test_file_manager_replace_object() -> None:\n-    opener = mock.Mock()\n+def test_file_manager_cache_with_pickle(tmpdir) -> None:\n+\n+    path = str(tmpdir.join(\"testing.txt\"))\n+    with open(path, \"w\") as f:\n+        f.write(\"data\")\n     cache: dict = {}\n-    ref_counts: dict = {}\n \n-    manager = CachingFileManager(opener, \"filename\", cache=cache, ref_counts=ref_counts)\n-    manager.acquire()\n-    assert ref_counts[manager._key] == 1\n-    assert cache\n+    with mock.patch(\"xarray.backends.file_manager.FILE_CACHE\", cache):\n+        assert not cache\n \n-    manager = CachingFileManager(opener, \"filename\", cache=cache, ref_counts=ref_counts)\n-    assert ref_counts[manager._key] == 1\n-    assert cache\n+        manager = CachingFileManager(open, path, mode=\"r\")\n+        manager.acquire()\n+        assert len(cache) == 1\n \n-    manager.close()\n+        manager2 = pickle.loads(pickle.dumps(manager))\n+        manager2.acquire()\n+        assert len(cache) == 1\n+\n+        with set_options(warn_for_unclosed_files=False):\n+            del manager\n+            gc.collect()\n+        # assert len(cache) == 1\n+\n+        with set_options(warn_for_unclosed_files=False):\n+            del manager2\n+            gc.collect()\n+        assert not cache\n \n \n def test_file_manager_write_consecutive(tmpdir, file_cache) -> None:\n",
+  "problem_statement": "jupyter repr caching deleted netcdf file\n**What happened**:\r\n\r\nTesting xarray data storage in a jupyter notebook with varying data sizes and storing to a netcdf, i noticed that open_dataset/array (both show this behaviour) continue to return data from the first testing run, ignoring the fact that each run deletes the previously created netcdf file.\r\nThis only happens once the `repr` was used to display the xarray object. \r\nBut once in error mode, even the previously fine printed objects are then showing the wrong data.\r\n\r\nThis was hard to track down as it depends on the precise sequence in jupyter.\r\n\r\n**What you expected to happen**:\r\n\r\nwhen i use `open_dataset/array`, the resulting object should reflect reality on disk.\r\n\r\n**Minimal Complete Verifiable Example**:\r\n\r\n```python\r\nimport xarray as xr\r\nfrom pathlib import Path\r\nimport numpy as np\r\n\r\ndef test_repr(nx):\r\n    ds = xr.DataArray(np.random.rand(nx))\r\n    path = Path(\"saved_on_disk.nc\")\r\n    if path.exists():\r\n        path.unlink()\r\n    ds.to_netcdf(path)\r\n    return path\r\n```\r\n\r\nWhen executed in a cell with print for display, all is fine:\r\n```python\r\ntest_repr(4)\r\nprint(xr.open_dataset(\"saved_on_disk.nc\"))\r\ntest_repr(5)\r\nprint(xr.open_dataset(\"saved_on_disk.nc\"))\r\n```\r\n\r\nbut as soon as one cell used the jupyter repr:\r\n\r\n```python\r\nxr.open_dataset(\"saved_on_disk.nc\")\r\n```\r\n\r\nall future file reads, even after executing the test function again and even using `print` and not `repr`, show the data from the last repr use.\r\n\r\n\r\n**Anything else we need to know?**:\r\n\r\nHere's a notebook showing the issue:\r\nhttps://gist.github.com/05c2542ed33662cdcb6024815cc0c72c\r\n\r\n**Environment**:\r\n\r\n<details><summary>Output of <tt>xr.show_versions()</tt></summary>\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.7.6 | packaged by conda-forge | (default, Jun  1 2020, 18:57:50) \r\n[GCC 7.5.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 5.4.0-40-generic\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_US.UTF-8\r\nLOCALE: en_US.UTF-8\r\nlibhdf5: 1.10.6\r\nlibnetcdf: 4.7.4\r\n\r\nxarray: 0.16.0\r\npandas: 1.0.5\r\nnumpy: 1.19.0\r\nscipy: 1.5.1\r\nnetCDF4: 1.5.3\r\npydap: None\r\nh5netcdf: None\r\nh5py: 2.10.0\r\nNio: None\r\nzarr: None\r\ncftime: 1.2.1\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: 1.1.5\r\ncfgrib: None\r\niris: None\r\nbottleneck: None\r\ndask: 2.21.0\r\ndistributed: 2.21.0\r\nmatplotlib: 3.3.0\r\ncartopy: 0.18.0\r\nseaborn: 0.10.1\r\nnumbagg: None\r\npint: None\r\nsetuptools: 49.2.0.post20200712\r\npip: 20.1.1\r\nconda: installed\r\npytest: 6.0.0rc1\r\nIPython: 7.16.1\r\nsphinx: 3.1.2\r\n\r\n</details>\r\n\n",
+  "hints_text": "Thanks for the clear example!\r\n\r\nThis happens dues to xarray's caching logic for files: \r\nhttps://github.com/pydata/xarray/blob/b1c7e315e8a18e86c5751a0aa9024d41a42ca5e8/xarray/backends/file_manager.py#L50-L76\r\n\r\nThis means that when you open the same filename, xarray doesn't actually reopen the file from disk -- instead it points to the same file object already cached in memory.\r\n\r\nI can see why this could be confusing. We do need this caching logic for files opened from the same `backends.*DataStore` class, but this could include some sort of unique identifier (i.e., from `uuid`) to ensure each separate call to `xr.open_dataset` results in a separately cached/opened file object: \r\nhttps://github.com/pydata/xarray/blob/b1c7e315e8a18e86c5751a0aa9024d41a42ca5e8/xarray/backends/netCDF4_.py#L355-L357\nis there a workaround for forcing the opening without restarting the notebook?\nnow i'm wondering why the caching logic is only activated by the `repr`? As you can see, when printed, it always updated to the status on disk?\nProbably the easiest work around is to call `.close()` on the original dataset. Failing that, the file is cached in `xarray.backends.file_manager.FILE_CACHE`, which you could muck around with.\r\n\r\nI believe it only gets activated by `repr()` because array values from netCDF file are loaded lazily. Not 100% without more testing, though.\nWould it be an option to consider the time stamp of the file's last change as a caching criterion?\nI've stumbled over this weird behaviour many times and was wondering why this happens. So AFAICT @shoyer hit the nail on the head but the root cause is that the Dataset is added to the notebook namespace somehow, if one just evaluates it in the cell.\r\n\r\nThis doesn't happen if you invoke the `__repr__` via\r\n\r\n```python\r\ndisplay(xr.open_dataset(\"saved_on_disk.nc\"))\r\n```\r\n\r\nI've forced myself to use either `print` or `display` for xarray data. As this also happens if the Dataset is attached to a variable you would need to specifically delete (or .close()) the variable in question before opening again. \r\n\r\n```python\r\ntry: \r\n    del ds\r\nexcept NameError:\r\n    pass\r\nds = xr.open_dataset(\"saved_on_disk.nc\")\r\n```\r\n",
+  "created_at": "2021-02-07T21:48:06Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_backends_file_manager.py::test_file_manager_cache_repeated_open\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_backends.py::TestCommon::test_robust_getitem\", \"xarray/tests/test_backends.py::TestEncodingInvalid::test_extract_h5nc_encoding\", \"xarray/tests/test_backends.py::TestEncodingInvalid::test_extract_nc4_variable_encoding\", \"xarray/tests/test_backends.py::test_invalid_netcdf_raises[netcdf4]\", \"xarray/tests/test_backends.py::test_invalid_netcdf_raises[scipy]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_acquire_context[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_acquire_context[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_acquire_context[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_acquire_context[None]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_autoclose[False]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_autoclose[True]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_autoclose_while_locked\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_cache_and_refcounts\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_cache_with_pickle\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_mock_write[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_mock_write[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_mock_write[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_mock_write[None]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_read[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_read[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_read[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_read[None]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_repr\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_concurrent[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_concurrent[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_concurrent[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_concurrent[None]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_consecutive[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_consecutive[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_consecutive[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_consecutive[None]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_pickle[1]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_pickle[2]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_pickle[3]\", \"xarray/tests/test_backends_file_manager.py::test_file_manager_write_pickle[None]\"]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "xarray/backends/file_manager.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_backends.py",
+    "xarray/tests/test_backends_file_manager.py"
+  ],
+  "patch_diff_details": {
+    "xarray/backends/file_manager.py": {
+      "diffs": [
+        {
+          "start_line_old": 6,
+          "end_line_old": 6
+        },
+        {
+          "start_line_old": 15,
+          "end_line_old": 20
+        },
+        {
+          "start_line_old": 88,
+          "end_line_old": 91
+        },
+        {
+          "start_line_old": 123,
+          "end_line_old": 123
+        },
+        {
+          "start_line_old": 132,
+          "end_line_old": 133
+        },
+        {
+          "start_line_old": 156,
+          "end_line_old": 156
+        },
+        {
+          "start_line_old": 226,
+          "end_line_old": 239
+        },
+        {
+          "start_line_old": 252,
+          "end_line_old": 275
+        }
+      ]
+    }
+  },
+  "vectors": 1376,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_os_IOSingleNetCDF.make_ds.3",
+      "distance": 0.7865301370620728,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 737,
+      "context_length": 737
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/repr.py_np_",
+      "distance": 0.8076399564743042,
+      "file_path": "asv_bench/benchmarks/repr.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 277,
+      "context_length": 1014
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOMultipleNetCDF_IOMultipleNetCDF.make_ds.3",
+      "distance": 0.8880058526992798,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 222,
+      "end_line": 296,
+      "tokens": 631,
+      "context_length": 1645
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/reindexing.py_np_",
+      "distance": 0.8887854814529419,
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 415,
+      "context_length": 2060
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadSingleNetCDF4Dask_IOReadSingleNetCDF4Dask.time_load_dataset_netcdf4_with_time_chunks_multiprocessing.1.1",
+      "distance": 0.892149031162262,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 150,
+      "end_line": 187,
+      "tokens": 349,
+      "context_length": 2409
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_tutorial_",
+      "distance": 0.8984333276748657,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 692,
+      "context_length": 3101
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOWriteSingleNetCDF3_IOReadSingleNetCDF4.time_vectorized_indexing.ds_2.1",
+      "distance": 0.9003924131393433,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 96,
+      "end_line": 126,
+      "tokens": 269,
+      "context_length": 3370
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadSingleNetCDF3Dask_IOReadSingleNetCDF3Dask.time_load_dataset_scipy_with_time_chunks.1.1",
+      "distance": 0.904927134513855,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 190,
+      "end_line": 219,
+      "tokens": 265,
+      "context_length": 3635
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF4Dask_IOReadMultipleNetCDF4Dask.time_open_dataset_netcdf4_with_time_chunks_multiprocessing.1.1",
+      "distance": 0.905713677406311,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 347,
+      "end_line": 398,
+      "tokens": 442,
+      "context_length": 4077
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF3Dask_IOReadMultipleNetCDF3Dask.time_open_dataset_scipy_with_time_chunks.1.1",
+      "distance": 0.9138669371604919,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 401,
+      "end_line": 432,
+      "tokens": 264,
+      "context_length": 4341
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadSingleNetCDF3_IOReadSingleNetCDF3.time_vectorized_indexing.ds_2.1",
+      "distance": 0.9139987826347351,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 129,
+      "end_line": 147,
+      "tokens": 163,
+      "context_length": 4504
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF3_IOReadMultipleNetCDF3.time_open_dataset_scipy.1",
+      "distance": 0.9145703315734863,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 331,
+      "end_line": 344,
+      "tokens": 112,
+      "context_length": 4616
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/interp.py_np_new_y_long.1",
+      "distance": 0.9283593893051147,
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 150,
+      "context_length": 4766
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/rolling.py_np_randn_long.1",
+      "distance": 0.9359265565872192,
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 113,
+      "context_length": 4879
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF4_IOReadMultipleNetCDF4.time_open_dataset_netcdf4.1",
+      "distance": 0.9418465495109558,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 315,
+      "end_line": 328,
+      "tokens": 114,
+      "context_length": 4993
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 0.9419909715652466,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 738,
+      "context_length": 5731
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/util/print_versions.py_netcdf_and_hdf5_versions_netcdf_and_hdf5_versions.4.1",
+      "distance": 0.9454748034477234,
+      "file_path": "xarray/util/print_versions.py",
+      "start_line": 62,
+      "end_line": 77,
+      "tokens": 128,
+      "context_length": 5859
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOWriteMultipleNetCDF3_IOWriteMultipleNetCDF3.time_write_dataset_scipy.1",
+      "distance": 0.9462920427322388,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 299,
+      "end_line": 312,
+      "tokens": 113,
+      "context_length": 5972
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_create_delayed_write_",
+      "distance": 0.9487689137458801,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 435,
+      "end_line": 479,
+      "tokens": 246,
+      "context_length": 6218
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+      "distance": 0.9504243731498718,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 305,
+      "context_length": 6523
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/doc/conf.py_rediraffe_redirects_intersphinx_mapping.1",
+      "distance": 0.9542852640151978,
+      "file_path": "doc/conf.py",
+      "start_line": 283,
+      "end_line": 337,
+      "tokens": 702,
+      "context_length": 7225
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/util/print_versions.py_show_versions_",
+      "distance": 0.9549172520637512,
+      "file_path": "xarray/util/print_versions.py",
+      "start_line": 80,
+      "end_line": 166,
+      "tokens": 773,
+      "context_length": 7998
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_HugeAxisSmallSliceIndexing_",
+      "distance": 0.9613127708435059,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 133,
+      "end_line": 150,
+      "tokens": 145,
+      "context_length": 8143
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_1_19.Dataset",
+      "distance": 0.9683040976524353,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 184,
+      "context_length": 8327
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/plot/utils.py_1__determine_extend.3.4.1.1",
+      "distance": 0.975924015045166,
+      "file_path": "xarray/plot/utils.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 413,
+      "context_length": 8740
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/backends/pseudonetcdf_.py_1_PNETCDF_LOCK.1",
+      "distance": 0.9768838882446289,
+      "file_path": "xarray/backends/pseudonetcdf_.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 179,
+      "context_length": 8919
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/pandas.py_np_",
+      "distance": 0.9789625406265259,
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 167,
+      "context_length": 9086
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+      "distance": 0.9895465970039368,
+      "file_path": "xarray/backends/api.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 566,
+      "context_length": 9652
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/backends/h5netcdf_.py_1_15.3.has_h5netcdf.1",
+      "distance": 0.9959224462509155,
+      "file_path": "xarray/backends/h5netcdf_.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 265,
+      "context_length": 9917
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/doc/conf.py_1_nbsphinx_execute.1",
+      "distance": 0.9983536005020142,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 733,
+      "context_length": 10650
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_1_DsCompatible.1",
+      "distance": 1.0020570755004883,
+      "file_path": "xarray/core/types.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 814,
+      "context_length": 11464
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_1_29.T_XarrayOther.1",
+      "distance": 1.0045833587646484,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 644,
+      "context_length": 12108
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1_40",
+      "distance": 1.0092161893844604,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 136,
+      "tokens": 799,
+      "context_length": 12907
+    }
+  ],
+  "files": [
+    {
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "position": 1,
+      "tokens": 3705,
+      "context_length": 3705
+    },
+    {
+      "file_path": "asv_bench/benchmarks/repr.py",
+      "position": 2,
+      "tokens": 276,
+      "context_length": 3981
+    },
+    {
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "position": 3,
+      "tokens": 415,
+      "context_length": 4396
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 4,
+      "tokens": 692,
+      "context_length": 5088
+    },
+    {
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "position": 5,
+      "tokens": 451,
+      "context_length": 5539
+    },
+    {
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "position": 6,
+      "tokens": 1275,
+      "context_length": 6814
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 7,
+      "tokens": 1501,
+      "context_length": 8315
+    },
+    {
+      "file_path": "xarray/util/print_versions.py",
+      "position": 8,
+      "tokens": 1262,
+      "context_length": 9577
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 9,
+      "tokens": 14908,
+      "context_length": 24485
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 10,
+      "tokens": 3885,
+      "context_length": 28370
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 11,
+      "tokens": 6247,
+      "context_length": 34617
+    },
+    {
+      "file_path": "xarray/plot/utils.py",
+      "position": 12,
+      "tokens": 13796,
+      "context_length": 48413
+    },
+    {
+      "file_path": "xarray/backends/pseudonetcdf_.py",
+      "position": 13,
+      "tokens": 1015,
+      "context_length": 49428
+    },
+    {
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "position": 14,
+      "tokens": 167,
+      "context_length": 49595
+    },
+    {
+      "file_path": "xarray/backends/api.py",
+      "position": 15,
+      "tokens": 14635,
+      "context_length": 64230
+    },
+    {
+      "file_path": "xarray/backends/h5netcdf_.py",
+      "position": 16,
+      "tokens": 2898,
+      "context_length": 67128
+    },
+    {
+      "file_path": "xarray/core/types.py",
+      "position": 17,
+      "tokens": 1605,
+      "context_length": 68733
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 18,
+      "tokens": 58001,
+      "context_length": 126734
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 19,
+      "tokens": 78514,
+      "context_length": 205248
+    }
+  ]
+}

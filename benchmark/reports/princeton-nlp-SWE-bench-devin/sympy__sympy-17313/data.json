@@ -1,0 +1,538 @@
+{
+  "instance_id": "sympy__sympy-17313",
+  "model_patch": "diff --git a/sympy/functions/elementary/integers.py b/sympy/functions/elementary/integers.py\nindex fa68122865..691f178172 100644\n--- a/sympy/functions/elementary/integers.py\n+++ b/sympy/functions/elementary/integers.py\n@@ -390,13 +390,16 @@ def __ge__(self, other):\n     def __gt__(self, other):\n         if self.is_extended_real:\n             other = _sympify(other)\n-            # Check if other < 0\n-            res = self._value_one_or_more(other)\n-            if res is not None:\n-                return not(res)\n-            # Check if other >= 1\n-            if other.is_extended_negative:\n+            # Check if other is a positive number\n+            if other.is_positive:\n+                # If other is positive, ceiling of any number is greater than 0\n                 return S.true\n+            # Check if other is non-positive\n+            if other.is_nonpositive:\n+                # If other is non-positive, ceiling of any number is not greater\n+                return S.false\n+            # If other is not a number, return unevaluated\n+            return Gt(self, other, evaluate=False)\n         return Gt(self, other, evaluate=False)\n \n     def __le__(self, other):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/functions/elementary/integers.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "a4297a11fd8f3e8af17efda85e3047e32e470a70",
+  "patch": "diff --git a/sympy/functions/elementary/integers.py b/sympy/functions/elementary/integers.py\n--- a/sympy/functions/elementary/integers.py\n+++ b/sympy/functions/elementary/integers.py\n@@ -142,6 +142,12 @@ def _eval_nseries(self, x, n, logx):\n         else:\n             return r\n \n+    def _eval_is_negative(self):\n+        return self.args[0].is_negative\n+\n+    def _eval_is_nonnegative(self):\n+        return self.args[0].is_nonnegative\n+\n     def _eval_rewrite_as_ceiling(self, arg, **kwargs):\n         return -ceiling(-arg)\n \n@@ -155,17 +161,60 @@ def _eval_Eq(self, other):\n                 return S.true\n \n     def __le__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] < other + 1\n+            if other.is_number and other.is_real:\n+                return self.args[0] < ceiling(other)\n         if self.args[0] == other and other.is_real:\n             return S.true\n         if other is S.Infinity and self.is_finite:\n             return S.true\n+\n         return Le(self, other, evaluate=False)\n \n+    def __ge__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] >= other\n+            if other.is_number and other.is_real:\n+                return self.args[0] >= ceiling(other)\n+        if self.args[0] == other and other.is_real:\n+            return S.false\n+        if other is S.NegativeInfinity and self.is_finite:\n+            return S.true\n+\n+        return Ge(self, other, evaluate=False)\n+\n     def __gt__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] >= other + 1\n+            if other.is_number and other.is_real:\n+                return self.args[0] >= ceiling(other)\n         if self.args[0] == other and other.is_real:\n             return S.false\n+        if other is S.NegativeInfinity and self.is_finite:\n+            return S.true\n+\n         return Gt(self, other, evaluate=False)\n \n+    def __lt__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] < other\n+            if other.is_number and other.is_real:\n+                return self.args[0] < ceiling(other)\n+        if self.args[0] == other and other.is_real:\n+            return S.false\n+        if other is S.Infinity and self.is_finite:\n+            return S.true\n+\n+        return Lt(self, other, evaluate=False)\n \n class ceiling(RoundFunction):\n     \"\"\"\n@@ -234,6 +283,12 @@ def _eval_rewrite_as_floor(self, arg, **kwargs):\n     def _eval_rewrite_as_frac(self, arg, **kwargs):\n         return arg + frac(-arg)\n \n+    def _eval_is_positive(self):\n+        return self.args[0].is_positive\n+\n+    def _eval_is_nonpositive(self):\n+        return self.args[0].is_nonpositive\n+\n     def _eval_Eq(self, other):\n         if isinstance(self, ceiling):\n             if (self.rewrite(floor) == other) or \\\n@@ -241,17 +296,60 @@ def _eval_Eq(self, other):\n                 return S.true\n \n     def __lt__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] <= other - 1\n+            if other.is_number and other.is_real:\n+                return self.args[0] <= floor(other)\n         if self.args[0] == other and other.is_real:\n             return S.false\n+        if other is S.Infinity and self.is_finite:\n+            return S.true\n+\n         return Lt(self, other, evaluate=False)\n \n+    def __gt__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] > other\n+            if other.is_number and other.is_real:\n+                return self.args[0] > floor(other)\n+        if self.args[0] == other and other.is_real:\n+            return S.false\n+        if other is S.NegativeInfinity and self.is_finite:\n+            return S.true\n+\n+        return Gt(self, other, evaluate=False)\n+\n     def __ge__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] > other - 1\n+            if other.is_number and other.is_real:\n+                return self.args[0] > floor(other)\n         if self.args[0] == other and other.is_real:\n             return S.true\n-        if other is S.NegativeInfinity and self.is_real:\n+        if other is S.NegativeInfinity and self.is_finite:\n             return S.true\n+\n         return Ge(self, other, evaluate=False)\n \n+    def __le__(self, other):\n+        other = S(other)\n+        if self.args[0].is_real:\n+            if other.is_integer:\n+                return self.args[0] <= other\n+            if other.is_number and other.is_real:\n+                return self.args[0] <= floor(other)\n+        if self.args[0] == other and other.is_real:\n+            return S.false\n+        if other is S.Infinity and self.is_finite:\n+            return S.true\n+\n+        return Le(self, other, evaluate=False)\n \n class frac(Function):\n     r\"\"\"Represents the fractional part of x\n",
+  "test_patch": "diff --git a/sympy/functions/elementary/tests/test_integers.py b/sympy/functions/elementary/tests/test_integers.py\n--- a/sympy/functions/elementary/tests/test_integers.py\n+++ b/sympy/functions/elementary/tests/test_integers.py\n@@ -108,13 +108,18 @@ def test_floor():\n     assert floor(factorial(50)/exp(1)) == \\\n         11188719610782480504630258070757734324011354208865721592720336800\n \n+    assert (floor(y) < y) == False\n     assert (floor(y) <= y) == True\n     assert (floor(y) > y) == False\n+    assert (floor(y) >= y) == False\n     assert (floor(x) <= x).is_Relational  # x could be non-real\n     assert (floor(x) > x).is_Relational\n     assert (floor(x) <= y).is_Relational  # arg is not same as rhs\n     assert (floor(x) > y).is_Relational\n     assert (floor(y) <= oo) == True\n+    assert (floor(y) < oo) == True\n+    assert (floor(y) >= -oo) == True\n+    assert (floor(y) > -oo) == True\n \n     assert floor(y).rewrite(frac) == y - frac(y)\n     assert floor(y).rewrite(ceiling) == -ceiling(-y)\n@@ -126,6 +131,70 @@ def test_floor():\n     assert Eq(floor(y), y - frac(y))\n     assert Eq(floor(y), -ceiling(-y))\n \n+    neg = Symbol('neg', negative=True)\n+    nn = Symbol('nn', nonnegative=True)\n+    pos = Symbol('pos', positive=True)\n+    np = Symbol('np', nonpositive=True)\n+\n+    assert (floor(neg) < 0) == True\n+    assert (floor(neg) <= 0) == True\n+    assert (floor(neg) > 0) == False\n+    assert (floor(neg) >= 0) == False\n+    assert (floor(neg) <= -1) == True\n+    assert (floor(neg) >= -3) == (neg >= -3)\n+    assert (floor(neg) < 5) == (neg < 5)\n+\n+    assert (floor(nn) < 0) == False\n+    assert (floor(nn) >= 0) == True\n+\n+    assert (floor(pos) < 0) == False\n+    assert (floor(pos) <= 0) == (pos < 1)\n+    assert (floor(pos) > 0) == (pos >= 1)\n+    assert (floor(pos) >= 0) == True\n+    assert (floor(pos) >= 3) == (pos >= 3)\n+\n+    assert (floor(np) <= 0) == True\n+    assert (floor(np) > 0) == False\n+\n+    assert floor(neg).is_negative == True\n+    assert floor(neg).is_nonnegative == False\n+    assert floor(nn).is_negative == False\n+    assert floor(nn).is_nonnegative == True\n+    assert floor(pos).is_negative == False\n+    assert floor(pos).is_nonnegative == True\n+    assert floor(np).is_negative is None\n+    assert floor(np).is_nonnegative is None\n+\n+    assert (floor(7, evaluate=False) >= 7) == True\n+    assert (floor(7, evaluate=False) > 7) == False\n+    assert (floor(7, evaluate=False) <= 7) == True\n+    assert (floor(7, evaluate=False) < 7) == False\n+\n+    assert (floor(7, evaluate=False) >= 6) == True\n+    assert (floor(7, evaluate=False) > 6) == True\n+    assert (floor(7, evaluate=False) <= 6) == False\n+    assert (floor(7, evaluate=False) < 6) == False\n+\n+    assert (floor(7, evaluate=False) >= 8) == False\n+    assert (floor(7, evaluate=False) > 8) == False\n+    assert (floor(7, evaluate=False) <= 8) == True\n+    assert (floor(7, evaluate=False) < 8) == True\n+\n+    assert (floor(x) <= 5.5) == Le(floor(x), 5.5, evaluate=False)\n+    assert (floor(x) >= -3.2) == Ge(floor(x), -3.2, evaluate=False)\n+    assert (floor(x) < 2.9) == Lt(floor(x), 2.9, evaluate=False)\n+    assert (floor(x) > -1.7) == Gt(floor(x), -1.7, evaluate=False)\n+\n+    assert (floor(y) <= 5.5) == (y < 6)\n+    assert (floor(y) >= -3.2) == (y >= -3)\n+    assert (floor(y) < 2.9) == (y < 3)\n+    assert (floor(y) > -1.7) == (y >= -1)\n+\n+    assert (floor(y) <= n) == (y < n + 1)\n+    assert (floor(y) >= n) == (y >= n)\n+    assert (floor(y) < n) == (y < n)\n+    assert (floor(y) > n) == (y >= n + 1)\n+\n \n def test_ceiling():\n \n@@ -225,12 +294,17 @@ def test_ceiling():\n         11188719610782480504630258070757734324011354208865721592720336801\n \n     assert (ceiling(y) >= y) == True\n+    assert (ceiling(y) > y) == False\n     assert (ceiling(y) < y) == False\n+    assert (ceiling(y) <= y) == False\n     assert (ceiling(x) >= x).is_Relational  # x could be non-real\n     assert (ceiling(x) < x).is_Relational\n     assert (ceiling(x) >= y).is_Relational  # arg is not same as rhs\n     assert (ceiling(x) < y).is_Relational\n     assert (ceiling(y) >= -oo) == True\n+    assert (ceiling(y) > -oo) == True\n+    assert (ceiling(y) <= oo) == True\n+    assert (ceiling(y) < oo) == True\n \n     assert ceiling(y).rewrite(floor) == -floor(-y)\n     assert ceiling(y).rewrite(frac) == y + frac(-y)\n@@ -242,6 +316,70 @@ def test_ceiling():\n     assert Eq(ceiling(y), y + frac(-y))\n     assert Eq(ceiling(y), -floor(-y))\n \n+    neg = Symbol('neg', negative=True)\n+    nn = Symbol('nn', nonnegative=True)\n+    pos = Symbol('pos', positive=True)\n+    np = Symbol('np', nonpositive=True)\n+\n+    assert (ceiling(neg) <= 0) == True\n+    assert (ceiling(neg) < 0) == (neg <= -1)\n+    assert (ceiling(neg) > 0) == False\n+    assert (ceiling(neg) >= 0) == (neg > -1)\n+    assert (ceiling(neg) > -3) == (neg > -3)\n+    assert (ceiling(neg) <= 10) == (neg <= 10)\n+\n+    assert (ceiling(nn) < 0) == False\n+    assert (ceiling(nn) >= 0) == True\n+\n+    assert (ceiling(pos) < 0) == False\n+    assert (ceiling(pos) <= 0) == False\n+    assert (ceiling(pos) > 0) == True\n+    assert (ceiling(pos) >= 0) == True\n+    assert (ceiling(pos) >= 1) == True\n+    assert (ceiling(pos) > 5) == (pos > 5)\n+\n+    assert (ceiling(np) <= 0) == True\n+    assert (ceiling(np) > 0) == False\n+\n+    assert ceiling(neg).is_positive == False\n+    assert ceiling(neg).is_nonpositive == True\n+    assert ceiling(nn).is_positive is None\n+    assert ceiling(nn).is_nonpositive is None\n+    assert ceiling(pos).is_positive == True\n+    assert ceiling(pos).is_nonpositive == False\n+    assert ceiling(np).is_positive == False\n+    assert ceiling(np).is_nonpositive == True\n+\n+    assert (ceiling(7, evaluate=False) >= 7) == True\n+    assert (ceiling(7, evaluate=False) > 7) == False\n+    assert (ceiling(7, evaluate=False) <= 7) == True\n+    assert (ceiling(7, evaluate=False) < 7) == False\n+\n+    assert (ceiling(7, evaluate=False) >= 6) == True\n+    assert (ceiling(7, evaluate=False) > 6) == True\n+    assert (ceiling(7, evaluate=False) <= 6) == False\n+    assert (ceiling(7, evaluate=False) < 6) == False\n+\n+    assert (ceiling(7, evaluate=False) >= 8) == False\n+    assert (ceiling(7, evaluate=False) > 8) == False\n+    assert (ceiling(7, evaluate=False) <= 8) == True\n+    assert (ceiling(7, evaluate=False) < 8) == True\n+\n+    assert (ceiling(x) <= 5.5) == Le(ceiling(x), 5.5, evaluate=False)\n+    assert (ceiling(x) >= -3.2) == Ge(ceiling(x), -3.2, evaluate=False)\n+    assert (ceiling(x) < 2.9) == Lt(ceiling(x), 2.9, evaluate=False)\n+    assert (ceiling(x) > -1.7) == Gt(ceiling(x), -1.7, evaluate=False)\n+\n+    assert (ceiling(y) <= 5.5) == (y <= 5)\n+    assert (ceiling(y) >= -3.2) == (y > -4)\n+    assert (ceiling(y) < 2.9) == (y <= 2)\n+    assert (ceiling(y) > -1.7) == (y > -2)\n+\n+    assert (ceiling(y) <= n) == (y <= n)\n+    assert (ceiling(y) >= n) == (y > n - 1)\n+    assert (ceiling(y) < n) == (y <= n - 1)\n+    assert (ceiling(y) > n) == (y > n)\n+\n \n def test_frac():\n     assert isinstance(frac(x), frac)\n",
+  "problem_statement": "ceiling(pos) > 0 should be true\nAlso, shouldn't `floor(neg) < 0`, `floor(pos) >= 0` and `ceiling(neg) <=0` evaluate to True, too?\n",
+  "hints_text": "",
+  "created_at": "2019-07-31T23:51:00Z",
+  "version": "1.5",
+  "FAIL_TO_PASS": "[\"test_ceiling\", \"test_floor\"]",
+  "PASS_TO_PASS": "[\"test_frac\", \"test_issue_11207\", \"test_series\"]",
+  "environment_setup_commit": "70381f282f2d9d039da860e391fe51649df2779d",
+  "patch_files": [
+    "sympy/functions/elementary/integers.py"
+  ],
+  "test_patch_files": [
+    "sympy/functions/elementary/tests/test_integers.py"
+  ],
+  "patch_diff_details": {
+    "sympy/functions/elementary/integers.py": {
+      "diffs": [
+        {
+          "start_line_old": 145,
+          "end_line_old": 145,
+          "file_pos": 1,
+          "file_context_length": 2961,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/functions/elementary/integers.py_ceiling_ceiling.__ge__.3.1",
+          "closest_snippet_line_distance": 25,
+          "pos": 6,
+          "context_length": 2668
+        },
+        {
+          "start_line_old": 158,
+          "end_line_old": 158,
+          "file_pos": 1,
+          "file_context_length": 2961,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/functions/elementary/integers.py_ceiling_ceiling.__ge__.3.1",
+          "closest_snippet_line_distance": 12,
+          "pos": 6,
+          "context_length": 2668
+        },
+        {
+          "start_line_old": 237,
+          "end_line_old": 237,
+          "file_pos": 1,
+          "file_context_length": 2961,
+          "pos": 1,
+          "context_length": 582
+        },
+        {
+          "start_line_old": 244,
+          "end_line_old": 244,
+          "file_pos": 1,
+          "file_context_length": 2961,
+          "pos": 1,
+          "context_length": 582
+        }
+      ]
+    }
+  },
+  "vectors": 8227,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/integers.py_ceiling_ceiling.__ge__.3.1",
+      "distance": 1.090732455253601,
+      "file_path": "sympy/functions/elementary/integers.py",
+      "start_line": 170,
+      "end_line": 253,
+      "tokens": 582,
+      "context_length": 582,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/core/evalf.py_get_integer_part_get_integer_part.13",
+      "distance": 1.160409927368164,
+      "file_path": "sympy/core/evalf.py",
+      "start_line": 305,
+      "end_line": 340,
+      "tokens": 342,
+      "context_length": 924
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/calculus.py_AskFiniteHandler.Add_AskFiniteHandler.Add.result.1",
+      "distance": 1.1668208837509155,
+      "file_path": "sympy/assumptions/handlers/calculus.py",
+      "start_line": 55,
+      "end_line": 122,
+      "tokens": 669,
+      "context_length": 1593
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.positive_AssumptionKeys.positive.2.1",
+      "distance": 1.181248426437378,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 396,
+      "end_line": 432,
+      "tokens": 331,
+      "context_length": 1924
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/core/mul.py_Mul._eval_is_extended_positive_Mul._eval_is_extended_positive.2.1",
+      "distance": 1.1862483024597168,
+      "file_path": "sympy/core/mul.py",
+      "start_line": 1376,
+      "end_line": 1389,
+      "tokens": 157,
+      "context_length": 2081
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/integers.py_floor_floor.__gt__.2.1",
+      "distance": 1.1944475173950195,
+      "file_path": "sympy/functions/elementary/integers.py",
+      "start_line": 84,
+      "end_line": 167,
+      "tokens": 587,
+      "context_length": 2668,
+      "file_pos": 5
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/ntheory/factor_.py_is_deficient_is_deficient.4.1",
+      "distance": 1.2003211975097656,
+      "file_path": "sympy/ntheory/factor_.py",
+      "start_line": 2214,
+      "end_line": 2237,
+      "tokens": 137,
+      "context_length": 2805
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/assumptions/sathandlers.py_28_",
+      "distance": 1.203841209411621,
+      "file_path": "sympy/assumptions/sathandlers.py",
+      "start_line": 295,
+      "end_line": 381,
+      "tokens": 1219,
+      "context_length": 4024
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/order.py_AskPositiveHandler_AskPositiveHandler._number.6.3.2.3.1.1",
+      "distance": 1.2085953950881958,
+      "file_path": "sympy/assumptions/handlers/order.py",
+      "start_line": 217,
+      "end_line": 245,
+      "tokens": 217,
+      "context_length": 4241
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py_Piecewise._eval_transpose_Piecewise.__eval_cond.3.1.3.1",
+      "distance": 1.2117608785629272,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 883,
+      "end_line": 944,
+      "tokens": 634,
+      "context_length": 4875
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/ntheory/factor_.py_is_perfect_is_perfect.8.1",
+      "distance": 1.2163901329040527,
+      "file_path": "sympy/ntheory/factor_.py",
+      "start_line": 2108,
+      "end_line": 2139,
+      "tokens": 217,
+      "context_length": 5092
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/logic/boolalg.py_Nand_Nand.eval.1.1",
+      "distance": 1.2189204692840576,
+      "file_path": "sympy/logic/boolalg.py",
+      "start_line": 1063,
+      "end_line": 1089,
+      "tokens": 157,
+      "context_length": 5249
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/logic/boolalg.py_POSform_POSform.13.1",
+      "distance": 1.2226688861846924,
+      "file_path": "sympy/logic/boolalg.py",
+      "start_line": 2187,
+      "end_line": 2263,
+      "tokens": 831,
+      "context_length": 6080
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/integers.py_frac._eval_rewrite_as_floor_",
+      "distance": 1.224105715751648,
+      "file_path": "sympy/functions/elementary/integers.py",
+      "start_line": 341,
+      "end_line": 434,
+      "tokens": 674,
+      "context_length": 6754,
+      "file_pos": 10
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.nonnegative_AssumptionKeys.nonnegative.2.1",
+      "distance": 1.2242457866668701,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 572,
+      "end_line": 603,
+      "tokens": 275,
+      "context_length": 7029
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/calculus.py_AskFiniteHandler.Mul_AskFiniteHandler.Mul.4.1",
+      "distance": 1.224587082862854,
+      "file_path": "sympy/assumptions/handlers/calculus.py",
+      "start_line": 141,
+      "end_line": 195,
+      "tokens": 411,
+      "context_length": 7440
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.153__check_antecedents.177",
+      "distance": 1.2250136137008667,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1175,
+      "end_line": 1212,
+      "tokens": 760,
+      "context_length": 8200
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/core/evalf.py_get_integer_part.calc_part_evalf_floor.1.1",
+      "distance": 1.2269906997680664,
+      "file_path": "sympy/core/evalf.py",
+      "start_line": 341,
+      "end_line": 414,
+      "tokens": 699,
+      "context_length": 8899
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.negative_AssumptionKeys.negative.2.1",
+      "distance": 1.2296727895736694,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 434,
+      "end_line": 470,
+      "tokens": 343,
+      "context_length": 9242
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/ntheory/factor_.py_is_abundant_is_abundant.4.1",
+      "distance": 1.235277533531189,
+      "file_path": "sympy/ntheory/factor_.py",
+      "start_line": 2188,
+      "end_line": 2211,
+      "tokens": 150,
+      "context_length": 9392
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_ceil_ceil.3.3.1.1",
+      "distance": 1.235651969909668,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 310,
+      "end_line": 328,
+      "tokens": 142,
+      "context_length": 9534
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask_generated.py_get_all_known_facts.1_get_all_known_facts.1.1",
+      "distance": 1.2373309135437012,
+      "file_path": "sympy/assumptions/ask_generated.py",
+      "start_line": 17,
+      "end_line": 90,
+      "tokens": 1512,
+      "context_length": 11046
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.58__check_antecedents.59",
+      "distance": 1.237551212310791,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1011,
+      "end_line": 1052,
+      "tokens": 628,
+      "context_length": 11674
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.nonpositive_AssumptionKeys.nonpositive.2.1",
+      "distance": 1.238369107246399,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 538,
+      "end_line": 570,
+      "tokens": 265,
+      "context_length": 11939
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_get_known_facts_",
+      "distance": 1.2428200244903564,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 1511,
+      "end_line": 1569,
+      "tokens": 690,
+      "context_length": 12629
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.nonzero_AssumptionKeys.nonzero.2.1",
+      "distance": 1.242823600769043,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 498,
+      "end_line": 536,
+      "tokens": 294,
+      "context_length": 12923
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask_generated.py_8_get_known_facts_cnf.1.1",
+      "distance": 1.2440855503082275,
+      "file_path": "sympy/assumptions/ask_generated.py",
+      "start_line": 92,
+      "end_line": 168,
+      "tokens": 849,
+      "context_length": 13772
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr._eval_is_positive_Expr._eval_is_extended_positive.3.9.2.1.2.1",
+      "distance": 1.244574785232544,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 853,
+      "end_line": 906,
+      "tokens": 418,
+      "context_length": 14190
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.74__check_antecedents.109",
+      "distance": 1.2447059154510498,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1096,
+      "end_line": 1133,
+      "tokens": 808,
+      "context_length": 14998
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/polys/polyclasses.py_ANP.is_zero_",
+      "distance": 1.2450482845306396,
+      "file_path": "sympy/polys/polyclasses.py",
+      "start_line": 1669,
+      "end_line": 1779,
+      "tokens": 681,
+      "context_length": 15679
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.178__check_antecedents.192",
+      "distance": 1.2451213598251343,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1213,
+      "end_line": 1239,
+      "tokens": 453,
+      "context_length": 16132
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/order.py_AskPositiveHandler.Basic_",
+      "distance": 1.2454034090042114,
+      "file_path": "sympy/assumptions/handlers/order.py",
+      "start_line": 247,
+      "end_line": 366,
+      "tokens": 799,
+      "context_length": 16931
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__gt___AccumulationBounds.__gt__.4.1",
+      "distance": 1.2480227947235107,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1425,
+      "end_line": 1460,
+      "tokens": 299,
+      "context_length": 17230
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/logic/boolalg.py_Not.to_nnf_Not.to_nnf.10",
+      "distance": 1.2515454292297363,
+      "file_path": "sympy/logic/boolalg.py",
+      "start_line": 903,
+      "end_line": 937,
+      "tokens": 288,
+      "context_length": 17518
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__ge___AccumulationBounds.__ge__.4.1",
+      "distance": 1.2520897388458252,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1462,
+      "end_line": 1497,
+      "tokens": 300,
+      "context_length": 17818
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/physics/secondquant.py_NO.has_q_creators_NO.has_q_creators.2.1",
+      "distance": 1.2562512159347534,
+      "file_path": "sympy/physics/secondquant.py",
+      "start_line": 1834,
+      "end_line": 1856,
+      "tokens": 198,
+      "context_length": 18016
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/functions/elementary/integers.py",
+      "position": 1,
+      "tokens": 2961,
+      "context_length": 2961
+    },
+    {
+      "file_path": "sympy/core/evalf.py",
+      "position": 2,
+      "tokens": 13718,
+      "context_length": 16679
+    },
+    {
+      "file_path": "sympy/assumptions/handlers/calculus.py",
+      "position": 3,
+      "tokens": 1840,
+      "context_length": 18519
+    },
+    {
+      "file_path": "sympy/assumptions/ask.py",
+      "position": 4,
+      "tokens": 11123,
+      "context_length": 29642
+    },
+    {
+      "file_path": "sympy/core/mul.py",
+      "position": 5,
+      "tokens": 15736,
+      "context_length": 45378
+    },
+    {
+      "file_path": "sympy/ntheory/factor_.py",
+      "position": 6,
+      "tokens": 17942,
+      "context_length": 63320
+    },
+    {
+      "file_path": "sympy/assumptions/sathandlers.py",
+      "position": 7,
+      "tokens": 3447,
+      "context_length": 66767
+    },
+    {
+      "file_path": "sympy/assumptions/handlers/order.py",
+      "position": 8,
+      "tokens": 2345,
+      "context_length": 69112
+    },
+    {
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "position": 9,
+      "tokens": 11137,
+      "context_length": 80249
+    },
+    {
+      "file_path": "sympy/logic/boolalg.py",
+      "position": 10,
+      "tokens": 21067,
+      "context_length": 101316
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 11,
+      "tokens": 24294,
+      "context_length": 125610
+    },
+    {
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "position": 12,
+      "tokens": 3651,
+      "context_length": 129261
+    },
+    {
+      "file_path": "sympy/assumptions/ask_generated.py",
+      "position": 13,
+      "tokens": 3501,
+      "context_length": 132762
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 14,
+      "tokens": 32441,
+      "context_length": 165203
+    },
+    {
+      "file_path": "sympy/polys/polyclasses.py",
+      "position": 15,
+      "tokens": 14497,
+      "context_length": 179700
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 16,
+      "tokens": 12023,
+      "context_length": 191723
+    },
+    {
+      "file_path": "sympy/physics/secondquant.py",
+      "position": 17,
+      "tokens": 22557,
+      "context_length": 214280
+    }
+  ]
+}

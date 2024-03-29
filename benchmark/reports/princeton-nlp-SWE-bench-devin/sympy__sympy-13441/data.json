@@ -1,0 +1,230 @@
+{
+  "instance_id": "sympy__sympy-13441",
+  "model_patch": "diff --git a/sympy/core/function.py b/sympy/core/function.py\nindex efafd5a59a..0f97fe5b05 100644\n--- a/sympy/core/function.py\n+++ b/sympy/core/function.py\n@@ -2495,6 +2495,8 @@ def count_ops(expr, visual=False):\n     from sympy.simplify.radsimp import fraction\n     from sympy.logic.boolalg import BooleanFunction\n \n+    print(\"Counting operations in expression: {}\".format(expr))\n+\n     expr = sympify(expr)\n     if isinstance(expr, Expr):\n \n@@ -2504,6 +2506,7 @@ def count_ops(expr, visual=False):\n         DIV = Symbol('DIV')\n         SUB = Symbol('SUB')\n         ADD = Symbol('ADD')\n+        print(\"Entering while loop with args:\", args)\n         while args:\n             a = args.pop()\n \n@@ -2577,9 +2580,11 @@ def count_ops(expr, visual=False):\n                 args.extend(a.args)\n \n     elif type(expr) is dict:\n+        print(\"Before recursive calls in dict branch, current ops:\", ops)\n         ops = [count_ops(k, visual=visual) +\n                count_ops(v, visual=visual) for k, v in expr.items()]\n     elif iterable(expr):\n+        print(\"Before recursive calls in iterable branch, current ops:\", ops)\n         ops = [count_ops(i, visual=visual) for i in expr]\n     elif isinstance(expr, BooleanFunction):\n         ops = []\n@@ -2616,6 +2621,7 @@ def count_ops(expr, visual=False):\n         return 0\n \n     ops = Add(*ops)\n+    print(\"Before final summation, ops:\", ops)\n \n     if visual:\n         return ops\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/core/function.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "e0cd7d65857a90376a9b49529840f96908dd774f",
+  "patch": "diff --git a/sympy/core/add.py b/sympy/core/add.py\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n@@ -396,13 +396,26 @@ def matches(self, expr, repl_dict={}, old=False):\n     @staticmethod\n     def _combine_inverse(lhs, rhs):\n         \"\"\"\n-        Returns lhs - rhs, but treats arguments like symbols, so things like\n-        oo - oo return 0, instead of a nan.\n+        Returns lhs - rhs, but treats oo like a symbol so oo - oo\n+        returns 0, instead of a nan.\n         \"\"\"\n-        from sympy import oo, I, expand_mul\n-        if lhs == oo and rhs == oo or lhs == oo*I and rhs == oo*I:\n-            return S.Zero\n-        return expand_mul(lhs - rhs)\n+        from sympy.core.function import expand_mul\n+        from sympy.core.symbol import Dummy\n+        inf = (S.Infinity, S.NegativeInfinity)\n+        if lhs.has(*inf) or rhs.has(*inf):\n+            oo = Dummy('oo')\n+            reps = {\n+                S.Infinity: oo,\n+                S.NegativeInfinity: -oo}\n+            ireps = dict([(v, k) for k, v in reps.items()])\n+            eq = expand_mul(lhs.xreplace(reps) - rhs.xreplace(reps))\n+            if eq.has(oo):\n+                eq = eq.replace(\n+                    lambda x: x.is_Pow and x.base == oo,\n+                    lambda x: x.base)\n+            return eq.xreplace(ireps)\n+        else:\n+            return expand_mul(lhs - rhs)\n \n     @cacheit\n     def as_two_terms(self):\ndiff --git a/sympy/core/function.py b/sympy/core/function.py\n--- a/sympy/core/function.py\n+++ b/sympy/core/function.py\n@@ -456,17 +456,15 @@ def _should_evalf(cls, arg):\n \n         Returns the precision to evalf to, or -1 if it shouldn't evalf.\n         \"\"\"\n-        from sympy.core.symbol import Wild\n+        from sympy.core.evalf import pure_complex\n         if arg.is_Float:\n             return arg._prec\n         if not arg.is_Add:\n             return -1\n-        # Don't use as_real_imag() here, that's too much work\n-        a, b = Wild('a'), Wild('b')\n-        m = arg.match(a + b*S.ImaginaryUnit)\n-        if not m or not (m[a].is_Float or m[b].is_Float):\n+        m = pure_complex(arg)\n+        if m is None or not (m[0].is_Float or m[1].is_Float):\n             return -1\n-        l = [m[i]._prec for i in m if m[i].is_Float]\n+        l = [i._prec for i in m if i.is_Float]\n         l.append(-1)\n         return max(l)\n \ndiff --git a/sympy/core/operations.py b/sympy/core/operations.py\n--- a/sympy/core/operations.py\n+++ b/sympy/core/operations.py\n@@ -79,8 +79,8 @@ def _new_rawargs(self, *args, **kwargs):\n \n            Note: use this with caution. There is no checking of arguments at\n            all. This is best used when you are rebuilding an Add or Mul after\n-           simply removing one or more terms. If modification which result,\n-           for example, in extra 1s being inserted (as when collecting an\n+           simply removing one or more args. If, for example, modifications,\n+           result in extra 1s being inserted (as when collecting an\n            expression's numerators and denominators) they will not show up in\n            the result but a Mul will be returned nonetheless:\n \n@@ -180,29 +180,26 @@ def _matches_commutative(self, expr, repl_dict={}, old=False):\n         # eliminate exact part from pattern: (2+a+w1+w2).matches(expr) -> (w1+w2).matches(expr-a-2)\n         from .function import WildFunction\n         from .symbol import Wild\n-        wild_part = []\n-        exact_part = []\n-        for p in ordered(self.args):\n-            if p.has(Wild, WildFunction) and (not expr.has(p)):\n-                # not all Wild should stay Wilds, for example:\n-                # (w2+w3).matches(w1) -> (w1+w3).matches(w1) -> w3.matches(0)\n-                wild_part.append(p)\n-            else:\n-                exact_part.append(p)\n-\n-        if exact_part:\n-            exact = self.func(*exact_part)\n+        from sympy.utilities.iterables import sift\n+        sifted = sift(self.args, lambda p:\n+            p.has(Wild, WildFunction) and not expr.has(p))\n+        wild_part = sifted[True]\n+        exact_part = sifted[False]\n+        if not exact_part:\n+            wild_part = list(ordered(wild_part))\n+        else:\n+            exact = self._new_rawargs(*exact_part)\n             free = expr.free_symbols\n             if free and (exact.free_symbols - free):\n                 # there are symbols in the exact part that are not\n                 # in the expr; but if there are no free symbols, let\n                 # the matching continue\n                 return None\n-            newpattern = self.func(*wild_part)\n             newexpr = self._combine_inverse(expr, exact)\n             if not old and (expr.is_Add or expr.is_Mul):\n                 if newexpr.count_ops() > expr.count_ops():\n                     return None\n+            newpattern = self._new_rawargs(*wild_part)\n             return newpattern.matches(newexpr, repl_dict)\n \n         # now to real work ;)\n",
+  "test_patch": "diff --git a/sympy/core/tests/test_match.py b/sympy/core/tests/test_match.py\n--- a/sympy/core/tests/test_match.py\n+++ b/sympy/core/tests/test_match.py\n@@ -396,7 +396,7 @@ def test_match_wild_wild():\n     assert p.match(q*r) is None\n \n \n-def test_combine_inverse():\n+def test__combine_inverse():\n     x, y = symbols(\"x y\")\n     assert Mul._combine_inverse(x*I*y, x*I) == y\n     assert Mul._combine_inverse(x*I*y, y*I) == x\n@@ -404,6 +404,9 @@ def test_combine_inverse():\n     assert Mul._combine_inverse(oo*I*y, oo*I) == y\n     assert Add._combine_inverse(oo, oo) == S(0)\n     assert Add._combine_inverse(oo*I, oo*I) == S(0)\n+    assert Add._combine_inverse(x*oo, x*oo) == S(0)\n+    assert Add._combine_inverse(-x*oo, -x*oo) == S(0)\n+    assert Add._combine_inverse((x - oo)*(x + oo), -oo)\n \n \n def test_issue_3773():\n",
+  "problem_statement": "count_ops is slow for large expressions\nIt seems that this script was hanging inside `count_ops`:\n\n```\nmoorepants@garuda:pydy.wiki(master)$ SYMPY_CACHE_SIZE=10000 ipython\nPython 3.5.1 |Continuum Analytics, Inc.| (default, Dec  7 2015, 11:16:01) \nType \"copyright\", \"credits\" or \"license\" for more information.\n\nIPython 4.1.2 -- An enhanced Interactive Python.\n?         -> Introduction and overview of IPython's features.\n%quickref -> Quick reference.\nhelp      -> Python's own help system.\nobject?   -> Details about 'object', use 'object??' for extra details.\n\nIn [1]: %paste\n   In [1]: from pydy.models import n_link_pendulum_on_cart\n\n   In [2]: sys = n_link_pendulum_on_cart(3)\n\n   In [3]: x_dot = sys.eom_method.rhs()\n\n   In [4]: %time jac = x_dot.jacobian(sys.states)\n## -- End pasted text --\nCPU times: user 2.2 s, sys: 4 ms, total: 2.21 s\nWall time: 2.2 s\n\nIn [2]: %paste\n   In [5]: sys = n_link_pendulum_on_cart(4)\n\n   In [6]: x_dot = sys.eom_method.rhs()\n\n   In [7]: %time jac = x_dot.jacobian(sys.states)\n## -- End pasted text --\n^C---------------------------------------------------------------------------\nKeyboardInterrupt                         Traceback (most recent call last)\n<ipython-input-2-1039ec729c05> in <module>()\n      3 x_dot = sys.eom_method.rhs()\n      4 \n----> 5 get_ipython().magic('time jac = x_dot.jacobian(sys.states)')\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/IPython/core/interactiveshell.py in magic(self, arg_s)\n   2161         magic_name, _, magic_arg_s = arg_s.partition(' ')\n   2162         magic_name = magic_name.lstrip(prefilter.ESC_MAGIC)\n-> 2163         return self.run_line_magic(magic_name, magic_arg_s)\n   2164 \n   2165     #-------------------------------------------------------------------------\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/IPython/core/interactiveshell.py in run_line_magic(self, magic_name, line)\n   2082                 kwargs['local_ns'] = sys._getframe(stack_depth).f_locals\n   2083             with self.builtin_trap:\n-> 2084                 result = fn(*args,**kwargs)\n   2085             return result\n   2086 \n\n<decorator-gen-60> in time(self, line, cell, local_ns)\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/IPython/core/magic.py in <lambda>(f, *a, **k)\n    191     # but it's overkill for just that one bit of state.\n    192     def magic_deco(arg):\n--> 193         call = lambda f, *a, **k: f(*a, **k)\n    194 \n    195         if callable(arg):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/IPython/core/magics/execution.py in time(self, line, cell, local_ns)\n   1175         else:\n   1176             st = clock2()\n-> 1177             exec(code, glob, local_ns)\n   1178             end = clock2()\n   1179             out = None\n\n<timed exec> in <module>()\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/matrices/matrices.py in jacobian(self, X)\n   1551         # m is the number of functions and n is the number of variables\n   1552         # computing the Jacobian is now easy:\n-> 1553         return self._new(m, n, lambda j, i: self[j].diff(X[i]))\n   1554 \n   1555     def QRdecomposition(self):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/matrices/dense.py in _new(cls, *args, **kwargs)\n    601     @classmethod\n    602     def _new(cls, *args, **kwargs):\n--> 603         rows, cols, flat_list = cls._handle_creation_inputs(*args, **kwargs)\n    604         self = object.__new__(cls)\n    605         self.rows = rows\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/matrices/matrices.py in _handle_creation_inputs(cls, *args, **kwargs)\n    207                     flat_list.extend(\n    208                         [cls._sympify(op(cls._sympify(i), cls._sympify(j)))\n--> 209                         for j in range(cols)])\n    210 \n    211             # Matrix(2, 2, [1, 2, 3, 4])\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/matrices/matrices.py in <listcomp>(.0)\n    207                     flat_list.extend(\n    208                         [cls._sympify(op(cls._sympify(i), cls._sympify(j)))\n--> 209                         for j in range(cols)])\n    210 \n    211             # Matrix(2, 2, [1, 2, 3, 4])\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/matrices/matrices.py in <lambda>(j, i)\n   1551         # m is the number of functions and n is the number of variables\n   1552         # computing the Jacobian is now easy:\n-> 1553         return self._new(m, n, lambda j, i: self[j].diff(X[i]))\n   1554 \n   1555     def QRdecomposition(self):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in _eval_derivative(self, s)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in <listcomp>(.0)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in _eval_derivative(self, s)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in <listcomp>(.0)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in _eval_derivative(self, s)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in <listcomp>(.0)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in _eval_derivative(self, s)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in <listcomp>(.0)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/power.py in _eval_derivative(self, s)\n    982     def _eval_derivative(self, s):\n    983         from sympy import log\n--> 984         dbase = self.base.diff(s)\n    985         dexp = self.exp.diff(s)\n    986         return self * (dexp * log(self.base) + dbase * self.exp/self.base)\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in _eval_derivative(self, s)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in <listcomp>(.0)\n    351     @cacheit\n    352     def _eval_derivative(self, s):\n--> 353         return self.func(*[a.diff(s) for a in self.args])\n    354 \n    355     def _eval_nseries(self, x, n, logx):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/mul.py in _eval_derivative(self, s)\n    832         terms = []\n    833         for i in range(len(args)):\n--> 834             d = args[i].diff(s)\n    835             if d:\n    836                 terms.append(self.func(*(args[:i] + [d] + args[i + 1:])))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in diff(self, *symbols, **assumptions)\n   2864         new_symbols = list(map(sympify, symbols))  # e.g. x, 2, y, z\n   2865         assumptions.setdefault(\"evaluate\", True)\n-> 2866         return Derivative(self, *new_symbols, **assumptions)\n   2867 \n   2868     ###########################################################################\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, expr, *variables, **assumptions)\n   1141                     old_v = v\n   1142                     v = new_v\n-> 1143                 obj = expr._eval_derivative(v)\n   1144                 nderivs += 1\n   1145                 if not is_symbol:\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/power.py in _eval_derivative(self, s)\n    984         dbase = self.base.diff(s)\n    985         dexp = self.exp.diff(s)\n--> 986         return self * (dexp * log(self.base) + dbase * self.exp/self.base)\n    987 \n    988     def _eval_evalf(self, prec):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in __new__(cls, *args, **options)\n    388 \n    389         pr = max(cls._should_evalf(a) for a in result.args)\n--> 390         pr2 = min(cls._should_evalf(a) for a in result.args)\n    391         if pr2 > 0:\n    392             return result.evalf(mlib.libmpf.prec_to_dps(pr))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in <genexpr>(.0)\n    388 \n    389         pr = max(cls._should_evalf(a) for a in result.args)\n--> 390         pr2 = min(cls._should_evalf(a) for a in result.args)\n    391         if pr2 > 0:\n    392             return result.evalf(mlib.libmpf.prec_to_dps(pr))\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in _should_evalf(cls, arg)\n    411         # Don't use as_real_imag() here, that's too much work\n    412         a, b = Wild('a'), Wild('b')\n--> 413         m = arg.match(a + b*S.ImaginaryUnit)\n    414         if not m or not (m[a].is_Float or m[b].is_Float):\n    415             return -1\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/basic.py in match(self, pattern, old)\n   1489         \"\"\"\n   1490         pattern = sympify(pattern)\n-> 1491         return pattern.matches(self, old=old)\n   1492 \n   1493     def count_ops(self, visual=None):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in matches(self, expr, repl_dict, old)\n    365 \n    366     def matches(self, expr, repl_dict={}, old=False):\n--> 367         return AssocOp._matches_commutative(self, expr, repl_dict, old)\n    368 \n    369     @staticmethod\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/operations.py in _matches_commutative(self, expr, repl_dict, old)\n    215                     d1 = w.matches(last_op, repl_dict)\n    216                     if d1 is not None:\n--> 217                         d2 = self.xreplace(d1).matches(expr, d1)\n    218                         if d2 is not None:\n    219                             return d2\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/add.py in matches(self, expr, repl_dict, old)\n    365 \n    366     def matches(self, expr, repl_dict={}, old=False):\n--> 367         return AssocOp._matches_commutative(self, expr, repl_dict, old)\n    368 \n    369     @staticmethod\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/operations.py in _matches_commutative(self, expr, repl_dict, old)\n    201             newexpr = self._combine_inverse(expr, exact)\n    202             if not old and (expr.is_Add or expr.is_Mul):\n--> 203                 if newexpr.count_ops() > expr.count_ops():\n    204                     return None\n    205             return newpattern.matches(newexpr, repl_dict)\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/expr.py in count_ops(self, visual)\n   1017         \"\"\"wrapper for count_ops that returns the operation count.\"\"\"\n   1018         from .function import count_ops\n-> 1019         return count_ops(self, visual)\n   1020 \n   1021     def args_cnc(self, cset=False, warn=True, split_1=True):\n\n/home/moorepants/miniconda3/lib/python3.5/site-packages/sympy/core/function.py in count_ops(expr, visual)\n   2378                 a.is_Pow or\n   2379                 a.is_Function or\n-> 2380                 isinstance(a, Derivative) or\n   2381                     isinstance(a, Integral)):\n   2382 \n\nKeyboardInterrupt: \n\nIn [3]: \n```\n\n",
+  "hints_text": "My first thought is that the following\n\n```\n202             if not old and (expr.is_Add or expr.is_Mul):\n203                 if newexpr.count_ops() > expr.count_ops():\n```\n\nshould be\n\n```\nif not old and (expr.is_Add or expr.is_Mul):\n    len(expr.func.make_args(newexpr)) > len(expr.args):\n```\n\nHere is a pyinstrument profile of count_ops:\n\nhttps://rawgit.com/moorepants/b92b851bcc5236f71de1caf61de98e88/raw/8e5ce6255971c115d46fed3d65560f427d0a44aa/profile_count_ops.html\n\nI've updated the script so that it also calls `jacobian()` and found that for n>3 there are wildly different results. It seems that count_ops is called somewhere in jacobian if n>3.\n\nProfile from n=3:\n\nhttps://rawgit.com/moorepants/b92b851bcc5236f71de1caf61de98e88/raw/77e5f6f162e370b3a35060bef0030333e5ba3926/profile_count_ops_n_3.html\n\nProfile from n=4 (had to kill this one because it doesn't finish):\n\nhttps://rawgit.com/moorepants/b92b851bcc5236f71de1caf61de98e88/raw/77e5f6f162e370b3a35060bef0030333e5ba3926/profile_count_ops_n_4.html\n\nThis gist: https://gist.github.com/moorepants/b92b851bcc5236f71de1caf61de98e88\n\nI'm seeing that _matches_commutative sympy/core/operations.py:127 is whats taking so much time. This calls some simplification routines in the fraction function and count_ops which takes for ever. I'm not sure why `_matches_commutative` is getting called.\n\nThe use of matches in the core should be forbidden (mostly):\r\n```\r\n>>> from timeit import timeit\r\n>>> timeit('e.match(pat)','''\r\n... from sympy import I, Wild\r\n... a,b=Wild('a'),Wild('b')\r\n... e=3+4*I\r\n... pat=a+I*b\r\n... ''',number=100)\r\n0.2531449845839618\r\n>>> timeit('''\r\n... a, b = e.as_two_terms()\r\n... b = b.as_two_terms()\r\n... ''','''\r\n... from sympy import I, Wild\r\n... a,b=Wild('a'),Wild('b')\r\n... e=3+4*I\r\n... pat=a+I*b\r\n... ''',number=100)\r\n0.008118156473557292\r\n>>> timeit('''\r\n... pure_complex(e)''','''\r\n... from sympy import I\r\n... from sympy.core.evalf import pure_complex\r\n... e = 3+4*I''',number=100)\r\n0.001546217867016253\r\n```\nCould you run this again on my `n` branch?\nMuch improved. It finishes in a tolerable time:\r\n\r\n```\r\nIn [1]: from pydy.models import n_link_pendulum_on_cart\r\n\r\nIn [2]: sys = n_link_pendulum_on_cart(3)\r\n\r\nIn [3]: x_dot = sys.eom_method.rhs()\r\n\r\nIn [5]: %time jac = x_dot.jacobian(sys.states)\r\nCPU times: user 1.85 s, sys: 0 ns, total: 1.85 s\r\nWall time: 1.85 s\r\n\r\nIn [6]: sys = n_link_pendulum_on_cart(4)\r\n\r\nIn [7]: x_dot = sys.eom_method.rhs()\r\n\r\nIn [8]: %time jac = x_dot.jacobian(sys.states)\r\nCPU times: user 22.6 s, sys: 8 ms, total: 22.6 s\r\nWall time: 22.6 s\r\n```",
+  "created_at": "2017-10-13T13:05:09Z",
+  "version": "1.1",
+  "FAIL_TO_PASS": "[\"test__combine_inverse\"]",
+  "PASS_TO_PASS": "[\"test_Derivative_bug1\", \"test_add\", \"test_complex\", \"test_derivative1\", \"test_derivative2\", \"test_derivative_bug1\", \"test_exclude\", \"test_floats\", \"test_functions\", \"test_interface\", \"test_issue_3539\", \"test_issue_3773\", \"test_issue_3778\", \"test_issue_3883\", \"test_issue_4319\", \"test_issue_4418\", \"test_issue_4559\", \"test_issue_4700\", \"test_issue_5168\", \"test_issue_6103\", \"test_match_bug2\", \"test_match_bug3\", \"test_match_bug4\", \"test_match_bug5\", \"test_match_bug6\", \"test_match_deriv_bug1\", \"test_match_exclude\", \"test_match_polynomial\", \"test_match_wild_wild\", \"test_mul\", \"test_mul_noncommutative\", \"test_power\", \"test_symbol\"]",
+  "environment_setup_commit": "ec9e3c0436fbff934fa84e22bf07f1b3ef5bfac3",
+  "patch_files": [
+    "sympy/core/add.py",
+    "sympy/core/function.py",
+    "sympy/core/operations.py"
+  ],
+  "test_patch_files": [
+    "sympy/core/tests/test_match.py"
+  ],
+  "patch_diff_details": {
+    "sympy/core/add.py": {
+      "diffs": [
+        {
+          "start_line_old": 399,
+          "end_line_old": 405
+        }
+      ]
+    },
+    "sympy/core/function.py": {
+      "diffs": [
+        {
+          "start_line_old": 459,
+          "end_line_old": 469,
+          "file_pos": 1,
+          "file_context_length": 23089,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/function.py_count_ops_count_ops.expr.1",
+          "closest_snippet_line_distance": 1967
+        }
+      ]
+    },
+    "sympy/core/operations.py": {
+      "diffs": [
+        {
+          "start_line_old": 82,
+          "end_line_old": 83,
+          "file_pos": 4,
+          "file_context_length": 69779,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/operations.py_AssocOp._matches_commutative.20_AssocOp._matches_commutative.21",
+          "closest_snippet_line_distance": 129
+        },
+        {
+          "start_line_old": 183,
+          "end_line_old": 201,
+          "file_pos": 4,
+          "file_context_length": 69779,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/operations.py_AssocOp._matches_commutative.20_AssocOp._matches_commutative.21",
+          "closest_snippet_line_distance": 28
+        }
+      ]
+    }
+  },
+  "vectors": 7975,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_count_ops.6_count_ops.11.1",
+      "distance": 0.3828817903995514,
+      "file_path": "sympy/core/function.py",
+      "start_line": 2499,
+      "end_line": 2626,
+      "tokens": 904,
+      "context_length": 904,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_count_ops_count_ops.expr.1",
+      "distance": 0.4149858057498932,
+      "file_path": "sympy/core/function.py",
+      "start_line": 2426,
+      "end_line": 2498,
+      "tokens": 615,
+      "context_length": 1519,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/core/basic.py_Basic.count_ops_Basic.doit.2.3.1.1",
+      "distance": 0.6327175498008728,
+      "file_path": "sympy/core/basic.py",
+      "start_line": 1518,
+      "end_line": 1547,
+      "tokens": 241,
+      "context_length": 1760
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.removeO_Expr.count_ops.3.1",
+      "distance": 0.6805459856987,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 1034,
+      "end_line": 1088,
+      "tokens": 400,
+      "context_length": 2160
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/core/operations.py_AssocOp._matches_commutative.20_AssocOp._matches_commutative.21",
+      "distance": 0.7623345851898193,
+      "file_path": "sympy/core/operations.py",
+      "start_line": 211,
+      "end_line": 260,
+      "tokens": 431,
+      "context_length": 2591,
+      "file_pos": 4
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/integrals/rubi/rubi.py_1_5.83",
+      "distance": 0.7626531720161438,
+      "file_path": "sympy/integrals/rubi/rubi.py",
+      "start_line": 1,
+      "end_line": 131,
+      "tokens": 1310,
+      "context_length": 3901
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/integrals/rubi/utility_function.py_1_22.85",
+      "distance": 0.7995190620422363,
+      "file_path": "sympy/integrals/rubi/utility_function.py",
+      "start_line": 1,
+      "end_line": 158,
+      "tokens": 1722,
+      "context_length": 5623
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/integrals/rubi/utility_function.py__TrigSimplifyAux.rule27_",
+      "distance": 0.8638176321983337,
+      "file_path": "sympy/integrals/rubi/utility_function.py",
+      "start_line": 6644,
+      "end_line": 6700,
+      "tokens": 908,
+      "context_length": 6531
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.extract_multiplicatively.9_Expr.extract_multiplicatively.9.5.1.3.2.1.1",
+      "distance": 0.8808470964431763,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2001,
+      "end_line": 2082,
+      "tokens": 690,
+      "context_length": 7221
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.5_Expr._pow.1.1",
+      "distance": 0.8844668865203857,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 92,
+      "end_line": 150,
+      "tokens": 483,
+      "context_length": 7704
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode.py_odesimp___remove_linear_redundancies.5.6.1.1",
+      "distance": 0.8851451873779297,
+      "file_path": "sympy/solvers/ode.py",
+      "start_line": 2119,
+      "end_line": 2702,
+      "tokens": 5850,
+      "context_length": 13554
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 1,
+      "tokens": 23089,
+      "context_length": 23089
+    },
+    {
+      "file_path": "sympy/core/basic.py",
+      "position": 2,
+      "tokens": 14421,
+      "context_length": 37510
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 3,
+      "tokens": 28453,
+      "context_length": 65963
+    },
+    {
+      "file_path": "sympy/core/operations.py",
+      "position": 4,
+      "tokens": 3816,
+      "context_length": 69779
+    },
+    {
+      "file_path": "sympy/integrals/rubi/rubi.py",
+      "position": 5,
+      "tokens": 2234,
+      "context_length": 72013
+    },
+    {
+      "file_path": "sympy/integrals/rubi/utility_function.py",
+      "position": 6,
+      "tokens": 82019,
+      "context_length": 154032
+    },
+    {
+      "file_path": "sympy/solvers/ode.py",
+      "position": 7,
+      "tokens": 102701,
+      "context_length": 256733
+    }
+  ]
+}

@@ -1,0 +1,2844 @@
+{
+  "instance_id": "pytest-dev__pytest-5254",
+  "model_patch": "diff --git a/src/_pytest/python.py b/src/_pytest/python.py\nindex 06d853f78..e5a62cc92 100644\n--- a/src/_pytest/python.py\n+++ b/src/_pytest/python.py\n@@ -906,6 +906,10 @@ class CallSpec2(object):\n             getattr(self, valtype_for_arg)[arg] = val\n             self.indices[arg] = param_index\n             self._arg2scopenum[arg] = scopenum\n+        print(\"DEBUG: setmulti2 method called\")\n+        print(f\"DEBUG: argnames: {argnames}\")\n+        print(f\"DEBUG: valset: {valset}\")\n+        print(f\"DEBUG: scopenum: {scopenum}\")\n         self._idlist.append(id)\n         self.marks.extend(normalize_mark_list(marks))\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "src/_pytest/python.py"
+  ],
+  "repo": "pytest-dev/pytest",
+  "base_commit": "654d8da9f7ffd7a88e02ae2081ffcb2ca2e765b3",
+  "patch": "diff --git a/src/_pytest/fixtures.py b/src/_pytest/fixtures.py\n--- a/src/_pytest/fixtures.py\n+++ b/src/_pytest/fixtures.py\n@@ -1129,18 +1129,40 @@ def __init__(self, session):\n         self._nodeid_and_autousenames = [(\"\", self.config.getini(\"usefixtures\"))]\n         session.config.pluginmanager.register(self, \"funcmanage\")\n \n+    def _get_direct_parametrize_args(self, node):\n+        \"\"\"This function returns all the direct parametrization\n+        arguments of a node, so we don't mistake them for fixtures\n+\n+        Check https://github.com/pytest-dev/pytest/issues/5036\n+\n+        This things are done later as well when dealing with parametrization\n+        so this could be improved\n+        \"\"\"\n+        from _pytest.mark import ParameterSet\n+\n+        parametrize_argnames = []\n+        for marker in node.iter_markers(name=\"parametrize\"):\n+            if not marker.kwargs.get(\"indirect\", False):\n+                p_argnames, _ = ParameterSet._parse_parametrize_args(\n+                    *marker.args, **marker.kwargs\n+                )\n+                parametrize_argnames.extend(p_argnames)\n+\n+        return parametrize_argnames\n+\n     def getfixtureinfo(self, node, func, cls, funcargs=True):\n         if funcargs and not getattr(node, \"nofuncargs\", False):\n             argnames = getfuncargnames(func, cls=cls)\n         else:\n             argnames = ()\n+\n         usefixtures = itertools.chain.from_iterable(\n             mark.args for mark in node.iter_markers(name=\"usefixtures\")\n         )\n         initialnames = tuple(usefixtures) + argnames\n         fm = node.session._fixturemanager\n         initialnames, names_closure, arg2fixturedefs = fm.getfixtureclosure(\n-            initialnames, node\n+            initialnames, node, ignore_args=self._get_direct_parametrize_args(node)\n         )\n         return FuncFixtureInfo(argnames, initialnames, names_closure, arg2fixturedefs)\n \n@@ -1174,7 +1196,7 @@ def _getautousenames(self, nodeid):\n                 autousenames.extend(basenames)\n         return autousenames\n \n-    def getfixtureclosure(self, fixturenames, parentnode):\n+    def getfixtureclosure(self, fixturenames, parentnode, ignore_args=()):\n         # collect the closure of all fixtures , starting with the given\n         # fixturenames as the initial set.  As we have to visit all\n         # factory definitions anyway, we also return an arg2fixturedefs\n@@ -1202,6 +1224,8 @@ def merge(otherlist):\n         while lastlen != len(fixturenames_closure):\n             lastlen = len(fixturenames_closure)\n             for argname in fixturenames_closure:\n+                if argname in ignore_args:\n+                    continue\n                 if argname in arg2fixturedefs:\n                     continue\n                 fixturedefs = self.getfixturedefs(argname, parentid)\ndiff --git a/src/_pytest/mark/structures.py b/src/_pytest/mark/structures.py\n--- a/src/_pytest/mark/structures.py\n+++ b/src/_pytest/mark/structures.py\n@@ -103,8 +103,11 @@ def extract_from(cls, parameterset, force_tuple=False):\n         else:\n             return cls(parameterset, marks=[], id=None)\n \n-    @classmethod\n-    def _for_parametrize(cls, argnames, argvalues, func, config, function_definition):\n+    @staticmethod\n+    def _parse_parametrize_args(argnames, argvalues, **_):\n+        \"\"\"It receives an ignored _ (kwargs) argument so this function can\n+        take also calls from parametrize ignoring scope, indirect, and other\n+        arguments...\"\"\"\n         if not isinstance(argnames, (tuple, list)):\n             argnames = [x.strip() for x in argnames.split(\",\") if x.strip()]\n             force_tuple = len(argnames) == 1\n@@ -113,6 +116,11 @@ def _for_parametrize(cls, argnames, argvalues, func, config, function_definition\n         parameters = [\n             ParameterSet.extract_from(x, force_tuple=force_tuple) for x in argvalues\n         ]\n+        return argnames, parameters\n+\n+    @classmethod\n+    def _for_parametrize(cls, argnames, argvalues, func, config, function_definition):\n+        argnames, parameters = cls._parse_parametrize_args(argnames, argvalues)\n         del argvalues\n \n         if parameters:\n",
+  "test_patch": "diff --git a/testing/python/fixtures.py b/testing/python/fixtures.py\n--- a/testing/python/fixtures.py\n+++ b/testing/python/fixtures.py\n@@ -3950,3 +3950,46 @@ def fix():\n \n     with pytest.raises(pytest.fail.Exception):\n         assert fix() == 1\n+\n+\n+def test_fixture_param_shadowing(testdir):\n+    \"\"\"Parametrized arguments would be shadowed if a fixture with the same name also exists (#5036)\"\"\"\n+    testdir.makepyfile(\n+        \"\"\"\n+        import pytest\n+\n+        @pytest.fixture(params=['a', 'b'])\n+        def argroot(request):\n+            return request.param\n+\n+        @pytest.fixture\n+        def arg(argroot):\n+            return argroot\n+\n+        # This should only be parametrized directly\n+        @pytest.mark.parametrize(\"arg\", [1])\n+        def test_direct(arg):\n+            assert arg == 1\n+\n+        # This should be parametrized based on the fixtures\n+        def test_normal_fixture(arg):\n+            assert isinstance(arg, str)\n+\n+        # Indirect should still work:\n+\n+        @pytest.fixture\n+        def arg2(request):\n+            return 2*request.param\n+\n+        @pytest.mark.parametrize(\"arg2\", [1], indirect=True)\n+        def test_indirect(arg2):\n+            assert arg2 == 2\n+    \"\"\"\n+    )\n+    # Only one test should have run\n+    result = testdir.runpytest(\"-v\")\n+    result.assert_outcomes(passed=4)\n+    result.stdout.fnmatch_lines([\"*::test_direct[[]1[]]*\"])\n+    result.stdout.fnmatch_lines([\"*::test_normal_fixture[[]a[]]*\"])\n+    result.stdout.fnmatch_lines([\"*::test_normal_fixture[[]b[]]*\"])\n+    result.stdout.fnmatch_lines([\"*::test_indirect[[]1[]]*\"])\n",
+  "problem_statement": "`pytest.mark.parametrize` does not correctly hide fixtures of the same name (it misses its dependencies)\nFrom https://github.com/smarie/python-pytest-cases/issues/36\r\n\r\nThis works:\r\n\r\n```python\r\n@pytest.fixture(params=['a', 'b'])\r\ndef arg(request):\r\n    return request.param\r\n\r\n@pytest.mark.parametrize(\"arg\", [1])\r\ndef test_reference(arg, request):\r\n    assert '[1]' in request.node.nodeid\r\n```\r\n\r\nthe `arg` parameter in the test correctly hides the `arg` fixture so the unique pytest node has id `[1]` (instead of there being two nodes because of the fixture).\r\n\r\nHowever if the fixture that is hidden by the parameter depends on another fixture, that other fixture is mistakenly kept in the fixtures closure, even if it is not needed anymore. Therefore the test fails:\r\n\r\n```python\r\n@pytest.fixture(params=['a', 'b'])\r\ndef argroot(request):\r\n    return request.param\r\n\r\n@pytest.fixture\r\ndef arg(argroot):\r\n    return argroot\r\n\r\n@pytest.mark.parametrize(\"arg\", [1])\r\ndef test_reference(arg, request):\r\n    assert '[1]' in request.node.nodeid\r\n```\r\n\r\n\r\n\r\n\r\n\r\n\n",
+  "hints_text": "",
+  "created_at": "2019-05-12T23:50:35Z",
+  "version": "4.5",
+  "FAIL_TO_PASS": "[\"testing/python/fixtures.py::test_fixture_param_shadowing\"]",
+  "PASS_TO_PASS": "[\"testing/python/fixtures.py::TestAutouseDiscovery::test_autouse_in_conftests\", \"testing/python/fixtures.py::TestAutouseDiscovery::test_autouse_in_module_and_two_classes\", \"testing/python/fixtures.py::TestAutouseDiscovery::test_callables_nocode\", \"testing/python/fixtures.py::TestAutouseDiscovery::test_parsefactories_conftest\", \"testing/python/fixtures.py::TestAutouseDiscovery::test_setup_at_classlevel\", \"testing/python/fixtures.py::TestAutouseDiscovery::test_two_classes_separated_autouse\", \"testing/python/fixtures.py::TestAutouseManagement::test_autouse_conftest_mid_directory\", \"testing/python/fixtures.py::TestAutouseManagement::test_class_function_parametrization_finalization\", \"testing/python/fixtures.py::TestAutouseManagement::test_funcarg_and_setup\", \"testing/python/fixtures.py::TestAutouseManagement::test_ordering_autouse_before_explicit\", \"testing/python/fixtures.py::TestAutouseManagement::test_ordering_dependencies_torndown_first[p10-p00]\", \"testing/python/fixtures.py::TestAutouseManagement::test_ordering_dependencies_torndown_first[p10-p01]\", \"testing/python/fixtures.py::TestAutouseManagement::test_ordering_dependencies_torndown_first[p11-p00]\", \"testing/python/fixtures.py::TestAutouseManagement::test_ordering_dependencies_torndown_first[p11-p01]\", \"testing/python/fixtures.py::TestAutouseManagement::test_parametrization_setup_teardown_ordering\", \"testing/python/fixtures.py::TestAutouseManagement::test_scope_ordering\", \"testing/python/fixtures.py::TestAutouseManagement::test_session_parametrized_function\", \"testing/python/fixtures.py::TestAutouseManagement::test_uses_parametrized_resource\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_custom_name[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_custom_name[yield_fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_scoped[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_scoped[yield_fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_setup_exception[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_setup_exception[yield_fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_simple[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_simple[yield_fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_teardown_exception[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_teardown_exception[yield_fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_yields_more_than_one[fixture]\", \"testing/python/fixtures.py::TestContextManagerFixtureFuncs::test_yields_more_than_one[yield_fixture]\", \"testing/python/fixtures.py::TestErrors::test_issue498_fixture_finalizer_failing\", \"testing/python/fixtures.py::TestErrors::test_setupfunc_missing_funcarg\", \"testing/python/fixtures.py::TestErrors::test_subfactory_missing_funcarg\", \"testing/python/fixtures.py::TestFillFixtures::test_autouse_fixture_plugin\", \"testing/python/fixtures.py::TestFillFixtures::test_conftest_funcargs_only_available_in_subdir\", \"testing/python/fixtures.py::TestFillFixtures::test_detect_recursive_dependency_error\", \"testing/python/fixtures.py::TestFillFixtures::test_extend_fixture_conftest_conftest\", \"testing/python/fixtures.py::TestFillFixtures::test_extend_fixture_conftest_module\", \"testing/python/fixtures.py::TestFillFixtures::test_extend_fixture_conftest_plugin\", \"testing/python/fixtures.py::TestFillFixtures::test_extend_fixture_module_class\", \"testing/python/fixtures.py::TestFillFixtures::test_extend_fixture_plugin_plugin\", \"testing/python/fixtures.py::TestFillFixtures::test_fillfuncargs_exposed\", \"testing/python/fixtures.py::TestFillFixtures::test_fixture_excinfo_leak\", \"testing/python/fixtures.py::TestFillFixtures::test_funcarg_basic\", \"testing/python/fixtures.py::TestFillFixtures::test_funcarg_lookup_classlevel\", \"testing/python/fixtures.py::TestFillFixtures::test_funcarg_lookup_error\", \"testing/python/fixtures.py::TestFillFixtures::test_funcarg_lookup_modulelevel\", \"testing/python/fixtures.py::TestFillFixtures::test_funcarg_lookupfails\", \"testing/python/fixtures.py::TestFillFixtures::test_override_autouse_fixture_with_parametrized_fixture_conftest_conftest\", \"testing/python/fixtures.py::TestFillFixtures::test_override_non_parametrized_fixture_conftest_conftest\", \"testing/python/fixtures.py::TestFillFixtures::test_override_non_parametrized_fixture_conftest_module\", \"testing/python/fixtures.py::TestFillFixtures::test_override_parametrized_fixture_conftest_conftest\", \"testing/python/fixtures.py::TestFillFixtures::test_override_parametrized_fixture_conftest_module\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_collect_custom_items\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_package_fixture_complex\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_package_xunit_fixture\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_parsefactories_conftest\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_parsefactories_conftest_and_module_and_class\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_parsefactories_evil_objects_issue214\", \"testing/python/fixtures.py::TestFixtureManagerParseFactories::test_parsefactories_relative_node_ids\", \"testing/python/fixtures.py::TestFixtureMarker::test_class_ordering\", \"testing/python/fixtures.py::TestFixtureMarker::test_class_scope_parametrization_ordering\", \"testing/python/fixtures.py::TestFixtureMarker::test_class_scope_with_normal_tests\", \"testing/python/fixtures.py::TestFixtureMarker::test_deterministic_fixture_collection\", \"testing/python/fixtures.py::TestFixtureMarker::test_dynamic_parametrized_ordering\", \"testing/python/fixtures.py::TestFixtureMarker::test_finalizer_order_on_parametrization[function]\", \"testing/python/fixtures.py::TestFixtureMarker::test_finalizer_order_on_parametrization[module]\", \"testing/python/fixtures.py::TestFixtureMarker::test_finalizer_order_on_parametrization[session]\", \"testing/python/fixtures.py::TestFixtureMarker::test_fixture_finalizer\", \"testing/python/fixtures.py::TestFixtureMarker::test_fixture_marked_function_not_collected_as_test\", \"testing/python/fixtures.py::TestFixtureMarker::test_module_parametrized_ordering\", \"testing/python/fixtures.py::TestFixtureMarker::test_multiple_parametrization_issue_736\", \"testing/python/fixtures.py::TestFixtureMarker::test_override_parametrized_fixture_issue_979['fixt,\", \"testing/python/fixtures.py::TestFixtureMarker::test_override_parametrized_fixture_issue_979['fixt,val']\", \"testing/python/fixtures.py::TestFixtureMarker::test_override_parametrized_fixture_issue_979[('fixt',\", \"testing/python/fixtures.py::TestFixtureMarker::test_override_parametrized_fixture_issue_979[['fixt',\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_and_scope\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_function_scoped_finalizers_called\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_separated_lifecycle\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_separated_order\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_separated_order_higher_scope_first\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrize_setup_function\", \"testing/python/fixtures.py::TestFixtureMarker::test_parametrized_fixture_teardown_order\", \"testing/python/fixtures.py::TestFixtureMarker::test_params_and_ids\", \"testing/python/fixtures.py::TestFixtureMarker::test_params_and_ids_yieldfixture\", \"testing/python/fixtures.py::TestFixtureMarker::test_register_only_with_mark\", \"testing/python/fixtures.py::TestFixtureMarker::test_request_is_clean\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_exc\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_mismatch\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_mismatch_various\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_module_and_finalizer\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_module_uses_session\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_session\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_session_exc\", \"testing/python/fixtures.py::TestFixtureMarker::test_scope_session_exc_two_fix\", \"testing/python/fixtures.py::TestFixtureUsages::test_factory_setup_as_classes_fails\", \"testing/python/fixtures.py::TestFixtureUsages::test_factory_uses_unknown_funcarg_as_dependency_error\", \"testing/python/fixtures.py::TestFixtureUsages::test_fixture_parametrized_with_iterator\", \"testing/python/fixtures.py::TestFixtureUsages::test_funcarg_parametrized_and_used_twice\", \"testing/python/fixtures.py::TestFixtureUsages::test_invalid_scope\", \"testing/python/fixtures.py::TestFixtureUsages::test_noargfixturedec\", \"testing/python/fixtures.py::TestFixtureUsages::test_receives_funcargs\", \"testing/python/fixtures.py::TestFixtureUsages::test_receives_funcargs_scope_mismatch\", \"testing/python/fixtures.py::TestFixtureUsages::test_receives_funcargs_scope_mismatch_issue660\", \"testing/python/fixtures.py::TestFixtureUsages::test_request_can_be_overridden\", \"testing/python/fixtures.py::TestFixtureUsages::test_request_instance_issue203\", \"testing/python/fixtures.py::TestFixtureUsages::test_setup_functions_as_fixtures\", \"testing/python/fixtures.py::TestFixtureUsages::test_usefixtures_ini\", \"testing/python/fixtures.py::TestFixtureUsages::test_usefixtures_marker\", \"testing/python/fixtures.py::TestFixtureUsages::test_usefixtures_seen_in_showmarkers\", \"testing/python/fixtures.py::TestParameterizedSubRequest::test_call_from_fixture\", \"testing/python/fixtures.py::TestParameterizedSubRequest::test_call_from_test\", \"testing/python/fixtures.py::TestParameterizedSubRequest::test_external_fixture\", \"testing/python/fixtures.py::TestParameterizedSubRequest::test_non_relative_path\", \"testing/python/fixtures.py::TestRequestBasic::test_fixtures_sub_subdir_normalize_sep\", \"testing/python/fixtures.py::TestRequestBasic::test_funcargnames_compatattr\", \"testing/python/fixtures.py::TestRequestBasic::test_getfixturevalue[getfixturevalue]\", \"testing/python/fixtures.py::TestRequestBasic::test_getfixturevalue[getfuncargvalue]\", \"testing/python/fixtures.py::TestRequestBasic::test_getfixturevalue_recursive\", \"testing/python/fixtures.py::TestRequestBasic::test_getfixturevalue_teardown\", \"testing/python/fixtures.py::TestRequestBasic::test_newstyle_with_request\", \"testing/python/fixtures.py::TestRequestBasic::test_request_addfinalizer\", \"testing/python/fixtures.py::TestRequestBasic::test_request_addfinalizer_failing_setup\", \"testing/python/fixtures.py::TestRequestBasic::test_request_addfinalizer_failing_setup_module\", \"testing/python/fixtures.py::TestRequestBasic::test_request_addfinalizer_partial_setup_failure\", \"testing/python/fixtures.py::TestRequestBasic::test_request_attributes\", \"testing/python/fixtures.py::TestRequestBasic::test_request_attributes_method\", \"testing/python/fixtures.py::TestRequestBasic::test_request_contains_funcarg_arg2fixturedefs\", \"testing/python/fixtures.py::TestRequestBasic::test_request_fixturenames\", \"testing/python/fixtures.py::TestRequestBasic::test_request_fixturenames_dynamic_fixture\", \"testing/python/fixtures.py::TestRequestBasic::test_request_garbage\", \"testing/python/fixtures.py::TestRequestBasic::test_request_getmodulepath\", \"testing/python/fixtures.py::TestRequestBasic::test_request_subrequest_addfinalizer_exceptions\", \"testing/python/fixtures.py::TestRequestBasic::test_setupcontext_no_param\", \"testing/python/fixtures.py::TestRequestBasic::test_setupdecorator_and_xunit\", \"testing/python/fixtures.py::TestRequestBasic::test_show_fixtures_color_yes\", \"testing/python/fixtures.py::TestRequestMarking::test_accesskeywords\", \"testing/python/fixtures.py::TestRequestMarking::test_accessmarker_dynamic\", \"testing/python/fixtures.py::TestRequestMarking::test_applymarker\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_funcarg[class-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_funcarg[function-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_funcarg[module-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_funcarg[session--fspath\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_setup[class-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_setup[function-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_setup[module-module\", \"testing/python/fixtures.py::TestRequestScopeAccess::test_setup[session--fspath\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_all_scopes_complex\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_module\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_module_auto[autouse]\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_module_auto[mark]\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_same_scope_closer_root_first\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_scopes_reordered\", \"testing/python/fixtures.py::TestScopeOrdering::test_func_closure_with_native_fixtures\", \"testing/python/fixtures.py::TestScopeOrdering::test_multiple_packages\", \"testing/python/fixtures.py::TestShowFixtures::test_fixture_disallow_twice\", \"testing/python/fixtures.py::TestShowFixtures::test_funcarg_compat\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_conftest[False]\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_conftest[True]\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_different_files\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_indented_doc\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_indented_doc_first_line_unindented\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_indented_in_class\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_testmodule\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_trimmed_doc\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_verbose\", \"testing/python/fixtures.py::TestShowFixtures::test_show_fixtures_with_same_name\", \"testing/python/fixtures.py::test_call_fixture_function_error\", \"testing/python/fixtures.py::test_getfuncargnames\", \"testing/python/fixtures.py::test_pytest_fixture_setup_and_post_finalizer_hook\"]",
+  "environment_setup_commit": "693c3b7f61d4d32f8927a74f34ce8ac56d63958e",
+  "patch_files": [
+    "src/_pytest/fixtures.py",
+    "src/_pytest/mark/structures.py"
+  ],
+  "test_patch_files": [
+    "testing/python/fixtures.py"
+  ],
+  "patch_diff_details": {
+    "src/_pytest/fixtures.py": {
+      "diffs": [
+        {
+          "start_line_old": 1132,
+          "end_line_old": 1132,
+          "file_pos": 5,
+          "file_context_length": 59965,
+          "closest_snippet_id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureFunctionMarker_FixtureFunctionMarker.__call__.7.1",
+          "closest_snippet_line_distance": 136,
+          "pos": 51,
+          "context_length": 35103
+        },
+        {
+          "start_line_old": 1177,
+          "end_line_old": 1177,
+          "file_pos": 5,
+          "file_context_length": 59965,
+          "closest_snippet_id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._getnextfixturedef_FixtureRequest._getnextfixturedef.7.1",
+          "closest_snippet_line_distance": 789,
+          "pos": 38,
+          "context_length": 32648
+        },
+        {
+          "start_line_old": 1205,
+          "end_line_old": 1205,
+          "file_pos": 5,
+          "file_context_length": 59965,
+          "closest_snippet_id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._getnextfixturedef_FixtureRequest._getnextfixturedef.7.1",
+          "closest_snippet_line_distance": 817,
+          "pos": 38,
+          "context_length": 32648
+        }
+      ]
+    },
+    "src/_pytest/mark/structures.py": {
+      "diffs": [
+        {
+          "start_line_old": 106,
+          "end_line_old": 107,
+          "file_pos": 8,
+          "file_context_length": 80800,
+          "pos": 29,
+          "context_length": 30114
+        },
+        {
+          "start_line_old": 116,
+          "end_line_old": 116,
+          "file_pos": 8,
+          "file_context_length": 80800,
+          "pos": 29,
+          "context_length": 30114
+        }
+      ]
+    }
+  },
+  "vectors": 877,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureUsages.test_receives_funcargs_scope_mismatch_TestFixtureMarker.test_override_parametrized_fixture_issue_979.4",
+      "distance": 0.708193838596344,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 1013,
+      "end_line": 2016,
+      "tokens": 6226,
+      "context_length": 6226
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameter_ids_test_show_fixtures_with_parameter_ids.5",
+      "distance": 0.7803976535797119,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 157,
+      "end_line": 183,
+      "tokens": 167,
+      "context_length": 6393
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_fixture_parametrized_empty_ids_TestMetafuncFunctional.test_parametrized_empty_ids.4",
+      "distance": 0.7899724245071411,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1138,
+      "end_line": 1167,
+      "tokens": 200,
+      "context_length": 6593
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_overrides_indirect_dependency_fixture_TestFunction.test_parametrize_overrides_indirect_dependency_fixture.4",
+      "distance": 0.7899831533432007,
+      "file_path": "testing/python/collect.py",
+      "start_line": 449,
+      "end_line": 478,
+      "tokens": 193,
+      "context_length": 6786
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_overrides_parametrized_fixture_TestFunction.test_parametrize_overrides_parametrized_fixture.4",
+      "distance": 0.8026260137557983,
+      "file_path": "testing/python/collect.py",
+      "start_line": 430,
+      "end_line": 447,
+      "tokens": 124,
+      "context_length": 6910
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFillFixtures_TestFixtureUsages.test_receives_funcargs.3",
+      "distance": 0.8047415614128113,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 47,
+      "end_line": 1011,
+      "tokens": 6204,
+      "context_length": 13114
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_overrides_fixture_TestFunction.test_parametrize_overrides_fixture.4",
+      "distance": 0.8052389025688171,
+      "file_path": "testing/python/collect.py",
+      "start_line": 401,
+      "end_line": 428,
+      "tokens": 194,
+      "context_length": 13308
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestShowFixtures.test_show_fixtures_trimmed_doc_",
+      "distance": 0.8084359169006348,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 3110,
+      "end_line": 3953,
+      "tokens": 5054,
+      "context_length": 18362
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureMarker.test_scope_mismatch_various_TestShowFixtures.test_show_fixtures_conftest.4",
+      "distance": 0.8166840672492981,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 2182,
+      "end_line": 3108,
+      "tokens": 6112,
+      "context_length": 24474
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureMarker.test_scope_session_TestFixtureMarker.test_scope_module_and_finalizer.4",
+      "distance": 0.821346640586853,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 2018,
+      "end_line": 2180,
+      "tokens": 969,
+      "context_length": 25443
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameters_test_show_fixtures_with_parameters.5",
+      "distance": 0.822364330291748,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 124,
+      "end_line": 154,
+      "tokens": 183,
+      "context_length": 25626
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_nested_fixtures_test_show_nested_fixtures.5",
+      "distance": 0.8300368785858154,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 63,
+      "end_line": 94,
+      "tokens": 190,
+      "context_length": 25816
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_1_test_getfuncargnames",
+      "distance": 0.8503199815750122,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 259,
+      "context_length": 26075
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.pytest_generate_tests_FixtureManager.pytest_collection_modifyitems.2",
+      "distance": 0.8622127771377563,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1223,
+      "end_line": 1255,
+      "tokens": 247,
+      "context_length": 26322,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_nested_marks_TestMarkersWithParametrization.test_nested_marks.4.3",
+      "distance": 0.8795775175094604,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1535,
+      "end_line": 1554,
+      "tokens": 169,
+      "context_length": 26491
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_1_get_scope_node.3.1",
+      "distance": 0.8875346183776855,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 705,
+      "context_length": 27196,
+      "file_pos": 5
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameter_ids_function_test_show_fixtures_with_parameter_ids_function.4",
+      "distance": 0.8901578187942505,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 186,
+      "end_line": 201,
+      "tokens": 119,
+      "context_length": 27315
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_ids_returns_non_string_TestMetafunc.test_idmaker_with_ids_unique_names.3",
+      "distance": 0.8913078904151917,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 518,
+      "end_line": 557,
+      "tokens": 330,
+      "context_length": 27645
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pytest/src/_pytest/capture.py_capture_fixtures__ensure_only_one_capture_fixture.2.3",
+      "distance": 0.8916587829589844,
+      "file_path": "src/_pytest/capture.py",
+      "start_line": 251,
+      "end_line": 261,
+      "tokens": 108,
+      "context_length": 27753
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._schedule_finalizers_FixtureRequest._check_scope.2.lines.2",
+      "distance": 0.8960342407226562,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 591,
+      "end_line": 609,
+      "tokens": 183,
+      "context_length": 27936,
+      "file_pos": 6
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_called_in_generate_tests_TestMarkersWithParametrization.test_parametrize_ID_generation_string_int_works.4",
+      "distance": 0.8969127535820007,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1659,
+      "end_line": 1698,
+      "tokens": 267,
+      "context_length": 28203
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_different_scopes_test_show_different_scopes.4",
+      "distance": 0.8979236483573914,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 34,
+      "end_line": 60,
+      "tokens": 167,
+      "context_length": 28370
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_idmaker_show_fixtures_per_test.2.1",
+      "distance": 0.8991994857788086,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1221,
+      "end_line": 1240,
+      "tokens": 189,
+      "context_length": 28559
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._get_active_fixturedef_FixtureRequest._get_fixturestack.3.current.1",
+      "distance": 0.9021409153938293,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 488,
+      "end_line": 515,
+      "tokens": 208,
+      "context_length": 28767,
+      "file_pos": 7
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_issue323_TestMetafuncFunctional.test_usefixtures_seen_in_generate_tests.3",
+      "distance": 0.9028201103210449,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1231,
+      "end_line": 1263,
+      "tokens": 200,
+      "context_length": 28967
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureLookupError_FixtureLookupError.formatrepr.9.1",
+      "distance": 0.9033752083778381,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 699,
+      "end_line": 750,
+      "tokens": 475,
+      "context_length": 29442,
+      "file_pos": 7
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_1_test_show_only_active_fixtures.5",
+      "distance": 0.9052257537841797,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 188,
+      "context_length": 29630
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_arg_TestMarkersWithParametrization.test_xfail_with_arg.4",
+      "distance": 0.908954381942749,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1589,
+      "end_line": 1603,
+      "tokens": 131,
+      "context_length": 29761
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_ParameterSet._for_parametrize_ParameterSet._for_parametrize.5.1",
+      "distance": 0.9096373319625854,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 106,
+      "end_line": 145,
+      "tokens": 353,
+      "context_length": 30114,
+      "file_pos": 8
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_and_inner_getfixturevalue_TestMetafuncFunctional.test_parametrize_and_inner_getfixturevalue.3",
+      "distance": 0.910190999507904,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1025,
+      "end_line": 1047,
+      "tokens": 174,
+      "context_length": 30288
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.make_function_TestFunction.test_issue213_parametrize_value_no_equal.3",
+      "distance": 0.9107555150985718,
+      "file_path": "testing/python/collect.py",
+      "start_line": 285,
+      "end_line": 350,
+      "tokens": 472,
+      "context_length": 30760
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_with_mark_TestFunction.test_parametrize_with_mark.4",
+      "distance": 0.917640209197998,
+      "file_path": "testing/python/collect.py",
+      "start_line": 480,
+      "end_line": 499,
+      "tokens": 157,
+      "context_length": 30917
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_pytest_make_parametrize_id_with_argname_",
+      "distance": 0.9178295135498047,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1744,
+      "end_line": 1768,
+      "tokens": 183,
+      "context_length": 31100
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_skipif_TestFunction.test_function_original_name.2",
+      "distance": 0.9199334383010864,
+      "file_path": "testing/python/collect.py",
+      "start_line": 565,
+      "end_line": 664,
+      "tokens": 663,
+      "context_length": 31763
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._getnextfixturedef_FixtureRequest._getnextfixturedef.7.1",
+      "distance": 0.9210770726203918,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 374,
+      "end_line": 388,
+      "tokens": 198,
+      "context_length": 31961,
+      "file_pos": 8
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestParameterize.test_idfn_fixture_",
+      "distance": 0.9212785959243774,
+      "file_path": "testing/python/integration.py",
+      "start_line": 421,
+      "end_line": 448,
+      "tokens": 161,
+      "context_length": 32122
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg.4",
+      "distance": 0.9253652691841125,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1621,
+      "end_line": 1635,
+      "tokens": 139,
+      "context_length": 32261
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.getfixtureclosure_FixtureManager.getfixtureclosure.parentid.14.1",
+      "distance": 0.9256810545921326,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1177,
+      "end_line": 1221,
+      "tokens": 387,
+      "context_length": 32648,
+      "file_pos": 9
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_autouse_test_show_fixtures_with_autouse.4",
+      "distance": 0.9276342391967773,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 97,
+      "end_line": 121,
+      "tokens": 150,
+      "context_length": 32798
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_list_error_TestMetafunc.test_parametrize_uses_no_fixture_error_indirect_false.4",
+      "distance": 0.9289274215698242,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 636,
+      "end_line": 664,
+      "tokens": 231,
+      "context_length": 33029
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureDef.execute_FixtureDef.__repr__.1.1",
+      "distance": 0.9333964586257935,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 873,
+      "end_line": 903,
+      "tokens": 264,
+      "context_length": 33293,
+      "file_pos": 9
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._factorytraceback_FixtureRequest.__repr__.1.1",
+      "distance": 0.9345252513885498,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 611,
+      "end_line": 638,
+      "tokens": 274,
+      "context_length": 33567,
+      "file_pos": 9
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_get_empty_parameterset_mark_get_empty_parameterset_mark.6.1",
+      "distance": 0.9370014667510986,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 38,
+      "end_line": 61,
+      "tokens": 202,
+      "context_length": 33769,
+      "file_pos": 9
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_on_setup_arg_TestMetafuncFunctional.test_parametrize_on_setup_arg.3",
+      "distance": 0.9386364817619324,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1049,
+      "end_line": 1070,
+      "tokens": 158,
+      "context_length": 33927
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_passing_is_xpass_TestMarkersWithParametrization.test_xfail_passing_is_xpass.5",
+      "distance": 0.9400051832199097,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1637,
+      "end_line": 1657,
+      "tokens": 202,
+      "context_length": 34129
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureFunctionMarker_FixtureFunctionMarker.__call__.7.1",
+      "distance": 0.9402782917022705,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 973,
+      "end_line": 996,
+      "tokens": 181,
+      "context_length": 34310,
+      "file_pos": 9
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_select_based_on_mark_TestMarkersWithParametrization.test_select_based_on_mark.7",
+      "distance": 0.9407663345336914,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1516,
+      "end_line": 1533,
+      "tokens": 159,
+      "context_length": 34469
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test__show_fixtures_per_test.write_fixture.6.2.1",
+      "distance": 0.9409980177879333,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1243,
+      "end_line": 1269,
+      "tokens": 208,
+      "context_length": 34677
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_kwarg_TestMarkersWithParametrization.test_xfail_with_kwarg.4",
+      "distance": 0.9410926103591919,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1605,
+      "end_line": 1619,
+      "tokens": 134,
+      "context_length": 34811
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestParameterize_TestParameterize.test_idfn_marker.3",
+      "distance": 0.9417591691017151,
+      "file_path": "testing/python/integration.py",
+      "start_line": 397,
+      "end_line": 419,
+      "tokens": 141,
+      "context_length": 34952
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.getfixtureinfo_FixtureManager.getfixtureinfo.6.1",
+      "distance": 0.942676842212677,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1132,
+      "end_line": 1145,
+      "tokens": 151,
+      "context_length": 35103,
+      "file_pos": 9
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_simple_xfail_TestMarkersWithParametrization.test_simple_xfail.5",
+      "distance": 0.9441253542900085,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1556,
+      "end_line": 1571,
+      "tokens": 136,
+      "context_length": 35239
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_simple_xfail_single_argname_TestMarkersWithParametrization.test_simple_xfail_single_argname.4",
+      "distance": 0.9449353218078613,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1573,
+      "end_line": 1587,
+      "tokens": 119,
+      "context_length": 35358
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_generate_same_function_names_issue403_TestMetafuncFunctional.test_parametrize_misspelling.4",
+      "distance": 0.9503694772720337,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1289,
+      "end_line": 1327,
+      "tokens": 244,
+      "context_length": 35602
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization_TestMarkersWithParametrization.test_simple_mark.7",
+      "distance": 0.9506593942642212,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1492,
+      "end_line": 1514,
+      "tokens": 170,
+      "context_length": 35772
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pytest/testing/python/setup_plan.py_1_",
+      "distance": 0.9544339179992676,
+      "file_path": "testing/python/setup_plan.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 127,
+      "context_length": 35899
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_add_funcarg_pseudo_fixture_def_add_funcarg_pseudo_fixture_def.7.10.scope.4.2.3.1",
+      "distance": 0.9550232887268066,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 114,
+      "end_line": 169,
+      "tokens": 607,
+      "context_length": 36506,
+      "file_pos": 10
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue_519.py_1_checked_order.4",
+      "distance": 0.9555767774581909,
+      "file_path": "testing/example_scripts/issue_519.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 358,
+      "context_length": 36864
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Class._inject_setup_method_fixture_Instance.newinstance.2.1",
+      "distance": 0.9557871222496033,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 767,
+      "end_line": 808,
+      "tokens": 336,
+      "context_length": 37200
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_uses_no_fixture_error_indirect_true_TestMetafunc.test_parametrize_uses_no_fixture_error_indirect_true.4",
+      "distance": 0.9559482932090759,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 666,
+      "end_line": 684,
+      "tokens": 149,
+      "context_length": 37349
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Module._inject_setup_function_fixture_Module._inject_setup_function_fixture.self.obj.__pytest_setup_function.1",
+      "distance": 0.9560813903808594,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 477,
+      "end_line": 502,
+      "tokens": 243,
+      "context_length": 37592
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_with_identical_ids_get_unique_names_TestMetafuncFunctional.test_parametrize_with_identical_ids_get_unique_names.4",
+      "distance": 0.9562152624130249,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1187,
+      "end_line": 1203,
+      "tokens": 140,
+      "context_length": 37732
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_raises_cyclic_reference_TestRaises.test_raises_cyclic_reference.10.1",
+      "distance": 0.9574682116508484,
+      "file_path": "testing/python/raises.py",
+      "start_line": 186,
+      "end_line": 211,
+      "tokens": 164,
+      "context_length": 37896
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_uses_no_fixture_error_indirect_list_TestMetafunc.test_parametrize_indirect_uses_no_fixture_error_indirect_list.4",
+      "distance": 0.9576852917671204,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 703,
+      "end_line": 718,
+      "tokens": 131,
+      "context_length": 38027
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_parametrize_marked_value_TestMarkersWithParametrization.test_parametrize_marked_value.5",
+      "distance": 0.9580799341201782,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1700,
+      "end_line": 1723,
+      "tokens": 223,
+      "context_length": 38250
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.pytest_plugin_registered_FixtureManager._getautousenames.4.1",
+      "distance": 0.9596835374832153,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1147,
+      "end_line": 1175,
+      "tokens": 250,
+      "context_length": 38500,
+      "file_pos": 12
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_pytest_make_parametrize_id_TestMarkersWithParametrization.test_pytest_make_parametrize_id.4",
+      "distance": 0.9619154930114746,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1725,
+      "end_line": 1742,
+      "tokens": 128,
+      "context_length": 38628
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.parsefactories_FixtureManager.parsefactories.6.1",
+      "distance": 0.9628903269767761,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1257,
+      "end_line": 1315,
+      "tokens": 469,
+      "context_length": 39097,
+      "file_pos": 12
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_two_functions_not_same_instance_TestMetafuncFunctional.test_two_functions_not_same_instance.3",
+      "distance": 0.9637967348098755,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 977,
+      "end_line": 992,
+      "tokens": 145,
+      "context_length": 39242
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_uses_no_fixture_error_indirect_string_TestMetafunc.test_parametrize_indirect_uses_no_fixture_error_indirect_string.4",
+      "distance": 0.9661643505096436,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 686,
+      "end_line": 701,
+      "tokens": 131,
+      "context_length": 39373
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_UnitTestCase_UnitTestCase.nofuncargs._inject_setup_teardown_fixtures.5.cls.__pytest_method_setup.1",
+      "distance": 0.9670767784118652,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 32,
+      "end_line": 80,
+      "tokens": 397,
+      "context_length": 39770
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_issue751_multiple_parametrize_with_ids_TestFunction.test_issue751_multiple_parametrize_with_ids.6",
+      "distance": 0.9691476821899414,
+      "file_path": "testing/python/collect.py",
+      "start_line": 546,
+      "end_line": 563,
+      "tokens": 183,
+      "context_length": 39953
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_fillfixtures_get_direct_param_fixture_func.1.1",
+      "distance": 0.974785327911377,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 277,
+      "end_line": 300,
+      "tokens": 191,
+      "context_length": 40144,
+      "file_pos": 13
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pytest/src/pytest.py_1_",
+      "distance": 0.9761520624160767,
+      "file_path": "src/pytest.py",
+      "start_line": 1,
+      "end_line": 108,
+      "tokens": 731,
+      "context_length": 40875
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_ParameterSet_ParameterSet.param.6.1",
+      "distance": 0.9772533774375916,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 64,
+      "end_line": 85,
+      "tokens": 175,
+      "context_length": 41050,
+      "file_pos": 14
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_getfixturemarker_get_parametrized_fixture_keys.4.3.4.3",
+      "distance": 0.9806036353111267,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 172,
+      "end_line": 206,
+      "tokens": 327,
+      "context_length": 41377,
+      "file_pos": 14
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue_519.py_fix1_",
+      "distance": 0.9813663959503174,
+      "file_path": "testing/example_scripts/issue_519.py",
+      "start_line": 35,
+      "end_line": 53,
+      "tokens": 115,
+      "context_length": 41492
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_1_TestFailing.test_not.2",
+      "distance": 0.9823087453842163,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 178,
+      "context_length": 41670
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__showfixtures_main_write_docstring.4.1.1",
+      "distance": 0.983248233795166,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1301,
+      "end_line": 1370,
+      "tokens": 493,
+      "context_length": 42163
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_error_TestMetafunc.test_parametrize_bad_scope",
+      "distance": 0.9888869524002075,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 57,
+      "end_line": 78,
+      "tokens": 212,
+      "context_length": 42375
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_fail_fixturefunc__teardown_yield_fixture.2.3.1",
+      "distance": 0.9891029000282288,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 780,
+      "end_line": 809,
+      "tokens": 245,
+      "context_length": 42620,
+      "file_pos": 15
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager.getfixturedefs_",
+      "distance": 0.9927958846092224,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1317,
+      "end_line": 1335,
+      "tokens": 154,
+      "context_length": 42774,
+      "file_pos": 15
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pytest/src/_pytest/setuponly.py_pytest_fixture_setup_pytest_fixture_post_finalizer.1.2.2.1",
+      "distance": 0.9929730892181396,
+      "file_path": "src/_pytest/setuponly.py",
+      "start_line": 27,
+      "end_line": 51,
+      "tokens": 206,
+      "context_length": 42980
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_with_non_hashable_values_indirect_TestFunction.test_parametrize_with_non_hashable_values_indirect.4",
+      "distance": 0.9983124732971191,
+      "file_path": "testing/python/collect.py",
+      "start_line": 372,
+      "end_line": 399,
+      "tokens": 193,
+      "context_length": 43173
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test.write_item_showfixtures.2.1",
+      "distance": 0.9984407424926758,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1271,
+      "end_line": 1298,
+      "tokens": 217,
+      "context_length": 43390
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_dynamic_fixture_request_test_dynamic_fixture_request.4",
+      "distance": 0.9988967180252075,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 204,
+      "end_line": 227,
+      "tokens": 129,
+      "context_length": 43519
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_argument_not_in_indirect_list_TestMetafunc.test_parametrize_argument_not_in_indirect_list.4",
+      "distance": 1.0012435913085938,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 720,
+      "end_line": 735,
+      "tokens": 127,
+      "context_length": 43646
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_multiple_times_TestMetafunc.test_parametrize_CSV.3",
+      "distance": 1.0023071765899658,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 801,
+      "end_line": 828,
+      "tokens": 211,
+      "context_length": 43857
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pytest/src/_pytest/compat.py_getfslineno_",
+      "distance": 1.0029237270355225,
+      "file_path": "src/_pytest/compat.py",
+      "start_line": 322,
+      "end_line": 459,
+      "tokens": 804,
+      "context_length": 44661
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_scope_overrides_TestMetafuncFunctional.test_parametrize_scope_overrides.3",
+      "distance": 1.0032074451446533,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1205,
+      "end_line": 1229,
+      "tokens": 200,
+      "context_length": 44861
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_autoname_TestMetafunc.test_idmaker_with_bytes_regex.3",
+      "distance": 1.006028652191162,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 296,
+      "end_line": 317,
+      "tokens": 231,
+      "context_length": 45092
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_test_pytestconfig_is_session_scoped_TestNoselikeTestAttribute.test_class_and_method.5",
+      "distance": 1.007325530052185,
+      "file_path": "testing/python/integration.py",
+      "start_line": 307,
+      "end_line": 344,
+      "tokens": 225,
+      "context_length": 45317
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_find_parametrized_scope_TestMetafunc.test_find_parametrized_scope.21",
+      "distance": 1.0073955059051514,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 80,
+      "end_line": 124,
+      "tokens": 450,
+      "context_length": 45767
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_issue634_TestMetafuncFunctionalAuto.test_parametrize_issue634.5",
+      "distance": 1.0074307918548584,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1457,
+      "end_line": 1489,
+      "tokens": 226,
+      "context_length": 45993
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_1___all__.1",
+      "distance": 1.0089411735534668,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 139,
+      "context_length": 46132
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_fixture_fixture.4.1",
+      "distance": 1.0093340873718262,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 999,
+      "end_line": 1050,
+      "tokens": 550,
+      "context_length": 46682,
+      "file_pos": 18
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_class_scenarios_TestMetafunc.test_parametrize_class_scenarios.4",
+      "distance": 1.009503722190857,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 830,
+      "end_line": 870,
+      "tokens": 314,
+      "context_length": 46996
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_onearg_TestMetafunc.test_parametrize_onearg_indirect.6",
+      "distance": 1.0104033946990967,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 775,
+      "end_line": 790,
+      "tokens": 213,
+      "context_length": 47209
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_param_param.2.1",
+      "distance": 1.013148307800293,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 21,
+      "end_line": 38,
+      "tokens": 172,
+      "context_length": 47381
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py__ensure_immutable_ids_wrap_function_to_error_out_if_called_directly.7.1",
+      "distance": 1.0140159130096436,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 946,
+      "end_line": 970,
+      "tokens": 180,
+      "context_length": 47561,
+      "file_pos": 18
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_without_ids_TestMetafuncFunctional.test_parametrize_without_ids.3",
+      "distance": 1.0145268440246582,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1096,
+      "end_line": 1114,
+      "tokens": 124,
+      "context_length": 47685
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Class._inject_setup_class_fixture_Class._inject_setup_class_fixture.self.obj.__pytest_setup_class.1",
+      "distance": 1.01482355594635,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 743,
+      "end_line": 765,
+      "tokens": 215,
+      "context_length": 47900
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_auto_scope_override_fixture_TestMetafuncFunctionalAuto.test_parametrize_auto_scope_override_fixture.3",
+      "distance": 1.0148781538009644,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1380,
+      "end_line": 1395,
+      "tokens": 113,
+      "context_length": 48013
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_list_functional_TestMetafunc.test_parametrize_indirect_list_functional.4",
+      "distance": 1.0154829025268555,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 607,
+      "end_line": 634,
+      "tokens": 225,
+      "context_length": 48238
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration_TestMockDecoration.test_wrapped_getfuncargnames_patching.5",
+      "distance": 1.0168190002441406,
+      "file_path": "testing/python/integration.py",
+      "start_line": 90,
+      "end_line": 127,
+      "tokens": 198,
+      "context_length": 48436
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_functional_TestMetafunc.test_parametrize_functional.3",
+      "distance": 1.0183701515197754,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 754,
+      "end_line": 773,
+      "tokens": 151,
+      "context_length": 48587
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py__make_xunit_fixture__make_xunit_fixture.5.1",
+      "distance": 1.019209623336792,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 83,
+      "end_line": 106,
+      "tokens": 157,
+      "context_length": 48744
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_with_non_hashable_values_TestFunction.test_parametrize_with_non_hashable_values.4",
+      "distance": 1.0204079151153564,
+      "file_path": "testing/python/collect.py",
+      "start_line": 352,
+      "end_line": 370,
+      "tokens": 153,
+      "context_length": 48897
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest_FixtureRequest.node.2.1",
+      "distance": 1.021700143814087,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 342,
+      "end_line": 372,
+      "tokens": 272,
+      "context_length": 49169,
+      "file_pos": 18
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_PyCollector._genfunctions_PyCollector._genfunctions.12.2.2",
+      "distance": 1.0226131677627563,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 389,
+      "end_line": 434,
+      "tokens": 394,
+      "context_length": 49563
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest.config_FixtureRequest.getfuncargvalue.4.1",
+      "distance": 1.024357557296753,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 390,
+      "end_line": 486,
+      "tokens": 779,
+      "context_length": 50342,
+      "file_pos": 18
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_capturing_test_capturing.3",
+      "distance": 1.026016354560852,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 230,
+      "end_line": 249,
+      "tokens": 122,
+      "context_length": 50464
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_functional2_TestMetafuncFunctional.test_parametrize_functional2.3",
+      "distance": 1.0288740396499634,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1010,
+      "end_line": 1023,
+      "tokens": 144,
+      "context_length": 50608
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._matchnodes_",
+      "distance": 1.031734824180603,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 725,
+      "end_line": 775,
+      "tokens": 430,
+      "context_length": 51038
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrized_ids_invalid_type_TestMetafuncFunctional.test_parametrized_ids_invalid_type.4",
+      "distance": 1.032031774520874,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1169,
+      "end_line": 1185,
+      "tokens": 150,
+      "context_length": 51188
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_with_ids_TestMetafuncFunctional.test_parametrize_with_ids.5",
+      "distance": 1.0332896709442139,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1072,
+      "end_line": 1094,
+      "tokens": 157,
+      "context_length": 51345
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_twoargs_TestMetafunc.test_parametrize_twoargs.7",
+      "distance": 1.0337862968444824,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 792,
+      "end_line": 799,
+      "tokens": 137,
+      "context_length": 51482
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__warn_incompatibility_with_xunit2__warn_incompatibility_with_xunit2.4.1",
+      "distance": 1.035054087638855,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 285,
+      "end_line": 297,
+      "tokens": 132,
+      "context_length": 51614
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_multiple_parametrize_TestFunction.test_multiple_parametrize.6",
+      "distance": 1.0357692241668701,
+      "file_path": "testing/python/collect.py",
+      "start_line": 530,
+      "end_line": 544,
+      "tokens": 151,
+      "context_length": 51765
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_idfn_unique_names_TestMetafunc.test_idmaker_idfn_unique_names.5",
+      "distance": 1.0375006198883057,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 409,
+      "end_line": 425,
+      "tokens": 118,
+      "context_length": 51883
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/pytest/src/_pytest/setuponly.py__show_fixture_action_",
+      "distance": 1.0378155708312988,
+      "file_path": "src/_pytest/setuponly.py",
+      "start_line": 54,
+      "end_line": 90,
+      "tokens": 265,
+      "context_length": 52148
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_with_None_in_ids_TestMetafuncFunctional.test_parametrize_with_None_in_ids.4",
+      "distance": 1.038414716720581,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1116,
+      "end_line": 1136,
+      "tokens": 163,
+      "context_length": 52311
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureDef.finish_FixtureDef.finish.2.3.self._finalizers.1",
+      "distance": 1.0399103164672852,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 846,
+      "end_line": 871,
+      "tokens": 194,
+      "context_length": 52505,
+      "file_pos": 20
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_all_indirects_TestMetafuncFunctionalAuto.test_parametrize_all_indirects.3",
+      "distance": 1.0411839485168457,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1397,
+      "end_line": 1422,
+      "tokens": 200,
+      "context_length": 52705
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_SubRequest_SubRequest._schedule_finalizers.4.2",
+      "distance": 1.0428357124328613,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 641,
+      "end_line": 673,
+      "tokens": 320,
+      "context_length": 53025,
+      "file_pos": 20
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional_TestMetafuncFunctional.test_attributes.3",
+      "distance": 1.0442434549331665,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 894,
+      "end_line": 923,
+      "tokens": 235,
+      "context_length": 53260
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_ParameterSet.extract_from_ParameterSet.extract_from.3.2.1.1",
+      "distance": 1.044342279434204,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 87,
+      "end_line": 104,
+      "tokens": 139,
+      "context_length": 53399,
+      "file_pos": 20
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_FSHookProxy__bestrelpath_cache.__missing__.3.1",
+      "distance": 1.0454366207122803,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 385,
+      "end_line": 418,
+      "tokens": 201,
+      "context_length": 53600
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_format_args_TestMetafunc.test_format_args",
+      "distance": 1.0468785762786865,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 872,
+      "end_line": 891,
+      "tokens": 130,
+      "context_length": 53730
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_ids_exception_TestMetafunc.test_parametrize_ids_exception.4",
+      "distance": 1.0477938652038574,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 493,
+      "end_line": 516,
+      "tokens": 150,
+      "context_length": 53880
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_1_TestModule.test_import_duplicate.8",
+      "distance": 1.0480518341064453,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 239,
+      "context_length": 54119
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_list_TestMetafunc.test_parametrize_indirect_list_empty.6",
+      "distance": 1.0492746829986572,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 574,
+      "end_line": 605,
+      "tokens": 271,
+      "context_length": 54390
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FuncFixtureInfo_FuncFixtureInfo.argnames.prune_dependency_tree.5",
+      "distance": 1.0497972965240479,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 303,
+      "end_line": 339,
+      "tokens": 376,
+      "context_length": 54766,
+      "file_pos": 20
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_gives_indicative_error_on_function_with_default_argument_TestMetafunc.test_parametrize_gives_indicative_error_on_function_with_default_argument.3",
+      "distance": 1.0511672496795654,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 737,
+      "end_line": 752,
+      "tokens": 118,
+      "context_length": 54884
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestOEJSKITSpecials.test_autouse_fixture_TestOEJSKITSpecials.test_autouse_fixture.2",
+      "distance": 1.0517497062683105,
+      "file_path": "testing/python/integration.py",
+      "start_line": 38,
+      "end_line": 69,
+      "tokens": 227,
+      "context_length": 55111
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/pytest/src/_pytest/debugging.py__test_pytest_function__test_pytest_function.pyfuncitem._fixtureinfo.argnames.1",
+      "distance": 1.052216649055481,
+      "file_path": "src/_pytest/debugging.py",
+      "start_line": 267,
+      "end_line": 276,
+      "tokens": 128,
+      "context_length": 55239
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureManager_FixtureManager.__init__.7",
+      "distance": 1.0528470277786255,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1088,
+      "end_line": 1130,
+      "tokens": 357,
+      "context_length": 55596,
+      "file_pos": 21
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_mock_double_patch_issue473_TestMockDecoration.test_mock_double_patch_issue473.4",
+      "distance": 1.0530409812927246,
+      "file_path": "testing/python/integration.py",
+      "start_line": 248,
+      "end_line": 264,
+      "tokens": 122,
+      "context_length": 55718
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_and_id_TestMetafunc.test_parametrize_empty_list.6",
+      "distance": 1.0563619136810303,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 126,
+      "end_line": 181,
+      "tokens": 406,
+      "context_length": 56124
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_configure_pytest_configure.2",
+      "distance": 1.0584015846252441,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 141,
+      "end_line": 158,
+      "tokens": 212,
+      "context_length": 56336
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_1_TestMetafunc.Metafunc.FixtureInfo.7.1",
+      "distance": 1.0585073232650757,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 212,
+      "context_length": 56548
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_unittest_mock_TestMockDecoration.test_unittest_mock_and_fixture.4",
+      "distance": 1.0615262985229492,
+      "file_path": "testing/python/integration.py",
+      "start_line": 129,
+      "end_line": 165,
+      "tokens": 229,
+      "context_length": 56777
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_modulecol_roundtrip_TestTracebackCutting.test_traceback_argsetup.16",
+      "distance": 1.0622344017028809,
+      "file_path": "testing/python/collect.py",
+      "start_line": 889,
+      "end_line": 926,
+      "tokens": 322,
+      "context_length": 57099
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/pytest/src/_pytest/capture.py_CaptureFixture._suspend_CaptureFixture.disabled.3.1",
+      "distance": 1.0633282661437988,
+      "file_path": "src/_pytest/capture.py",
+      "start_line": 390,
+      "end_line": 405,
+      "tokens": 128,
+      "context_length": 57227
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_two_functions_TestMetafuncFunctional.test_two_functions.3",
+      "distance": 1.06368088722229,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 925,
+      "end_line": 947,
+      "tokens": 177,
+      "context_length": 57404
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureLookupErrorRepr_FixtureLookupErrorRepr.toterminal.2.5",
+      "distance": 1.0637869834899902,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 753,
+      "end_line": 777,
+      "tokens": 214,
+      "context_length": 57618,
+      "file_pos": 21
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_keep_duplicates_test_keep_duplicates.6",
+      "distance": 1.0670814514160156,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1293,
+      "end_line": 1310,
+      "tokens": 130,
+      "context_length": 57748
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests.3",
+      "distance": 1.0672507286071777,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 994,
+      "end_line": 1008,
+      "tokens": 119,
+      "context_length": 57867
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_1_TestOEJSKITSpecials.test_funcarg_non_pycollectobj.2",
+      "distance": 1.0673775672912598,
+      "file_path": "testing/python/integration.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 248,
+      "context_length": 58115
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestModule_DoctestModule.collect.MockAwareDocTestFinder._find.2.1",
+      "distance": 1.0683058500289917,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 389,
+      "end_line": 408,
+      "tokens": 159,
+      "context_length": 58274
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_package_ordering_",
+      "distance": 1.073283076286316,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1366,
+      "end_line": 1399,
+      "tokens": 239,
+      "context_length": 58513
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_collect_functools_partial_test_collect_functools_partial.4",
+      "distance": 1.0735235214233398,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1154,
+      "end_line": 1197,
+      "tokens": 332,
+      "context_length": 58845
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py__patched_find_module__patched_find_module.2.3.1",
+      "distance": 1.0739116668701172,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 345,
+      "end_line": 382,
+      "tokens": 333,
+      "context_length": 59178
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_customized_python_discovery_functions_test_unorderable_types.4",
+      "distance": 1.0752297639846802,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1114,
+      "end_line": 1151,
+      "tokens": 209,
+      "context_length": 59387
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_auto_scope_indirect_TestMetafuncFunctionalAuto.test_parametrize_auto_scope_indirect.3",
+      "distance": 1.0759685039520264,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1357,
+      "end_line": 1378,
+      "tokens": 187,
+      "context_length": 59574
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_and_execute_test_",
+      "distance": 1.0773000717163086,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 252,
+      "end_line": 271,
+      "tokens": 125,
+      "context_length": 59699
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestModule.test_import_prepend_append_TestModule.test_import_prepend_append.8.4",
+      "distance": 1.0773710012435913,
+      "file_path": "testing/python/collect.py",
+      "start_line": 36,
+      "end_line": 58,
+      "tokens": 188,
+      "context_length": 59887
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_setup_only_available_in_subdir_test_setup_only_available_in_subdir.8",
+      "distance": 1.0780503749847412,
+      "file_path": "testing/python/collect.py",
+      "start_line": 854,
+      "end_line": 886,
+      "tokens": 304,
+      "context_length": 60191
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/pytest/doc/en/example/xfail_demo.py_1_",
+      "distance": 1.0785067081451416,
+      "file_path": "doc/en/example/xfail_demo.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 151,
+      "context_length": 60342
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_1_pyobj_property",
+      "distance": 1.080652117729187,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 430,
+      "context_length": 60772
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestClass.test_setup_teardown_class_as_classmethod_TestClass.test_issue2234_property.3",
+      "distance": 1.0835614204406738,
+      "file_path": "testing/python/collect.py",
+      "start_line": 202,
+      "end_line": 255,
+      "tokens": 321,
+      "context_length": 61093
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_package_collection_infinite_recursion_test_package_collection_init_given_as_argument.4",
+      "distance": 1.0837314128875732,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1313,
+      "end_line": 1323,
+      "tokens": 110,
+      "context_length": 61203
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_noself_in_method_TestMetafuncFunctional.test_generate_tests_in_class.3",
+      "distance": 1.0860595703125,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 949,
+      "end_line": 975,
+      "tokens": 203,
+      "context_length": 61406
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_deselect_by_mark_",
+      "distance": 1.0863453149795532,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 129,
+      "end_line": 167,
+      "tokens": 242,
+      "context_length": 61648
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_22_",
+      "distance": 1.086956262588501,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 249,
+      "end_line": 290,
+      "tokens": 286,
+      "context_length": 61934
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_indirect_TestMetafunc.test_parametrize_indirect.10",
+      "distance": 1.08925461769104,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 559,
+      "end_line": 572,
+      "tokens": 146,
+      "context_length": 62080
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MarkGenerator_MarkGenerator.__getattr__.3.1",
+      "distance": 1.0915437936782837,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 281,
+      "end_line": 328,
+      "tokens": 428,
+      "context_length": 62508,
+      "file_pos": 23
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_manual_ids_must_be_printable_TestMetafunc.test_idmaker_enum.5",
+      "distance": 1.0915718078613281,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 370,
+      "end_line": 388,
+      "tokens": 161,
+      "context_length": 62669
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_yield_fixture_pytest_addoption.1",
+      "distance": 1.0928795337677002,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1053,
+      "end_line": 1085,
+      "tokens": 196,
+      "context_length": 62865,
+      "file_pos": 23
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestTracebackCutting.test_traceback_filter_error_during_fixture_collection_TestTracebackCutting.test_traceback_filter_error_during_fixture_collection.7",
+      "distance": 1.0933465957641602,
+      "file_path": "testing/python/collect.py",
+      "start_line": 949,
+      "end_line": 974,
+      "tokens": 171,
+      "context_length": 63036
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_pytest_pycollect_makeitem_TestConftestCustomization.test_makeitem_non_underscore.5",
+      "distance": 1.094720721244812,
+      "file_path": "testing/python/collect.py",
+      "start_line": 796,
+      "end_line": 818,
+      "tokens": 196,
+      "context_length": 63232
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_package_with_modules_test_package_with_modules.20",
+      "distance": 1.096195101737976,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1326,
+      "end_line": 1363,
+      "tokens": 320,
+      "context_length": 63552
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_linecomp_rex_outcome.1",
+      "distance": 1.0966793298721313,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 334,
+      "end_line": 367,
+      "tokens": 157,
+      "context_length": 63709
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_scopes_scope2index.2.2.1",
+      "distance": 1.0968410968780518,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 676,
+      "end_line": 696,
+      "tokens": 132,
+      "context_length": 63841,
+      "file_pos": 24
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_with_idfn_and_config_TestMetafunc.test_idmaker_with_idfn_and_config.6.2",
+      "distance": 1.0986270904541016,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 427,
+      "end_line": 458,
+      "tokens": 230,
+      "context_length": 64071
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_function_equality_with_callspec_TestFunction.test_pyfunc_call.8",
+      "distance": 1.099583625793457,
+      "file_path": "testing/python/collect.py",
+      "start_line": 501,
+      "end_line": 528,
+      "tokens": 208,
+      "context_length": 64279
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureRequest._compute_fixture_value_FixtureRequest._compute_fixture_value.14.3.1",
+      "distance": 1.099631905555725,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 517,
+      "end_line": 589,
+      "tokens": 651,
+      "context_length": 64930,
+      "file_pos": 24
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._collect_Session._collect.10.4.9.1",
+      "distance": 1.10112726688385,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 552,
+      "end_line": 627,
+      "tokens": 688,
+      "context_length": 65618
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_pytest_collect_file_MultipleDoctestFailures.__init__.self.failures.1",
+      "distance": 1.1030513048171997,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 89,
+      "end_line": 130,
+      "tokens": 319,
+      "context_length": 65937
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_mock_sorting_TestMockDecoration.test_mock_sorting.7",
+      "distance": 1.103092908859253,
+      "file_path": "testing/python/integration.py",
+      "start_line": 224,
+      "end_line": 246,
+      "tokens": 184,
+      "context_length": 66121
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_TestCaseFunction_TestCaseFunction.startTest.1",
+      "distance": 1.1039034128189087,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 109,
+      "end_line": 137,
+      "tokens": 202,
+      "context_length": 66323
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto_TestMetafuncFunctionalAuto.test_parametrize_auto_scope.3",
+      "distance": 1.104039192199707,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1330,
+      "end_line": 1355,
+      "tokens": 160,
+      "context_length": 66483
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_cmdline_main_pytest_generate_tests.alt_spellings.3.1",
+      "distance": 1.1041682958602905,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 120,
+      "end_line": 138,
+      "tokens": 176,
+      "context_length": 66659
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_unittest_mock_and_pypi_mock_TestMockDecoration.test_unittest_mock_and_pypi_mock.5",
+      "distance": 1.105686902999878,
+      "file_path": "testing/python/integration.py",
+      "start_line": 167,
+      "end_line": 189,
+      "tokens": 170,
+      "context_length": 66829
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__setup_fixtures__setup_fixtures.8.1",
+      "distance": 1.1058939695358276,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 435,
+      "end_line": 450,
+      "tokens": 111,
+      "context_length": 66940
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_idfn_TestMetafunc.test_idmaker_idfn.5",
+      "distance": 1.1068260669708252,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 390,
+      "end_line": 407,
+      "tokens": 126,
+      "context_length": 67066
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py__",
+      "distance": 1.107438564300537,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 67066
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/pytest/src/_pytest/capture.py_CaptureManager.deactivate_fixture_CaptureManager.pytest_internalerror.1",
+      "distance": 1.1087099313735962,
+      "file_path": "src/_pytest/capture.py",
+      "start_line": 163,
+      "end_line": 248,
+      "tokens": 573,
+      "context_length": 67639
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_some_arguments_auto_scope_TestMetafuncFunctionalAuto.test_parametrize_some_arguments_auto_scope.10",
+      "distance": 1.1088438034057617,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1424,
+      "end_line": 1455,
+      "tokens": 245,
+      "context_length": 67884
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_configure_pytest_configure.4",
+      "distance": 1.1088826656341553,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 33,
+      "end_line": 70,
+      "tokens": 363,
+      "context_length": 68247
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_with_userobjects_TestMetafunc.test_parametrize_with_userobjects",
+      "distance": 1.1088922023773193,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 183,
+      "end_line": 197,
+      "tokens": 130,
+      "context_length": 68377
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_pytest_fixture_setup_pytest_fixture_setup.8.1",
+      "distance": 1.1089587211608887,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 926,
+      "end_line": 943,
+      "tokens": 165,
+      "context_length": 68542,
+      "file_pos": 26
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_dont_collect_non_function_callable_test_dont_collect_non_function_callable.4",
+      "distance": 1.1097536087036133,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1200,
+      "end_line": 1226,
+      "tokens": 182,
+      "context_length": 68724
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_no_funcargs_TestMetafunc.test_function_basic",
+      "distance": 1.1122772693634033,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 39,
+      "end_line": 55,
+      "tokens": 118,
+      "context_length": 68842
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_1_IGNORE_PAM.1",
+      "distance": 1.1124022006988525,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 234,
+      "context_length": 69076
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestRaises_test_dynamic_compile_shows_nicely.9",
+      "distance": 1.1139914989471436,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 165,
+      "end_line": 203,
+      "tokens": 256,
+      "context_length": 69332
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_PyCollector.collect_PyCollector._makeitem.2.1",
+      "distance": 1.1140493154525757,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 360,
+      "end_line": 387,
+      "tokens": 249,
+      "context_length": 69581
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/pytest/src/_pytest/monkeypatch.py_1_monkeypatch.4",
+      "distance": 1.115130066871643,
+      "file_path": "src/_pytest/monkeypatch.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 279,
+      "context_length": 69860
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__idvalset__idvalset.2.3.1.1",
+      "distance": 1.115748405456543,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1208,
+      "end_line": 1218,
+      "tokens": 122,
+      "context_length": 69982
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py__",
+      "distance": 1.115840196609497,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 69982
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_customized_python_discovery_test_customized_python_discovery.9",
+      "distance": 1.1159987449645996,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1084,
+      "end_line": 1111,
+      "tokens": 183,
+      "context_length": 70165
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_raises_match_TestRaises.test_raises_match.7.1.1",
+      "distance": 1.1162619590759277,
+      "file_path": "testing/python/raises.py",
+      "start_line": 213,
+      "end_line": 228,
+      "tokens": 135,
+      "context_length": 70300
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_native_strings_TestMetafunc.test_idmaker_native_strings.3",
+      "distance": 1.1168816089630127,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 319,
+      "end_line": 352,
+      "tokens": 265,
+      "context_length": 70565
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/pytest/src/_pytest/deprecated.py_PYTEST_CONFIG_GLOBAL_",
+      "distance": 1.117051362991333,
+      "file_path": "src/_pytest/deprecated.py",
+      "start_line": 71,
+      "end_line": 97,
+      "tokens": 237,
+      "context_length": 70802
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idval_hypothesis_TestMetafunc.test_idval_hypothesis.4",
+      "distance": 1.117415428161621,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 199,
+      "end_line": 208,
+      "tokens": 114,
+      "context_length": 70916
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestItem_DoctestItem._disable_output_capturing_for_darwin.4.4",
+      "distance": 1.1185532808303833,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 182,
+      "end_line": 219,
+      "tokens": 309,
+      "context_length": 71225
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_runtest_setup_pytest_runtest_setup.item._skipped_by_mark.6",
+      "distance": 1.118723750114441,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 73,
+      "end_line": 92,
+      "tokens": 167,
+      "context_length": 71392
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_hasinit_CallSpec2.id.1.1",
+      "distance": 1.1197879314422607,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 850,
+      "end_line": 900,
+      "tokens": 358,
+      "context_length": 71750
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/pytest/bench/manyparam.py__",
+      "distance": 1.1200568675994873,
+      "file_path": "bench/manyparam.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 0,
+      "context_length": 71750
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._perform_collect_Session.collect.1.5",
+      "distance": 1.1216106414794922,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 505,
+      "end_line": 550,
+      "tokens": 379,
+      "context_length": 72129
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_with_ids_and_config_TestMetafunc.test_idmaker_with_ids_and_config.6.2",
+      "distance": 1.1237316131591797,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 460,
+      "end_line": 491,
+      "tokens": 226,
+      "context_length": 72355
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestMockDecoration.test_mock_TestMockDecoration.test_mock.7",
+      "distance": 1.1244274377822876,
+      "file_path": "testing/python/integration.py",
+      "start_line": 191,
+      "end_line": 222,
+      "tokens": 272,
+      "context_length": 72627
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir.5",
+      "distance": 1.1244597434997559,
+      "file_path": "testing/python/collect.py",
+      "start_line": 738,
+      "end_line": 761,
+      "tokens": 171,
+      "context_length": 72798
+    },
+    {
+      "position": 214,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_syntax_error_with_non_ascii_chars_test_skip_duplicates_by_default.6",
+      "distance": 1.1262447834014893,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1259,
+      "end_line": 1290,
+      "tokens": 203,
+      "context_length": 73001
+    },
+    {
+      "position": 215,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_runtest_makereport_",
+      "distance": 1.1263045072555542,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 125,
+      "end_line": 187,
+      "tokens": 583,
+      "context_length": 73584
+    },
+    {
+      "position": 216,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction_TestFunction.test_function_as_object_instance_ignored.3",
+      "distance": 1.1263941526412964,
+      "file_path": "testing/python/collect.py",
+      "start_line": 258,
+      "end_line": 283,
+      "tokens": 182,
+      "context_length": 73766
+    },
+    {
+      "position": 217,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakeitem_TestConftestCustomization.test_customized_pymakeitem.5",
+      "distance": 1.1266928911209106,
+      "file_path": "testing/python/collect.py",
+      "start_line": 763,
+      "end_line": 794,
+      "tokens": 205,
+      "context_length": 73971
+    },
+    {
+      "position": 218,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_MARK_GEN_NodeKeywords.__repr__.1.1",
+      "distance": 1.1267743110656738,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 331,
+      "end_line": 368,
+      "tokens": 217,
+      "context_length": 74188,
+      "file_pos": 30
+    },
+    {
+      "position": 219,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_1_istestfunc.1.1",
+      "distance": 1.1268980503082275,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 198,
+      "context_length": 74386,
+      "file_pos": 30
+    },
+    {
+      "position": 220,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__idval__idval.3.1",
+      "distance": 1.1281927824020386,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1175,
+      "end_line": 1205,
+      "tokens": 307,
+      "context_length": 74693
+    },
+    {
+      "position": 221,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_pycollect_makeitem_pytest_pycollect_makeitem.5.2.obj.5.3.2",
+      "distance": 1.1283800601959229,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 202,
+      "end_line": 236,
+      "tokens": 334,
+      "context_length": 75027
+    },
+    {
+      "position": 222,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_53_fix_cache_order.1.1.1",
+      "distance": 1.1288107633590698,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 209,
+      "end_line": 234,
+      "tokens": 261,
+      "context_length": 75288,
+      "file_pos": 30
+    },
+    {
+      "position": 223,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Package._collectfile_Package.isinitpath.1.1",
+      "distance": 1.1294726133346558,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 609,
+      "end_line": 636,
+      "tokens": 211,
+      "context_length": 75499
+    },
+    {
+      "position": 224,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_generate_tests_only_done_in_subdir_TestMetafuncFunctional.test_generate_tests_only_done_in_subdir.8",
+      "distance": 1.129701018333435,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1265,
+      "end_line": 1287,
+      "tokens": 225,
+      "context_length": 75724
+    },
+    {
+      "position": 225,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_pytest_ignore_collect_pytest_collection_modifyitems.6.2",
+      "distance": 1.1297857761383057,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 296,
+      "end_line": 342,
+      "tokens": 339,
+      "context_length": 76063
+    },
+    {
+      "position": 226,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session_Session.isinitpath.1.1",
+      "distance": 1.1322553157806396,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 421,
+      "end_line": 476,
+      "tokens": 473,
+      "context_length": 76536
+    },
+    {
+      "position": 227,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_TestCaseFunction._handle_skip_TestCaseFunction._handle_skip.testMethod.3.1",
+      "distance": 1.132567048072815,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 200,
+      "end_line": 218,
+      "tokens": 217,
+      "context_length": 76753
+    },
+    {
+      "position": 228,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Metafunc._resolve_arg_value_types_Metafunc._resolve_arg_value_types.4.1",
+      "distance": 1.1326422691345215,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1073,
+      "end_line": 1100,
+      "tokens": 303,
+      "context_length": 77056
+    },
+    {
+      "position": 229,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._recurse_Session.17.2._visit_filter.1.1",
+      "distance": 1.132728934288025,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 652,
+      "end_line": 675,
+      "tokens": 180,
+      "context_length": 77236
+    },
+    {
+      "position": 230,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_CallSpec2.setmulti2_CallSpec2.setall.5.1",
+      "distance": 1.1329271793365479,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 902,
+      "end_line": 922,
+      "tokens": 225,
+      "context_length": 77461
+    },
+    {
+      "position": 231,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Module._importtestmodule_Module._importtestmodule.importmode.4.1",
+      "distance": 1.1336634159088135,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 504,
+      "end_line": 552,
+      "tokens": 469,
+      "context_length": 77930
+    },
+    {
+      "position": 232,
+      "id": "/tmp/repos/pytest/doc/en/example/multipython.py_1_python2.1.1",
+      "distance": 1.1342101097106934,
+      "file_path": "doc/en/example/multipython.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 125,
+      "context_length": 78055
+    },
+    {
+      "position": 233,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_1_TestRaises.test_raises_repr_inflight.3.4",
+      "distance": 1.1342884302139282,
+      "file_path": "testing/python/raises.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 455,
+      "context_length": 78510
+    },
+    {
+      "position": 234,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_Mark_Mark.name.combined_with.3.1",
+      "distance": 1.1379876136779785,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 148,
+      "end_line": 168,
+      "tokens": 147,
+      "context_length": 78657,
+      "file_pos": 31
+    },
+    {
+      "position": 235,
+      "id": "/tmp/repos/pytest/src/_pytest/monkeypatch.py_resolve_resolve.parts.5.1",
+      "distance": 1.1379897594451904,
+      "file_path": "src/_pytest/monkeypatch.py",
+      "start_line": 46,
+      "end_line": 72,
+      "tokens": 184,
+      "context_length": 78841
+    },
+    {
+      "position": 236,
+      "id": "/tmp/repos/pytest/src/_pytest/setupplan.py_1_",
+      "distance": 1.1391732692718506,
+      "file_path": "src/_pytest/setupplan.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 194,
+      "context_length": 79035
+    },
+    {
+      "position": 237,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_non_printable_characters_TestMetafunc.test_idmaker_non_printable_characters.3",
+      "distance": 1.1400628089904785,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 354,
+      "end_line": 368,
+      "tokens": 145,
+      "context_length": 79180
+    },
+    {
+      "position": 238,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._collectfile_Session._collectfile.5.1",
+      "distance": 1.140257477760315,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 629,
+      "end_line": 650,
+      "tokens": 177,
+      "context_length": 79357
+    },
+    {
+      "position": 239,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_raises_match_wrong_type_TestRaises.test_raises_exception_looks_iterable.4.1",
+      "distance": 1.1412904262542725,
+      "file_path": "testing/python/raises.py",
+      "start_line": 230,
+      "end_line": 258,
+      "tokens": 195,
+      "context_length": 79552
+    },
+    {
+      "position": 240,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py__",
+      "distance": 1.1437385082244873,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 79552
+    },
+    {
+      "position": 241,
+      "id": "/tmp/repos/pytest/src/_pytest/nodes.py__check_initialpaths_for_relpath_FSCollector.__init__.8",
+      "distance": 1.1463227272033691,
+      "file_path": "src/_pytest/nodes.py",
+      "start_line": 347,
+      "end_line": 376,
+      "tokens": 253,
+      "context_length": 79805
+    },
+    {
+      "position": 242,
+      "id": "/tmp/repos/pytest/src/_pytest/python_api.py_raises.__tracebackhide___raises.7",
+      "distance": 1.1470293998718262,
+      "file_path": "src/_pytest/python_api.py",
+      "start_line": 673,
+      "end_line": 716,
+      "tokens": 379,
+      "context_length": 80184
+    },
+    {
+      "position": 243,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestTracebackCutting.test_traceback_error_during_import_TestTracebackCutting.test_traceback_error_during_import.12",
+      "distance": 1.1473355293273926,
+      "file_path": "testing/python/collect.py",
+      "start_line": 928,
+      "end_line": 947,
+      "tokens": 179,
+      "context_length": 80363
+    },
+    {
+      "position": 244,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization_TestConftestCustomization.test_pytest_pycollect_module.5",
+      "distance": 1.1477619409561157,
+      "file_path": "testing/python/collect.py",
+      "start_line": 721,
+      "end_line": 736,
+      "tokens": 144,
+      "context_length": 80507
+    },
+    {
+      "position": 245,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Metafunc._validate_if_using_arg_names_Metafunc._validate_if_using_arg_names.4.1.1.2.2",
+      "distance": 1.1488916873931885,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1102,
+      "end_line": 1129,
+      "tokens": 252,
+      "context_length": 80759
+    },
+    {
+      "position": 246,
+      "id": "/tmp/repos/pytest/testing/example_scripts/tmpdir/tmpdir_fixture.py__",
+      "distance": 1.1490073204040527,
+      "file_path": "testing/example_scripts/tmpdir/tmpdir_fixture.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 80759
+    },
+    {
+      "position": 247,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestTracebackCutting.test_filter_traceback_generated_code_TestTracebackCutting.test_filter_traceback_generated_code.6",
+      "distance": 1.1493200063705444,
+      "file_path": "testing/python/collect.py",
+      "start_line": 976,
+      "end_line": 995,
+      "tokens": 171,
+      "context_length": 80930
+    },
+    {
+      "position": 248,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Package_Package.setup.setup_module.6.2",
+      "distance": 1.1495110988616943,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 555,
+      "end_line": 580,
+      "tokens": 266,
+      "context_length": 81196
+    },
+    {
+      "position": 249,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestTracebackCutting.test_filter_traceback_path_no_longer_valid_TestTracebackCutting.test_filter_traceback_path_no_longer_valid.9",
+      "distance": 1.1498422622680664,
+      "file_path": "testing/python/collect.py",
+      "start_line": 997,
+      "end_line": 1022,
+      "tokens": 205,
+      "context_length": 81401
+    },
+    {
+      "position": 250,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__find_parametrized_scope__ascii_escaped_by_config.2.1",
+      "distance": 1.1507841348648071,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1132,
+      "end_line": 1172,
+      "tokens": 314,
+      "context_length": 81715
+    }
+  ],
+  "files": [
+    {
+      "file_path": "testing/python/fixtures.py",
+      "position": 1,
+      "tokens": 24799,
+      "context_length": 24799
+    },
+    {
+      "file_path": "testing/python/setup_only.py",
+      "position": 2,
+      "tokens": 1541,
+      "context_length": 26340
+    },
+    {
+      "file_path": "testing/python/metafunc.py",
+      "position": 3,
+      "tokens": 13122,
+      "context_length": 39462
+    },
+    {
+      "file_path": "testing/python/collect.py",
+      "position": 4,
+      "tokens": 9695,
+      "context_length": 49157
+    },
+    {
+      "file_path": "src/_pytest/fixtures.py",
+      "position": 5,
+      "tokens": 10808,
+      "context_length": 59965
+    },
+    {
+      "file_path": "src/_pytest/capture.py",
+      "position": 6,
+      "tokens": 6167,
+      "context_length": 66132
+    },
+    {
+      "file_path": "src/_pytest/python.py",
+      "position": 7,
+      "tokens": 11832,
+      "context_length": 77964
+    },
+    {
+      "file_path": "src/_pytest/mark/structures.py",
+      "position": 8,
+      "tokens": 2836,
+      "context_length": 80800
+    },
+    {
+      "file_path": "testing/python/integration.py",
+      "position": 9,
+      "tokens": 2781,
+      "context_length": 83581
+    },
+    {
+      "file_path": "testing/python/setup_plan.py",
+      "position": 10,
+      "tokens": 127,
+      "context_length": 83708
+    },
+    {
+      "file_path": "testing/example_scripts/issue_519.py",
+      "position": 11,
+      "tokens": 474,
+      "context_length": 84182
+    },
+    {
+      "file_path": "testing/python/raises.py",
+      "position": 12,
+      "tokens": 1837,
+      "context_length": 86019
+    },
+    {
+      "file_path": "src/_pytest/unittest.py",
+      "position": 13,
+      "tokens": 2055,
+      "context_length": 88074
+    },
+    {
+      "file_path": "src/pytest.py",
+      "position": 14,
+      "tokens": 731,
+      "context_length": 88805
+    },
+    {
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "position": 15,
+      "tokens": 1663,
+      "context_length": 90468
+    },
+    {
+      "file_path": "src/_pytest/setuponly.py",
+      "position": 16,
+      "tokens": 595,
+      "context_length": 91063
+    },
+    {
+      "file_path": "src/_pytest/compat.py",
+      "position": 17,
+      "tokens": 3158,
+      "context_length": 94221
+    },
+    {
+      "file_path": "src/_pytest/mark/__init__.py",
+      "position": 18,
+      "tokens": 1180,
+      "context_length": 95401
+    },
+    {
+      "file_path": "src/_pytest/main.py",
+      "position": 19,
+      "tokens": 5783,
+      "context_length": 101184
+    },
+    {
+      "file_path": "src/_pytest/junitxml.py",
+      "position": 20,
+      "tokens": 5021,
+      "context_length": 106205
+    },
+    {
+      "file_path": "src/_pytest/debugging.py",
+      "position": 21,
+      "tokens": 2348,
+      "context_length": 108553
+    },
+    {
+      "file_path": "src/_pytest/doctest.py",
+      "position": 22,
+      "tokens": 4171,
+      "context_length": 112724
+    },
+    {
+      "file_path": "doc/en/example/xfail_demo.py",
+      "position": 23,
+      "tokens": 152,
+      "context_length": 112876
+    },
+    {
+      "file_path": "src/_pytest/pytester.py",
+      "position": 24,
+      "tokens": 10572,
+      "context_length": 123448
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py",
+      "position": 25,
+      "tokens": 34,
+      "context_length": 123482
+    },
+    {
+      "file_path": "src/_pytest/skipping.py",
+      "position": 26,
+      "tokens": 1559,
+      "context_length": 125041
+    },
+    {
+      "file_path": "src/_pytest/monkeypatch.py",
+      "position": 27,
+      "tokens": 2570,
+      "context_length": 127611
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py",
+      "position": 28,
+      "tokens": 33,
+      "context_length": 127644
+    },
+    {
+      "file_path": "src/_pytest/deprecated.py",
+      "position": 29,
+      "tokens": 977,
+      "context_length": 128621
+    },
+    {
+      "file_path": "bench/manyparam.py",
+      "position": 30,
+      "tokens": 49,
+      "context_length": 128670
+    },
+    {
+      "file_path": "doc/en/example/multipython.py",
+      "position": 31,
+      "tokens": 455,
+      "context_length": 129125
+    },
+    {
+      "file_path": "src/_pytest/setupplan.py",
+      "position": 32,
+      "tokens": 195,
+      "context_length": 129320
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py",
+      "position": 33,
+      "tokens": 26,
+      "context_length": 129346
+    },
+    {
+      "file_path": "src/_pytest/nodes.py",
+      "position": 34,
+      "tokens": 3098,
+      "context_length": 132444
+    },
+    {
+      "file_path": "src/_pytest/python_api.py",
+      "position": 35,
+      "tokens": 6437,
+      "context_length": 138881
+    },
+    {
+      "file_path": "testing/example_scripts/tmpdir/tmpdir_fixture.py",
+      "position": 36,
+      "tokens": 49,
+      "context_length": 138930
+    }
+  ]
+}

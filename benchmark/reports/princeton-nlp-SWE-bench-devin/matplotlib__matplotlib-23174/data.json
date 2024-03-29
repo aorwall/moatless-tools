@@ -1,0 +1,1226 @@
+{
+  "instance_id": "matplotlib__matplotlib-23174",
+  "model_patch": "diff --git a/lib/matplotlib/contour.py b/lib/matplotlib/contour.py\nindex 2b34c3f524..a0c393f692 100644\n--- a/lib/matplotlib/contour.py\n+++ b/lib/matplotlib/contour.py\n@@ -21,6 +21,8 @@ import matplotlib.text as text\n import matplotlib.cbook as cbook\n import matplotlib.patches as mpatches\n import matplotlib.transforms as mtransforms\n+from matplotlib.figure import SubFigure\n+from matplotlib.tight_layout import get_renderer\n \n \n # We can't use a single line collection for contour because a line\n@@ -251,13 +253,20 @@ class ContourLabeler:\n     def _get_nth_label_width(self, nth):\n         \"\"\"Return the width of the *nth* label, in pixels.\"\"\"\n         fig = self.axes.figure\n-        return (\n-            text.Text(0, 0,\n-                      self.get_text(self.labelLevelList[nth], self.labelFmt),\n-                      figure=fig,\n-                      size=self.labelFontSizeList[nth],\n-                      fontproperties=self.labelFontProps)\n-            .get_window_extent(mpl._tight_layout.get_renderer(fig)).width)\n+        # Check if the figure is a SubFigure and get the renderer from the parent figure if so\n+        if isinstance(fig, SubFigure):\n+            renderer = fig.parent._cachedRenderer\n+        else:\n+            renderer = get_renderer(fig)\n+\n+        # Use the renderer to get the window extent\n+        window_extent = text.Text(0, 0,\n+                                  self.get_text(self.labelLevelList[nth], self.labelFmt),\n+                                  figure=fig,\n+                                  size=self.labelFontSizeList[nth],\n+                                  fontproperties=self.labelFontProps\n+                                 ).get_window_extent(renderer).width\n+        return window_extent\n \n     @_api.deprecated(\"3.5\")\n     def get_label_width(self, lev, fmt, fsize):\n@@ -267,7 +276,7 @@ class ContourLabeler:\n         fig = self.axes.figure\n         width = (text.Text(0, 0, lev, figure=fig,\n                            size=fsize, fontproperties=self.labelFontProps)\n-                 .get_window_extent(mpl._tight_layout.get_renderer(fig)).width)\n+                 .get_window_extent(get_renderer(fig)).width)\n         width *= 72 / fig.dpi\n         return width\n \n@@ -1565,6 +1574,187 @@ class QuadContourSet(ContourSet):\n         return np.meshgrid(x, y)\n \n \n+@_docstring.dedent_interpd\n+class QuadContourSet(ContourSet):\n+    \"\"\"\n+    Create and store a set of contour lines or filled regions.\n+\n+    This class is typically not instantiated directly by the user but by\n+    `~.Axes.contour` and `~.Axes.contourf`.\n+\n+    %(contour_set_attributes)s\n+    \"\"\"\n+\n+    def _process_args(self, *args, corner_mask=None, algorithm=None, **kwargs):\n+        \"\"\"\n+        Process args and kwargs.\n+        \"\"\"\n+        if isinstance(args[0], QuadContourSet):\n+            if self.levels is None:\n+                self.levels = args[0].levels\n+            self.zmin = args[0].zmin\n+            self.zmax = args[0].zmax\n+            self._corner_mask = args[0]._corner_mask\n+            contour_generator = args[0]._contour_generator\n+            self._mins = args[0]._mins\n+            self._maxs = args[0]._maxs\n+            self._algorithm = args[0]._algorithm\n+        else:\n+            import contourpy\n+\n+            if algorithm is None:\n+                algorithm = mpl.rcParams['contour.algorithm']\n+            mpl.rcParams.validate[\"contour.algorithm\"](algorithm)\n+            self._algorithm = algorithm\n+\n+            if corner_mask is None:\n+                if self._algorithm == \"mpl2005\":\n+                    # mpl2005 does not support corner_mask=True so if not\n+                    # specifically requested then disable it.\n+                    corner_mask = False\n+                else:\n+                    corner_mask = mpl.rcParams['contour.corner_mask']\n+            self._corner_mask = corner_mask\n+\n+            x, y, z = self._contour_args(args, kwargs)\n+\n+            contour_generator = contourpy.contour_generator(\n+                x, y, z, name=self._algorithm, corner_mask=self._corner_mask,\n+                line_type=contourpy.LineType.SeparateCode,\n+                fill_type=contourpy.FillType.OuterCode,\n+                chunk_size=self.nchunk)\n+\n+            t = self.get_transform()\n+\n+            # if the transform is not trans data, and some part of it\n+            # contains transData, transform the xs and ys to data coordinates\n+            if (t != self.axes.transData and\n+                    any(t.contains_branch_seperately(self.axes.transData))):\n+                trans_to_data = t - self.axes.transData\n+                pts = np.vstack([x.flat, y.flat]).T\n+                transformed_pts = trans_to_data.transform(pts)\n+                x = transformed_pts[..., 0]\n+                y = transformed_pts[..., 1]\n+\n+            self._mins = [ma.min(x), ma.min(y)]\n+            self._maxs = [ma.max(x), ma.max(y)]\n+\n+        self._contour_generator = contour_generator\n+\n+        return kwargs\n+\n+    def _contour_args(self, args, kwargs):\n+        if self.filled:\n+            fn = 'contourf'\n+        else:\n+            fn = 'contour'\n+        Nargs = len(args)\n+        if Nargs <= 2:\n+            z = ma.asarray(args[0], dtype=np.float64)\n+            x, y = self._initialize_x_y(z)\n+            args = args[1:]\n+        elif Nargs <= 4:\n+            x, y, z = self._check_xyz(args[:3], kwargs)\n+            args = args[3:]\n+        else:\n+            raise TypeError(\"Too many arguments to %s; see help(%s)\" %\n+                            (fn, fn))\n+        z = ma.masked_invalid(z, copy=False)\n+        self.zmax = float(z.max())\n+        self.zmin = float(z.min())\n+        if self.logscale and self.zmin <= 0:\n+            z = ma.masked_where(z <= 0, z)\n+            _api.warn_external('Log scale: values of z <= 0 have been masked')\n+            self.zmin = float(z.min())\n+        self._process_contour_level_args(args)\n+        return (x, y, z)\n+\n+    def _check_xyz(self, args, kwargs):\n+        \"\"\"\n+        Check that the shapes of the input arrays match; if x and y are 1D,\n+        convert them to 2D using meshgrid.\n+        \"\"\"\n+        x, y = args[:2]\n+        x, y = self.axes._process_unit_info([(\"x\", x), (\"y\", y)], kwargs)\n+\n+        x = np.asarray(x, dtype=np.float64)\n+        y = np.asarray(y, dtype=np.float64)\n+        z = ma.asarray(args[2], dtype=np.float64)\n+\n+        if z.ndim != 2:\n+            raise TypeError(f\"Input z must be 2D, not {z.ndim}D\")\n+        if z.shape[0] < 2 or z.shape[1] < 2:\n+            raise TypeError(f\"Input z must be at least a (2, 2) shaped array, \"\n+                            f\"but has shape {z.shape}\")\n+        Ny, Nx = z.shape\n+\n+        if x.ndim != y.ndim:\n+            raise TypeError(f\"Number of dimensions of x ({x.ndim}) and y \"\n+                            f\"({y.ndim}) do not match\")\n+        if x.ndim == 1:\n+            nx, = x.shape\n+            ny, = y.shape\n+            if nx != Nx:\n+                raise TypeError(f\"Length of x ({nx}) must match number of \"\n+                                f\"columns in z ({Nx})\")\n+            if ny != Ny:\n+                raise TypeError(f\"Length of y ({ny}) must match number of \"\n+                                f\"rows in z ({Ny})\")\n+            x, y = np.meshgrid(x, y)\n+        elif x.ndim == 2:\n+            if x.shape != z.shape:\n+                raise TypeError(\n+                    f\"Shapes of x {x.shape} and z {z.shape} do not match\")\n+            if y.shape != z.shape:\n+                raise TypeError(\n+                    f\"Shapes of y {y.shape} and z {z.shape} do not match\")\n+        else:\n+            raise TypeError(f\"Inputs x and y must be 1D or 2D, not {x.ndim}D\")\n+\n+        return x, y, z\n+\n+    def _initialize_x_y(self, z):\n+        \"\"\"\n+        Return X, Y arrays such that contour(Z) will match imshow(Z)\n+        if origin is not None.\n+        The center of pixel Z[i, j] depends on origin:\n+        if origin is None, x = j, y = i;\n+        if origin is 'lower', x = j + 0.5, y = i + 0.5;\n+        if origin is 'upper', x = j + 0.5, y = Nrows - i - 0.5\n+        If extent is not None, x and y will be scaled to match,\n+        as in imshow.\n+        If origin is None and extent is not None, then extent\n+        will give the minimum and maximum values of x and y.\n+        \"\"\"\n+        if z.ndim != 2:\n+            raise TypeError(f\"Input z must be 2D, not {z.ndim}D\")\n+        elif z.shape[0] < 2 or z.shape[1] < 2:\n+            raise TypeError(f\"Input z must be at least a (2, 2) shaped array, \"\n+                            f\"but has shape {z.shape}\")\n+        else:\n+            Ny, Nx = z.shape\n+        if self.origin is None:  # Not for image-matching.\n+            if self.extent is None:\n+                return np.meshgrid(np.arange(Nx), np.arange(Ny))\n+            else:\n+                x0, x1, y0, y1 = self.extent\n+                x = np.linspace(x0, x1, Nx)\n+                y = np.linspace(y0, y1, Ny)\n+                return np.meshgrid(x, y)\n+        # Match image behavior:\n+        if self.extent is None:\n+            x0, x1, y0, y1 = (0, Nx, 0, Ny)\n+        else:\n+            x0, x1, y0, y1 = self.extent\n+        dx = (x1 - x0) / Nx\n+        dy = (y1 - y0) / Ny\n+        x = x0 + (np.arange(Nx) + 0.5) * dx\n+        y = y0 + (np.arange(Ny) + 0.5) * dy\n+        if self.origin == 'upper':\n+            y = y[::-1]\n+        return np.meshgrid(x, y)\n+\n+\n _docstring.interpd.update(contour_doc=\"\"\"\n `.contour` and `.contourf` draw contour lines and filled contours,\n respectively.  Except as noted, function signatures and return values\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/contour.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "d73ba9e00eddae34610bf9982876b5aa62114ad5",
+  "patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -2060,6 +2060,14 @@ def dpi(self):\n     def dpi(self, value):\n         self._parent.dpi = value\n \n+    @property\n+    def _cachedRenderer(self):\n+        return self._parent._cachedRenderer\n+\n+    @_cachedRenderer.setter\n+    def _cachedRenderer(self, renderer):\n+        self._parent._cachedRenderer = renderer\n+\n     def _redo_transform_rel_fig(self, bbox=None):\n         \"\"\"\n         Make the transSubfigure bbox relative to Figure transform.\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_contour.py b/lib/matplotlib/tests/test_contour.py\n--- a/lib/matplotlib/tests/test_contour.py\n+++ b/lib/matplotlib/tests/test_contour.py\n@@ -585,3 +585,23 @@ def test_all_algorithms():\n         ax.contourf(x, y, z, algorithm=algorithm)\n         ax.contour(x, y, z, algorithm=algorithm, colors='k')\n         ax.set_title(algorithm)\n+\n+\n+def test_subfigure_clabel():\n+    # Smoke test for gh#23173\n+    delta = 0.025\n+    x = np.arange(-3.0, 3.0, delta)\n+    y = np.arange(-2.0, 2.0, delta)\n+    X, Y = np.meshgrid(x, y)\n+    Z1 = np.exp(-(X**2) - Y**2)\n+    Z2 = np.exp(-((X - 1) ** 2) - (Y - 1) ** 2)\n+    Z = (Z1 - Z2) * 2\n+\n+    fig = plt.figure()\n+    figs = fig.subfigures(nrows=1, ncols=2)\n+\n+    for f in figs:\n+        ax = f.subplots()\n+        CS = ax.contour(X, Y, Z)\n+        ax.clabel(CS, inline=True, fontsize=10)\n+        ax.set_title(\"Simplest default with labels\")\n",
+  "problem_statement": "[Bug]: Crash when adding clabels to subfigures\n### Bug summary\n\nAdding a clabel to a contour plot of a subfigure results in a traceback.\n\n### Code for reproduction\n\n```python\n# Taken from the Contour Demo example\r\ndelta = 0.025\r\nx = np.arange(-3.0, 3.0, delta)\r\ny = np.arange(-2.0, 2.0, delta)\r\nX, Y = np.meshgrid(x, y)\r\nZ1 = np.exp(-(X**2) - Y**2)\r\nZ2 = np.exp(-((X - 1) ** 2) - (Y - 1) ** 2)\r\nZ = (Z1 - Z2) * 2\r\n\r\nfig = plt.figure()\r\nfigs = fig.subfigures(nrows=1, ncols=2)\r\n\r\nfor f in figs:\r\n    ax = f.subplots()\r\n    CS = ax.contour(X, Y, Z)\r\n    ax.clabel(CS, inline=True, fontsize=10)\r\n    ax.set_title(\"Simplest default with labels\")\r\n\r\nplt.show()\n```\n\n\n### Actual outcome\n\n```\r\n    ax.clabel(CS, inline=True, fontsize=10)\r\n  File \"/usr/lib/python3.9/site-packages/matplotlib/axes/_axes.py\", line 6335, in clabel\r\n    return CS.clabel(levels, **kwargs)\r\n  File \"/usr/lib/python3.9/site-packages/matplotlib/contour.py\", line 235, in clabel\r\n    self.labels(inline, inline_spacing)\r\n  File \"/usr/lib/python3.9/site-packages/matplotlib/contour.py\", line 582, in labels\r\n    lw = self._get_nth_label_width(idx)\r\n  File \"/usr/lib/python3.9/site-packages/matplotlib/contour.py\", line 285, in _get_nth_label_width\r\n    .get_window_extent(mpl.tight_layout.get_renderer(fig)).width)\r\n  File \"/usr/lib/python3.9/site-packages/matplotlib/tight_layout.py\", line 206, in get_renderer\r\n    if fig._cachedRenderer:\r\nAttributeError: 'SubFigure' object has no attribute '_cachedRenderer'\r\n```\n\n### Expected outcome\n\nThe two subfigures appearing side by side, each showing the Contour Demo example\n\n### Additional information\n\n_No response_\n\n### Operating system\n\nGentoo\n\n### Matplotlib Version\n\n3.5.2\n\n### Matplotlib Backend\n\nQtAgg\n\n### Python version\n\n3.9.13\n\n### Jupyter version\n\n_No response_\n\n### Installation\n\nLinux package manager\n",
+  "hints_text": "Not sure if one should add `self._cachedRenderer = None` to `FigureBase` (and remove in `Figure`) or to `SubFigure` init-functions, but that should fix it.\r\n\r\nI thought it was a recent regression, but it doesn't look like it, so maybe should be labelled 3.6.0 instead?",
+  "created_at": "2022-06-01T10:32:18Z",
+  "version": "3.5",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_contour.py::test_subfigure_clabel\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_contour.py::test_algorithm_name[invalid-None]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_name[mpl2005-Mpl2005ContourGenerator]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_name[mpl2014-Mpl2014ContourGenerator]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_name[serial-SerialContourGenerator]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_name[threaded-ThreadedContourGenerator]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_supports_corner_mask[mpl2005]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_supports_corner_mask[mpl2014]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_supports_corner_mask[serial]\", \"lib/matplotlib/tests/test_contour.py::test_algorithm_supports_corner_mask[threaded]\", \"lib/matplotlib/tests/test_contour.py::test_all_algorithms[png]\", \"lib/matplotlib/tests/test_contour.py::test_circular_contour_warning\", \"lib/matplotlib/tests/test_contour.py::test_clabel_zorder[False-123-1234]\", \"lib/matplotlib/tests/test_contour.py::test_clabel_zorder[False-123-None]\", \"lib/matplotlib/tests/test_contour.py::test_clabel_zorder[True-123-1234]\", \"lib/matplotlib/tests/test_contour.py::test_clabel_zorder[True-123-None]\", \"lib/matplotlib/tests/test_contour.py::test_contour_Nlevels\", \"lib/matplotlib/tests/test_contour.py::test_contour_addlines[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_autolabel_beyond_powerlimits\", \"lib/matplotlib/tests/test_contour.py::test_contour_badlevel_fmt\", \"lib/matplotlib/tests/test_contour.py::test_contour_closed_line_loop[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_datetime_axis[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_empty_levels\", \"lib/matplotlib/tests/test_contour.py::test_contour_legend_elements\", \"lib/matplotlib/tests/test_contour.py::test_contour_line_start_on_corner_edge[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_linewidth[1.23-4.24-5.02-5.02]\", \"lib/matplotlib/tests/test_contour.py::test_contour_linewidth[1.23-4.24-None-4.24]\", \"lib/matplotlib/tests/test_contour.py::test_contour_linewidth[1.23-None-None-1.23]\", \"lib/matplotlib/tests/test_contour.py::test_contour_manual[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_manual_labels[pdf]\", \"lib/matplotlib/tests/test_contour.py::test_contour_manual_labels[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_1d_valid\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_2d_valid\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args0-Length\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args1-Length\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args2-Number\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args3-Number\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args4-Shapes\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args5-Shapes\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args6-Inputs\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args7-Input\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args8-Input\", \"lib/matplotlib/tests/test_contour.py::test_contour_shape_error[args9-Input\", \"lib/matplotlib/tests/test_contour.py::test_contour_uneven[png]\", \"lib/matplotlib/tests/test_contour.py::test_contour_uniform_z\", \"lib/matplotlib/tests/test_contour.py::test_contourf_decreasing_levels\", \"lib/matplotlib/tests/test_contour.py::test_contourf_legend_elements\", \"lib/matplotlib/tests/test_contour.py::test_contourf_symmetric_locator\", \"lib/matplotlib/tests/test_contour.py::test_corner_mask[png]\", \"lib/matplotlib/tests/test_contour.py::test_find_nearest_contour\", \"lib/matplotlib/tests/test_contour.py::test_find_nearest_contour_no_filled\", \"lib/matplotlib/tests/test_contour.py::test_given_colors_levels_and_extends[png]\", \"lib/matplotlib/tests/test_contour.py::test_label_nonagg\", \"lib/matplotlib/tests/test_contour.py::test_labels[png]\", \"lib/matplotlib/tests/test_contour.py::test_quadcontourset_reuse\"]",
+  "environment_setup_commit": "de98877e3dc45de8dd441d008f23d88738dc015d",
+  "patch_files": [
+    "lib/matplotlib/figure.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_contour.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/figure.py": {
+      "diffs": [
+        {
+          "start_line_old": 2063,
+          "end_line_old": 2063,
+          "file_pos": 15,
+          "file_context_length": 157025,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subfigures_FigureBase.subfigures.5.4.2.1",
+          "closest_snippet_line_distance": 586
+        }
+      ]
+    }
+  },
+  "vectors": 3900,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contour_label_demo.py_1_",
+      "distance": 0.7248437404632568,
+      "file_path": "examples/images_contours_and_fields/contour_label_demo.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 613,
+      "context_length": 613
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler.clabel.2_ContourLabeler.clabel.28.1",
+      "distance": 0.7481706142425537,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 167,
+      "end_line": 238,
+      "tokens": 712,
+      "context_length": 1325
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contour_demo.py_1_levels.1",
+      "distance": 0.7607648968696594,
+      "file_path": "examples/images_contours_and_fields/contour_demo.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 749,
+      "context_length": 2074
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes.pcolorfast.C_Axes.hist",
+      "distance": 0.7691624164581299,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 6229,
+      "end_line": 6818,
+      "tokens": 1191,
+      "context_length": 3265
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contourf_demo.py_extends_",
+      "distance": 0.770511269569397,
+      "file_path": "examples/images_contours_and_fields/contourf_demo.py",
+      "start_line": 96,
+      "end_line": 129,
+      "tokens": 338,
+      "context_length": 3603
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/label_subplots.py_1_",
+      "distance": 0.779217004776001,
+      "file_path": "examples/text_labels_and_annotations/label_subplots.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 603,
+      "context_length": 4206
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contour_demo.py_CS_56_",
+      "distance": 0.7794220447540283,
+      "file_path": "examples/images_contours_and_fields/contour_demo.py",
+      "start_line": 84,
+      "end_line": 122,
+      "tokens": 341,
+      "context_length": 4547
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subfigures.py_1_36",
+      "distance": 0.7984739542007446,
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 756,
+      "context_length": 5303
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contourf_demo.py_1_64",
+      "distance": 0.8049436807632446,
+      "file_path": "examples/images_contours_and_fields/contourf_demo.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 779,
+      "context_length": 6082
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subfigures.py_37_",
+      "distance": 0.8205640912055969,
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "start_line": 84,
+      "end_line": 149,
+      "tokens": 667,
+      "context_length": 6749
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py__contour_labeler_event_handler__contour_labeler_event_handler.7.5.1.2",
+      "distance": 0.8380572199821472,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 47,
+      "end_line": 73,
+      "tokens": 309,
+      "context_length": 7058
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/figure_title.py_1_",
+      "distance": 0.8386923670768738,
+      "file_path": "examples/subplots_axes_and_figures/figure_title.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 544,
+      "context_length": 7602
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_188_clabel.1.1",
+      "distance": 0.8460484147071838,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2466,
+      "end_line": 2477,
+      "tokens": 146,
+      "context_length": 7748
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler._get_label_text_ContourLabeler._get_label_clabeltext.transDataInv.5.1",
+      "distance": 0.8502645492553711,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 418,
+      "end_line": 438,
+      "tokens": 235,
+      "context_length": 7983
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_64_fig_127.1",
+      "distance": 0.8529796600341797,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 87,
+      "end_line": 170,
+      "tokens": 785,
+      "context_length": 8768
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler._add_label_ContourLabeler.add_label.3",
+      "distance": 0.8551140427589417,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 440,
+      "end_line": 457,
+      "tokens": 181,
+      "context_length": 8949
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_gs_128_",
+      "distance": 0.8578193187713623,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 171,
+      "end_line": 212,
+      "tokens": 441,
+      "context_length": 9390
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/align_ylabels.py_5_",
+      "distance": 0.875060498714447,
+      "file_path": "examples/pyplots/align_ylabels.py",
+      "start_line": 40,
+      "end_line": 86,
+      "tokens": 346,
+      "context_length": 9736
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contour_image.py_1_44",
+      "distance": 0.8779650926589966,
+      "file_path": "examples/images_contours_and_fields/contour_image.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 763,
+      "context_length": 10499
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/tricontour_demo.py_65_",
+      "distance": 0.8795545697212219,
+      "file_path": "examples/images_contours_and_fields/tricontour_demo.py",
+      "start_line": 139,
+      "end_line": 161,
+      "tokens": 190,
+      "context_length": 10689
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/examples/showcase/anatomy.py_35_",
+      "distance": 0.8893126845359802,
+      "file_path": "examples/showcase/anatomy.py",
+      "start_line": 84,
+      "end_line": 121,
+      "tokens": 453,
+      "context_length": 11142
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/tricontour_demo.py_1_52",
+      "distance": 0.8923491835594177,
+      "file_path": "examples/images_contours_and_fields/tricontour_demo.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 672,
+      "context_length": 11814
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.supxlabel_FigureBase.supxlabel.info.2.1",
+      "distance": 0.8932413458824158,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 389,
+      "end_line": 396,
+      "tokens": 129,
+      "context_length": 11943,
+      "file_pos": 15
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_np_71",
+      "distance": 0.8945534229278564,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 100,
+      "end_line": 185,
+      "tokens": 881,
+      "context_length": 12824
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler.add_label_clabeltext_ContourLabeler.add_label_clabeltext.7",
+      "distance": 0.8972262144088745,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 459,
+      "end_line": 468,
+      "tokens": 130,
+      "context_length": 12954
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contour_image.py_45_",
+      "distance": 0.8979496955871582,
+      "file_path": "examples/images_contours_and_fields/contour_image.py",
+      "start_line": 77,
+      "end_line": 109,
+      "tokens": 314,
+      "context_length": 13268
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/figlegend_demo.py_1_",
+      "distance": 0.899703323841095,
+      "file_path": "examples/text_labels_and_annotations/figlegend_demo.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 254,
+      "context_length": 13522
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/line_with_text.py_8_",
+      "distance": 0.9012686014175415,
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "start_line": 51,
+      "end_line": 87,
+      "tokens": 260,
+      "context_length": 13782
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler_ContourLabeler.clabel.1",
+      "distance": 0.9019501805305481,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 76,
+      "end_line": 165,
+      "tokens": 821,
+      "context_length": 14603
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler.pop_label__is_closed_polygon.2.1",
+      "distance": 0.902758002281189,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 536,
+      "end_line": 595,
+      "tokens": 475,
+      "context_length": 15078
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/examples/ticks/colorbar_tick_labelling_demo.py_1_",
+      "distance": 0.9047383069992065,
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 303,
+      "context_length": 15381
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_tight_layout.py_1_top.1",
+      "distance": 0.9051332473754883,
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 756,
+      "context_length": 16137
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_SubFigure.get_axes_SubFigure.draw.self._cachedRenderer.5.6.self.stale.1",
+      "distance": 0.9066367149353027,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 2133,
+      "end_line": 2155,
+      "tokens": 157,
+      "context_length": 16294,
+      "file_pos": 20
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_1_63",
+      "distance": 0.908329963684082,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 741,
+      "context_length": 17035
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/align_labels_demo.py_1_",
+      "distance": 0.909002423286438,
+      "file_path": "examples/subplots_axes_and_figures/align_labels_demo.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 294,
+      "context_length": 17329
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.supylabel_FigureBase.supylabel.info.2.1",
+      "distance": 0.909264862537384,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 398,
+      "end_line": 406,
+      "tokens": 137,
+      "context_length": 17466,
+      "file_pos": 21
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/pcolormesh_grids.py_50_",
+      "distance": 0.9113544225692749,
+      "file_path": "examples/images_contours_and_fields/pcolormesh_grids.py",
+      "start_line": 82,
+      "end_line": 129,
+      "tokens": 484,
+      "context_length": 17950
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_194_contourf.3.1",
+      "distance": 0.9127161502838135,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2493,
+      "end_line": 2510,
+      "tokens": 196,
+      "context_length": 18146
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_140_160",
+      "distance": 0.9139472246170044,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2272,
+      "end_line": 2347,
+      "tokens": 767,
+      "context_length": 18913
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_fig_spec_129.1",
+      "distance": 0.9158350229263306,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 187,
+      "end_line": 260,
+      "tokens": 754,
+      "context_length": 19667
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contourf_hatching.py_1_",
+      "distance": 0.9173532128334045,
+      "file_path": "examples/images_contours_and_fields/contourf_hatching.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 476,
+      "context_length": 20143
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourLabeler.calc_label_rot_and_inline.23_ContourLabeler.calc_label_rot_and_inline.24.1",
+      "distance": 0.9194722175598145,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 386,
+      "end_line": 416,
+      "tokens": 385,
+      "context_length": 20528
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.suptitle_FigureBase.suptitle.info.2.1",
+      "distance": 0.9196324348449707,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 380,
+      "end_line": 387,
+      "tokens": 132,
+      "context_length": 20660,
+      "file_pos": 23
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_constrained_layout.py_1_",
+      "distance": 0.9219133853912354,
+      "file_path": "examples/subplots_axes_and_figures/demo_constrained_layout.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 430,
+      "context_length": 21090
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_ax0_130_squiggle_xy.1.1",
+      "distance": 0.9240002632141113,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 262,
+      "end_line": 337,
+      "tokens": 755,
+      "context_length": 21845
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/examples/showcase/anatomy.py_1_32",
+      "distance": 0.9241244792938232,
+      "file_path": "examples/showcase/anatomy.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 510,
+      "context_length": 22355
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/tutorials/introductory/quick_start.py_443_518",
+      "distance": 0.925434947013855,
+      "file_path": "tutorials/introductory/quick_start.py",
+      "start_line": 475,
+      "end_line": 561,
+      "tokens": 1039,
+      "context_length": 23394
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/custom_figure_class.py_x_",
+      "distance": 0.9271915555000305,
+      "file_path": "examples/subplots_axes_and_figures/custom_figure_class.py",
+      "start_line": 35,
+      "end_line": 52,
+      "tokens": 115,
+      "context_length": 23509
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/bar_label_demo.py_1_",
+      "distance": 0.9274630546569824,
+      "file_path": "examples/lines_bars_and_markers/bar_label_demo.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 820,
+      "context_length": 24329
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/demo_tight_layout.py_bottom_",
+      "distance": 0.9279689192771912,
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "start_line": 116,
+      "end_line": 135,
+      "tokens": 123,
+      "context_length": 24452
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/irregulardatagrid.py_46_",
+      "distance": 0.9285265207290649,
+      "file_path": "examples/images_contours_and_fields/irregulardatagrid.py",
+      "start_line": 79,
+      "end_line": 95,
+      "tokens": 144,
+      "context_length": 24596
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/contourf_log.py_1_",
+      "distance": 0.9300473928451538,
+      "file_path": "examples/images_contours_and_fields/contourf_log.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 492,
+      "context_length": 25088
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot.2_subplot.26.1",
+      "distance": 0.9308446645736694,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1258,
+      "end_line": 1322,
+      "tokens": 686,
+      "context_length": 25774
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_264_stackplot.1.1",
+      "distance": 0.9311337471008301,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2869,
+      "end_line": 2888,
+      "tokens": 226,
+      "context_length": 26000
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/examples/shapes_and_collections/fancybox_demo.py_36_",
+      "distance": 0.9322569966316223,
+      "file_path": "examples/shapes_and_collections/fancybox_demo.py",
+      "start_line": 80,
+      "end_line": 127,
+      "tokens": 501,
+      "context_length": 26501
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/broken_axis.py_1_",
+      "distance": 0.9323058128356934,
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 525,
+      "context_length": 27026
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/legend_demo.py_44_71",
+      "distance": 0.9328175187110901,
+      "file_path": "examples/text_labels_and_annotations/legend_demo.py",
+      "start_line": 76,
+      "end_line": 116,
+      "tokens": 567,
+      "context_length": 27593
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/filled_step.py_10_",
+      "distance": 0.9330005645751953,
+      "file_path": "examples/lines_bars_and_markers/filled_step.py",
+      "start_line": 179,
+      "end_line": 237,
+      "tokens": 493,
+      "context_length": 28086
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_276_tricontourf.3.1",
+      "distance": 0.9341528415679932,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2950,
+      "end_line": 2986,
+      "tokens": 401,
+      "context_length": 28487
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplot.py_1_",
+      "distance": 0.9367237091064453,
+      "file_path": "examples/subplots_axes_and_figures/subplot.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 343,
+      "context_length": 28830
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/scatter_hist.py_10_",
+      "distance": 0.9370310306549072,
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "start_line": 57,
+      "end_line": 123,
+      "tokens": 702,
+      "context_length": 29532
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/legend_demo.py_x_76_",
+      "distance": 0.9376874566078186,
+      "file_path": "examples/text_labels_and_annotations/legend_demo.py",
+      "start_line": 164,
+      "end_line": 183,
+      "tokens": 198,
+      "context_length": 29730
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_figure.allnums_figure.10.1",
+      "distance": 0.9381958246231079,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 782,
+      "end_line": 834,
+      "tokens": 572,
+      "context_length": 30302
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._do_layout.18_FigureBase.subplot_mosaic._do_layout.19.1",
+      "distance": 0.9386413097381592,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1900,
+      "end_line": 1935,
+      "tokens": 377,
+      "context_length": 30679,
+      "file_pos": 35
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/tight_layout_guide.py_fig_146",
+      "distance": 0.938966691493988,
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "start_line": 105,
+      "end_line": 221,
+      "tokens": 878,
+      "context_length": 31557
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_1_ClabelText.get_rotation.2.1",
+      "distance": 0.9398288726806641,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 290,
+      "context_length": 31847
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/examples/misc/contour_manual.py_1_",
+      "distance": 0.9425157308578491,
+      "file_path": "examples/misc/contour_manual.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 621,
+      "context_length": 32468
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_106_163.1",
+      "distance": 0.9426172971725464,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 187,
+      "end_line": 260,
+      "tokens": 763,
+      "context_length": 33231
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_1__stale_figure_callback.1.self.figure.stale.1",
+      "distance": 0.943274199962616,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 335,
+      "context_length": 33566,
+      "file_pos": 38
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/matplotlib/examples/mplot3d/contour3d_2.py_1_",
+      "distance": 0.9437512159347534,
+      "file_path": "examples/mplot3d/contour3d_2.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 130,
+      "context_length": 33696
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/tight_layout_guide.py_lines_",
+      "distance": 0.943783164024353,
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "start_line": 222,
+      "end_line": 293,
+      "tokens": 495,
+      "context_length": 34191
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_1__log.1",
+      "distance": 0.943794846534729,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 665,
+      "context_length": 34856
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_norm_105",
+      "distance": 0.9441064596176147,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 113,
+      "end_line": 185,
+      "tokens": 781,
+      "context_length": 35637
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_SubplotBase._label_outer_xaxis_SubplotBase._label_outer_xaxis.2.5.2.3.1",
+      "distance": 0.9456753134727478,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 62,
+      "end_line": 79,
+      "tokens": 205,
+      "context_length": 35842
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/tricontour_smooth_user.py_9_",
+      "distance": 0.9456872940063477,
+      "file_path": "examples/images_contours_and_fields/tricontour_smooth_user.py",
+      "start_line": 27,
+      "end_line": 89,
+      "tokens": 561,
+      "context_length": 36403
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/contour.py_ContourSet.__init__.40_ContourSet.__init__.46.1",
+      "distance": 0.9457195401191711,
+      "file_path": "lib/matplotlib/contour.py",
+      "start_line": 847,
+      "end_line": 903,
+      "tokens": 644,
+      "context_length": 37047
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/pcolormesh_levels.py_69_",
+      "distance": 0.9463455677032471,
+      "file_path": "examples/images_contours_and_fields/pcolormesh_levels.py",
+      "start_line": 84,
+      "end_line": 133,
+      "tokens": 448,
+      "context_length": 37495
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_subplots.py_SubplotBase._label_outer_yaxis_SubplotBase._label_outer_yaxis.2.5.2.3.1",
+      "distance": 0.9473865628242493,
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "start_line": 81,
+      "end_line": 98,
+      "tokens": 212,
+      "context_length": 37707
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/quadmesh_demo.py_1_",
+      "distance": 0.9480698108673096,
+      "file_path": "examples/images_contours_and_fields/quadmesh_demo.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 450,
+      "context_length": 38157
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subfigures_FigureBase.subfigures.5.4.2.1",
+      "distance": 0.9485245943069458,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1425,
+      "end_line": 1477,
+      "tokens": 532,
+      "context_length": 38689,
+      "file_pos": 43
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/legend_demo.py_1_43",
+      "distance": 0.9492975473403931,
+      "file_path": "examples/text_labels_and_annotations/legend_demo.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 738,
+      "context_length": 39427
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/image_demo.py_87_",
+      "distance": 0.9495493173599243,
+      "file_path": "examples/images_contours_and_fields/image_demo.py",
+      "start_line": 123,
+      "end_line": 185,
+      "tokens": 545,
+      "context_length": 39972
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/demo_axes_grid2.py_1_",
+      "distance": 0.9496536254882812,
+      "file_path": "examples/axes_grid1/demo_axes_grid2.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 783,
+      "context_length": 40755
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_gtk3agg.py_FigureCanvasGTK3Agg.blit_",
+      "distance": 0.9510823488235474,
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "start_line": 56,
+      "end_line": 87,
+      "tokens": 300,
+      "context_length": 41055
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/matplotlib/examples/showcase/anatomy.py_33_annotate.c.6.4",
+      "distance": 0.951614499092102,
+      "file_path": "examples/showcase/anatomy.py",
+      "start_line": 58,
+      "end_line": 81,
+      "tokens": 277,
+      "context_length": 41332
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/axes_demo.py_1_",
+      "distance": 0.9520564079284668,
+      "file_path": "examples/subplots_axes_and_figures/axes_demo.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 423,
+      "context_length": 41755
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/matplotlib/examples/specialty_plots/leftventricle_bulleye.py_6_",
+      "distance": 0.952798068523407,
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "start_line": 130,
+      "end_line": 193,
+      "tokens": 708,
+      "context_length": 42463
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/pcolor_demo.py_Z2_",
+      "distance": 0.952831506729126,
+      "file_path": "examples/images_contours_and_fields/pcolor_demo.py",
+      "start_line": 98,
+      "end_line": 125,
+      "tokens": 257,
+      "context_length": 42720
+    }
+  ],
+  "files": [
+    {
+      "file_path": "examples/images_contours_and_fields/contour_label_demo.py",
+      "position": 1,
+      "tokens": 613,
+      "context_length": 613
+    },
+    {
+      "file_path": "lib/matplotlib/contour.py",
+      "position": 2,
+      "tokens": 16681,
+      "context_length": 17294
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/contour_demo.py",
+      "position": 3,
+      "tokens": 1090,
+      "context_length": 18384
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "position": 4,
+      "tokens": 73711,
+      "context_length": 92095
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/contourf_demo.py",
+      "position": 5,
+      "tokens": 1117,
+      "context_length": 93212
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/label_subplots.py",
+      "position": 6,
+      "tokens": 603,
+      "context_length": 93815
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "position": 7,
+      "tokens": 1423,
+      "context_length": 95238
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/figure_title.py",
+      "position": 8,
+      "tokens": 544,
+      "context_length": 95782
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 9,
+      "tokens": 26814,
+      "context_length": 122596
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "position": 10,
+      "tokens": 1967,
+      "context_length": 124563
+    },
+    {
+      "file_path": "examples/pyplots/align_ylabels.py",
+      "position": 11,
+      "tokens": 634,
+      "context_length": 125197
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/contour_image.py",
+      "position": 12,
+      "tokens": 1077,
+      "context_length": 126274
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/tricontour_demo.py",
+      "position": 13,
+      "tokens": 2520,
+      "context_length": 128794
+    },
+    {
+      "file_path": "examples/showcase/anatomy.py",
+      "position": 14,
+      "tokens": 1240,
+      "context_length": 130034
+    },
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 15,
+      "tokens": 26991,
+      "context_length": 157025
+    },
+    {
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "position": 16,
+      "tokens": 3652,
+      "context_length": 160677
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/figlegend_demo.py",
+      "position": 17,
+      "tokens": 254,
+      "context_length": 160931
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "position": 18,
+      "tokens": 592,
+      "context_length": 161523
+    },
+    {
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "position": 19,
+      "tokens": 303,
+      "context_length": 161826
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "position": 20,
+      "tokens": 879,
+      "context_length": 162705
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/align_labels_demo.py",
+      "position": 21,
+      "tokens": 294,
+      "context_length": 162999
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/pcolormesh_grids.py",
+      "position": 22,
+      "tokens": 1305,
+      "context_length": 164304
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/contourf_hatching.py",
+      "position": 23,
+      "tokens": 476,
+      "context_length": 164780
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/demo_constrained_layout.py",
+      "position": 24,
+      "tokens": 430,
+      "context_length": 165210
+    },
+    {
+      "file_path": "tutorials/introductory/quick_start.py",
+      "position": 25,
+      "tokens": 5941,
+      "context_length": 171151
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/custom_figure_class.py",
+      "position": 26,
+      "tokens": 371,
+      "context_length": 171522
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/bar_label_demo.py",
+      "position": 27,
+      "tokens": 820,
+      "context_length": 172342
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/irregulardatagrid.py",
+      "position": 28,
+      "tokens": 908,
+      "context_length": 173250
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/contourf_log.py",
+      "position": 29,
+      "tokens": 492,
+      "context_length": 173742
+    },
+    {
+      "file_path": "examples/shapes_and_collections/fancybox_demo.py",
+      "position": 30,
+      "tokens": 1268,
+      "context_length": 175010
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "position": 31,
+      "tokens": 525,
+      "context_length": 175535
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/legend_demo.py",
+      "position": 32,
+      "tokens": 1907,
+      "context_length": 177442
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/filled_step.py",
+      "position": 33,
+      "tokens": 1645,
+      "context_length": 179087
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subplot.py",
+      "position": 34,
+      "tokens": 343,
+      "context_length": 179430
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "position": 35,
+      "tokens": 1111,
+      "context_length": 180541
+    },
+    {
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "position": 36,
+      "tokens": 2151,
+      "context_length": 182692
+    },
+    {
+      "file_path": "examples/misc/contour_manual.py",
+      "position": 37,
+      "tokens": 621,
+      "context_length": 183313
+    },
+    {
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "position": 38,
+      "tokens": 6020,
+      "context_length": 189333
+    },
+    {
+      "file_path": "examples/mplot3d/contour3d_2.py",
+      "position": 39,
+      "tokens": 130,
+      "context_length": 189463
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_subplots.py",
+      "position": 40,
+      "tokens": 1147,
+      "context_length": 190610
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/tricontour_smooth_user.py",
+      "position": 41,
+      "tokens": 838,
+      "context_length": 191448
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/pcolormesh_levels.py",
+      "position": 42,
+      "tokens": 1222,
+      "context_length": 192670
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/quadmesh_demo.py",
+      "position": 43,
+      "tokens": 450,
+      "context_length": 193120
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/image_demo.py",
+      "position": 44,
+      "tokens": 1584,
+      "context_length": 194704
+    },
+    {
+      "file_path": "examples/axes_grid1/demo_axes_grid2.py",
+      "position": 45,
+      "tokens": 783,
+      "context_length": 195487
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_gtk3agg.py",
+      "position": 46,
+      "tokens": 694,
+      "context_length": 196181
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/axes_demo.py",
+      "position": 47,
+      "tokens": 423,
+      "context_length": 196604
+    },
+    {
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "position": 48,
+      "tokens": 2167,
+      "context_length": 198771
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/pcolor_demo.py",
+      "position": 49,
+      "tokens": 1045,
+      "context_length": 199816
+    }
+  ]
+}

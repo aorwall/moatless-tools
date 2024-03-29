@@ -1,0 +1,725 @@
+{
+  "instance_id": "sympy__sympy-11796",
+  "model_patch": "diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py\nindex e365706749..485dc9fcdf 100644\n--- a/sympy/sets/sets.py\n+++ b/sympy/sets/sets.py\n@@ -712,6 +712,8 @@ class Interval(Set, EvalfMixin):\n \n     def __new__(cls, start, end, left_open=False, right_open=False):\n \n+        print(f\"Received start: {start}, end: {end}\")\n+\n         start = _sympify(start)\n         end = _sympify(end)\n         left_open = _sympify(left_open)\n@@ -730,11 +732,14 @@ def __new__(cls, start, end, left_open=False, right_open=False):\n \n         # evaluate if possible\n         if (end < start) == True:\n+            print(f\"Interval.__new__ called with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n             return S.EmptySet\n         elif (end - start).is_negative:\n+            print(f\"Interval.__new__ called with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n             return S.EmptySet\n \n         if end == start and (left_open or right_open):\n+            print(f\"Interval.__new__ called with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n             return S.EmptySet\n         if end == start and not (left_open or right_open):\n             return FiniteSet(end)\n@@ -745,6 +750,7 @@ def __new__(cls, start, end, left_open=False, right_open=False):\n         if end == S.Infinity:\n             right_open = true\n \n+        print(f\"Interval.__new__ called with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n         return Basic.__new__(cls, start, end, left_open, right_open)\n \n     @property\n@@ -835,6 +841,8 @@ def right_open(self):\n         return self._args[3]\n \n     def _intersect(self, other):\n+        start = None\n+        end = None\n         \"\"\"\n         This function should only be used internally\n \n@@ -885,6 +893,7 @@ def _intersect(self, other):\n             empty = True\n \n         if empty:\n+            print(f\"Interval.__new__ called with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n             return S.EmptySet\n \n         return Interval(start, end, left_open, right_open)\n@@ -930,6 +939,7 @@ def _union(self, other):\n                 right_open = ((self.end != end or self.right_open) and\n                               (other.end != end or other.right_open))\n \n+                print(f\"Creating new Interval with start={start}, end={end}, left_open={left_open}, right_open={right_open}\")\n                 return Interval(start, end, left_open, right_open)\n \n         # If I have open end points and these endpoints are contained in other.\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/sets/sets.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "8e80c0be90728b915942d7953e4b2c5d56deb570",
+  "patch": "diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py\n--- a/sympy/sets/sets.py\n+++ b/sympy/sets/sets.py\n@@ -737,6 +737,8 @@ def __new__(cls, start, end, left_open=False, right_open=False):\n         if end == start and (left_open or right_open):\n             return S.EmptySet\n         if end == start and not (left_open or right_open):\n+            if start == S.Infinity or start == S.NegativeInfinity:\n+                return S.EmptySet\n             return FiniteSet(end)\n \n         # Make sure infinite interval end points are open.\n",
+  "test_patch": "diff --git a/sympy/sets/tests/test_sets.py b/sympy/sets/tests/test_sets.py\n--- a/sympy/sets/tests/test_sets.py\n+++ b/sympy/sets/tests/test_sets.py\n@@ -35,6 +35,8 @@ def test_interval_arguments():\n     assert Interval(-oo, 0) == Interval(-oo, 0, True, False)\n     assert Interval(-oo, 0).left_open is true\n     assert Interval(oo, -oo) == S.EmptySet\n+    assert Interval(oo, oo) == S.EmptySet\n+    assert Interval(-oo, -oo) == S.EmptySet\n \n     assert isinstance(Interval(1, 1), FiniteSet)\n     e = Sum(x, (x, 1, 3))\n",
+  "problem_statement": "Where oo belongs? (Concept)\nHi again, well, i'm little confuse of the conditions to take or not `oo` in some sets:\n\n``` python\n>>> Interval(-oo, oo)\n(-oo, oo)\n```\n\nFirst the means the interval is created excluding `oo` and `-oo`, and interval interpret it in that way, but now:\n\n``` python\n>>> Interval(oo, oo)\n{oo}\n```\n\nHere is a little conflict, in first place Interval show don't take `oo` but now it is there? in some way is fine to have a way to can represent the `oo` from Interval.\n\nNow from this point we have some points:\nHow they will interpret the limit concept? basically two options, limit is:\n\n``` python\n[x, oo]\n```\n\nor\n\n``` python\n[x, oo)\n```\n\n?\nThis point is very important, because define the behavior for sets, and affects directly like this issue: https://github.com/sympy/sympy/issues/11174\n\nso, for now only to match the math in all sets we can say the limit is calculated via\n\n``` python\n[x, oo)\n```\n\nnow, what is the effect of this in Sympy?, first this enable the limit concept in every unbounded set, for now i found this two issues:\nhttps://github.com/sympy/sympy/issues/11688\nhttps://github.com/sympy/sympy/issues/11640\n\nfor example, actually we have this:\n\n``` python\n>>> solveset(y/x, x)\nEmptySet()\n```\n\nthis return should be something like... `nan`? because in the limit we don't know what is the proportion of `y` and `x`, so we can't calc it.\n\nactually this concept is applied in some way like:\n\n``` python\n>>> solveset(y*x, x)\n{0} \n```\n\nNow the next question, `oo` will represent the infinite, as a integer, real or what?\ni know this question don't have sense, but let me try explain it:\n\n``` python\n>>> Interval(-oo, oo) in S.Reals\nFalse\n>>> Interval(-oo, oo) in S.Naturals\n#can't be calculated for now\n```\n\nif the oo represent the infinite without form, it can exist in S.Naturals, and S.Reals, but if you represent the infinite like the interval between it, `Interval(x, oo)` where is the limit of x to infinite while always `x < oo`, in other way `Interval(A, B)` where A go to `oo` and B do to `oo`, but it need always will respect this condition `A < B` so between `A` and `B` can exist any type of numbers, so `oo` can't exist in `S.Naturals` because `Interval(A, B)` can contains a real number for example, but the extension of that concept says `oo` can't exist in any set, because always will exist a bigger set, in sympy you have an approximation of it, is `UniversalSet`, but don't will be true completely, because, why is it the limit set?, `UniversalSet` can represent two things, the limit of the actually human knowledge (or applied to Sympy), or the 'master' set, thinking its like the perfection of the sets knowledge.\nObvs, to `oo` make some sense in the actual system the option is interpret `oo` without limit or form, and take the second interpretation of `UniversalSet` (if you take the first. `oo` can't exist in any place).\nIf you disagree you always can discuss and change the behavior.\n\nObjetives of this issue:\n\nGet a clear definitions in Sympy of:\n- Infinite\n- Limit\n- UniversalSet\n\nThen, clear the behavior of this concepts in Sympy, and to finish, set the behavior in Sympy.\n\nThx. Cya.\n\n",
+  "hints_text": "Interval should represent a real interval. I think we decided in another issue that Interval should always be open for infinite boundaries, because it should always be a subset of S.Reals. So \n\n```\n>>> Interval(oo, oo)\n{oo}\n```\n\nis wrong.  I'm going to modify the issue title to make this clearer. \n\nRegarding your other points, note that `in` means \"is contained in\", not \"is subset of\". So `<set of numbers> in <set of numbers>` will always give False. I'm really not following your other points, but note that both `S.Reals` and `S.Naturals` (the latter is a subset of the former) contain only _finite_ numbers, so `oo` is not contained in either). \n",
+  "created_at": "2016-11-02T07:46:32Z",
+  "version": "1.0",
+  "FAIL_TO_PASS": "[\"test_interval_arguments\"]",
+  "PASS_TO_PASS": "[\"test_EmptySet\", \"test_Eq\", \"test_Finite_as_relational\", \"test_Intersection_as_relational\", \"test_Interval_as_relational\", \"test_Interval_free_symbols\", \"test_Interval_is_left_unbounded\", \"test_Interval_is_right_unbounded\", \"test_ProductSet_of_single_arg_is_arg\", \"test_SymmetricDifference\", \"test_Union_as_relational\", \"test_Union_of_ProductSets_shares\", \"test_boundary\", \"test_boundary_ProductSet\", \"test_boundary_ProductSet_line\", \"test_boundary_Union\", \"test_closure\", \"test_complement\", \"test_difference\", \"test_finite_basic\", \"test_image_EmptySet\", \"test_image_FiniteSet\", \"test_image_Union\", \"test_imageset\", \"test_interior\", \"test_intersect\", \"test_intersection\", \"test_interval_subs\", \"test_interval_symbolic\", \"test_interval_symbolic_end_points\", \"test_interval_to_mpi\", \"test_is_closed\", \"test_is_disjoint\", \"test_is_number\", \"test_is_open\", \"test_is_proper_subset\", \"test_is_proper_superset\", \"test_is_subset\", \"test_is_superset\", \"test_issue_10248\", \"test_issue_10326\", \"test_issue_10337\", \"test_issue_10931\", \"test_issue_2799\", \"test_issue_5724_7680\", \"test_issue_7841\", \"test_issue_8257\", \"test_issue_9447\", \"test_issue_9536\", \"test_issue_9623\", \"test_issue_9637\", \"test_issue_9706\", \"test_issue_9808\", \"test_issue_9956\", \"test_measure\", \"test_powerset\", \"test_product_basic\", \"test_supinf\", \"test_union\", \"test_union_contains\", \"test_union_iter\", \"test_universalset\"]",
+  "environment_setup_commit": "50b81f9f6be151014501ffac44e5dc6b2416938f",
+  "patch_files": [
+    "sympy/sets/sets.py"
+  ],
+  "test_patch_files": [
+    "sympy/sets/tests/test_sets.py"
+  ],
+  "patch_diff_details": {
+    "sympy/sets/sets.py": {
+      "diffs": [
+        {
+          "start_line_old": 740,
+          "end_line_old": 740
+        }
+      ]
+    }
+  },
+  "vectors": 6846,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/series/order.py_1_Order.1",
+      "distance": 0.8564497828483582,
+      "file_path": "sympy/series/order.py",
+      "start_line": 1,
+      "end_line": 122,
+      "tokens": 1162,
+      "context_length": 1162
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds_AccumulationBounds.1",
+      "distance": 0.8589134216308594,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 457,
+      "end_line": 608,
+      "tokens": 1496,
+      "context_length": 2658
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity_Infinity.__rmul__.1",
+      "distance": 0.8869500756263733,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2432,
+      "end_line": 2531,
+      "tokens": 635,
+      "context_length": 3293
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__div___AccumulationBounds.__div__.2.1",
+      "distance": 0.9135148525238037,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 779,
+      "end_line": 833,
+      "tokens": 516,
+      "context_length": 3809
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_Sum.is_convergent.12_Sum.is_convergent.45",
+      "distance": 0.9472537040710449,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 394,
+      "end_line": 484,
+      "tokens": 829,
+      "context_length": 4638
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_Limit_Limit.free_symbols.5.1",
+      "distance": 0.9735344648361206,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 75,
+      "end_line": 119,
+      "tokens": 327,
+      "context_length": 4965
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/series/gruntz.py_limitinf_limitinf.9.4.2",
+      "distance": 0.9789826273918152,
+      "file_path": "sympy/series/gruntz.py",
+      "start_line": 407,
+      "end_line": 439,
+      "tokens": 329,
+      "context_length": 5294
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/examples/beginner/limits_examples.py_1_",
+      "distance": 0.9843510389328003,
+      "file_path": "examples/beginner/limits_examples.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 306,
+      "context_length": 5600
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__pow___AccumulationBounds.__pow__.3.1",
+      "distance": 0.9852132201194763,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 864,
+      "end_line": 933,
+      "tokens": 557,
+      "context_length": 6157
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__sub___AccumulationBounds.__rsub__.1.1",
+      "distance": 0.9857653379440308,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 720,
+      "end_line": 735,
+      "tokens": 174,
+      "context_length": 6331
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__add___AccumulationBounds.__neg__.1.1",
+      "distance": 0.9925194382667542,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 702,
+      "end_line": 718,
+      "tokens": 168,
+      "context_length": 6499
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.is_real_AccumulationBounds.__new__.9.1",
+      "distance": 0.9930957555770874,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 610,
+      "end_line": 631,
+      "tokens": 181,
+      "context_length": 6680
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity._as_mpf_val_Infinity.__rmod__.1",
+      "distance": 0.9999108910560608,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2602,
+      "end_line": 2667,
+      "tokens": 477,
+      "context_length": 7157
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__mul___AccumulationBounds.__rmul__.1",
+      "distance": 1.0084437131881714,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 737,
+      "end_line": 777,
+      "tokens": 353,
+      "context_length": 7510
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__abs___AccumulationBounds.__lt__.6.1",
+      "distance": 1.0108921527862549,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 935,
+      "end_line": 979,
+      "tokens": 338,
+      "context_length": 7848
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__truediv___AccumulationBounds.__rtruediv__.1",
+      "distance": 1.0110878944396973,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 835,
+      "end_line": 862,
+      "tokens": 237,
+      "context_length": 8085
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_Sum_Sum.1",
+      "distance": 1.0129023790359497,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 23,
+      "end_line": 150,
+      "tokens": 1346,
+      "context_length": 9431
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_nan_ComplexInfinity._sage_.2.1",
+      "distance": 1.0146961212158203,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2993,
+      "end_line": 3061,
+      "tokens": 352,
+      "context_length": 9783
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem__.8_Range.__getitem__.8.2.7.1",
+      "distance": 1.0149497985839844,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 816,
+      "end_line": 923,
+      "tokens": 923,
+      "context_length": 10706
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__contains___AccumulationBounds.__contains__.5.1",
+      "distance": 1.0152595043182373,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1096,
+      "end_line": 1127,
+      "tokens": 219,
+      "context_length": 10925
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_Limit.doit_",
+      "distance": 1.017432689666748,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 122,
+      "end_line": 190,
+      "tokens": 569,
+      "context_length": 11494
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_Pow_Pow.1",
+      "distance": 1.021451473236084,
+      "file_path": "sympy/core/power.py",
+      "start_line": 102,
+      "end_line": 182,
+      "tokens": 1032,
+      "context_length": 12526
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.union_",
+      "distance": 1.022101640701294,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1173,
+      "end_line": 1189,
+      "tokens": 143,
+      "context_length": 12669
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/series/gruntz.py_1_2",
+      "distance": 1.0294153690338135,
+      "file_path": "sympy/series/gruntz.py",
+      "start_line": 1,
+      "end_line": 119,
+      "tokens": 1345,
+      "context_length": 14014
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_Sum.is_convergent_Sum.is_convergent.11",
+      "distance": 1.029746413230896,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 307,
+      "end_line": 393,
+      "tokens": 759,
+      "context_length": 14773
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits_ExprWithLimits.__new__.function.17.1",
+      "distance": 1.030382752418518,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 74,
+      "end_line": 118,
+      "tokens": 384,
+      "context_length": 15157
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits._eval_subs_ExprWithLimits._eval_subs.18.1",
+      "distance": 1.0345268249511719,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 266,
+      "end_line": 341,
+      "tokens": 729,
+      "context_length": 15886
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity._as_mpf_val_NegativeInfinity.__rmod__.1",
+      "distance": 1.0358108282089233,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2813,
+      "end_line": 2878,
+      "tokens": 481,
+      "context_length": 16367
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__div___interval.__div__.2.3.3.1.1",
+      "distance": 1.0395762920379639,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 315,
+      "end_line": 354,
+      "tokens": 341,
+      "context_length": 16708
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._intersect.6_Range._intersect.6.52.1",
+      "distance": 1.0402140617370605,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 655,
+      "end_line": 758,
+      "tokens": 881,
+      "context_length": 17589
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_1_19",
+      "distance": 1.0404787063598633,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 198,
+      "context_length": 17787
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__lt___interval.__gt__.1.3.1.1",
+      "distance": 1.0425031185150146,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 100,
+      "end_line": 135,
+      "tokens": 249,
+      "context_length": 18036
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__ge___AccumulationBounds.__ge__.6.1",
+      "distance": 1.0434833765029907,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1058,
+      "end_line": 1094,
+      "tokens": 289,
+      "context_length": 18325
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/concrete/summations.py_Sum.is_convergent.46_Sum.is_convergent.49",
+      "distance": 1.0442924499511719,
+      "file_path": "sympy/concrete/summations.py",
+      "start_line": 485,
+      "end_line": 518,
+      "tokens": 306,
+      "context_length": 18631
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__mul___interval.__rdiv__.1.4.1.1",
+      "distance": 1.0451626777648926,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 278,
+      "end_line": 313,
+      "tokens": 292,
+      "context_length": 18923
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/polys/rootisolation.py_OO__rules_simple.1",
+      "distance": 1.0462267398834229,
+      "file_path": "sympy/polys/rootisolation.py",
+      "start_line": 728,
+      "end_line": 782,
+      "tokens": 647,
+      "context_length": 19570
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._contains_Range.__bool__.1",
+      "distance": 1.0464304685592651,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 760,
+      "end_line": 805,
+      "tokens": 318,
+      "context_length": 19888
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__le___AccumulationBounds.__le__.6.1",
+      "distance": 1.0471446514129639,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 981,
+      "end_line": 1018,
+      "tokens": 299,
+      "context_length": 20187
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/series/fourier.py__process_limits__process_limits.9.1",
+      "distance": 1.0473428964614868,
+      "file_path": "sympy/series/fourier.py",
+      "start_line": 39,
+      "end_line": 90,
+      "tokens": 466,
+      "context_length": 20653
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__le___interval.__ge__.1.2.1.1",
+      "distance": 1.047684907913208,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 186,
+      "end_line": 219,
+      "tokens": 242,
+      "context_length": 20895
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py_nonlinsolve.1_nonlinsolve.1",
+      "distance": 1.0481619834899902,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 1920,
+      "end_line": 2074,
+      "tokens": 1939,
+      "context_length": 22834
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._intersect_Range._intersect.5.10.1",
+      "distance": 1.0494544506072998,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 627,
+      "end_line": 653,
+      "tokens": 215,
+      "context_length": 23049
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_AccumulationBounds.__gt___AccumulationBounds.__gt__.6.1",
+      "distance": 1.0496445894241333,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1020,
+      "end_line": 1056,
+      "tokens": 288,
+      "context_length": 23337
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__radd___interval.__neg__.1.2.1.1",
+      "distance": 1.0516784191131592,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 242,
+      "end_line": 276,
+      "tokens": 272,
+      "context_length": 23609
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/calculus/singularities.py_is_strictly_increasing_is_strictly_increasing.7.1",
+      "distance": 1.0523815155029297,
+      "file_path": "sympy/calculus/singularities.py",
+      "start_line": 103,
+      "end_line": 139,
+      "tokens": 360,
+      "context_length": 23969
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/concrete/products.py_Product.1_Product.1",
+      "distance": 1.0532267093658447,
+      "file_path": "sympy/concrete/products.py",
+      "start_line": 15,
+      "end_line": 187,
+      "tokens": 1768,
+      "context_length": 25737
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.1_solve.1",
+      "distance": 1.0564308166503906,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 358,
+      "end_line": 800,
+      "tokens": 4409,
+      "context_length": 30146
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Integers._eval_imageset_Reals.__hash__.1.1",
+      "distance": 1.0591500997543335,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 171,
+      "end_line": 210,
+      "tokens": 321,
+      "context_length": 30467
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Naturals_Naturals._boundary.1.1",
+      "distance": 1.0600155591964722,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 18,
+      "end_line": 72,
+      "tokens": 346,
+      "context_length": 30813
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/calculus/singularities.py_7_is_increasing.7.1",
+      "distance": 1.0649926662445068,
+      "file_path": "sympy/calculus/singularities.py",
+      "start_line": 59,
+      "end_line": 100,
+      "tokens": 328,
+      "context_length": 31141
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/integrals/integrals.py_Integral.transform._calc_limit_Integral.transform.22.1",
+      "distance": 1.0671592950820923,
+      "file_path": "sympy/integrals/integrals.py",
+      "start_line": 321,
+      "end_line": 352,
+      "tokens": 296,
+      "context_length": 31437
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_1_limit.2.1",
+      "distance": 1.0714950561523438,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 389,
+      "context_length": 31826
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__ne___interval.__ne__.2.5.1.1",
+      "distance": 1.074906587600708,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 162,
+      "end_line": 184,
+      "tokens": 179,
+      "context_length": 32005
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__eq___interval.__eq__.2.3.1.1",
+      "distance": 1.0749386548995972,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 137,
+      "end_line": 160,
+      "tokens": 182,
+      "context_length": 32187
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits.as_dummy_ExprWithLimits._eval_interval.3.1",
+      "distance": 1.07600736618042,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 212,
+      "end_line": 264,
+      "tokens": 470,
+      "context_length": 32657
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_ExprWithLimits.free_symbols_ExprWithLimits.is_number.2.1",
+      "distance": 1.0772415399551392,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 176,
+      "end_line": 210,
+      "tokens": 281,
+      "context_length": 32938
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.5_Expr.__floordiv__.2.1",
+      "distance": 1.078916072845459,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 93,
+      "end_line": 185,
+      "tokens": 762,
+      "context_length": 33700
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/series/order.py",
+      "position": 1,
+      "tokens": 4079,
+      "context_length": 4079
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 2,
+      "tokens": 9210,
+      "context_length": 13289
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 3,
+      "tokens": 26879,
+      "context_length": 40168
+    },
+    {
+      "file_path": "sympy/concrete/summations.py",
+      "position": 4,
+      "tokens": 9765,
+      "context_length": 49933
+    },
+    {
+      "file_path": "sympy/series/limits.py",
+      "position": 5,
+      "tokens": 1466,
+      "context_length": 51399
+    },
+    {
+      "file_path": "sympy/series/gruntz.py",
+      "position": 6,
+      "tokens": 6206,
+      "context_length": 57605
+    },
+    {
+      "file_path": "examples/beginner/limits_examples.py",
+      "position": 7,
+      "tokens": 306,
+      "context_length": 57911
+    },
+    {
+      "file_path": "sympy/sets/fancysets.py",
+      "position": 8,
+      "tokens": 11281,
+      "context_length": 69192
+    },
+    {
+      "file_path": "sympy/core/power.py",
+      "position": 9,
+      "tokens": 13191,
+      "context_length": 82383
+    },
+    {
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "position": 10,
+      "tokens": 3647,
+      "context_length": 86030
+    },
+    {
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "position": 11,
+      "tokens": 3421,
+      "context_length": 89451
+    },
+    {
+      "file_path": "sympy/polys/rootisolation.py",
+      "position": 12,
+      "tokens": 19065,
+      "context_length": 108516
+    },
+    {
+      "file_path": "sympy/series/fourier.py",
+      "position": 13,
+      "tokens": 2927,
+      "context_length": 111443
+    },
+    {
+      "file_path": "sympy/solvers/solveset.py",
+      "position": 14,
+      "tokens": 19161,
+      "context_length": 130604
+    },
+    {
+      "file_path": "sympy/calculus/singularities.py",
+      "position": 15,
+      "tokens": 2005,
+      "context_length": 132609
+    },
+    {
+      "file_path": "sympy/concrete/products.py",
+      "position": 16,
+      "tokens": 4375,
+      "context_length": 136984
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 17,
+      "tokens": 29583,
+      "context_length": 166567
+    },
+    {
+      "file_path": "sympy/integrals/integrals.py",
+      "position": 18,
+      "tokens": 11809,
+      "context_length": 178376
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 19,
+      "tokens": 27439,
+      "context_length": 205815
+    }
+  ]
+}

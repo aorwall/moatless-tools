@@ -1,0 +1,1416 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-12583",
+  "model_patch": "diff --git a/sklearn/impute.py b/sklearn/impute.py\nindex 39550e242..46efb6e8c 100644\n--- a/sklearn/impute.py\n+++ b/sklearn/impute.py\n@@ -175,12 +175,13 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n \n     \"\"\"\n     def __init__(self, missing_values=np.nan, strategy=\"mean\",\n-                 fill_value=None, verbose=0, copy=True):\n+                 fill_value=None, verbose=0, copy=True, add_indicator=False):\n         self.missing_values = missing_values\n         self.strategy = strategy\n         self.fill_value = fill_value\n         self.verbose = verbose\n         self.copy = copy\n+        self.add_indicator = add_indicator\n \n     def _validate_input(self, X):\n         allowed_strategies = [\"mean\", \"median\", \"most_frequent\", \"constant\"]\n@@ -272,6 +273,10 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n                                                self.missing_values,\n                                                fill_value)\n \n+        if self.add_indicator:\n+            self.indicator_ = MissingIndicator(missing_values=self.missing_values)\n+            self.indicator_.fit(X)\n+\n         return self\n \n     def _sparse_fit(self, X, strategy, missing_values, fill_value):\n@@ -420,6 +425,13 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n \n             X[coordinates] = values\n \n+        if self.add_indicator:\n+            if sparse.issparse(X):\n+                hstack = sparse.hstack\n+            else:\n+                hstack = np.hstack\n+            X = hstack((X, self.indicator_.transform(X)))\n+\n         return X\n \n     def _more_tags(self):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/impute.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "e8c6cb151cff869cf1b61bddd3c72841318501ab",
+  "patch": "diff --git a/sklearn/impute.py b/sklearn/impute.py\n--- a/sklearn/impute.py\n+++ b/sklearn/impute.py\n@@ -141,13 +141,26 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n         a new copy will always be made, even if `copy=False`:\n \n         - If X is not an array of floating values;\n-        - If X is encoded as a CSR matrix.\n+        - If X is encoded as a CSR matrix;\n+        - If add_indicator=True.\n+\n+    add_indicator : boolean, optional (default=False)\n+        If True, a `MissingIndicator` transform will stack onto output\n+        of the imputer's transform. This allows a predictive estimator\n+        to account for missingness despite imputation. If a feature has no\n+        missing values at fit/train time, the feature won't appear on\n+        the missing indicator even if there are missing values at\n+        transform/test time.\n \n     Attributes\n     ----------\n     statistics_ : array of shape (n_features,)\n         The imputation fill value for each feature.\n \n+    indicator_ : :class:`sklearn.impute.MissingIndicator`\n+        Indicator used to add binary indicators for missing values.\n+        ``None`` if add_indicator is False.\n+\n     See also\n     --------\n     IterativeImputer : Multivariate imputation of missing values.\n@@ -159,8 +172,8 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n     >>> imp_mean = SimpleImputer(missing_values=np.nan, strategy='mean')\n     >>> imp_mean.fit([[7, 2, 3], [4, np.nan, 6], [10, 5, 9]])\n     ... # doctest: +NORMALIZE_WHITESPACE\n-    SimpleImputer(copy=True, fill_value=None, missing_values=nan,\n-           strategy='mean', verbose=0)\n+    SimpleImputer(add_indicator=False, copy=True, fill_value=None,\n+            missing_values=nan, strategy='mean', verbose=0)\n     >>> X = [[np.nan, 2, 3], [4, np.nan, 6], [10, np.nan, 9]]\n     >>> print(imp_mean.transform(X))\n     ... # doctest: +NORMALIZE_WHITESPACE\n@@ -175,12 +188,13 @@ class SimpleImputer(BaseEstimator, TransformerMixin):\n \n     \"\"\"\n     def __init__(self, missing_values=np.nan, strategy=\"mean\",\n-                 fill_value=None, verbose=0, copy=True):\n+                 fill_value=None, verbose=0, copy=True, add_indicator=False):\n         self.missing_values = missing_values\n         self.strategy = strategy\n         self.fill_value = fill_value\n         self.verbose = verbose\n         self.copy = copy\n+        self.add_indicator = add_indicator\n \n     def _validate_input(self, X):\n         allowed_strategies = [\"mean\", \"median\", \"most_frequent\", \"constant\"]\n@@ -272,6 +286,13 @@ def fit(self, X, y=None):\n                                                self.missing_values,\n                                                fill_value)\n \n+        if self.add_indicator:\n+            self.indicator_ = MissingIndicator(\n+                missing_values=self.missing_values)\n+            self.indicator_.fit(X)\n+        else:\n+            self.indicator_ = None\n+\n         return self\n \n     def _sparse_fit(self, X, strategy, missing_values, fill_value):\n@@ -285,7 +306,6 @@ def _sparse_fit(self, X, strategy, missing_values, fill_value):\n             # for constant strategy, self.statistcs_ is used to store\n             # fill_value in each column\n             statistics.fill(fill_value)\n-\n         else:\n             for i in range(X.shape[1]):\n                 column = X.data[X.indptr[i]:X.indptr[i + 1]]\n@@ -382,6 +402,9 @@ def transform(self, X):\n             raise ValueError(\"X has %d features per sample, expected %d\"\n                              % (X.shape[1], self.statistics_.shape[0]))\n \n+        if self.add_indicator:\n+            X_trans_indicator = self.indicator_.transform(X)\n+\n         # Delete the invalid columns if strategy is not constant\n         if self.strategy == \"constant\":\n             valid_statistics = statistics\n@@ -420,6 +443,10 @@ def transform(self, X):\n \n             X[coordinates] = values\n \n+        if self.add_indicator:\n+            hstack = sparse.hstack if sparse.issparse(X) else np.hstack\n+            X = hstack((X, X_trans_indicator))\n+\n         return X\n \n     def _more_tags(self):\n",
+  "test_patch": "diff --git a/sklearn/tests/test_impute.py b/sklearn/tests/test_impute.py\n--- a/sklearn/tests/test_impute.py\n+++ b/sklearn/tests/test_impute.py\n@@ -952,15 +952,15 @@ def test_missing_indicator_error(X_fit, X_trans, params, msg_err):\n      ])\n @pytest.mark.parametrize(\n     \"param_features, n_features, features_indices\",\n-    [('missing-only', 2, np.array([0, 1])),\n+    [('missing-only', 3, np.array([0, 1, 2])),\n      ('all', 3, np.array([0, 1, 2]))])\n def test_missing_indicator_new(missing_values, arr_type, dtype, param_features,\n                                n_features, features_indices):\n     X_fit = np.array([[missing_values, missing_values, 1],\n-                      [4, missing_values, 2]])\n+                      [4, 2, missing_values]])\n     X_trans = np.array([[missing_values, missing_values, 1],\n                         [4, 12, 10]])\n-    X_fit_expected = np.array([[1, 1, 0], [0, 1, 0]])\n+    X_fit_expected = np.array([[1, 1, 0], [0, 0, 1]])\n     X_trans_expected = np.array([[1, 1, 0], [0, 0, 0]])\n \n     # convert the input to the right array format and right dtype\n@@ -1144,3 +1144,54 @@ def test_missing_indicator_sparse_no_explicit_zeros():\n     Xt = mi.fit_transform(X)\n \n     assert Xt.getnnz() == Xt.sum()\n+\n+\n+@pytest.mark.parametrize(\"marker\", [np.nan, -1, 0])\n+def test_imputation_add_indicator(marker):\n+    X = np.array([\n+        [marker, 1,      5,       marker, 1],\n+        [2,      marker, 1,       marker, 2],\n+        [6,      3,      marker,  marker, 3],\n+        [1,      2,      9,       marker, 4]\n+    ])\n+    X_true = np.array([\n+        [3., 1., 5., 1., 1., 0., 0., 1.],\n+        [2., 2., 1., 2., 0., 1., 0., 1.],\n+        [6., 3., 5., 3., 0., 0., 1., 1.],\n+        [1., 2., 9., 4., 0., 0., 0., 1.]\n+    ])\n+\n+    imputer = SimpleImputer(missing_values=marker, add_indicator=True)\n+    X_trans = imputer.fit_transform(X)\n+\n+    assert_allclose(X_trans, X_true)\n+    assert_array_equal(imputer.indicator_.features_, np.array([0, 1, 2, 3]))\n+\n+\n+@pytest.mark.parametrize(\n+    \"arr_type\",\n+    [\n+        sparse.csc_matrix, sparse.csr_matrix, sparse.coo_matrix,\n+        sparse.lil_matrix, sparse.bsr_matrix\n+    ]\n+)\n+def test_imputation_add_indicator_sparse_matrix(arr_type):\n+    X_sparse = arr_type([\n+        [np.nan, 1, 5],\n+        [2, np.nan, 1],\n+        [6, 3, np.nan],\n+        [1, 2, 9]\n+    ])\n+    X_true = np.array([\n+        [3., 1., 5., 1., 0., 0.],\n+        [2., 2., 1., 0., 1., 0.],\n+        [6., 3., 5., 0., 0., 1.],\n+        [1., 2., 9., 0., 0., 0.],\n+    ])\n+\n+    imputer = SimpleImputer(missing_values=np.nan, add_indicator=True)\n+    X_trans = imputer.fit_transform(X_sparse)\n+\n+    assert sparse.issparse(X_trans)\n+    assert X_trans.shape == X_true.shape\n+    assert_allclose(X_trans.toarray(), X_true)\n",
+  "problem_statement": "add_indicator switch in imputers\nFor whatever imputers we have, but especially [SimpleImputer](http://scikit-learn.org/dev/modules/generated/sklearn.impute.SimpleImputer.html), we should have an `add_indicator` parameter, which simply stacks a [MissingIndicator](http://scikit-learn.org/dev/modules/generated/sklearn.impute.MissingIndicator.html) transform onto the output of the imputer's `transform`.\n",
+  "hints_text": "This allows downstream models to adjust for the fact that a value was imputed, rather than observed.\nCan I  take this up if no  one else is working on it yet @jnothman ?\nGo for it\n@prathusha94 are you still working on this?",
+  "created_at": "2018-11-14T11:41:05Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/tests/test_impute.py::test_imputation_add_indicator[-1]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator[0]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator[nan]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator_sparse_matrix[bsr_matrix]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator_sparse_matrix[coo_matrix]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator_sparse_matrix[csc_matrix]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator_sparse_matrix[csr_matrix]\", \"sklearn/tests/test_impute.py::test_imputation_add_indicator_sparse_matrix[lil_matrix]\"]",
+  "PASS_TO_PASS": "[\"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[dtype1-constant]\", \"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[dtype1-most_frequent]\", \"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[dtype2-constant]\", \"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[dtype2-most_frequent]\", \"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[str-constant]\", \"sklearn/tests/test_impute.py::test_imputation_const_mostf_error_invalid_types[str-most_frequent]\", \"sklearn/tests/test_impute.py::test_imputation_constant_error_invalid_type[1-0]\", \"sklearn/tests/test_impute.py::test_imputation_constant_error_invalid_type[1.0-nan]\", \"sklearn/tests/test_impute.py::test_imputation_constant_float[asarray]\", \"sklearn/tests/test_impute.py::test_imputation_constant_float[csr_matrix]\", \"sklearn/tests/test_impute.py::test_imputation_constant_integer\", \"sklearn/tests/test_impute.py::test_imputation_constant_object[0]\", \"sklearn/tests/test_impute.py::test_imputation_constant_object[NAN]\", \"sklearn/tests/test_impute.py::test_imputation_constant_object[None]\", \"sklearn/tests/test_impute.py::test_imputation_constant_object[]\", \"sklearn/tests/test_impute.py::test_imputation_constant_object[nan]\", \"sklearn/tests/test_impute.py::test_imputation_constant_pandas[category]\", \"sklearn/tests/test_impute.py::test_imputation_constant_pandas[object]\", \"sklearn/tests/test_impute.py::test_imputation_copy\", \"sklearn/tests/test_impute.py::test_imputation_deletion_warning[mean]\", \"sklearn/tests/test_impute.py::test_imputation_deletion_warning[median]\", \"sklearn/tests/test_impute.py::test_imputation_deletion_warning[most_frequent]\", \"sklearn/tests/test_impute.py::test_imputation_error_invalid_strategy[101]\", \"sklearn/tests/test_impute.py::test_imputation_error_invalid_strategy[None]\", \"sklearn/tests/test_impute.py::test_imputation_error_invalid_strategy[const]\", \"sklearn/tests/test_impute.py::test_imputation_error_sparse_0[constant]\", \"sklearn/tests/test_impute.py::test_imputation_error_sparse_0[mean]\", \"sklearn/tests/test_impute.py::test_imputation_error_sparse_0[median]\", \"sklearn/tests/test_impute.py::test_imputation_error_sparse_0[most_frequent]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[None-mean]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[None-median]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[object-mean]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[object-median]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[str-mean]\", \"sklearn/tests/test_impute.py::test_imputation_mean_median_error_invalid_type[str-median]\", \"sklearn/tests/test_impute.py::test_imputation_median_special_cases\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_objects[0]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_objects[NAN]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_objects[None]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_objects[]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_objects[nan]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_pandas[category]\", \"sklearn/tests/test_impute.py::test_imputation_most_frequent_pandas[object]\", \"sklearn/tests/test_impute.py::test_imputation_pipeline_grid_search\", \"sklearn/tests/test_impute.py::test_imputation_shape\", \"sklearn/tests/test_impute.py::test_inconsistent_dtype_X_missing_values[-1--1-types\", \"sklearn/tests/test_impute.py::test_inconsistent_dtype_X_missing_values[NaN-nan-Input\", \"sklearn/tests/test_impute.py::test_iterative_imputer_additive_matrix\", \"sklearn/tests/test_impute.py::test_iterative_imputer_all_missing\", \"sklearn/tests/test_impute.py::test_iterative_imputer_clip\", \"sklearn/tests/test_impute.py::test_iterative_imputer_clip_truncnorm\", \"sklearn/tests/test_impute.py::test_iterative_imputer_early_stopping\", \"sklearn/tests/test_impute.py::test_iterative_imputer_error_param[-1-0.001-ValueError-should\", \"sklearn/tests/test_impute.py::test_iterative_imputer_error_param[1--0.001-ValueError-should\", \"sklearn/tests/test_impute.py::test_iterative_imputer_estimators[None]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_estimators[estimator1]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_estimators[estimator2]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_estimators[estimator3]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_estimators[estimator4]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_imputation_order[arabic]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_imputation_order[ascending]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_imputation_order[descending]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_imputation_order[random]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_imputation_order[roman]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_missing_at_transform[mean]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_missing_at_transform[median]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_missing_at_transform[most_frequent]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_no_missing\", \"sklearn/tests/test_impute.py::test_iterative_imputer_rank_one\", \"sklearn/tests/test_impute.py::test_iterative_imputer_transform_recovery[3]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_transform_recovery[5]\", \"sklearn/tests/test_impute.py::test_iterative_imputer_transform_stochasticity\", \"sklearn/tests/test_impute.py::test_iterative_imputer_truncated_normal_posterior\", \"sklearn/tests/test_impute.py::test_iterative_imputer_verbose\", \"sklearn/tests/test_impute.py::test_iterative_imputer_zero_iters\", \"sklearn/tests/test_impute.py::test_missing_indicator_error[X_fit0-X_trans0-params0-have\", \"sklearn/tests/test_impute.py::test_missing_indicator_error[X_fit1-X_trans1-params1-'features'\", \"sklearn/tests/test_impute.py::test_missing_indicator_error[X_fit2-X_trans2-params2-'sparse'\", \"sklearn/tests/test_impute.py::test_missing_indicator_error[X_fit3-X_trans3-params3-MissingIndicator\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-bsr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-coo_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-csc_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-csr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1--1-int32-lil_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-0-int32-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-bsr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-coo_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-csc_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-csr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[all-3-features_indices1-nan-float64-lil_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-bsr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-coo_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-csc_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-csr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0--1-int32-lil_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-0-int32-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-array]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-bsr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-coo_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-csc_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-csr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_new[missing-only-3-features_indices0-nan-float64-lil_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_no_missing\", \"sklearn/tests/test_impute.py::test_missing_indicator_raise_on_sparse_with_missing_0[bsr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_raise_on_sparse_with_missing_0[coo_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_raise_on_sparse_with_missing_0[csc_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_raise_on_sparse_with_missing_0[csr_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_raise_on_sparse_with_missing_0[lil_matrix]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_no_explicit_zeros\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[0-array-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[0-array-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[0-array-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-array-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-array-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-array-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-coo_matrix-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-coo_matrix-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-coo_matrix-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csc_matrix-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csc_matrix-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csc_matrix-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csr_matrix-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csr_matrix-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-csr_matrix-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-lil_matrix-False]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-lil_matrix-True]\", \"sklearn/tests/test_impute.py::test_missing_indicator_sparse_param[nan-lil_matrix-auto]\", \"sklearn/tests/test_impute.py::test_missing_indicator_string\", \"sklearn/tests/test_impute.py::test_missing_indicator_with_imputer[X0-a-X_trans_exp0]\", \"sklearn/tests/test_impute.py::test_missing_indicator_with_imputer[X1-nan-X_trans_exp1]\", \"sklearn/tests/test_impute.py::test_missing_indicator_with_imputer[X2-nan-X_trans_exp2]\", \"sklearn/tests/test_impute.py::test_missing_indicator_with_imputer[X3-None-X_trans_exp3]\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/impute.py"
+  ],
+  "test_patch_files": [
+    "sklearn/tests/test_impute.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/impute.py": {
+      "diffs": [
+        {
+          "start_line_old": 144,
+          "end_line_old": 144,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._validate_input_SimpleImputer._validate_input.8.1",
+          "closest_snippet_line_distance": 41,
+          "pos": 7,
+          "context_length": 2842
+        },
+        {
+          "start_line_old": 162,
+          "end_line_old": 163,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._validate_input_SimpleImputer._validate_input.8.1",
+          "closest_snippet_line_distance": 23,
+          "pos": 7,
+          "context_length": 2842
+        },
+        {
+          "start_line_old": 178,
+          "end_line_old": 178,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._validate_input_SimpleImputer._validate_input.8.1",
+          "closest_snippet_line_distance": 7,
+          "pos": 7,
+          "context_length": 2842
+        },
+        {
+          "start_line_old": 275,
+          "end_line_old": 275,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.fit_transform.24_IterativeImputer.fit_transform.26.1",
+          "closest_snippet_line_distance": 661,
+          "pos": 16,
+          "context_length": 7614
+        },
+        {
+          "start_line_old": 288,
+          "end_line_old": 288,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer.transform_SimpleImputer._more_tags.1.1",
+          "closest_snippet_line_distance": 79,
+          "pos": 23,
+          "context_length": 10418
+        },
+        {
+          "start_line_old": 385,
+          "end_line_old": 385,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._get_ordered_idx_IterativeImputer._get_ordered_idx.5.1",
+          "closest_snippet_line_distance": 357,
+          "pos": 21,
+          "context_length": 9436
+        },
+        {
+          "start_line_old": 423,
+          "end_line_old": 423,
+          "file_pos": 1,
+          "file_context_length": 10656,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._get_ordered_idx_IterativeImputer._get_ordered_idx.5.1",
+          "closest_snippet_line_distance": 319,
+          "pos": 21,
+          "context_length": 9436
+        }
+      ]
+    }
+  },
+  "vectors": 3231,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator_MissingIndicator.__init__.self.error_on_new.1",
+      "distance": 0.7685354351997375,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1044,
+      "end_line": 1115,
+      "tokens": 650,
+      "context_length": 650,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator._validate_input_MissingIndicator._validate_input.6.1",
+      "distance": 0.8524894714355469,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1172,
+      "end_line": 1195,
+      "tokens": 254,
+      "context_length": 904,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator.transform_MissingIndicator.transform.7.1",
+      "distance": 0.854020357131958,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1227,
+      "end_line": 1261,
+      "tokens": 272,
+      "context_length": 1176,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator.fit_transform_",
+      "distance": 0.9162722826004028,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1263,
+      "end_line": 1283,
+      "tokens": 145,
+      "context_length": 1321,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator._get_missing_features_info_MissingIndicator._get_missing_features_info.4.1",
+      "distance": 0.9866781234741211,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1117,
+      "end_line": 1170,
+      "tokens": 429,
+      "context_length": 1750,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._validate_input_SimpleImputer._validate_input.8.1",
+      "distance": 1.0451339483261108,
+      "file_path": "sklearn/impute.py",
+      "start_line": 185,
+      "end_line": 222,
+      "tokens": 343,
+      "context_length": 2093,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer_SimpleImputer.__init__.self.copy.1",
+      "distance": 1.0762871503829956,
+      "file_path": "sklearn/impute.py",
+      "start_line": 103,
+      "end_line": 183,
+      "tokens": 749,
+      "context_length": 2842,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._impute_one_feature.11_IterativeImputer._impute_one_feature.14.1",
+      "distance": 1.0789694786071777,
+      "file_path": "sklearn/impute.py",
+      "start_line": 661,
+      "end_line": 700,
+      "tokens": 499,
+      "context_length": 3341,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer_IterativeImputer.1",
+      "distance": 1.0830271244049072,
+      "file_path": "sklearn/impute.py",
+      "start_line": 429,
+      "end_line": 562,
+      "tokens": 1326,
+      "context_length": 4667,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_1__check_inputs_dtype.1.1",
+      "distance": 1.084230661392212,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 298,
+      "context_length": 4965,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MissingIndicator.fit_MissingIndicator.fit.7.1",
+      "distance": 1.105268120765686,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1197,
+      "end_line": 1225,
+      "tokens": 228,
+      "context_length": 5193,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 1.1076512336730957,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 741,
+      "context_length": 5934
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_34_",
+      "distance": 1.1149330139160156,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 85,
+      "end_line": 131,
+      "tokens": 384,
+      "context_length": 6318
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.fit_transform.24_IterativeImputer.fit_transform.26.1",
+      "distance": 1.1185688972473145,
+      "file_path": "sklearn/impute.py",
+      "start_line": 936,
+      "end_line": 971,
+      "tokens": 344,
+      "context_length": 6662,
+      "file_pos": 2
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer_Imputer.__init__.self.copy.1",
+      "distance": 1.129063606262207,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 60,
+      "end_line": 123,
+      "tokens": 564,
+      "context_length": 7226
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer.fit_SimpleImputer.fit.9.1",
+      "distance": 1.1421728134155273,
+      "file_path": "sklearn/impute.py",
+      "start_line": 224,
+      "end_line": 275,
+      "tokens": 388,
+      "context_length": 7614,
+      "file_pos": 3
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_missing_values.py_1_get_scores_for_imputer.3.1",
+      "distance": 1.1564514636993408,
+      "file_path": "examples/impute/plot_missing_values.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 371,
+      "context_length": 7985
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.__init___IterativeImputer.__init__.self.random_state.1",
+      "distance": 1.1610764265060425,
+      "file_path": "sklearn/impute.py",
+      "start_line": 564,
+      "end_line": 589,
+      "tokens": 189,
+      "context_length": 8174,
+      "file_pos": 4
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._get_ordered_idx_IterativeImputer._get_ordered_idx.5.1",
+      "distance": 1.164392113685608,
+      "file_path": "sklearn/impute.py",
+      "start_line": 742,
+      "end_line": 784,
+      "tokens": 428,
+      "context_length": 8602,
+      "file_pos": 4
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_MultiLabelBinarizer.inverse_transform_",
+      "distance": 1.1664679050445557,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 957,
+      "end_line": 993,
+      "tokens": 366,
+      "context_length": 8968
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer.transform_SimpleImputer._more_tags.1.1",
+      "distance": 1.1693711280822754,
+      "file_path": "sklearn/impute.py",
+      "start_line": 367,
+      "end_line": 426,
+      "tokens": 468,
+      "context_length": 9436,
+      "file_pos": 5
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer.transform_",
+      "distance": 1.170112133026123,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 294,
+      "end_line": 373,
+      "tokens": 666,
+      "context_length": 10102
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._sparse_fit_SimpleImputer._sparse_fit.6.1",
+      "distance": 1.1719499826431274,
+      "file_path": "sklearn/impute.py",
+      "start_line": 277,
+      "end_line": 313,
+      "tokens": 316,
+      "context_length": 10418,
+      "file_pos": 5
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._sparse_fit_Imputer._sparse_fit.8.7.columns_all.7.5.3.1",
+      "distance": 1.1747740507125854,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 169,
+      "end_line": 247,
+      "tokens": 675,
+      "context_length": 11093
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer.fit_Imputer.fit.10.1",
+      "distance": 1.1795222759246826,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 125,
+      "end_line": 167,
+      "tokens": 382,
+      "context_length": 11475
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._initial_imputation_IterativeImputer._initial_imputation.10.1",
+      "distance": 1.1919636726379395,
+      "file_path": "sklearn/impute.py",
+      "start_line": 821,
+      "end_line": 866,
+      "tokens": 398,
+      "context_length": 11873,
+      "file_pos": 5
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.transform_IterativeImputer.transform.11.1",
+      "distance": 1.2000060081481934,
+      "file_path": "sklearn/impute.py",
+      "start_line": 973,
+      "end_line": 1019,
+      "tokens": 393,
+      "context_length": 12266,
+      "file_pos": 5
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._dense_fit_Imputer._dense_fit.6.9.6.5.1",
+      "distance": 1.2121670246124268,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 249,
+      "end_line": 292,
+      "tokens": 434,
+      "context_length": 12700
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._dense_fit_SimpleImputer._dense_fit.5.11.3.1",
+      "distance": 1.2201616764068604,
+      "file_path": "sklearn/impute.py",
+      "start_line": 315,
+      "end_line": 365,
+      "tokens": 460,
+      "context_length": 13160,
+      "file_pos": 5
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.fit_IterativeImputer._more_tags.1.1",
+      "distance": 1.2339974641799927,
+      "file_path": "sklearn/impute.py",
+      "start_line": 1021,
+      "end_line": 1041,
+      "tokens": 127,
+      "context_length": 13287,
+      "file_pos": 5
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer.fit_transform_IterativeImputer.fit_transform.23.normalized_tol.1",
+      "distance": 1.2431550025939941,
+      "file_path": "sklearn/impute.py",
+      "start_line": 868,
+      "end_line": 935,
+      "tokens": 556,
+      "context_length": 13843,
+      "file_pos": 5
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_missing_values.py_results_diabetes_",
+      "distance": 1.2470932006835938,
+      "file_path": "examples/impute/plot_missing_values.py",
+      "start_line": 96,
+      "end_line": 141,
+      "tokens": 391,
+      "context_length": 14234
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._impute_one_feature_IterativeImputer._impute_one_feature.X_test.1",
+      "distance": 1.2569797039031982,
+      "file_path": "sklearn/impute.py",
+      "start_line": 591,
+      "end_line": 660,
+      "tokens": 526,
+      "context_length": 14760,
+      "file_pos": 5
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_MetaEstimatorMixin_",
+      "distance": 1.261924386024475,
+      "file_path": "sklearn/base.py",
+      "start_line": 572,
+      "end_line": 636,
+      "tokens": 373,
+      "context_length": 15133
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_add_dummy_feature_add_dummy_feature.5.2.1.1",
+      "distance": 1.262873888015747,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1963,
+      "end_line": 2019,
+      "tokens": 543,
+      "context_length": 15676
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_AdditiveChi2Sampler._transform_sparse_AdditiveChi2Sampler._more_tags.1.1",
+      "distance": 1.297209620475769,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 410,
+      "end_line": 439,
+      "tokens": 284,
+      "context_length": 15960
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_warnings__get_mask.2.2.1.1",
+      "distance": 1.3045120239257812,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 4,
+      "end_line": 29,
+      "tokens": 141,
+      "context_length": 16101
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/__init__.py_1_",
+      "distance": 1.3182837963104248,
+      "file_path": "sklearn/preprocessing/__init__.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 419,
+      "context_length": 16520
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_MultiLabelBinarizer.transform_MultiLabelBinarizer._build_cache.2.1",
+      "distance": 1.3202799558639526,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 890,
+      "end_line": 921,
+      "tokens": 233,
+      "context_length": 16753
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._resize_state_BaseGradientBoosting._check_initialized.2",
+      "distance": 1.3317166566848755,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1368,
+      "end_line": 1393,
+      "tokens": 296,
+      "context_length": 17049
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_missing_values.py_get_results_get_results.24.1",
+      "distance": 1.3328428268432617,
+      "file_path": "examples/impute/plot_missing_values.py",
+      "start_line": 49,
+      "end_line": 93,
+      "tokens": 440,
+      "context_length": 17489
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.idf__TfidfVectorizer",
+      "distance": 1.3357927799224854,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1293,
+      "end_line": 1644,
+      "tokens": 157,
+      "context_length": 17646
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/multioutput.py_MultiOutputEstimator_MultiOutputEstimator.partial_fit.7.1",
+      "distance": 1.3417954444885254,
+      "file_path": "sklearn/multioutput.py",
+      "start_line": 62,
+      "end_line": 121,
+      "tokens": 485,
+      "context_length": 18131
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/multioutput.py_1__fit_estimator.3.1",
+      "distance": 1.3429661989212036,
+      "file_path": "sklearn/multioutput.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 264,
+      "context_length": 18395
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_1_",
+      "distance": 1.3492532968521118,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 1,
+      "end_line": 104,
+      "tokens": 799,
+      "context_length": 19194
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_IterativeImputer._get_neighbor_feat_idx_IterativeImputer._get_neighbor_feat_idx.3.1",
+      "distance": 1.3497025966644287,
+      "file_path": "sklearn/impute.py",
+      "start_line": 702,
+      "end_line": 740,
+      "tokens": 330,
+      "context_length": 19524,
+      "file_pos": 13
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer._transform_DictVectorizer._transform.5",
+      "distance": 1.3505690097808838,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 135,
+      "end_line": 209,
+      "tokens": 603,
+      "context_length": 20127
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_BiclusterMixin_BiclusterMixin.get_indices.4.1",
+      "distance": 1.3523762226104736,
+      "file_path": "sklearn/base.py",
+      "start_line": 420,
+      "end_line": 451,
+      "tokens": 221,
+      "context_length": 20348
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_42_122",
+      "distance": 1.3563593626022339,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 219,
+      "end_line": 310,
+      "tokens": 815,
+      "context_length": 21163
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_MultiLabelBinarizer._transform_MultiLabelBinarizer._transform.8.1",
+      "distance": 1.3580325841903687,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 923,
+      "end_line": 955,
+      "tokens": 237,
+      "context_length": 21400
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/multioutput.py_MultiOutputRegressor.partial_fit_MultiOutputRegressor.4",
+      "distance": 1.3596947193145752,
+      "file_path": "sklearn/multioutput.py",
+      "start_line": 234,
+      "end_line": 259,
+      "tokens": 189,
+      "context_length": 21589
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_AdditiveChi2Sampler._transform_dense_AdditiveChi2Sampler._transform_dense.9.1",
+      "distance": 1.3655887842178345,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 384,
+      "end_line": 408,
+      "tokens": 231,
+      "context_length": 21820
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingClassifier.1_GradientBoostingClassifier.1",
+      "distance": 1.3681999444961548,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1764,
+      "end_line": 2012,
+      "tokens": 2533,
+      "context_length": 24353
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingRegressor.1_GradientBoostingRegressor.1",
+      "distance": 1.3682221174240112,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2228,
+      "end_line": 2471,
+      "tokens": 2515,
+      "context_length": 26868
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_LabelBinarizer_LabelBinarizer.1",
+      "distance": 1.3687113523483276,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 289,
+      "end_line": 378,
+      "tokens": 741,
+      "context_length": 27609
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.3699510097503662,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1151,
+      "end_line": 1219,
+      "tokens": 601,
+      "context_length": 28210
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._transform_QuantileTransformer._transform.3.1",
+      "distance": 1.3715945482254028,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2350,
+      "end_line": 2381,
+      "tokens": 227,
+      "context_length": 28437
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.__getitem___Pipeline.14",
+      "distance": 1.372444748878479,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 208,
+      "end_line": 242,
+      "tokens": 284,
+      "context_length": 28721
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._transform_col_QuantileTransformer._transform_col.13.1",
+      "distance": 1.377091407775879,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2250,
+      "end_line": 2317,
+      "tokens": 677,
+      "context_length": 29398
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_MultiLabelBinarizer.fit_transform_MultiLabelBinarizer.fit_transform.18.1",
+      "distance": 1.377377986907959,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 847,
+      "end_line": 888,
+      "tokens": 346,
+      "context_length": 29744
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._hstack__check_X.3.1",
+      "distance": 1.379711627960205,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 502,
+      "end_line": 535,
+      "tokens": 283,
+      "context_length": 30027
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_multioutput_estimator_convert_y_2d_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.6",
+      "distance": 1.3805361986160278,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2211,
+      "end_line": 2252,
+      "tokens": 399,
+      "context_length": 30426
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline_Pipeline.1",
+      "distance": 1.3845183849334717,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 29,
+      "end_line": 124,
+      "tokens": 1039,
+      "context_length": 31465
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_all_estimators.estimators_13_all_estimators.18.1",
+      "distance": 1.3861584663391113,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 665,
+      "end_line": 692,
+      "tokens": 280,
+      "context_length": 31745
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_inputs_QuantileTransformer._check_inputs.8.1",
+      "distance": 1.3908910751342773,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2319,
+      "end_line": 2338,
+      "tokens": 215,
+      "context_length": 31960
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._boost_discrete_AdaBoostClassifier._boost_discrete.19.1",
+      "distance": 1.3914134502410889,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 550,
+      "end_line": 596,
+      "tokens": 397,
+      "context_length": 32357
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_encoders.py__BaseEncoder._transform_OneHotEncoder",
+      "distance": 1.3923439979553223,
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "start_line": 107,
+      "end_line": 852,
+      "tokens": 334,
+      "context_length": 32691
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_encoders.py__BaseEncoder._get_feature__BaseEncoder._fit.4.3",
+      "distance": 1.394948959350586,
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "start_line": 72,
+      "end_line": 105,
+      "tokens": 291,
+      "context_length": 32982
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_encoders.py_OneHotEncoder._transform_new_OneHotEncoder._transform_new.14.2.1.1",
+      "distance": 1.3960063457489014,
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "start_line": 676,
+      "end_line": 710,
+      "tokens": 326,
+      "context_length": 33308
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_VerboseReporter.update_VerboseReporter.update.6.5.2",
+      "distance": 1.3963568210601807,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1136,
+      "end_line": 1163,
+      "tokens": 299,
+      "context_length": 33607
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/examples/semi_supervised/plot_label_propagation_digits_active_learning.py_23_",
+      "distance": 1.3970580101013184,
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits_active_learning.py",
+      "start_line": 50,
+      "end_line": 116,
+      "tokens": 672,
+      "context_length": 34279
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._boost_real_AdaBoostClassifier._boost_real.34.1",
+      "distance": 1.397719144821167,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 492,
+      "end_line": 548,
+      "tokens": 534,
+      "context_length": 34813
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostRegressor._boost_AdaBoostRegressor._boost.28.1",
+      "distance": 1.3987925052642822,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 1003,
+      "end_line": 1093,
+      "tokens": 694,
+      "context_length": 35507
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/mutual_info_.py__estimate_mi.8__estimate_mi.11.1",
+      "distance": 1.4011123180389404,
+      "file_path": "sklearn/feature_selection/mutual_info_.py",
+      "start_line": 271,
+      "end_line": 292,
+      "tokens": 246,
+      "context_length": 35753
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_9___all__.1",
+      "distance": 1.4019230604171753,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 11,
+      "end_line": 59,
+      "tokens": 309,
+      "context_length": 36062
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 1.4026554822921753,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 950,
+      "end_line": 972,
+      "tokens": 248,
+      "context_length": 36310
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_MultiLabelBinarizer_MultiLabelBinarizer.__init__.self.sparse_output.1",
+      "distance": 1.403014898300171,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 770,
+      "end_line": 817,
+      "tokens": 394,
+      "context_length": 36704
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_encoders.py_OneHotEncoder.1_OneHotEncoder.1",
+      "distance": 1.4035208225250244,
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "start_line": 144,
+      "end_line": 316,
+      "tokens": 1798,
+      "context_length": 38502
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/cluster/supervised.py_adjusted_mutual_info_score.2_adjusted_mutual_info_score.26.1",
+      "distance": 1.4035725593566895,
+      "file_path": "sklearn/metrics/cluster/supervised.py",
+      "start_line": 728,
+      "end_line": 764,
+      "tokens": 456,
+      "context_length": 38958
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_discretization.py_1_KBinsDiscretizer.1",
+      "distance": 1.4037036895751953,
+      "file_path": "sklearn/preprocessing/_discretization.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 1026,
+      "context_length": 39984
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/from_model.py_SelectFromModel._get_support_mask_SelectFromModel._get_support_mask.2.8.1",
+      "distance": 1.4046704769134521,
+      "file_path": "sklearn/feature_selection/from_model.py",
+      "start_line": 142,
+      "end_line": 162,
+      "tokens": 207,
+      "context_length": 40191
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_set_checking_parameters_set_checking_parameters.params.17.3",
+      "distance": 1.4066826105117798,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 321,
+      "end_line": 397,
+      "tokens": 714,
+      "context_length": 40905
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/base.py_1_SelectorMixin.get_support.3.1",
+      "distance": 1.4080497026443481,
+      "file_path": "sklearn/feature_selection/base.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 299,
+      "context_length": 41204
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/weight_boosting.py_AdaBoostClassifier._boost_AdaBoostClassifier._boost.2.2.2.1",
+      "distance": 1.4083514213562012,
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "start_line": 447,
+      "end_line": 490,
+      "tokens": 323,
+      "context_length": 41527
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PowerTransformer._fit_PowerTransformer._fit.7.1",
+      "distance": 1.4097479581832886,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2676,
+      "end_line": 2703,
+      "tokens": 293,
+      "context_length": 41820
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_is_fitted_QuantileTransformer._check_is_fitted.4.1",
+      "distance": 1.4138970375061035,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2340,
+      "end_line": 2348,
+      "tokens": 119,
+      "context_length": 41939
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_hastie_10_2.py_1_40.1",
+      "distance": 1.4143636226654053,
+      "file_path": "examples/ensemble/plot_adaboost_hastie_10_2.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 749,
+      "context_length": 42688
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting.fit.13_BaseGradientBoosting.fit.26.1",
+      "distance": 1.4149523973464966,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1472,
+      "end_line": 1550,
+      "tokens": 742,
+      "context_length": 43430
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py__inverse_binarize_thresholding__inverse_binarize_thresholding.8.4.1",
+      "distance": 1.416062831878662,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 726,
+      "end_line": 767,
+      "tokens": 342,
+      "context_length": 43772
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.4181454181671143,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 84,
+      "end_line": 105,
+      "tokens": 314,
+      "context_length": 44086
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py__get_mask__get_mask.2.2.3.1",
+      "distance": 1.4204906225204468,
+      "file_path": "sklearn/impute.py",
+      "start_line": 52,
+      "end_line": 66,
+      "tokens": 142,
+      "context_length": 44228,
+      "file_pos": 29
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py__fit_ovo_binary__partial_fit_ovo_binary.5.1",
+      "distance": 1.421013355255127,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 414,
+      "end_line": 436,
+      "tokens": 238,
+      "context_length": 44466
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_Binarizer_Binarizer.fit.3.1",
+      "distance": 1.4214248657226562,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1785,
+      "end_line": 1854,
+      "tokens": 580,
+      "context_length": 45046
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer.py_1_TextStats.transform.1.1",
+      "distance": 1.4215847253799438,
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 370,
+      "context_length": 45416
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.fit_DictVectorizer.fit.8.1",
+      "distance": 1.422088384628296,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 101,
+      "end_line": 133,
+      "tokens": 208,
+      "context_length": 45624
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer.transform_",
+      "distance": 1.4225475788116455,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 138,
+      "end_line": 184,
+      "tokens": 254,
+      "context_length": 45878
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_inductive_clustering.py_InductiveClusterer_InductiveClusterer.decision_function.1.1",
+      "distance": 1.4225645065307617,
+      "file_path": "examples/cluster/plot_inductive_clustering.py",
+      "start_line": 38,
+      "end_line": 56,
+      "tokens": 149,
+      "context_length": 46027
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer.transform_QuantileTransformer.transform.4.1",
+      "distance": 1.4233416318893433,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2383,
+      "end_line": 2402,
+      "tokens": 161,
+      "context_length": 46188
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.fit_transform_DictVectorizer.fit_transform.2.1",
+      "distance": 1.4235525131225586,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 211,
+      "end_line": 229,
+      "tokens": 144,
+      "context_length": 46332
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer._check_inverse_transform_FunctionTransformer._check_inverse_transform.3.2.1",
+      "distance": 1.4250816106796265,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 105,
+      "end_line": 116,
+      "tokens": 127,
+      "context_length": 46459
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_discretization.py_KBinsDiscretizer.__init___KBinsDiscretizer.fit.14.1",
+      "distance": 1.426937222480774,
+      "file_path": "sklearn/preprocessing/_discretization.py",
+      "start_line": 117,
+      "end_line": 207,
+      "tokens": 870,
+      "context_length": 47329
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_AdditiveChi2Sampler.transform_AdditiveChi2Sampler.transform.12.1",
+      "distance": 1.4285147190093994,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 353,
+      "end_line": 382,
+      "tokens": 265,
+      "context_length": 47594
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OutputCodeClassifier_OutputCodeClassifier.__init__.self.n_jobs.1",
+      "distance": 1.4295191764831543,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 638,
+      "end_line": 711,
+      "tokens": 690,
+      "context_length": 48284
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_StandardScaler.partial_fit.10_StandardScaler.partial_fit.16.1",
+      "distance": 1.4296257495880127,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 677,
+      "end_line": 741,
+      "tokens": 571,
+      "context_length": 48855
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.transform_Pipeline._transform.3.1",
+      "distance": 1.4297709465026855,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 471,
+      "end_line": 498,
+      "tokens": 190,
+      "context_length": 49045
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/from_model.py_np__get_feature_importances.5.1",
+      "distance": 1.4310874938964844,
+      "file_path": "sklearn/feature_selection/from_model.py",
+      "start_line": 4,
+      "end_line": 34,
+      "tokens": 228,
+      "context_length": 49273
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_encoders.py_OneHotEncoder._validate_keywords_OneHotEncoder._validate_keywords.5.1",
+      "distance": 1.431394338607788,
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "start_line": 532,
+      "end_line": 544,
+      "tokens": 147,
+      "context_length": 49420
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/scikit-learn/sklearn/naive_bayes.py_BernoulliNB.__init___BernoulliNB._update_feature_log_prob.self.feature_log_prob_.1",
+      "distance": 1.4316158294677734,
+      "file_path": "sklearn/naive_bayes.py",
+      "start_line": 917,
+      "end_line": 937,
+      "tokens": 217,
+      "context_length": 49637
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/impute.py",
+      "position": 1,
+      "tokens": 10656,
+      "context_length": 10656
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 2,
+      "tokens": 1125,
+      "context_length": 11781
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 3,
+      "tokens": 2934,
+      "context_length": 14715
+    },
+    {
+      "file_path": "examples/impute/plot_missing_values.py",
+      "position": 4,
+      "tokens": 1204,
+      "context_length": 15919
+    },
+    {
+      "file_path": "sklearn/preprocessing/label.py",
+      "position": 5,
+      "tokens": 7636,
+      "context_length": 23555
+    },
+    {
+      "file_path": "sklearn/base.py",
+      "position": 6,
+      "tokens": 4639,
+      "context_length": 28194
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 7,
+      "tokens": 25151,
+      "context_length": 53345
+    },
+    {
+      "file_path": "sklearn/kernel_approximation.py",
+      "position": 8,
+      "tokens": 5232,
+      "context_length": 58577
+    },
+    {
+      "file_path": "sklearn/preprocessing/__init__.py",
+      "position": 9,
+      "tokens": 419,
+      "context_length": 58996
+    },
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 10,
+      "tokens": 21293,
+      "context_length": 80289
+    },
+    {
+      "file_path": "sklearn/feature_extraction/text.py",
+      "position": 11,
+      "tokens": 13238,
+      "context_length": 93527
+    },
+    {
+      "file_path": "sklearn/multioutput.py",
+      "position": 12,
+      "tokens": 5563,
+      "context_length": 99090
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 13,
+      "tokens": 821,
+      "context_length": 99911
+    },
+    {
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "position": 14,
+      "tokens": 2721,
+      "context_length": 102632
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 15,
+      "tokens": 3108,
+      "context_length": 105740
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 16,
+      "tokens": 21897,
+      "context_length": 127637
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 17,
+      "tokens": 7268,
+      "context_length": 134905
+    },
+    {
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "position": 18,
+      "tokens": 6457,
+      "context_length": 141362
+    },
+    {
+      "file_path": "sklearn/utils/testing.py",
+      "position": 19,
+      "tokens": 7322,
+      "context_length": 148684
+    },
+    {
+      "file_path": "sklearn/ensemble/weight_boosting.py",
+      "position": 20,
+      "tokens": 9116,
+      "context_length": 157800
+    },
+    {
+      "file_path": "sklearn/preprocessing/_encoders.py",
+      "position": 21,
+      "tokens": 8530,
+      "context_length": 166330
+    },
+    {
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits_active_learning.py",
+      "position": 22,
+      "tokens": 1013,
+      "context_length": 167343
+    },
+    {
+      "file_path": "sklearn/feature_selection/mutual_info_.py",
+      "position": 23,
+      "tokens": 3996,
+      "context_length": 171339
+    },
+    {
+      "file_path": "sklearn/metrics/cluster/supervised.py",
+      "position": 24,
+      "tokens": 8770,
+      "context_length": 180109
+    },
+    {
+      "file_path": "sklearn/preprocessing/_discretization.py",
+      "position": 25,
+      "tokens": 2828,
+      "context_length": 182937
+    },
+    {
+      "file_path": "sklearn/feature_selection/from_model.py",
+      "position": 26,
+      "tokens": 1800,
+      "context_length": 184737
+    },
+    {
+      "file_path": "sklearn/feature_selection/base.py",
+      "position": 27,
+      "tokens": 904,
+      "context_length": 185641
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_hastie_10_2.py",
+      "position": 28,
+      "tokens": 966,
+      "context_length": 186607
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 29,
+      "tokens": 1718,
+      "context_length": 188325
+    },
+    {
+      "file_path": "sklearn/multiclass.py",
+      "position": 30,
+      "tokens": 6439,
+      "context_length": 194764
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "position": 31,
+      "tokens": 970,
+      "context_length": 195734
+    },
+    {
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "position": 32,
+      "tokens": 1266,
+      "context_length": 197000
+    },
+    {
+      "file_path": "examples/cluster/plot_inductive_clustering.py",
+      "position": 33,
+      "tokens": 909,
+      "context_length": 197909
+    },
+    {
+      "file_path": "sklearn/naive_bayes.py",
+      "position": 34,
+      "tokens": 8442,
+      "context_length": 206351
+    }
+  ]
+}

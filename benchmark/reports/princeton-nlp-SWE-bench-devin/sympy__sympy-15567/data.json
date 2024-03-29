@@ -1,0 +1,934 @@
+{
+  "instance_id": "sympy__sympy-15567",
+  "model_patch": "diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py\nindex a63a315484..4ed50a213c 100644\n--- a/sympy/core/numbers.py\n+++ b/sympy/core/numbers.py\n@@ -575,9 +575,13 @@ def __divmod__(self, other):\n             return Tuple(*divmod(self.p, other.p))\n         else:\n             rat = self/other\n-        w = sign(rat)*int(abs(rat))  # = rat.floor()\n-        r = self - other*w\n-        return Tuple(w, r)\n+            w = int(rat)  # = rat.floor()\n+            r = self - other*w\n+            # Adjust the remainder and quotient if the remainder has a different sign than the divisor\n+            if sign(r) != sign(other):\n+                w -= sign(other)\n+                r += other\n+            return Tuple(w, r)\n \n     def __rdivmod__(self, other):\n         try:\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/core/numbers.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "39fe1d243440277a01d15fabc58dd36fc8c12f65",
+  "patch": "diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py\n--- a/sympy/core/numbers.py\n+++ b/sympy/core/numbers.py\n@@ -575,7 +575,7 @@ def __divmod__(self, other):\n             return Tuple(*divmod(self.p, other.p))\n         else:\n             rat = self/other\n-        w = sign(rat)*int(abs(rat))  # = rat.floor()\n+        w = int(rat) if rat > 0 else int(rat) - 1\n         r = self - other*w\n         return Tuple(w, r)\n \n",
+  "test_patch": "diff --git a/sympy/core/tests/test_numbers.py b/sympy/core/tests/test_numbers.py\n--- a/sympy/core/tests/test_numbers.py\n+++ b/sympy/core/tests/test_numbers.py\n@@ -191,6 +191,9 @@ def test_divmod():\n     assert divmod(S(-3), S(2)) == (-2, 1)\n     assert divmod(S(-3), 2) == (-2, 1)\n \n+    assert divmod(S(4), S(-3.1)) == Tuple(-2, -2.2)\n+    assert divmod(S(4), S(-2.1)) == divmod(4, -2.1)\n+    assert divmod(S(-8), S(-2.5) ) == Tuple(3 , -0.5)\n \n def test_igcd():\n     assert igcd(0, 0) == 0\n",
+  "problem_statement": "SymPy's Number.__divmod__ doesn't agree with the builtin divmod\n```py\r\n>>> divmod(4, -2.1)\r\n(-2.0, -0.20000000000000018)\r\n>>> divmod(S(4), S(-2.1))\r\n(-1, 1.9)\r\n```\r\n\r\nBoth are mathematically correct according to the invariant in the `divmod` docstring, `div*y + mod == x`, but we should be consistent with Python. In general in Python, the sign of mod should be the same as the sign of the second argument.\r\n\r\n```py\r\n>>> -1*-2.1 + 1.9\r\n4.0\r\n>>> -2.0*-2.1 + -0.2\r\n4.0\r\n```\r\n\r\nOur `Mod` is already correct, so it's just `Number.__divmod__` that needs to be corrected\r\n\r\n```py\r\n>>> Mod(4, -2.1)\r\n-0.200000000000000\r\n```\n",
+  "hints_text": "",
+  "created_at": "2018-11-29T13:29:13Z",
+  "version": "1.4",
+  "FAIL_TO_PASS": "[\"test_divmod\"]",
+  "PASS_TO_PASS": "[\"test_Catalan_EulerGamma_prec\", \"test_Div_By_Zero\", \"test_Float\", \"test_Float_RealElement\", \"test_Float_default_to_highprec_from_str\", \"test_Float_eq\", \"test_Float_eval\", \"test_Float_from_tuple\", \"test_Float_gcd_lcm_cofactors\", \"test_Float_idempotence\", \"test_Float_issue_2107\", \"test_GoldenRatio_expand\", \"test_Infinity\", \"test_Infinity_2\", \"test_Infinity_inequations\", \"test_IntegerInteger\", \"test_Integer_as_index\", \"test_Integer_factors\", \"test_Integer_new\", \"test_Integer_precision\", \"test_Mul_Infinity_Zero\", \"test_NaN\", \"test_NumberSymbol_comparison\", \"test_Number_new\", \"test_Rational_cmp\", \"test_Rational_factors\", \"test_Rational_gcd_lcm_cofactors\", \"test_Rational_int\", \"test_Rational_new\", \"test_TribonacciConstant_expand\", \"test_abs1\", \"test_accept_int\", \"test_as_content_primitive\", \"test_bug_sqrt\", \"test_comp\", \"test_comparisons_with_unknown_type\", \"test_conversion_to_mpmath\", \"test_dont_accept_str\", \"test_float_mpf\", \"test_golden_ratio_rewrite_as_sqrt\", \"test_hashing_sympy_integers\", \"test_igcd\", \"test_igcd2\", \"test_igcd_lehmer\", \"test_igcdex\", \"test_ilcm\", \"test_int\", \"test_int_NumberSymbols\", \"test_integer_log\", \"test_integer_nthroot_overflow\", \"test_integers_cache\", \"test_invert_numbers\", \"test_isqrt\", \"test_issue_10020\", \"test_issue_10063\", \"test_issue_13890\", \"test_issue_14289\", \"test_issue_3321\", \"test_issue_3423\", \"test_issue_3449\", \"test_issue_3692\", \"test_issue_4107\", \"test_issue_4122\", \"test_issue_4172\", \"test_issue_4611\", \"test_issue_6349\", \"test_issue_6640\", \"test_issue_7742\", \"test_issue_9491\", \"test_latex\", \"test_long\", \"test_mod\", \"test_mod_inverse\", \"test_mpf_norm\", \"test_no_len\", \"test_pi_Pi\", \"test_powers\", \"test_powers_Float\", \"test_powers_Integer\", \"test_powers_Rational\", \"test_real_bug\", \"test_relational\", \"test_seterr\", \"test_simplify_AlgebraicNumber\", \"test_special_numbers\", \"test_tribonacci_constant_rewrite_as_sqrt\", \"test_zoo\"]",
+  "environment_setup_commit": "73b3f90093754c5ed1561bd885242330e3583004",
+  "patch_files": [
+    "sympy/core/numbers.py"
+  ],
+  "test_patch_files": [
+    "sympy/core/tests/test_numbers.py"
+  ],
+  "patch_diff_details": {
+    "sympy/core/numbers.py": {
+      "diffs": [
+        {
+          "start_line_old": 578,
+          "end_line_old": 578,
+          "file_pos": 1,
+          "file_context_length": 29648,
+          "pos": 1,
+          "context_length": 221
+        }
+      ]
+    }
+  },
+  "vectors": 7919,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.invert_Number.__divmod__.9.1",
+      "distance": 0.6377124190330505,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 557,
+      "end_line": 580,
+      "tokens": 221,
+      "context_length": 221,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__rdivmod___Integer.__rdivmod__.2.2.2.1",
+      "distance": 0.8081256151199341,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2060,
+      "end_line": 2072,
+      "tokens": 126,
+      "context_length": 347,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__rdivmod___Number.__sub__.2.1",
+      "distance": 0.8225415945053101,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 582,
+      "end_line": 660,
+      "tokens": 604,
+      "context_length": 951,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__div___Float.__mod__.4.1",
+      "distance": 0.8359984159469604,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1187,
+      "end_line": 1209,
+      "tokens": 283,
+      "context_length": 1234,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_mod_inverse_mod_inverse.5.1",
+      "distance": 0.8395671844482422,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 437,
+      "end_line": 499,
+      "tokens": 542,
+      "context_length": 1776,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__mod___Rational.__rmod__.2.1",
+      "distance": 0.8402909636497498,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1660,
+      "end_line": 1677,
+      "tokens": 188,
+      "context_length": 1964,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/core/mod.py_Mod.eval_Mod.eval.doit.13.2.2",
+      "distance": 0.8505457043647766,
+      "file_path": "sympy/core/mod.py",
+      "start_line": 26,
+      "end_line": 89,
+      "tokens": 434,
+      "context_length": 2398
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/core/mod.py_1_Mod.1",
+      "distance": 0.8606913089752197,
+      "file_path": "sympy/core/mod.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 132,
+      "context_length": 2530
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__div___Rational.__div__.2.1",
+      "distance": 0.8964540958404541,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1631,
+      "end_line": 1645,
+      "tokens": 156,
+      "context_length": 2686,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__mul___Number.__mul__.2.1",
+      "distance": 0.9029942750930786,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 662,
+      "end_line": 683,
+      "tokens": 157,
+      "context_length": 2843,
+      "file_pos": 2
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__rmod___Float.__rmod__.3.1",
+      "distance": 0.9165793061256409,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1211,
+      "end_line": 1218,
+      "tokens": 110,
+      "context_length": 2953,
+      "file_pos": 2
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rdiv___Rational.__truediv__.1",
+      "distance": 0.9232143759727478,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1646,
+      "end_line": 1658,
+      "tokens": 144,
+      "context_length": 3097,
+      "file_pos": 2
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_I_",
+      "distance": 0.9256477355957031,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3882,
+      "end_line": 3938,
+      "tokens": 358,
+      "context_length": 3455,
+      "file_pos": 2
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/core/mod.py_Mod.eval.rv_Mod.eval.20.1",
+      "distance": 0.93802809715271,
+      "file_path": "sympy/core/mod.py",
+      "start_line": 91,
+      "end_line": 183,
+      "tokens": 845,
+      "context_length": 4300
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/core/mod.py_Mod.eval.21_",
+      "distance": 0.9494565725326538,
+      "file_path": "sympy/core/mod.py",
+      "start_line": 185,
+      "end_line": 212,
+      "tokens": 260,
+      "context_length": 4560
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.12_Float.__mul__.2.1",
+      "distance": 0.9510229229927063,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1097,
+      "end_line": 1185,
+      "tokens": 752,
+      "context_length": 5312,
+      "file_pos": 2
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity._as_mpf_val_NegativeInfinity.ceiling.1.1",
+      "distance": 0.9534255266189575,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3083,
+      "end_line": 3154,
+      "tokens": 498,
+      "context_length": 5810,
+      "file_pos": 2
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_30__as_integer_ratio.4.1",
+      "distance": 0.9584594964981079,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 110,
+      "end_line": 134,
+      "tokens": 184,
+      "context_length": 5994,
+      "file_pos": 2
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.gcd_Rational._sage_.2.1",
+      "distance": 0.9654514789581299,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1848,
+      "end_line": 1871,
+      "tokens": 183,
+      "context_length": 6177,
+      "file_pos": 2
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__new___Number.__new__.8",
+      "distance": 0.967406153678894,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 536,
+      "end_line": 555,
+      "tokens": 179,
+      "context_length": 6356,
+      "file_pos": 2
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeOne._eval_power_NegativeOne._eval_power.4",
+      "distance": 0.9686572551727295,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2636,
+      "end_line": 2656,
+      "tokens": 194,
+      "context_length": 6550,
+      "file_pos": 2
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity.__div___NegativeInfinity.__neg__.1.1",
+      "distance": 0.9734759330749512,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3016,
+      "end_line": 3045,
+      "tokens": 191,
+      "context_length": 6741,
+      "file_pos": 2
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/mul.py__set_div_",
+      "distance": 0.9751298427581787,
+      "file_path": "sympy/sets/handlers/mul.py",
+      "start_line": 50,
+      "end_line": 81,
+      "tokens": 207,
+      "context_length": 6948
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__mul___Rational.__rmul__.1",
+      "distance": 0.9760072827339172,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1617,
+      "end_line": 1629,
+      "tokens": 141,
+      "context_length": 7089,
+      "file_pos": 3
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__ne___Float.__gt__.5.1",
+      "distance": 0.9796723127365112,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1291,
+      "end_line": 1309,
+      "tokens": 174,
+      "context_length": 7263,
+      "file_pos": 3
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational._as_mpf_val_Rational.ceiling.1.1",
+      "distance": 0.982323408126831,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1717,
+      "end_line": 1738,
+      "tokens": 163,
+      "context_length": 7426,
+      "file_pos": 3
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__lt___Rational.__lt__.5.1",
+      "distance": 0.9867233037948608,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1797,
+      "end_line": 1813,
+      "tokens": 172,
+      "context_length": 7598,
+      "file_pos": 3
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational._eval_power_Rational._eval_power.3",
+      "distance": 0.9885592460632324,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1679,
+      "end_line": 1715,
+      "tokens": 402,
+      "context_length": 8000,
+      "file_pos": 3
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__eq___Rational.__ne__.1.1",
+      "distance": 0.9898711442947388,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1740,
+      "end_line": 1759,
+      "tokens": 166,
+      "context_length": 8166,
+      "file_pos": 3
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_1__LOG2.1",
+      "distance": 0.9925998449325562,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 323,
+      "context_length": 8489,
+      "file_pos": 3
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__ge___Rational.__ge__.5.1",
+      "distance": 0.9935884475708008,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1779,
+      "end_line": 1795,
+      "tokens": 172,
+      "context_length": 8661,
+      "file_pos": 3
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__gt___Rational.__gt__.5.1",
+      "distance": 0.9937739372253418,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1761,
+      "end_line": 1777,
+      "tokens": 172,
+      "context_length": 8833,
+      "file_pos": 3
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/modularinteger.py_1_ModularInteger.invert.1.1",
+      "distance": 0.995796799659729,
+      "file_path": "sympy/polys/domains/modularinteger.py",
+      "start_line": 1,
+      "end_line": 177,
+      "tokens": 1032,
+      "context_length": 9865
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__abs___Float.__eq__.7",
+      "distance": 0.9962067604064941,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1252,
+      "end_line": 1289,
+      "tokens": 339,
+      "context_length": 10204,
+      "file_pos": 4
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__radd___Rational.__sub__.2.1",
+      "distance": 0.9986998438835144,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1591,
+      "end_line": 1604,
+      "tokens": 131,
+      "context_length": 10335,
+      "file_pos": 4
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__le___Rational.__le__.4.1",
+      "distance": 0.9991815090179443,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1815,
+      "end_line": 1831,
+      "tokens": 172,
+      "context_length": 10507,
+      "file_pos": 4
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__ge___Float.__ge__.5.1",
+      "distance": 1.001142978668213,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1311,
+      "end_line": 1326,
+      "tokens": 158,
+      "context_length": 10665,
+      "file_pos": 4
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__lt___Float.__lt__.5.1",
+      "distance": 1.0023778676986694,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1328,
+      "end_line": 1343,
+      "tokens": 158,
+      "context_length": 10823,
+      "file_pos": 4
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.21_Integer.__ne__.1.1",
+      "distance": 1.0028934478759766,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2074,
+      "end_line": 2162,
+      "tokens": 750,
+      "context_length": 11573,
+      "file_pos": 4
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__getnewargs___Integer.__divmod__.2.2.1.1",
+      "distance": 1.004563570022583,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2029,
+      "end_line": 2058,
+      "tokens": 172,
+      "context_length": 11745,
+      "file_pos": 4
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity.__div___Infinity.__neg__.1.1",
+      "distance": 1.0055092573165894,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2793,
+      "end_line": 2821,
+      "tokens": 183,
+      "context_length": 11928,
+      "file_pos": 4
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+      "distance": 1.0058119297027588,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1605,
+      "end_line": 1616,
+      "tokens": 125,
+      "context_length": 12053,
+      "file_pos": 4
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__le___RealNumber.1",
+      "distance": 1.0074012279510498,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1345,
+      "end_line": 1380,
+      "tokens": 277,
+      "context_length": 12330,
+      "file_pos": 4
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number_Number._prec.1",
+      "distance": 1.0131168365478516,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 502,
+      "end_line": 534,
+      "tokens": 299,
+      "context_length": 12629,
+      "file_pos": 4
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__div___Number.cofactors.3.1",
+      "distance": 1.0154213905334473,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 685,
+      "end_line": 779,
+      "tokens": 765,
+      "context_length": 13394,
+      "file_pos": 4
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer._eval_power.27_Integer.__rfloordiv__.1.1",
+      "distance": 1.0161442756652832,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2284,
+      "end_line": 2334,
+      "tokens": 470,
+      "context_length": 13864,
+      "file_pos": 4
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__new___Rational.__new__.14.1",
+      "distance": 1.0171375274658203,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1475,
+      "end_line": 1548,
+      "tokens": 489,
+      "context_length": 14353,
+      "file_pos": 4
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__gt___Integer._eval_is_odd.1.1",
+      "distance": 1.018122911453247,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2164,
+      "end_line": 2209,
+      "tokens": 347,
+      "context_length": 14700,
+      "file_pos": 4
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity._as_mpf_val_Infinity.ceiling.1.1",
+      "distance": 1.0193883180618286,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2862,
+      "end_line": 2933,
+      "tokens": 494,
+      "context_length": 15194,
+      "file_pos": 4
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__add___Rational.__add__.2.1",
+      "distance": 1.022267460823059,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1578,
+      "end_line": 1590,
+      "tokens": 132,
+      "context_length": 15326,
+      "file_pos": 4
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/dyadic.py_Dyadic.__div___Dyadic.__eq__.5.1",
+      "distance": 1.0346484184265137,
+      "file_path": "sympy/physics/vector/dyadic.py",
+      "start_line": 101,
+      "end_line": 121,
+      "tokens": 147,
+      "context_length": 15473
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.__rdivmod___PolyElement.__rmod__.1.1",
+      "distance": 1.038390874862671,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1292,
+      "end_line": 1319,
+      "tokens": 217,
+      "context_length": 15690
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_E_pi.1",
+      "distance": 1.0403038263320923,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3486,
+      "end_line": 3554,
+      "tokens": 429,
+      "context_length": 16119,
+      "file_pos": 6
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_GoldenRatio_GoldenRatio._eval_rewrite_as_sqrt.1",
+      "distance": 1.0450000762939453,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3557,
+      "end_line": 3618,
+      "tokens": 433,
+      "context_length": 16552,
+      "file_pos": 6
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/solvers/diophantine.py_1__even.1.1",
+      "distance": 1.0462820529937744,
+      "file_path": "sympy/solvers/diophantine.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 695,
+      "context_length": 17247
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__new__.13_Float.__new__.19.1",
+      "distance": 1.0483336448669434,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1032,
+      "end_line": 1081,
+      "tokens": 522,
+      "context_length": 17769,
+      "file_pos": 7
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Zero._eval_power_Zero.as_coeff_Mul.2",
+      "distance": 1.052053689956665,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2521,
+      "end_line": 2548,
+      "tokens": 227,
+      "context_length": 17996,
+      "file_pos": 7
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float._new_Float._new.2.8.1",
+      "distance": 1.057358741760254,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1083,
+      "end_line": 1095,
+      "tokens": 130,
+      "context_length": 18126,
+      "file_pos": 7
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__slots___Float.__new__.precision.1",
+      "distance": 1.0577113628387451,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 937,
+      "end_line": 1030,
+      "tokens": 807,
+      "context_length": 18933,
+      "file_pos": 7
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/sho1d.py_NumberOp._eval_commutator_RaisingOp_NumberOp._represent_XOp.6",
+      "distance": 1.0581767559051514,
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "start_line": 380,
+      "end_line": 395,
+      "tokens": 139,
+      "context_length": 19072
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/ntheory/__init__.py_1_",
+      "distance": 1.0584570169448853,
+      "file_path": "sympy/ntheory/__init__.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 255,
+      "context_length": 19327
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__truediv___",
+      "distance": 1.0590803623199463,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 208,
+      "end_line": 288,
+      "tokens": 500,
+      "context_length": 19827
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py__mag__mag.9.1",
+      "distance": 1.0620760917663574,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 3422,
+      "end_line": 3450,
+      "tokens": 242,
+      "context_length": 20069
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/modularinteger.py__modular_integer_cache_",
+      "distance": 1.0655605792999268,
+      "file_path": "sympy/polys/domains/modularinteger.py",
+      "start_line": 179,
+      "end_line": 210,
+      "tokens": 211,
+      "context_length": 20280
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/polys/modulargcd.py__integer_rational_reconstruction__integer_rational_reconstruction.11.1",
+      "distance": 1.068084478378296,
+      "file_path": "sympy/polys/modulargcd.py",
+      "start_line": 1709,
+      "end_line": 1770,
+      "tokens": 410,
+      "context_length": 20690
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/matrices/common.py_MatrixArithmetic.__neg___MatrixArithmetic.__pow__.2.4.1",
+      "distance": 1.0691688060760498,
+      "file_path": "sympy/matrices/common.py",
+      "start_line": 2041,
+      "end_line": 2074,
+      "tokens": 299,
+      "context_length": 20989
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__pow___Expr.__pow__.2.3.2.2.1.1",
+      "distance": 1.069303035736084,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 163,
+      "end_line": 178,
+      "tokens": 131,
+      "context_length": 21120
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeOne_NegativeOne.__neg__.1.1",
+      "distance": 1.0701265335083008,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2598,
+      "end_line": 2634,
+      "tokens": 166,
+      "context_length": 21286,
+      "file_pos": 13
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer._eval_power_Integer._eval_power.sqr_dict.1",
+      "distance": 1.071336269378662,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2211,
+      "end_line": 2283,
+      "tokens": 687,
+      "context_length": 21973,
+      "file_pos": 13
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_1_16",
+      "distance": 1.0719234943389893,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 174,
+      "context_length": 22147
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_39_BIGBITS.1",
+      "distance": 1.0726399421691895,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 206,
+      "end_line": 224,
+      "tokens": 146,
+      "context_length": 22293,
+      "file_pos": 14
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/ntheory/partitions_.py_1_is_quad_residue",
+      "distance": 1.0744984149932861,
+      "file_path": "sympy/ntheory/partitions_.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 142,
+      "context_length": 22435
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__rpow___Expr.__rfloordiv__.2.1",
+      "distance": 1.0759391784667969,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 180,
+      "end_line": 218,
+      "tokens": 341,
+      "context_length": 22776
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_60__mod1.8.3.1",
+      "distance": 1.0775697231292725,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 84,
+      "end_line": 96,
+      "tokens": 160,
+      "context_length": 22936
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 1,
+      "tokens": 29648,
+      "context_length": 29648
+    },
+    {
+      "file_path": "sympy/core/mod.py",
+      "position": 2,
+      "tokens": 1618,
+      "context_length": 31266
+    },
+    {
+      "file_path": "sympy/sets/handlers/mul.py",
+      "position": 3,
+      "tokens": 584,
+      "context_length": 31850
+    },
+    {
+      "file_path": "sympy/polys/domains/modularinteger.py",
+      "position": 4,
+      "tokens": 1244,
+      "context_length": 33094
+    },
+    {
+      "file_path": "sympy/physics/vector/dyadic.py",
+      "position": 5,
+      "tokens": 4651,
+      "context_length": 37745
+    },
+    {
+      "file_path": "sympy/polys/rings.py",
+      "position": 6,
+      "tokens": 17555,
+      "context_length": 55300
+    },
+    {
+      "file_path": "sympy/solvers/diophantine.py",
+      "position": 7,
+      "tokens": 31242,
+      "context_length": 86542
+    },
+    {
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "position": 8,
+      "tokens": 5470,
+      "context_length": 92012
+    },
+    {
+      "file_path": "sympy/ntheory/__init__.py",
+      "position": 9,
+      "tokens": 256,
+      "context_length": 92268
+    },
+    {
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "position": 10,
+      "tokens": 2043,
+      "context_length": 94311
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 11,
+      "tokens": 29116,
+      "context_length": 123427
+    },
+    {
+      "file_path": "sympy/polys/modulargcd.py",
+      "position": 12,
+      "tokens": 18495,
+      "context_length": 141922
+    },
+    {
+      "file_path": "sympy/matrices/common.py",
+      "position": 13,
+      "tokens": 17359,
+      "context_length": 159281
+    },
+    {
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "position": 14,
+      "tokens": 14443,
+      "context_length": 173724
+    },
+    {
+      "file_path": "sympy/ntheory/partitions_.py",
+      "position": 15,
+      "tokens": 2112,
+      "context_length": 175836
+    },
+    {
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "position": 16,
+      "tokens": 24728,
+      "context_length": 200564
+    }
+  ]
+}

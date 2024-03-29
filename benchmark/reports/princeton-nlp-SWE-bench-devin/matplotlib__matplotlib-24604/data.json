@@ -1,0 +1,1164 @@
+{
+  "instance_id": "matplotlib__matplotlib-24604",
+  "model_patch": "diff --git a/lib/matplotlib/gridspec.py b/lib/matplotlib/gridspec.py\nindex e3abb4425a..6cb917b32b 100644\n--- a/lib/matplotlib/gridspec.py\n+++ b/lib/matplotlib/gridspec.py\n@@ -467,6 +467,73 @@ class GridSpec(GridSpecBase):\n         if kwargs:\n             self.update(**kwargs)\n \n+    def gridspec_mosaic(self, mosaic, **kwargs):\n+        \"\"\"\n+        Create a dictionary of SubplotSpecs from a mosaic pattern.\n+\n+        Parameters\n+        ----------\n+        mosaic : str or list of str\n+            A visual layout of how the grid should be structured.\n+\n+        Returns\n+        -------\n+        dict of SubplotSpec\n+            A dictionary mapping labels to SubplotSpec objects.\n+\n+        Other Parameters\n+        ----------------\n+        **kwargs\n+            Additional keyword arguments to be passed to the SubplotSpec creation.\n+\n+        Examples\n+        --------\n+        >>> fig = plt.figure()\n+        >>> gs = fig.add_gridspec(3, 3)\n+        >>> specs = gs.gridspec_mosaic([\n+        ...     \"abc\",\n+        ...     \"def\",\n+        ...     \"ghi\"\n+        ... ])\n+        >>> ax1 = fig.add_subplot(specs[\"a\"], projection='polar')\n+        >>> ax2 = fig.add_subplot(specs[\"b\"], projection='rectilinear')\n+        \"\"\"\n+        # Normalize the mosaic input to a list of strings if it's a single string\n+        if isinstance(mosaic, str):\n+            mosaic = [mosaic]\n+\n+        # Initialize the dictionary to hold the SubplotSpecs\n+        specs_dict = {}\n+\n+        # Determine the number of rows and columns in the mosaic\n+        nrows = len(mosaic)\n+        ncols = max(len(row) for row in mosaic)\n+\n+        # Iterate over the mosaic pattern\n+        for row_idx, row in enumerate(mosaic):\n+            for col_idx, char in enumerate(row):\n+                if char not in specs_dict:\n+                    # Determine the span of the current character\n+                    rowspan = [row_idx, row_idx + 1]\n+                    colspan = [col_idx, col_idx + 1]\n+\n+                    # Expand the span to include adjacent cells with the same character\n+                    for i in range(row_idx, nrows):\n+                        if mosaic[i][col_idx] == char:\n+                            rowspan[1] = i + 1\n+                        else:\n+                            break\n+                    for j in range(col_idx, ncols):\n+                        if mosaic[row_idx][j] == char:\n+                            colspan[1] = j + 1\n+                        else:\n+                            break\n+\n+                    # Create a new SubplotSpec for this character\n+                    specs_dict[char] = self[rowspan[0]:rowspan[1], colspan[0]:colspan[1]]\n+\n+        return specs_dict\n+\n \n class GridSpecFromSubplotSpec(GridSpecBase):\n     \"\"\"\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/gridspec.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "3393a4f22350e5df7aa8d3c7904e26e81428d2cd",
+  "patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -1759,6 +1759,25 @@ def get_tightbbox(self, renderer=None, bbox_extra_artists=None):\n \n         return _bbox\n \n+    @staticmethod\n+    def _norm_per_subplot_kw(per_subplot_kw):\n+        expanded = {}\n+        for k, v in per_subplot_kw.items():\n+            if isinstance(k, tuple):\n+                for sub_key in k:\n+                    if sub_key in expanded:\n+                        raise ValueError(\n+                            f'The key {sub_key!r} appears multiple times.'\n+                            )\n+                    expanded[sub_key] = v\n+            else:\n+                if k in expanded:\n+                    raise ValueError(\n+                        f'The key {k!r} appears multiple times.'\n+                    )\n+                expanded[k] = v\n+        return expanded\n+\n     @staticmethod\n     def _normalize_grid_string(layout):\n         if '\\n' not in layout:\n@@ -1771,7 +1790,8 @@ def _normalize_grid_string(layout):\n \n     def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\n                        width_ratios=None, height_ratios=None,\n-                       empty_sentinel='.', subplot_kw=None, gridspec_kw=None):\n+                       empty_sentinel='.',\n+                       subplot_kw=None, per_subplot_kw=None, gridspec_kw=None):\n         \"\"\"\n         Build a layout of Axes based on ASCII art or nested lists.\n \n@@ -1821,6 +1841,9 @@ def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\n             The string notation allows only single character Axes labels and\n             does not support nesting but is very terse.\n \n+            The Axes identifiers may be `str` or a non-iterable hashable\n+            object (e.g. `tuple` s may not be used).\n+\n         sharex, sharey : bool, default: False\n             If True, the x-axis (*sharex*) or y-axis (*sharey*) will be shared\n             among all subplots.  In that case, tick label visibility and axis\n@@ -1843,7 +1866,21 @@ def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\n \n         subplot_kw : dict, optional\n             Dictionary with keywords passed to the `.Figure.add_subplot` call\n-            used to create each subplot.\n+            used to create each subplot.  These values may be overridden by\n+            values in *per_subplot_kw*.\n+\n+        per_subplot_kw : dict, optional\n+            A dictionary mapping the Axes identifiers or tuples of identifiers\n+            to a dictionary of keyword arguments to be passed to the\n+            `.Figure.add_subplot` call used to create each subplot.  The values\n+            in these dictionaries have precedence over the values in\n+            *subplot_kw*.\n+\n+            If *mosaic* is a string, and thus all keys are single characters,\n+            it is possible to use a single string instead of a tuple as keys;\n+            i.e. ``\"AB\"`` is equivalent to ``(\"A\", \"B\")``.\n+\n+            .. versionadded:: 3.7\n \n         gridspec_kw : dict, optional\n             Dictionary with keywords passed to the `.GridSpec` constructor used\n@@ -1868,6 +1905,8 @@ def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\n         \"\"\"\n         subplot_kw = subplot_kw or {}\n         gridspec_kw = dict(gridspec_kw or {})\n+        per_subplot_kw = per_subplot_kw or {}\n+\n         if height_ratios is not None:\n             if 'height_ratios' in gridspec_kw:\n                 raise ValueError(\"'height_ratios' must not be defined both as \"\n@@ -1882,6 +1921,12 @@ def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\n         # special-case string input\n         if isinstance(mosaic, str):\n             mosaic = self._normalize_grid_string(mosaic)\n+            per_subplot_kw = {\n+                tuple(k): v for k, v in per_subplot_kw.items()\n+            }\n+\n+        per_subplot_kw = self._norm_per_subplot_kw(per_subplot_kw)\n+\n         # Only accept strict bools to allow a possible future API expansion.\n         _api.check_isinstance(bool, sharex=sharex, sharey=sharey)\n \n@@ -2011,7 +2056,11 @@ def _do_layout(gs, mosaic, unique_ids, nested):\n                         raise ValueError(f\"There are duplicate keys {name} \"\n                                          f\"in the layout\\n{mosaic!r}\")\n                     ax = self.add_subplot(\n-                        gs[slc], **{'label': str(name), **subplot_kw}\n+                        gs[slc], **{\n+                            'label': str(name),\n+                            **subplot_kw,\n+                            **per_subplot_kw.get(name, {})\n+                        }\n                     )\n                     output[name] = ax\n                 elif method == 'nested':\n@@ -2048,9 +2097,11 @@ def _do_layout(gs, mosaic, unique_ids, nested):\n             if sharey:\n                 ax.sharey(ax0)\n                 ax._label_outer_yaxis(check_patch=True)\n-        for k, ax in ret.items():\n-            if isinstance(k, str):\n-                ax.set_label(k)\n+        if extra := set(per_subplot_kw) - set(ret):\n+            raise ValueError(\n+                f\"The keys {extra} are in *per_subplot_kw* \"\n+                \"but not in the mosaic.\"\n+            )\n         return ret\n \n     def _set_artist_props(self, a):\ndiff --git a/lib/matplotlib/pyplot.py b/lib/matplotlib/pyplot.py\n--- a/lib/matplotlib/pyplot.py\n+++ b/lib/matplotlib/pyplot.py\n@@ -1479,7 +1479,8 @@ def subplots(nrows=1, ncols=1, *, sharex=False, sharey=False, squeeze=True,\n \n def subplot_mosaic(mosaic, *, sharex=False, sharey=False,\n                    width_ratios=None, height_ratios=None, empty_sentinel='.',\n-                   subplot_kw=None, gridspec_kw=None, **fig_kw):\n+                   subplot_kw=None, gridspec_kw=None,\n+                   per_subplot_kw=None, **fig_kw):\n     \"\"\"\n     Build a layout of Axes based on ASCII art or nested lists.\n \n@@ -1550,7 +1551,21 @@ def subplot_mosaic(mosaic, *, sharex=False, sharey=False,\n \n     subplot_kw : dict, optional\n         Dictionary with keywords passed to the `.Figure.add_subplot` call\n-        used to create each subplot.\n+        used to create each subplot.  These values may be overridden by\n+        values in *per_subplot_kw*.\n+\n+    per_subplot_kw : dict, optional\n+        A dictionary mapping the Axes identifiers or tuples of identifiers\n+        to a dictionary of keyword arguments to be passed to the\n+        `.Figure.add_subplot` call used to create each subplot.  The values\n+        in these dictionaries have precedence over the values in\n+        *subplot_kw*.\n+\n+        If *mosaic* is a string, and thus all keys are single characters,\n+        it is possible to use a single string instead of a tuple as keys;\n+        i.e. ``\"AB\"`` is equivalent to ``(\"A\", \"B\")``.\n+\n+        .. versionadded:: 3.7\n \n     gridspec_kw : dict, optional\n         Dictionary with keywords passed to the `.GridSpec` constructor used\n@@ -1576,7 +1591,8 @@ def subplot_mosaic(mosaic, *, sharex=False, sharey=False,\n         mosaic, sharex=sharex, sharey=sharey,\n         height_ratios=height_ratios, width_ratios=width_ratios,\n         subplot_kw=subplot_kw, gridspec_kw=gridspec_kw,\n-        empty_sentinel=empty_sentinel\n+        empty_sentinel=empty_sentinel,\n+        per_subplot_kw=per_subplot_kw,\n     )\n     return fig, ax_dict\n \ndiff --git a/tutorials/provisional/mosaic.py b/tutorials/provisional/mosaic.py\n--- a/tutorials/provisional/mosaic.py\n+++ b/tutorials/provisional/mosaic.py\n@@ -202,8 +202,8 @@ def identify_axes(ax_dict, fontsize=48):\n # empty sentinel with the string shorthand because it may be stripped\n # while processing the input.\n #\n-# Controlling mosaic and subplot creation\n-# =======================================\n+# Controlling mosaic creation\n+# ===========================\n #\n # This feature is built on top of `.gridspec` and you can pass the\n # keyword arguments through to the underlying `.gridspec.GridSpec`\n@@ -278,8 +278,12 @@ def identify_axes(ax_dict, fontsize=48):\n \n \n ###############################################################################\n+# Controlling subplot creation\n+# ============================\n+#\n # We can also pass through arguments used to create the subplots\n-# (again, the same as `.Figure.subplots`).\n+# (again, the same as `.Figure.subplots`) which will apply to all\n+# of the Axes created.\n \n \n axd = plt.figure(constrained_layout=True).subplot_mosaic(\n@@ -287,6 +291,58 @@ def identify_axes(ax_dict, fontsize=48):\n )\n identify_axes(axd)\n \n+###############################################################################\n+# Per-Axes subplot keyword arguments\n+# ----------------------------------\n+#\n+# If you need to control the parameters passed to each subplot individually use\n+# *per_subplot_kw* to pass a mapping between the Axes identifiers (or\n+# tuples of Axes identifiers) to dictionaries of keywords to be passed.\n+#\n+# .. versionadded:: 3.7\n+#\n+\n+\n+fig, axd = plt.subplot_mosaic(\n+    \"AB;CD\",\n+    per_subplot_kw={\n+        \"A\": {\"projection\": \"polar\"},\n+        (\"C\", \"D\"): {\"xscale\": \"log\"}\n+    },\n+)\n+identify_axes(axd)\n+\n+###############################################################################\n+# If the layout is specified with the string short-hand, then we know the\n+# Axes labels will be one character and can unambiguously interpret longer\n+# strings in *per_subplot_kw* to specify a set of Axes to apply the\n+# keywords to:\n+\n+\n+fig, axd = plt.subplot_mosaic(\n+    \"AB;CD\",\n+    per_subplot_kw={\n+        \"AD\": {\"projection\": \"polar\"},\n+        \"BC\": {\"facecolor\": \".9\"}\n+    },\n+)\n+identify_axes(axd)\n+\n+###############################################################################\n+# If *subplot_kw* and *per_subplot_kw* are used together, then they are\n+# merged with *per_subplot_kw* taking priority:\n+\n+\n+axd = plt.figure(constrained_layout=True).subplot_mosaic(\n+    \"AB;CD\",\n+    subplot_kw={\"facecolor\": \"xkcd:tangerine\"},\n+    per_subplot_kw={\n+        \"B\": {\"facecolor\": \"xkcd:water blue\"},\n+        \"D\": {\"projection\": \"polar\", \"facecolor\": \"w\"},\n+    }\n+)\n+identify_axes(axd)\n+\n \n ###############################################################################\n # Nested list input\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_figure.py b/lib/matplotlib/tests/test_figure.py\n--- a/lib/matplotlib/tests/test_figure.py\n+++ b/lib/matplotlib/tests/test_figure.py\n@@ -848,7 +848,12 @@ def test_animated_with_canvas_change(fig_test, fig_ref):\n class TestSubplotMosaic:\n     @check_figures_equal(extensions=[\"png\"])\n     @pytest.mark.parametrize(\n-        \"x\", [[[\"A\", \"A\", \"B\"], [\"C\", \"D\", \"B\"]], [[1, 1, 2], [3, 4, 2]]]\n+        \"x\", [\n+            [[\"A\", \"A\", \"B\"], [\"C\", \"D\", \"B\"]],\n+            [[1, 1, 2], [3, 4, 2]],\n+            ((\"A\", \"A\", \"B\"), (\"C\", \"D\", \"B\")),\n+            ((1, 1, 2), (3, 4, 2))\n+        ]\n     )\n     def test_basic(self, fig_test, fig_ref, x):\n         grid_axes = fig_test.subplot_mosaic(x)\n@@ -998,6 +1003,10 @@ def test_fail_list_of_str(self):\n             plt.subplot_mosaic(['foo', 'bar'])\n         with pytest.raises(ValueError, match='must be 2D'):\n             plt.subplot_mosaic(['foo'])\n+        with pytest.raises(ValueError, match='must be 2D'):\n+            plt.subplot_mosaic([['foo', ('bar',)]])\n+        with pytest.raises(ValueError, match='must be 2D'):\n+            plt.subplot_mosaic([['a', 'b'], [('a', 'b'), 'c']])\n \n     @check_figures_equal(extensions=[\"png\"])\n     @pytest.mark.parametrize(\"subplot_kw\", [{}, {\"projection\": \"polar\"}, None])\n@@ -1011,8 +1020,26 @@ def test_subplot_kw(self, fig_test, fig_ref, subplot_kw):\n \n         axB = fig_ref.add_subplot(gs[0, 1], **subplot_kw)\n \n+    @check_figures_equal(extensions=[\"png\"])\n+    @pytest.mark.parametrize(\"multi_value\", ['BC', tuple('BC')])\n+    def test_per_subplot_kw(self, fig_test, fig_ref, multi_value):\n+        x = 'AB;CD'\n+        grid_axes = fig_test.subplot_mosaic(\n+            x,\n+            subplot_kw={'facecolor': 'red'},\n+            per_subplot_kw={\n+                'D': {'facecolor': 'blue'},\n+                multi_value: {'facecolor': 'green'},\n+            }\n+        )\n+\n+        gs = fig_ref.add_gridspec(2, 2)\n+        for color, spec in zip(['red', 'green', 'green', 'blue'], gs):\n+            fig_ref.add_subplot(spec, facecolor=color)\n+\n     def test_string_parser(self):\n         normalize = Figure._normalize_grid_string\n+\n         assert normalize('ABC') == [['A', 'B', 'C']]\n         assert normalize('AB;CC') == [['A', 'B'], ['C', 'C']]\n         assert normalize('AB;CC;DE') == [['A', 'B'], ['C', 'C'], ['D', 'E']]\n@@ -1029,6 +1056,25 @@ def test_string_parser(self):\n                          DE\n                          \"\"\") == [['A', 'B'], ['C', 'C'], ['D', 'E']]\n \n+    def test_per_subplot_kw_expander(self):\n+        normalize = Figure._norm_per_subplot_kw\n+        assert normalize({\"A\": {}, \"B\": {}}) == {\"A\": {}, \"B\": {}}\n+        assert normalize({(\"A\", \"B\"): {}}) == {\"A\": {}, \"B\": {}}\n+        with pytest.raises(\n+                ValueError, match=f'The key {\"B\"!r} appears multiple times'\n+        ):\n+            normalize({(\"A\", \"B\"): {}, \"B\": {}})\n+        with pytest.raises(\n+                ValueError, match=f'The key {\"B\"!r} appears multiple times'\n+        ):\n+            normalize({\"B\": {}, (\"A\", \"B\"): {}})\n+\n+    def test_extra_per_subplot_kw(self):\n+        with pytest.raises(\n+                ValueError, match=f'The keys {set(\"B\")!r} are in'\n+        ):\n+            Figure().subplot_mosaic(\"A\", per_subplot_kw={\"B\": {}})\n+\n     @check_figures_equal(extensions=[\"png\"])\n     @pytest.mark.parametrize(\"str_pattern\",\n                              [\"AAA\\nBBB\", \"\\nAAA\\nBBB\\n\", \"ABC\\nDEF\"]\n",
+  "problem_statement": "[ENH]: gridspec_mosaic\n### Problem\n\nTrying to combine subplot_mosaic with axes using various different projections (e.g. one rectilinear axes and one polar axes and one 3d axes) has been requested a few times (once in the original subplot_mosaic thread IIRC, and in #20392 too), and it's something I would recently have been happy to have, too.\r\n\r\nPushing projections directly into subplot_mosaic seems ripe for API bloat, but perhaps another solution would be to add `figure.gridspec_mosaic(...)` which takes the same arguments as subplot_mosaic, but returns a dict of *subplotspecs*, such that one can do something like\r\n```\r\nspecs = fig.gridspec_mosaic(...)\r\nd = {\r\n    \"foo\": fig.add_subplot(specs[\"foo\"], projection=...),\r\n    \"bar\": fig.add_subplot(specs[\"bar\"], projection=...),\r\n    ...\r\n}\r\n```\r\nAs a side point, I do find the repetition of `fig` in each call to add_subplot a bit jarring (as the underlying gridspec is bound to the figure, so that information is actually redundant).  Back in #13280 I had proposed to add SubplotSpec.add_subplot() (adding to the figure to which the gridspec is bound), which would allow one to write, here,\r\n```\r\nspecs = fig.gridspec_mosaic(...)\r\nd = {\r\n    \"foo\": specs[\"foo\"].add_subplot(projection=...),\r\n    \"bar\": specs[\"bar\"].add_subplot(projection=...),\r\n    ...\r\n}\r\n```\r\nbut that idea got shot down back then and even if we decide not to revisit it, even the first form would be nice to have.\r\n\r\nThoughts?\n\n### Proposed solution\n\n_No response_\n",
+  "hints_text": "I like this better than the current  create/remove/replace scheme, but just to be clear- using this method means folks would have to go in manually and create a subplot for each spec, right? So this feature is just providing the ability to layout and identify axes in the same way as subplot_mosaic? \nWe could do this, but it seems relatively convoluted, and likely to end up in a dusty corner...  Isn't the fundamental problem that we can't change projections post-facto?  Can we not do that somehow?  `ax.change_projection()` would be best, but `axnew = fig.change_projection(ax, proj)` would perhaps be bearable.  \r\n\n> and likely to end up in a dusty corner\n\nI think that the loops for adding a new subplot would probably look almost identical to the ones for changing the projection, so I'm not sure that the discoverablity/documentation problem favors one over the other, especially if either solution is added to the mosaic tutorial and as a nice gallery example. \nThe projection machinery can pick a different class to use for the returned `Axes` instance.  While you can change classes in Python (which we do in mplot3d), I am not a huge fan of doing more of that to I think changing the projection is off the table.\r\n\r\n----\r\n\r\nUnfortunately we already pass `subplot_kw` to all of them and do not want to try to de-conflict the namespaces.  Making something like:\r\n\r\n```python\r\nfrom matplotlib import pyplot as plt\r\n\r\nfig, axd = plt.subplot_mosaic(\r\n    \"AB;CC\",\r\n    needs_a_better_name={\"A\": {\"projection\": \"polar\"}, \"B\": {\"projection\": \"3d\"}},\r\n)\r\n\r\n```\r\n\r\nwork is not that bad (I used a bad name to avoid getting lost in discussions of the parameter name just yet ;) ).\r\n\r\n![so](https://user-images.githubusercontent.com/199813/204940851-cb3b7304-d18f-4a7b-9657-88eaee19ec58.png)\r\n\r\n\r\n```diff\r\ndiff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\r\nindex 6c18ba1a64..e75b973044 100644\r\n--- a/lib/matplotlib/figure.py\r\n+++ b/lib/matplotlib/figure.py\r\n@@ -1771,7 +1771,8 @@ default: %(va)s\r\n\r\n     def subplot_mosaic(self, mosaic, *, sharex=False, sharey=False,\r\n                        width_ratios=None, height_ratios=None,\r\n-                       empty_sentinel='.', subplot_kw=None, gridspec_kw=None):\r\n+                       empty_sentinel='.', subplot_kw=None, gridspec_kw=None,\r\n+                       needs_a_better_name=None):\r\n         \"\"\"\r\n         Build a layout of Axes based on ASCII art or nested lists.\r\n\r\n@@ -1868,6 +1869,7 @@ default: %(va)s\r\n         \"\"\"\r\n         subplot_kw = subplot_kw or {}\r\n         gridspec_kw = dict(gridspec_kw or {})\r\n+        needs_a_better_name = needs_a_better_name or {}\r\n         if height_ratios is not None:\r\n             if 'height_ratios' in gridspec_kw:\r\n                 raise ValueError(\"'height_ratios' must not be defined both as \"\r\n@@ -2011,7 +2013,11 @@ default: %(va)s\r\n                         raise ValueError(f\"There are duplicate keys {name} \"\r\n                                          f\"in the layout\\n{mosaic!r}\")\r\n                     ax = self.add_subplot(\r\n-                        gs[slc], **{'label': str(name), **subplot_kw}\r\n+                        gs[slc], **{\r\n+                            'label': str(name),\r\n+                            **subplot_kw,\r\n+                            **needs_a_better_name.get(name, {})\r\n+                        }\r\n                     )\r\n                     output[name] = ax\r\n                 elif method == 'nested':\r\ndiff --git a/lib/matplotlib/pyplot.py b/lib/matplotlib/pyplot.py\r\nindex 79c33a6bac..f384fe747b 100644\r\n--- a/lib/matplotlib/pyplot.py\r\n+++ b/lib/matplotlib/pyplot.py\r\n@@ -1474,7 +1474,8 @@ def subplots(nrows=1, ncols=1, *, sharex=False, sharey=False, squeeze=True,\r\n\r\n def subplot_mosaic(mosaic, *, sharex=False, sharey=False,\r\n                    width_ratios=None, height_ratios=None, empty_sentinel='.',\r\n-                   subplot_kw=None, gridspec_kw=None, **fig_kw):\r\n+                   subplot_kw=None, gridspec_kw=None,\r\n+                   needs_a_better_name=None, **fig_kw):\r\n     \"\"\"\r\n     Build a layout of Axes based on ASCII art or nested lists.\r\n\r\n@@ -1571,7 +1572,8 @@ def subplot_mosaic(mosaic, *, sharex=False, sharey=False,\r\n         mosaic, sharex=sharex, sharey=sharey,\r\n         height_ratios=height_ratios, width_ratios=width_ratios,\r\n         subplot_kw=subplot_kw, gridspec_kw=gridspec_kw,\r\n-        empty_sentinel=empty_sentinel\r\n+        empty_sentinel=empty_sentinel,\r\n+        needs_a_better_name=needs_a_better_name,\r\n     )\r\n     return fig, ax_dict\r\n```\nJust to chime in and say that I have also had the desire to have a dropdown selector of geographic projections to click through/change at will. (A nice example here: https://observablehq.com/@d3/projection-transitions) If someone calls `ax.change_projection()` I think we could get away with some documentation that the class type may change underneath them..., and do some fiddling on our end to update the transforms and `__class__` attributes properly (which is probably not trivial to get right).\nAh, I see that #20392 proposed to pass subplot_kws as an array of dicts (which is a bit of a mess once you have axes spanning multiple cells), and I can't find if a concrete proposal had been made in the original thread (#16603); but I agree that passing instead a dict of dicts (label -> subplot_kw) as proposed by @tacaswell seems not too bad.\nMy first follow-up feature request would be to do\r\n\r\n```python\r\nfrom matplotlib import pyplot as plt\r\n\r\nfig, axd = plt.subplot_mosaic(\r\n    \"AB;CC\",\r\n    needs_a_better_name={\"AB\": {\"projection\": \"polar\"}},\r\n)\r\n```\r\nto make both the top panels polar.  Sometimes you might want like 10 axes with 5 in one projection and 5 in another.\n> ```\r\n> needs_a_better_name={\"AB\": {\"projection\": \"polar\"}},\r\n> ```\r\n\r\nI think the generic solution is\r\n```\r\nneeds_a_better_name={\r\n    (\"name1\", \"name2\"): {\"projection\": \"polar\"}},\r\n    \"name3\": {\"projection\": \"3d\"},\r\n}\r\n```\r\ni.e. keys are strings or tuples of strings.\r\n\r\nMaybe with the extension: If the mosaic spec is a string (i.e. we only have single-char names), any key with len>1 is interpreted as `tuple(key)`, i.e. \"AB\" is internally converted to (\"A\", \"B\").\n> we already pass subplot_kw to all of them and do not want to try to de-conflict the namespaces\r\n\r\nSo which one would get priority if like `subplot_kw` and `needs_a_better_name` get passed the same key?\nIn Tom's diff, `needs_a_better_name` would get priority as it is later in the unpacking.\r\n\r\n```python\r\n>>> {\"a\": 1, \"a\":2}\r\n{'a': 2}\r\n```\r\n\r\nThis makes intuitive sense as it allows you to set some generic settings for most subplots but override with the more specific kwargs for individual subplot, which you simply would not do if that had no effect.\n> This makes intuitive sense \r\n\r\nYeah, it's just gonna have to be documented in neon lights and commented as this is a for free of python dict implementation. I'm worried though about two keywords that do almost the same thing but one is vectorized, since that feels like `color` vs `colors`\nImplementing @rcomer 's idea for the short hand was easy, but I have more concerns about the general case as we will technically work with _any_ hashables as the keys so there is an ambiguity there.  Not insurmountable, but annoying.\r\n\r\nPulling out a (maybe private) `gridspec_mosaic` may still be useful so we can implement `subfigure_mosaic` as well....",
+  "created_at": "2022-12-03T20:20:12Z",
+  "version": "3.6",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_extra_per_subplot_kw\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_per_subplot_kw[BC-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_per_subplot_kw[multi_value1-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_per_subplot_kw_expander\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_all_nested[png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_basic[x0-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_basic[x1-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_basic[x2-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_basic[x3-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x0-None-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x1-SKIP-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x2-0-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x3-None-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x4-SKIP-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_empty[x5-0-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_fail[AAA\\\\nc\\\\nBBB-All\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_fail[x0-(?m)we\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_fail[x1-There\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_fail[x3-All\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_fail_list_of_str\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_hashable_keys[png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_nested[png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_nested_height_ratios\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_nested_tuple[png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_nested_user_order\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_nested_width_ratios\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_share_all\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_single_str_input[AAA\\\\nBBB-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_single_str_input[ABC\\\\nDEF-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_single_str_input[\\\\nAAA\\\\nBBB\\\\n-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_string_parser\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_subplot_kw[None-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_subplot_kw[subplot_kw0-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_subplot_kw[subplot_kw1-png]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[abc]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[acb]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[bac]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[bca]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[cab]\", \"lib/matplotlib/tests/test_figure.py::TestSubplotMosaic::test_user_order[cba]\", \"lib/matplotlib/tests/test_figure.py::test_add_artist[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_add_artist[png]\", \"lib/matplotlib/tests/test_figure.py::test_add_axes_kwargs\", \"lib/matplotlib/tests/test_figure.py::test_add_subplot_invalid\", \"lib/matplotlib/tests/test_figure.py::test_add_subplot_kwargs\", \"lib/matplotlib/tests/test_figure.py::test_add_subplot_subclass\", \"lib/matplotlib/tests/test_figure.py::test_add_subplot_twotuple\", \"lib/matplotlib/tests/test_figure.py::test_align_labels[png]\", \"lib/matplotlib/tests/test_figure.py::test_align_labels_stray_axes\", \"lib/matplotlib/tests/test_figure.py::test_alpha[png]\", \"lib/matplotlib/tests/test_figure.py::test_animated_with_canvas_change[eps]\", \"lib/matplotlib/tests/test_figure.py::test_animated_with_canvas_change[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_animated_with_canvas_change[png]\", \"lib/matplotlib/tests/test_figure.py::test_autofmt_xdate[both]\", \"lib/matplotlib/tests/test_figure.py::test_autofmt_xdate[major]\", \"lib/matplotlib/tests/test_figure.py::test_autofmt_xdate[minor]\", \"lib/matplotlib/tests/test_figure.py::test_axes_removal\", \"lib/matplotlib/tests/test_figure.py::test_axes_remove\", \"lib/matplotlib/tests/test_figure.py::test_change_dpi\", \"lib/matplotlib/tests/test_figure.py::test_clf_keyword\", \"lib/matplotlib/tests/test_figure.py::test_clf_not_redefined\", \"lib/matplotlib/tests/test_figure.py::test_deepcopy\", \"lib/matplotlib/tests/test_figure.py::test_figaspect\", \"lib/matplotlib/tests/test_figure.py::test_fignum_exists\", \"lib/matplotlib/tests/test_figure.py::test_figure[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_figure[png]\", \"lib/matplotlib/tests/test_figure.py::test_figure_clear[clear]\", \"lib/matplotlib/tests/test_figure.py::test_figure_clear[clf]\", \"lib/matplotlib/tests/test_figure.py::test_figure_label\", \"lib/matplotlib/tests/test_figure.py::test_figure_legend[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_figure_legend[png]\", \"lib/matplotlib/tests/test_figure.py::test_figure_repr\", \"lib/matplotlib/tests/test_figure.py::test_fspath[eps]\", \"lib/matplotlib/tests/test_figure.py::test_fspath[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_fspath[png]\", \"lib/matplotlib/tests/test_figure.py::test_fspath[ps]\", \"lib/matplotlib/tests/test_figure.py::test_fspath[svg]\", \"lib/matplotlib/tests/test_figure.py::test_gca\", \"lib/matplotlib/tests/test_figure.py::test_ginput\", \"lib/matplotlib/tests/test_figure.py::test_gridspec_no_mutate_input\", \"lib/matplotlib/tests/test_figure.py::test_invalid_figure_add_axes\", \"lib/matplotlib/tests/test_figure.py::test_invalid_figure_size[-1-1]\", \"lib/matplotlib/tests/test_figure.py::test_invalid_figure_size[1-nan]\", \"lib/matplotlib/tests/test_figure.py::test_invalid_figure_size[inf-1]\", \"lib/matplotlib/tests/test_figure.py::test_invalid_layouts\", \"lib/matplotlib/tests/test_figure.py::test_iterability_axes_argument\", \"lib/matplotlib/tests/test_figure.py::test_kwargs_pass\", \"lib/matplotlib/tests/test_figure.py::test_layout_change_warning[compressed]\", \"lib/matplotlib/tests/test_figure.py::test_layout_change_warning[constrained]\", \"lib/matplotlib/tests/test_figure.py::test_picking_does_not_stale\", \"lib/matplotlib/tests/test_figure.py::test_rcparams[png]\", \"lib/matplotlib/tests/test_figure.py::test_removed_axis\", \"lib/matplotlib/tests/test_figure.py::test_reused_gridspec\", \"lib/matplotlib/tests/test_figure.py::test_savefig\", \"lib/matplotlib/tests/test_figure.py::test_savefig_backend\", \"lib/matplotlib/tests/test_figure.py::test_savefig_pixel_ratio[Agg]\", \"lib/matplotlib/tests/test_figure.py::test_savefig_pixel_ratio[Cairo]\", \"lib/matplotlib/tests/test_figure.py::test_savefig_warns\", \"lib/matplotlib/tests/test_figure.py::test_set_fig_size\", \"lib/matplotlib/tests/test_figure.py::test_subfigure[png]\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_double[png]\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_dpi\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_pdf\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_scatter_size[png]\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_spanning\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_ss[png]\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_ticks\", \"lib/matplotlib/tests/test_figure.py::test_subfigure_tightbbox\", \"lib/matplotlib/tests/test_figure.py::test_subplots_shareax_loglabels\", \"lib/matplotlib/tests/test_figure.py::test_suptitle[pdf]\", \"lib/matplotlib/tests/test_figure.py::test_suptitle[png]\", \"lib/matplotlib/tests/test_figure.py::test_suptitle_fontproperties\", \"lib/matplotlib/tests/test_figure.py::test_tightbbox\", \"lib/matplotlib/tests/test_figure.py::test_too_many_figures\", \"lib/matplotlib/tests/test_figure.py::test_unpickle_with_device_pixel_ratio\", \"lib/matplotlib/tests/test_figure.py::test_valid_layouts\", \"lib/matplotlib/tests/test_figure.py::test_waitforbuttonpress\"]",
+  "environment_setup_commit": "73909bcb408886a22e2b84581d6b9e6d9907c813",
+  "patch_files": [
+    "lib/matplotlib/figure.py",
+    "lib/matplotlib/pyplot.py",
+    "tutorials/provisional/mosaic.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_figure.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/figure.py": {
+      "diffs": [
+        {
+          "start_line_old": 1762,
+          "end_line_old": 1762,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.add_subfigure_FigureBase.add_subfigure.4.1",
+          "closest_snippet_line_distance": 169
+        },
+        {
+          "start_line_old": 1774,
+          "end_line_old": 1774,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.mosaic_FigureBase._set_artist_props.3",
+          "closest_snippet_line_distance": 265,
+          "pos": 20,
+          "context_length": 9847
+        },
+        {
+          "start_line_old": 1824,
+          "end_line_old": 1824,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.mosaic_FigureBase._set_artist_props.3",
+          "closest_snippet_line_distance": 215,
+          "pos": 20,
+          "context_length": 9847
+        },
+        {
+          "start_line_old": 1846,
+          "end_line_old": 1846,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.mosaic_FigureBase._set_artist_props.3",
+          "closest_snippet_line_distance": 193,
+          "pos": 20,
+          "context_length": 9847
+        },
+        {
+          "start_line_old": 1871,
+          "end_line_old": 1871,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._do_layout.18_FigureBase.subplot_mosaic._do_layout.19.1",
+          "closest_snippet_line_distance": 131,
+          "pos": 16,
+          "context_length": 7977
+        },
+        {
+          "start_line_old": 1885,
+          "end_line_old": 1885,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._do_layout.18_FigureBase.subplot_mosaic._do_layout.19.1",
+          "closest_snippet_line_distance": 117,
+          "pos": 16,
+          "context_length": 7977
+        },
+        {
+          "start_line_old": 2014,
+          "end_line_old": 2014,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "pos": 13,
+          "context_length": 6678
+        },
+        {
+          "start_line_old": 2051,
+          "end_line_old": 2053,
+          "file_pos": 8,
+          "file_context_length": 70700,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.subplot_kw_FigureBase.subplot_mosaic.9",
+          "closest_snippet_line_distance": 167,
+          "pos": 19,
+          "context_length": 8945
+        }
+      ]
+    },
+    "lib/matplotlib/pyplot.py": {
+      "diffs": [
+        {
+          "start_line_old": 1482,
+          "end_line_old": 1482,
+          "file_pos": 4,
+          "file_context_length": 34974,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_103_subplot.1",
+          "closest_snippet_line_distance": 211
+        },
+        {
+          "start_line_old": 1553,
+          "end_line_old": 1553,
+          "file_pos": 4,
+          "file_context_length": 34974,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot.2_subplot.26.1",
+          "closest_snippet_line_distance": 217,
+          "pos": 15,
+          "context_length": 7715
+        },
+        {
+          "start_line_old": 1579,
+          "end_line_old": 1579,
+          "file_pos": 4,
+          "file_context_length": 34974,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot.2_subplot.26.1",
+          "closest_snippet_line_distance": 243,
+          "pos": 15,
+          "context_length": 7715
+        }
+      ]
+    },
+    "tutorials/provisional/mosaic.py": {
+      "diffs": [
+        {
+          "start_line_old": 205,
+          "end_line_old": 206,
+          "file_pos": 1,
+          "file_context_length": 2330,
+          "pos": 1,
+          "context_length": 760
+        },
+        {
+          "start_line_old": 281,
+          "end_line_old": 281,
+          "file_pos": 1,
+          "file_context_length": 2330,
+          "pos": 1,
+          "context_length": 760
+        },
+        {
+          "start_line_old": 290,
+          "end_line_old": 290,
+          "file_pos": 1,
+          "file_context_length": 2330,
+          "closest_snippet_id": "/tmp/repos/matplotlib/tutorials/provisional/mosaic.py_6_axd_72.1",
+          "closest_snippet_line_distance": 120,
+          "pos": 17,
+          "context_length": 8284
+        }
+      ]
+    }
+  },
+  "vectors": 3967,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/tutorials/provisional/mosaic.py_73_axd_127.1",
+      "distance": 0.7213459610939026,
+      "file_path": "tutorials/provisional/mosaic.py",
+      "start_line": 171,
+      "end_line": 287,
+      "tokens": 760,
+      "context_length": 760,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_196_",
+      "distance": 0.7452610731124878,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 345,
+      "end_line": 413,
+      "tokens": 671,
+      "context_length": 1431
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_spec_gs01.1",
+      "distance": 0.7496906518936157,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 264,
+      "end_line": 343,
+      "tokens": 760,
+      "context_length": 2191
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/gridspec_and_subplots.py_1_",
+      "distance": 0.765362024307251,
+      "file_path": "examples/subplots_axes_and_figures/gridspec_and_subplots.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 242,
+      "context_length": 2433
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/tutorials/provisional/mosaic.py_1_np",
+      "distance": 0.7744365930557251,
+      "file_path": "tutorials/provisional/mosaic.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 327,
+      "context_length": 2760,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot.2_subplot.26.1",
+      "distance": 0.7807168960571289,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1272,
+      "end_line": 1336,
+      "tokens": 676,
+      "context_length": 3436,
+      "file_pos": 4
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/gridspec_multicolumn.py_1_",
+      "distance": 0.7978388071060181,
+      "file_path": "examples/subplots_axes_and_figures/gridspec_multicolumn.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 259,
+      "context_length": 3695
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec._from_subplot_args_SubplotSpec._from_subplot_args.6.1",
+      "distance": 0.799171507358551,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 556,
+      "end_line": 599,
+      "tokens": 391,
+      "context_length": 4086
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/gridspec_nested.py_1_",
+      "distance": 0.8015768527984619,
+      "file_path": "examples/subplots_axes_and_figures/gridspec_nested.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 337,
+      "context_length": 4423
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_1__log.1",
+      "distance": 0.80494225025177,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 177,
+      "context_length": 4600
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/tutorials/provisional/mosaic.py_6_axd_72.1",
+      "distance": 0.8139545321464539,
+      "file_path": "tutorials/provisional/mosaic.py",
+      "start_line": 59,
+      "end_line": 170,
+      "tokens": 789,
+      "context_length": 5389,
+      "file_pos": 7
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_66_fig_132.1",
+      "distance": 0.8154429197311401,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 179,
+      "end_line": 263,
+      "tokens": 908,
+      "context_length": 6297
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._do_layout.18_FigureBase.subplot_mosaic._do_layout.19.1",
+      "distance": 0.8229254484176636,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 2002,
+      "end_line": 2037,
+      "tokens": 381,
+      "context_length": 6678,
+      "file_pos": 8
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase.__getitem__.4_GridSpecBase.__getitem__.5.1",
+      "distance": 0.8378936052322388,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 252,
+      "end_line": 263,
+      "tokens": 135,
+      "context_length": 6813
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_subplot_mosaic_subplot_mosaic.4.1",
+      "distance": 0.8397452235221863,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1493,
+      "end_line": 1594,
+      "tokens": 902,
+      "context_length": 7715,
+      "file_pos": 8
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.subplot_kw_FigureBase.subplot_mosaic.9",
+      "distance": 0.845399022102356,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1869,
+      "end_line": 1886,
+      "tokens": 262,
+      "context_length": 7977,
+      "file_pos": 8
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/tutorials/provisional/mosaic.py_128_",
+      "distance": 0.8559728860855103,
+      "file_path": "tutorials/provisional/mosaic.py",
+      "start_line": 288,
+      "end_line": 339,
+      "tokens": 307,
+      "context_length": 8284,
+      "file_pos": 8
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/examples/userdemo/demo_gridspec03.py_1_",
+      "distance": 0.8634119033813477,
+      "file_path": "examples/userdemo/demo_gridspec03.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 421,
+      "context_length": 8705
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic.mosaic_FigureBase._set_artist_props.3",
+      "distance": 0.8749152421951294,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 2039,
+      "end_line": 2060,
+      "tokens": 240,
+      "context_length": 8945,
+      "file_pos": 9
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic_FigureBase.subplot_mosaic.1",
+      "distance": 0.8785154819488525,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1772,
+      "end_line": 1868,
+      "tokens": 902,
+      "context_length": 9847,
+      "file_pos": 9
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._do_layout_FigureBase.subplot_mosaic._do_layout.17",
+      "distance": 0.8856228590011597,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1948,
+      "end_line": 2001,
+      "tokens": 581,
+      "context_length": 10428,
+      "file_pos": 9
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpec.get_subplot_params_GridSpec.locally_modified_subplot_params.2.1",
+      "distance": 0.8917626142501831,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 413,
+      "end_line": 441,
+      "tokens": 217,
+      "context_length": 10645
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecFromSubplotSpec.get_subplot_params_GridSpecFromSubplotSpec.get_topmost_subplotspec.2.1",
+      "distance": 0.8948715329170227,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 503,
+      "end_line": 523,
+      "tokens": 218,
+      "context_length": 10863
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.add_subplot_FigureBase.add_subplot.1",
+      "distance": 0.8954406976699829,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 615,
+      "end_line": 715,
+      "tokens": 958,
+      "context_length": 11821,
+      "file_pos": 9
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpec.update_GridSpec.update.3.1.1.2.1",
+      "distance": 0.8983878493309021,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 385,
+      "end_line": 411,
+      "tokens": 248,
+      "context_length": 12069
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase.subplots_GridSpecBase.subplots.16.4.2.1",
+      "distance": 0.9005894660949707,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 265,
+      "end_line": 316,
+      "tokens": 500,
+      "context_length": 12569
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase._check_gridspec_exists_GridSpecBase._check_gridspec_exists.4.1",
+      "distance": 0.9010289907455444,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 207,
+      "end_line": 226,
+      "tokens": 205,
+      "context_length": 12774
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.add_gridspec_FigureBase.add_gridspec.5.1",
+      "distance": 0.9019807577133179,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1471,
+      "end_line": 1512,
+      "tokens": 262,
+      "context_length": 13036,
+      "file_pos": 9
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subfigures.py_1_36",
+      "distance": 0.9053606986999512,
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 756,
+      "context_length": 13792
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_np_65",
+      "distance": 0.9063811302185059,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 100,
+      "end_line": 178,
+      "tokens": 776,
+      "context_length": 14568
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_gs_128_",
+      "distance": 0.9069149494171143,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 171,
+      "end_line": 212,
+      "tokens": 442,
+      "context_length": 15010
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py_make_layoutgrids_gs_make_layoutgrids_gs.7.1",
+      "distance": 0.9088314771652222,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 197,
+      "end_line": 240,
+      "tokens": 435,
+      "context_length": 15445
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec.subgridspec_",
+      "distance": 0.9097070693969727,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 693,
+      "end_line": 734,
+      "tokens": 260,
+      "context_length": 15705
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase.__getitem___GridSpecBase.__getitem__._normalize.orig_key.2.4.2.3.2",
+      "distance": 0.9101495146751404,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 228,
+      "end_line": 250,
+      "tokens": 216,
+      "context_length": 15921
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec.5_SubplotSpec.is_last_col.1.1",
+      "distance": 0.9106613397598267,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 601,
+      "end_line": 651,
+      "tokens": 442,
+      "context_length": 16363
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase.__repr___GridSpecBase.__repr__.3.1",
+      "distance": 0.9114022254943848,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 58,
+      "end_line": 68,
+      "tokens": 141,
+      "context_length": 16504
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/examples/userdemo/demo_gridspec06.py_1_",
+      "distance": 0.913704514503479,
+      "file_path": "examples/userdemo/demo_gridspec06.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 325,
+      "context_length": 16829
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpec_GridSpec._AllowedKeys.1",
+      "distance": 0.9179397821426392,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 319,
+      "end_line": 383,
+      "tokens": 598,
+      "context_length": 17427
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/examples/userdemo/demo_gridspec01.py_1_",
+      "distance": 0.9187968969345093,
+      "file_path": "examples/userdemo/demo_gridspec01.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 240,
+      "context_length": 17667
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase._process_projection_requirements_FigureBase.get_default_bbox_extra_artists.3.1",
+      "distance": 0.9224086999893188,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1647,
+      "end_line": 1689,
+      "tokens": 350,
+      "context_length": 18017,
+      "file_pos": 14
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecFromSubplotSpec_GridSpecFromSubplotSpec.__init__.6",
+      "distance": 0.929410457611084,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 471,
+      "end_line": 501,
+      "tokens": 277,
+      "context_length": 18294
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_fig_223_274.4",
+      "distance": 0.9297997951507568,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 354,
+      "end_line": 441,
+      "tokens": 772,
+      "context_length": 19066
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_163_222",
+      "distance": 0.9406594038009644,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 270,
+      "end_line": 352,
+      "tokens": 804,
+      "context_length": 19870
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.add_subplot.2_FigureBase._add_axes_internal.10.1",
+      "distance": 0.946427583694458,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 716,
+      "end_line": 756,
+      "tokens": 454,
+      "context_length": 20324,
+      "file_pos": 15
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec_SubplotSpec.__repr__.1.1",
+      "distance": 0.9472557306289673,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 526,
+      "end_line": 554,
+      "tokens": 250,
+      "context_length": 20574
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/projections/__init__.py_1_5",
+      "distance": 0.951820433139801,
+      "file_path": "lib/matplotlib/projections/__init__.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 563,
+      "context_length": 21137
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_103_subplot.1",
+      "distance": 0.9561383128166199,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 1136,
+      "end_line": 1271,
+      "tokens": 1196,
+      "context_length": 22333,
+      "file_pos": 16
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._make_array_FigureBase.subplot_mosaic._make_array.7.1",
+      "distance": 0.957935631275177,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1888,
+      "end_line": 1918,
+      "tokens": 320,
+      "context_length": 22653,
+      "file_pos": 16
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_64_fig_127.1",
+      "distance": 0.9583650827407837,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 87,
+      "end_line": 170,
+      "tokens": 785,
+      "context_length": 23438
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/arranging_axes.py_1_plt",
+      "distance": 0.9594482183456421,
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 834,
+      "context_length": 24272
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_tight_layout.py_get_subplotspec_list_get_subplotspec_list.4.1",
+      "distance": 0.9595157504081726,
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "start_line": 160,
+      "end_line": 191,
+      "tokens": 242,
+      "context_length": 24514
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/scatter_hist.py_10_",
+      "distance": 0.9647305607795715,
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "start_line": 57,
+      "end_line": 123,
+      "tokens": 702,
+      "context_length": 25216
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase.nrows_GridSpecBase.new_subplotspec.4.1",
+      "distance": 0.9656769633293152,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 70,
+      "end_line": 99,
+      "tokens": 242,
+      "context_length": 25458
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplot_mosaic._identify_keys_and_nested_FigureBase.subplot_mosaic._identify_keys_and_nested.6.1",
+      "distance": 0.9660574197769165,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1920,
+      "end_line": 1946,
+      "tokens": 242,
+      "context_length": 25700,
+      "file_pos": 18
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplots_FigureBase.subplots.1",
+      "distance": 0.9702728986740112,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 758,
+      "end_line": 876,
+      "tokens": 1131,
+      "context_length": 26831,
+      "file_pos": 18
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_base.py__AxesBase.name__AxesBase.sharey.self.yaxis._scale.1",
+      "distance": 0.9711836576461792,
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "start_line": 550,
+      "end_line": 1261,
+      "tokens": 6189,
+      "context_length": 33020
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/subplots_demo.py_1_63",
+      "distance": 0.9737856388092041,
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 741,
+      "context_length": 33761
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_GridSpecBase_GridSpecBase.__init__.6",
+      "distance": 0.97789067029953,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 27,
+      "end_line": 56,
+      "tokens": 311,
+      "context_length": 34072
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/ci/check_wheel_licenses.py_1_",
+      "distance": 0.982516348361969,
+      "file_path": "ci/check_wheel_licenses.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 213,
+      "context_length": 34285
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_275_fig_346.1",
+      "distance": 0.9844360947608948,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 442,
+      "end_line": 530,
+      "tokens": 776,
+      "context_length": 35061
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_441_",
+      "distance": 0.9845414161682129,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 636,
+      "end_line": 721,
+      "tokens": 777,
+      "context_length": 35838
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/examples/scales/semilogx_demo.py_1_",
+      "distance": 0.9878104329109192,
+      "file_path": "examples/scales/semilogx_demo.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 104,
+      "context_length": 35942
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.subplots.gridspec_kw_FigureBase.subplots.7.1",
+      "distance": 0.9889858961105347,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 877,
+      "end_line": 892,
+      "tokens": 245,
+      "context_length": 36187,
+      "file_pos": 21
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/projections/geo.py_GeoAxes._get_affine_transform_GeoAxes.set_longitude_grid_ends.3",
+      "distance": 0.9897890090942383,
+      "file_path": "lib/matplotlib/projections/geo.py",
+      "start_line": 110,
+      "end_line": 191,
+      "tokens": 807,
+      "context_length": 36994
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py_1__log.1",
+      "distance": 1.0016008615493774,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 602,
+      "context_length": 37596
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/examples/misc/custom_projection.py_GeoAxes._set_lim_and_transforms.self.transProjection_GeoAxes._set_lim_and_transforms.self.transProjection.self._yaxis_text2_transform.1",
+      "distance": 1.0121235847473145,
+      "file_path": "examples/misc/custom_projection.py",
+      "start_line": 100,
+      "end_line": 170,
+      "tokens": 799,
+      "context_length": 38395
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axes_grid1/axes_grid.py_ImageGrid_ImageGrid.__init__.11.1.3.1.ax.cax.1",
+      "distance": 1.0152586698532104,
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "start_line": 318,
+      "end_line": 417,
+      "tokens": 990,
+      "context_length": 39385
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec.get_position_SubplotSpec.get_position.10.1",
+      "distance": 1.0155830383300781,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 653,
+      "end_line": 667,
+      "tokens": 166,
+      "context_length": 39551
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/gridspec.py_SubplotSpec.get_topmost_subplotspec_SubplotSpec.__hash__.1.1",
+      "distance": 1.0159142017364502,
+      "file_path": "lib/matplotlib/gridspec.py",
+      "start_line": 669,
+      "end_line": 691,
+      "tokens": 207,
+      "context_length": 39758
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/matplotlib/tutorials/toolkits/mplot3d.py_1_",
+      "distance": 1.0170692205429077,
+      "file_path": "tutorials/toolkits/mplot3d.py",
+      "start_line": 1,
+      "end_line": 157,
+      "tokens": 1133,
+      "context_length": 40891
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/matplotlib/examples/color/named_colors.py_1_mcolors",
+      "distance": 1.0180729627609253,
+      "file_path": "examples/color/named_colors.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 118,
+      "context_length": 41009
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/matplotlib/tutorials/toolkits/axes_grid.py_1_",
+      "distance": 1.0180840492248535,
+      "file_path": "tutorials/toolkits/axes_grid.py",
+      "start_line": 1,
+      "end_line": 332,
+      "tokens": 3454,
+      "context_length": 44463
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/matplotlib/examples/misc/custom_projection.py_GeoAxes._get_affine_transform_GeoAxes.24",
+      "distance": 1.0182418823242188,
+      "file_path": "examples/misc/custom_projection.py",
+      "start_line": 172,
+      "end_line": 258,
+      "tokens": 778,
+      "context_length": 45241
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_gridspec.10_",
+      "distance": 1.0184566974639893,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1534,
+      "end_line": 1595,
+      "tokens": 624,
+      "context_length": 45865
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/pcolormesh_grids.py_1_48",
+      "distance": 1.018824577331543,
+      "file_path": "examples/images_contours_and_fields/pcolormesh_grids.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 799,
+      "context_length": 46664
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.add_subfigure_FigureBase.add_subfigure.4.1",
+      "distance": 1.0242682695388794,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1568,
+      "end_line": 1593,
+      "tokens": 148,
+      "context_length": 46812,
+      "file_pos": 29
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_layoutgrid.py_LayoutGrid_LayoutGrid.__init__.self.w_pad.1",
+      "distance": 1.0269831418991089,
+      "file_path": "lib/matplotlib/_layoutgrid.py",
+      "start_line": 31,
+      "end_line": 115,
+      "tokens": 925,
+      "context_length": 47737
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/mplot3d/axes3d.py_Axes3D.__init___Axes3D.__init__.38",
+      "distance": 1.028136968612671,
+      "file_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+      "start_line": 66,
+      "end_line": 180,
+      "tokens": 1207,
+      "context_length": 48944
+    }
+  ],
+  "files": [
+    {
+      "file_path": "tutorials/provisional/mosaic.py",
+      "position": 1,
+      "tokens": 2330,
+      "context_length": 2330
+    },
+    {
+      "file_path": "tutorials/intermediate/arranging_axes.py",
+      "position": 2,
+      "tokens": 3950,
+      "context_length": 6280
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/gridspec_and_subplots.py",
+      "position": 3,
+      "tokens": 242,
+      "context_length": 6522
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 4,
+      "tokens": 28452,
+      "context_length": 34974
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/gridspec_multicolumn.py",
+      "position": 5,
+      "tokens": 259,
+      "context_length": 35233
+    },
+    {
+      "file_path": "lib/matplotlib/gridspec.py",
+      "position": 6,
+      "tokens": 6304,
+      "context_length": 41537
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/gridspec_nested.py",
+      "position": 7,
+      "tokens": 337,
+      "context_length": 41874
+    },
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 8,
+      "tokens": 28826,
+      "context_length": 70700
+    },
+    {
+      "file_path": "examples/userdemo/demo_gridspec03.py",
+      "position": 9,
+      "tokens": 421,
+      "context_length": 71121
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subfigures.py",
+      "position": 10,
+      "tokens": 1423,
+      "context_length": 72544
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/subplots_demo.py",
+      "position": 11,
+      "tokens": 1968,
+      "context_length": 74512
+    },
+    {
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "position": 12,
+      "tokens": 7366,
+      "context_length": 81878
+    },
+    {
+      "file_path": "examples/userdemo/demo_gridspec06.py",
+      "position": 13,
+      "tokens": 325,
+      "context_length": 82203
+    },
+    {
+      "file_path": "examples/userdemo/demo_gridspec01.py",
+      "position": 14,
+      "tokens": 240,
+      "context_length": 82443
+    },
+    {
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "position": 15,
+      "tokens": 6566,
+      "context_length": 89009
+    },
+    {
+      "file_path": "lib/matplotlib/projections/__init__.py",
+      "position": 16,
+      "tokens": 856,
+      "context_length": 89865
+    },
+    {
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "position": 17,
+      "tokens": 2929,
+      "context_length": 92794
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "position": 18,
+      "tokens": 1111,
+      "context_length": 93905
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "position": 19,
+      "tokens": 39690,
+      "context_length": 133595
+    },
+    {
+      "file_path": "ci/check_wheel_licenses.py",
+      "position": 20,
+      "tokens": 257,
+      "context_length": 133852
+    },
+    {
+      "file_path": "examples/scales/semilogx_demo.py",
+      "position": 21,
+      "tokens": 104,
+      "context_length": 133956
+    },
+    {
+      "file_path": "lib/matplotlib/projections/geo.py",
+      "position": 22,
+      "tokens": 4166,
+      "context_length": 138122
+    },
+    {
+      "file_path": "examples/misc/custom_projection.py",
+      "position": 23,
+      "tokens": 3823,
+      "context_length": 141945
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "position": 24,
+      "tokens": 5049,
+      "context_length": 146994
+    },
+    {
+      "file_path": "tutorials/toolkits/mplot3d.py",
+      "position": 25,
+      "tokens": 1133,
+      "context_length": 148127
+    },
+    {
+      "file_path": "examples/color/named_colors.py",
+      "position": 26,
+      "tokens": 820,
+      "context_length": 148947
+    },
+    {
+      "file_path": "tutorials/toolkits/axes_grid.py",
+      "position": 27,
+      "tokens": 3454,
+      "context_length": 152401
+    },
+    {
+      "file_path": "lib/matplotlib/colorbar.py",
+      "position": 28,
+      "tokens": 14301,
+      "context_length": 166702
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/pcolormesh_grids.py",
+      "position": 29,
+      "tokens": 1283,
+      "context_length": 167985
+    },
+    {
+      "file_path": "lib/matplotlib/_layoutgrid.py",
+      "position": 30,
+      "tokens": 5436,
+      "context_length": 173421
+    },
+    {
+      "file_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+      "position": 31,
+      "tokens": 31016,
+      "context_length": 204437
+    }
+  ]
+}

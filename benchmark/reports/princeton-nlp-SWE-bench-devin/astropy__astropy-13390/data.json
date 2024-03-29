@@ -1,0 +1,974 @@
+{
+  "instance_id": "astropy__astropy-13390",
+  "model_patch": "diff --git a/astropy/table/column.py b/astropy/table/column.py\nindex ca3e652131..8459428612 100644\n--- a/astropy/table/column.py\n+++ b/astropy/table/column.py\n@@ -297,33 +297,18 @@ def _make_compare(oper):\n     oper : str\n         Operator name\n     \"\"\"\n-    swapped_oper = {'__eq__': '__eq__',\n-                    '__ne__': '__ne__',\n-                    '__gt__': '__lt__',\n-                    '__lt__': '__gt__',\n-                    '__ge__': '__le__',\n-                    '__le__': '__ge__'}[oper]\n-\n     def _compare(self, other):\n         op = oper  # copy enclosed ref to allow swap below\n \n-        # Special case to work around #6838.  Other combinations work OK,\n-        # see tests.test_column.test_unicode_sandwich_compare().  In this\n-        # case just swap self and other.\n-        #\n-        # This is related to an issue in numpy that was addressed in np 1.13.\n-        # However that fix does not make this problem go away, but maybe\n-        # future numpy versions will do so.  NUMPY_LT_1_13 to get the\n-        # attention of future maintainers to check (by deleting or versioning\n-        # the if block below).  See #6899 discussion.\n-        # 2019-06-21: still needed with numpy 1.16.\n-        if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'\n-                and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):\n-            self, other = other, self\n-            op = swapped_oper\n-\n-        if self.dtype.char == 'S':\n-            other = self._encode_str(other)\n+        # If other is a string then we may need to encode/decode self or other\n+        # to allow comparison of the underlying bytestring data.\n+        if isinstance(other, str):\n+            if self.dtype.kind == 'S':\n+                other = other.encode('utf-8')\n+            elif self.dtype.kind == 'U':\n+                self = self.astype(str)\n+        elif isinstance(other, bytes) and self.dtype.kind == 'U':\n+            other = other.decode('utf-8')\n \n         # Now just let the regular ndarray.__eq__, etc., take over.\n         result = getattr(super(Column, self), op)(other)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/table/column.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "1e75f298aef2540240c63b4075d06851d55fc19a",
+  "patch": "diff --git a/astropy/table/column.py b/astropy/table/column.py\n--- a/astropy/table/column.py\n+++ b/astropy/table/column.py\n@@ -297,31 +297,23 @@ def _make_compare(oper):\n     oper : str\n         Operator name\n     \"\"\"\n-    swapped_oper = {'__eq__': '__eq__',\n-                    '__ne__': '__ne__',\n-                    '__gt__': '__lt__',\n-                    '__lt__': '__gt__',\n-                    '__ge__': '__le__',\n-                    '__le__': '__ge__'}[oper]\n-\n     def _compare(self, other):\n         op = oper  # copy enclosed ref to allow swap below\n \n-        # Special case to work around #6838.  Other combinations work OK,\n-        # see tests.test_column.test_unicode_sandwich_compare().  In this\n-        # case just swap self and other.\n-        #\n-        # This is related to an issue in numpy that was addressed in np 1.13.\n-        # However that fix does not make this problem go away, but maybe\n-        # future numpy versions will do so.  NUMPY_LT_1_13 to get the\n-        # attention of future maintainers to check (by deleting or versioning\n-        # the if block below).  See #6899 discussion.\n-        # 2019-06-21: still needed with numpy 1.16.\n-        if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'\n-                and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):\n-            self, other = other, self\n-            op = swapped_oper\n+        # If other is a Quantity, we should let it do the work, since\n+        # it can deal with our possible unit (which, for MaskedColumn,\n+        # would get dropped below, as '.data' is accessed in super()).\n+        if isinstance(other, Quantity):\n+            return NotImplemented\n \n+        # If we are unicode and other is a column with bytes, defer to it for\n+        # doing the unicode sandwich.  This avoids problems like those\n+        # discussed in #6838 and #6899.\n+        if (self.dtype.kind == 'U'\n+                and isinstance(other, Column) and other.dtype.kind == 'S'):\n+            return NotImplemented\n+\n+        # If we are bytes, encode other as needed.\n         if self.dtype.char == 'S':\n             other = self._encode_str(other)\n \n@@ -1531,10 +1523,11 @@ def __new__(cls, data=None, name=None, mask=None, fill_value=None,\n \n         # Note: do not set fill_value in the MaskedArray constructor because this does not\n         # go through the fill_value workarounds.\n-        if fill_value is None and getattr(data, 'fill_value', None) is not None:\n-            # Coerce the fill_value to the correct type since `data` may be a\n-            # different dtype than self.\n-            fill_value = np.array(data.fill_value, self.dtype)[()]\n+        if fill_value is None:\n+            data_fill_value = getattr(data, 'fill_value', None)\n+            if (data_fill_value is not None\n+                    and data_fill_value != np.ma.default_fill_value(data.dtype)):\n+                fill_value = np.array(data_fill_value, self.dtype)[()]\n         self.fill_value = fill_value\n \n         self.parent_table = None\n",
+  "test_patch": "diff --git a/astropy/table/tests/test_column.py b/astropy/table/tests/test_column.py\n--- a/astropy/table/tests/test_column.py\n+++ b/astropy/table/tests/test_column.py\n@@ -2,6 +2,7 @@\n \n from astropy.utils.tests.test_metadata import MetaBaseTest\n import operator\n+import warnings\n \n import pytest\n import numpy as np\n@@ -773,7 +774,10 @@ def test_col_unicode_sandwich_unicode():\n     assert ok.dtype.char == '?'\n     assert np.all(ok)\n \n-    assert np.all(c != [uba8, b'def'])\n+    with warnings.catch_warnings():\n+        # Ignore the FutureWarning in numpy >=1.24 (it is OK).\n+        warnings.filterwarnings('ignore', message='.*elementwise comparison failed.*')\n+        assert np.all(c != [uba8, b'def'])\n \n \n def test_masked_col_unicode_sandwich():\n",
+  "problem_statement": "BUG: Table test failures with np 1.23.0rc3\n```\r\n====================================================================== FAILURES =======================================================================\r\n__________________________________________________________ test_col_unicode_sandwich_unicode __________________________________________________________\r\nnumpy.core._exceptions._UFuncNoLoopError: ufunc 'not_equal' did not contain a loop with signature matching types (<class 'numpy.dtype[str_]'>, <class 'numpy.dtype[bytes_]'>) -> None\r\n\r\nThe above exception was the direct cause of the following exception:\r\n\r\n    def test_col_unicode_sandwich_unicode():\r\n        \"\"\"\r\n        Sanity check that Unicode Column behaves normally.\r\n        \"\"\"\r\n        uba = 'b\u00e4'\r\n        uba8 = uba.encode('utf-8')\r\n    \r\n        c = table.Column([uba, 'def'], dtype='U')\r\n        assert c[0] == uba\r\n        assert isinstance(c[:0], table.Column)\r\n        assert isinstance(c[0], str)\r\n        assert np.all(c[:2] == np.array([uba, 'def']))\r\n    \r\n        assert isinstance(c[:], table.Column)\r\n        assert c[:].dtype.char == 'U'\r\n    \r\n        ok = c == [uba, 'def']\r\n        assert type(ok) == np.ndarray\r\n        assert ok.dtype.char == '?'\r\n        assert np.all(ok)\r\n    \r\n>       assert np.all(c != [uba8, b'def'])\r\n\r\nastropy/table/tests/test_column.py:777: \r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n\r\nself = <Column dtype='str3' length=2>\r\n b\u00e4\r\ndef, other = [b'b\\xc3\\xa4', b'def']\r\n\r\n    def _compare(self, other):\r\n        op = oper  # copy enclosed ref to allow swap below\r\n    \r\n        # Special case to work around #6838.  Other combinations work OK,\r\n        # see tests.test_column.test_unicode_sandwich_compare().  In this\r\n        # case just swap self and other.\r\n        #\r\n        # This is related to an issue in numpy that was addressed in np 1.13.\r\n        # However that fix does not make this problem go away, but maybe\r\n        # future numpy versions will do so.  NUMPY_LT_1_13 to get the\r\n        # attention of future maintainers to check (by deleting or versioning\r\n        # the if block below).  See #6899 discussion.\r\n        # 2019-06-21: still needed with numpy 1.16.\r\n        if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'\r\n                and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):\r\n            self, other = other, self\r\n            op = swapped_oper\r\n    \r\n        if self.dtype.char == 'S':\r\n            other = self._encode_str(other)\r\n    \r\n        # Now just let the regular ndarray.__eq__, etc., take over.\r\n>       result = getattr(super(Column, self), op)(other)\r\nE       FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison\r\n\r\nastropy/table/column.py:329: FutureWarning\r\n______________________________________________ test_unicode_sandwich_compare[MaskedColumn-MaskedColumn] _______________________________________________\r\n\r\nclass1 = <class 'astropy.table.column.MaskedColumn'>, class2 = <class 'astropy.table.column.MaskedColumn'>\r\n\r\n    @pytest.mark.parametrize('class1', [table.MaskedColumn, table.Column])\r\n    @pytest.mark.parametrize('class2', [table.MaskedColumn, table.Column, str, list])\r\n    def test_unicode_sandwich_compare(class1, class2):\r\n        \"\"\"Test that comparing a bytestring Column/MaskedColumn with various\r\n        str (unicode) object types gives the expected result.  Tests #6838.\r\n        \"\"\"\r\n        obj1 = class1([b'a', b'c'])\r\n        if class2 is str:\r\n            obj2 = 'a'\r\n        elif class2 is list:\r\n            obj2 = ['a', 'b']\r\n        else:\r\n            obj2 = class2(['a', 'b'])\r\n    \r\n        assert np.all((obj1 == obj2) == [True, False])\r\n        assert np.all((obj2 == obj1) == [True, False])\r\n    \r\n        assert np.all((obj1 != obj2) == [False, True])\r\n        assert np.all((obj2 != obj1) == [False, True])\r\n    \r\n>       assert np.all((obj1 > obj2) == [False, True])\r\nE       TypeError: '>' not supported between instances of 'MaskedColumn' and 'MaskedColumn'\r\n\r\nastropy/table/tests/test_column.py:857: TypeError\r\n_________________________________________________ test_unicode_sandwich_compare[Column-MaskedColumn] __________________________________________________\r\n\r\nclass1 = <class 'astropy.table.column.MaskedColumn'>, class2 = <class 'astropy.table.column.Column'>\r\n\r\n    @pytest.mark.parametrize('class1', [table.MaskedColumn, table.Column])\r\n    @pytest.mark.parametrize('class2', [table.MaskedColumn, table.Column, str, list])\r\n    def test_unicode_sandwich_compare(class1, class2):\r\n        \"\"\"Test that comparing a bytestring Column/MaskedColumn with various\r\n        str (unicode) object types gives the expected result.  Tests #6838.\r\n        \"\"\"\r\n        obj1 = class1([b'a', b'c'])\r\n        if class2 is str:\r\n            obj2 = 'a'\r\n        elif class2 is list:\r\n            obj2 = ['a', 'b']\r\n        else:\r\n            obj2 = class2(['a', 'b'])\r\n    \r\n        assert np.all((obj1 == obj2) == [True, False])\r\n        assert np.all((obj2 == obj1) == [True, False])\r\n    \r\n        assert np.all((obj1 != obj2) == [False, True])\r\n        assert np.all((obj2 != obj1) == [False, True])\r\n    \r\n>       assert np.all((obj1 > obj2) == [False, True])\r\nE       TypeError: '>' not supported between instances of 'MaskedColumn' and 'Column'\r\n\r\nastropy/table/tests/test_column.py:857: TypeError\r\n____________________________________________________ test_unicode_sandwich_compare[Column-Column] _____________________________________________________\r\nnumpy.core._exceptions._UFuncNoLoopError: ufunc 'equal' did not contain a loop with signature matching types (<class 'numpy.dtype[str_]'>, <class 'numpy.dtype[bytes_]'>) -> None\r\n\r\nThe above exception was the direct cause of the following exception:\r\n\r\nclass1 = <class 'astropy.table.column.Column'>, class2 = <class 'astropy.table.column.Column'>\r\n\r\n    @pytest.mark.parametrize('class1', [table.MaskedColumn, table.Column])\r\n    @pytest.mark.parametrize('class2', [table.MaskedColumn, table.Column, str, list])\r\n    def test_unicode_sandwich_compare(class1, class2):\r\n        \"\"\"Test that comparing a bytestring Column/MaskedColumn with various\r\n        str (unicode) object types gives the expected result.  Tests #6838.\r\n        \"\"\"\r\n        obj1 = class1([b'a', b'c'])\r\n        if class2 is str:\r\n            obj2 = 'a'\r\n        elif class2 is list:\r\n            obj2 = ['a', 'b']\r\n        else:\r\n            obj2 = class2(['a', 'b'])\r\n    \r\n        assert np.all((obj1 == obj2) == [True, False])\r\n>       assert np.all((obj2 == obj1) == [True, False])\r\n\r\nastropy/table/tests/test_column.py:852: \r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n\r\nself = <Column dtype='str1' length=2>\r\na\r\nb, other = <Column dtype='bytes1' length=2>\r\na\r\nc\r\n\r\n    def _compare(self, other):\r\n        op = oper  # copy enclosed ref to allow swap below\r\n    \r\n        # Special case to work around #6838.  Other combinations work OK,\r\n        # see tests.test_column.test_unicode_sandwich_compare().  In this\r\n        # case just swap self and other.\r\n        #\r\n        # This is related to an issue in numpy that was addressed in np 1.13.\r\n        # However that fix does not make this problem go away, but maybe\r\n        # future numpy versions will do so.  NUMPY_LT_1_13 to get the\r\n        # attention of future maintainers to check (by deleting or versioning\r\n        # the if block below).  See #6899 discussion.\r\n        # 2019-06-21: still needed with numpy 1.16.\r\n        if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'\r\n                and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):\r\n            self, other = other, self\r\n            op = swapped_oper\r\n    \r\n        if self.dtype.char == 'S':\r\n            other = self._encode_str(other)\r\n    \r\n        # Now just let the regular ndarray.__eq__, etc., take over.\r\n>       result = getattr(super(Column, self), op)(other)\r\nE       FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison\r\n\r\nastropy/table/column.py:329: FutureWarning\r\n___________________________________________________ test_unicode_sandwich_compare[str-MaskedColumn] ___________________________________________________\r\n\r\nclass1 = <class 'astropy.table.column.MaskedColumn'>, class2 = <class 'str'>\r\n\r\n    @pytest.mark.parametrize('class1', [table.MaskedColumn, table.Column])\r\n    @pytest.mark.parametrize('class2', [table.MaskedColumn, table.Column, str, list])\r\n    def test_unicode_sandwich_compare(class1, class2):\r\n        \"\"\"Test that comparing a bytestring Column/MaskedColumn with various\r\n        str (unicode) object types gives the expected result.  Tests #6838.\r\n        \"\"\"\r\n        obj1 = class1([b'a', b'c'])\r\n        if class2 is str:\r\n            obj2 = 'a'\r\n        elif class2 is list:\r\n            obj2 = ['a', 'b']\r\n        else:\r\n            obj2 = class2(['a', 'b'])\r\n    \r\n        assert np.all((obj1 == obj2) == [True, False])\r\n        assert np.all((obj2 == obj1) == [True, False])\r\n    \r\n        assert np.all((obj1 != obj2) == [False, True])\r\n        assert np.all((obj2 != obj1) == [False, True])\r\n    \r\n>       assert np.all((obj1 > obj2) == [False, True])\r\nE       TypeError: '>' not supported between instances of 'MaskedColumn' and 'str'\r\n\r\nastropy/table/tests/test_column.py:857: TypeError\r\n__________________________________________________ test_unicode_sandwich_compare[list-MaskedColumn] ___________________________________________________\r\n\r\nclass1 = <class 'astropy.table.column.MaskedColumn'>, class2 = <class 'list'>\r\n\r\n    @pytest.mark.parametrize('class1', [table.MaskedColumn, table.Column])\r\n    @pytest.mark.parametrize('class2', [table.MaskedColumn, table.Column, str, list])\r\n    def test_unicode_sandwich_compare(class1, class2):\r\n        \"\"\"Test that comparing a bytestring Column/MaskedColumn with various\r\n        str (unicode) object types gives the expected result.  Tests #6838.\r\n        \"\"\"\r\n        obj1 = class1([b'a', b'c'])\r\n        if class2 is str:\r\n            obj2 = 'a'\r\n        elif class2 is list:\r\n            obj2 = ['a', 'b']\r\n        else:\r\n            obj2 = class2(['a', 'b'])\r\n    \r\n        assert np.all((obj1 == obj2) == [True, False])\r\n        assert np.all((obj2 == obj1) == [True, False])\r\n    \r\n        assert np.all((obj1 != obj2) == [False, True])\r\n        assert np.all((obj2 != obj1) == [False, True])\r\n    \r\n>       assert np.all((obj1 > obj2) == [False, True])\r\nE       TypeError: '>' not supported between instances of 'MaskedColumn' and 'list'\r\n\r\nastropy/table/tests/test_column.py:857: TypeError\r\n=============================================================== short test summary info ===============================================================\r\nFAILED astropy/table/tests/test_column.py::test_col_unicode_sandwich_unicode - FutureWarning: elementwise comparison failed; returning scalar instea...\r\nFAILED astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-MaskedColumn] - TypeError: '>' not supported between instances...\r\nFAILED astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-MaskedColumn] - TypeError: '>' not supported between instances of 'M...\r\nFAILED astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-Column] - FutureWarning: elementwise comparison failed; returning sc...\r\nFAILED astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-MaskedColumn] - TypeError: '>' not supported between instances of 'Mask...\r\nFAILED astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-MaskedColumn] - TypeError: '>' not supported between instances of 'Mas...\r\n=============================================== 6 failed, 3377 passed, 43 skipped, 14 xfailed in 25.62s ===============================================\r\n\r\n```\r\n\n",
+  "hints_text": "Related details: https://github.com/astropy/astroquery/issues/2440#issuecomment-1155588504\nxref https://github.com/numpy/numpy/pull/21041\nIt was merged 4 days ago, so does this mean it went into the RC before it hits the \"nightly wheel\" that we tests against here?\nahh, good point, I forgot that the \"nightly\" is not in fact a daily build, that at least takes the confusion away of how a partial backport could happen that makes the RC fail but the dev still pass.\nPerhaps Numpy could have a policy to refresh the \"nightly wheel\" along with RC to make sure last-minute backport like this won't go unnoticed for those who test against \"nightly\"? \ud83e\udd14 \nThere you go: https://github.com/numpy/numpy/issues/21758\nIt seems there are two related problems.\r\n1. When a column is unicode, a comparison with bytes now raises a `FutureWarning`, which leads to a failure in the tests. Here, we can either filter out the warning in our tests, or move to the future and raise a `TypeError`.\r\n2. When one of the two is a `MaskedColumn`, the unicode sandwich somehow gets skipped. This is weird...\r\nSee https://github.com/numpy/numpy/issues/21770\nLooks like Numpy is thinking to [undo the backport](https://github.com/numpy/numpy/issues/21770#issuecomment-1157077479). If that happens, then we have more time to think about this.\nAre these errors related to the same numpy backport? Maybe we finally seeing it in \"nightly wheel\" and it does not look pretty (45 failures over several subpackages) -- https://github.com/astropy/astropy/runs/6918680788?check_suite_focus=true\n@pllim - those other errors are actually due to a bug in `Quantity`, where the unit of an `initial` argument is not taken into account (and where units are no longer stripped in numpy). Working on a fix...\nWell, *some* of the new failures are resolved by my fix - but at least it also fixes behaviour for all previous versions of numpy! See #13340.\nThe remainder all seem to be due to a new check on overflow on casting - we're trying to write `1e45` in a `float32` - see #13341\nAfter merging a few PRs to fix other dev failures, these are the remaining ones in `main` now. Please advise on what we should do next to get rid of these 21 failures. Thanks!\r\n\r\nExample log: https://github.com/astropy/astropy/runs/6936666794?check_suite_focus=true\r\n\r\n```\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_pathlib\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_meta\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_noextension\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[False]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[True]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units[model11]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units[model22]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units_x_array[model11]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units_x_array[model22]\r\nFAILED .../astropy/table/tests/test_column.py::test_col_unicode_sandwich_unicode\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-Column]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_init_table.py::TestInitFromTable::test_partial_names_dtype[True]\r\n```\nFWIW, I have #13349 that picked up the RC in question here and you can see there are only 17 failures (4 less from using numpy's \"nightly wheel\").\r\n\r\nExample log: https://github.com/astropy/astropy/runs/6937240337?check_suite_focus=true\r\n\r\n```\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_pathlib\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_meta\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_noextension\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[False]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[True]\r\nFAILED .../astropy/io/misc/tests/test_hdf5.py::test_read_write_unicode_to_hdf5\r\nFAILED .../astropy/table/tests/test_column.py::test_col_unicode_sandwich_unicode\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-Column]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-MaskedColumn]\r\n```\r\n\r\nSo...\r\n\r\n# In both \"nightly wheel\" and RC\r\n\r\n```\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_pathlib\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_meta\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_noextension\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[Table]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[QTable]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[False]\r\nFAILED .../astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[True]\r\nFAILED .../astropy/table/tests/test_column.py::test_col_unicode_sandwich_unicode\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-Column]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-MaskedColumn]\r\nFAILED .../astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-MaskedColumn]\r\n```\r\n\r\n# RC only\r\n\r\nI don't understand why this one only pops up in the RC but not in dev. \ud83e\udd37 \r\n\r\n```\r\nFAILED .../astropy/io/misc/tests/test_hdf5.py::test_read_write_unicode_to_hdf5\r\n```\r\n\r\n# \"nightly wheel\" only\r\n\r\n```\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units[model11]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units[model22]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units_x_array[model11]\r\nFAILED .../astropy/modeling/tests/test_models_quantities.py::test_models_evaluate_with_units_x_array[model22]\r\nFAILED .../astropy/table/tests/test_init_table.py::TestInitFromTable::test_partial_names_dtype[True]\r\n```\n@pllim - with the corrections to the rc3, i.e., numpy 1.23.x (1.23.0rc3+10.gcc0e08d20), the failures in `io.fits`, `io.misc`, and `table` are all gone -- all tests pass! So, we can now move to address the problems in `numpy-dev`.\nWill there be a rc4?\nLooks like numpy released 1.23 \ud83e\udd1e \nI am anxiously waiting for the \"nightly wheel\" to catch up. The other CI jobs passing even after the new release, so at least that is a good sign. \ud83e\udd1e \nI actually don't know that `-dev` was changed too - I think they just reverted the bad commit from 1.23, with the idea that for 1.24 there would be a fix (IIRC, https://github.com/numpy/numpy/pull/21812 would solve at least some of the problems)",
+  "created_at": "2022-06-23T20:06:08Z",
+  "version": "5.0",
+  "FAIL_TO_PASS": "[\"astropy/table/tests/test_column.py::TestColumn::test_quantity_comparison[MaskedColumn]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-Column]\"]",
+  "PASS_TO_PASS": "[\"astropy/table/tests/test_column.py::TestAttrEqual::test_10[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_10[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_11[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_11[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_12[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_12[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_13[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_13[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_5[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_5[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_6[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_6[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_7[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_7[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_8[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_8[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_9[Column]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_9[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestAttrEqual::test_col_and_masked_col\", \"astropy/table/tests/test_column.py::TestColumn::test_array_wrap\", \"astropy/table/tests/test_column.py::TestColumn::test_attrs_survive_getitem_after_change[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_attrs_survive_getitem_after_change[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_convert_numpy_array[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_convert_numpy_array[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_convert_unit[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_convert_unit[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_format[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_format[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_axis[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_axis[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_basic[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_basic[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_masked\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_masked_multidim\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_multidim[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_multidim[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_object[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_object[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_string_expand[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_string_expand[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_string_masked_values\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_string_type_error[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_insert_string_type_error[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_item_access_type[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_item_access_type[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_mask_on_non_masked_table\", \"astropy/table/tests/test_column.py::TestColumn::test_masked_multidim_as_list\", \"astropy/table/tests/test_column.py::TestColumn::test_name_none[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_name_none[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_numpy_boolean_ufuncs[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_numpy_boolean_ufuncs[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_numpy_ops[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_numpy_ops[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_quantity_comparison[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_quantity_init[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_quantity_init[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_subclass[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_subclass[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_to_funcunit_quantity[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_to_funcunit_quantity[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_to_quantity[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_to_quantity[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestColumn::test_view[Column]\", \"astropy/table/tests/test_column.py::TestColumn::test_view[MaskedColumn]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_init[meta0]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_init[meta1]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_init[meta2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_set[meta0]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_set[meta1]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_mapping_set[meta2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_meta_fits_header\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_init[1.2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_init[ceci\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_init[meta2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_set[1.2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_set[ceci\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_non_mapping_set[meta2]\", \"astropy/table/tests/test_column.py::TestMetaColumn::test_none\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_init[meta0]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_init[meta1]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_init[meta2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_set[meta0]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_set[meta1]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_mapping_set[meta2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_meta_fits_header\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_init[1.2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_init[ceci\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_init[meta2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_set[1.2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_set[ceci\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_non_mapping_set[meta2]\", \"astropy/table/tests/test_column.py::TestMetaMaskedColumn::test_none\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_bytes[Column]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_bytes[MaskedColumn]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_bytes_obj[Column]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_bytes_obj[MaskedColumn]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_create_from_str[Column]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_create_from_str[MaskedColumn]\", \"astropy/table/tests/test_column.py::test_col_unicode_sandwich_unicode\", \"astropy/table/tests/test_column.py::test_column_value_access\", \"astropy/table/tests/test_column.py::test_getitem_metadata_regression\", \"astropy/table/tests/test_column.py::test_masked_col_unicode_sandwich\", \"astropy/table/tests/test_column.py::test_masked_column_serialize_method_propagation\", \"astropy/table/tests/test_column.py::test_qtable_column_conversion\", \"astropy/table/tests/test_column.py::test_scalar_column\", \"astropy/table/tests/test_column.py::test_searchsorted[Column-S]\", \"astropy/table/tests/test_column.py::test_searchsorted[Column-U]\", \"astropy/table/tests/test_column.py::test_searchsorted[Column-i]\", \"astropy/table/tests/test_column.py::test_searchsorted[MaskedColumn-S]\", \"astropy/table/tests/test_column.py::test_searchsorted[MaskedColumn-U]\", \"astropy/table/tests/test_column.py::test_searchsorted[MaskedColumn-i]\", \"astropy/table/tests/test_column.py::test_string_truncation_warning[False]\", \"astropy/table/tests/test_column.py::test_string_truncation_warning[True]\", \"astropy/table/tests/test_column.py::test_string_truncation_warning_masked\", \"astropy/table/tests/test_column.py::test_structured_empty_column_init[f4,(2,)f8]\", \"astropy/table/tests/test_column.py::test_structured_empty_column_init[i4,f4]\", \"astropy/table/tests/test_column.py::test_structured_masked_column_roundtrip\", \"astropy/table/tests/test_column.py::test_unicode_guidelines\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[Column-MaskedColumn]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-Column]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[MaskedColumn-MaskedColumn]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-Column]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[list-MaskedColumn]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-Column]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_compare[str-MaskedColumn]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_masked_compare\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_set[Column]\", \"astropy/table/tests/test_column.py::test_unicode_sandwich_set[MaskedColumn]\"]",
+  "environment_setup_commit": "cdf311e0714e611d48b0a31eb1f0e2cbffab7f23",
+  "patch_files": [
+    "astropy/table/column.py"
+  ],
+  "test_patch_files": [
+    "astropy/table/tests/test_column.py"
+  ],
+  "patch_diff_details": {
+    "astropy/table/column.py": {
+      "diffs": [
+        {
+          "start_line_old": 300,
+          "end_line_old": 323,
+          "file_pos": 1,
+          "file_context_length": 14772,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn.__array_finalize___BaseColumn.__array_finalize__.2.9.self.info.1",
+          "closest_snippet_line_distance": 355
+        },
+        {
+          "start_line_old": 1534,
+          "end_line_old": 1537,
+          "file_pos": 1,
+          "file_context_length": 14772,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/table/column.py_Column.__setitem___Column.__le__.1",
+          "closest_snippet_line_distance": 251,
+          "pos": 16,
+          "context_length": 6747
+        }
+      ]
+    }
+  },
+  "vectors": 4529,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/table/column.py__make_compare._compare__make_compare.4.1",
+      "distance": 0.7320294380187988,
+      "file_path": "astropy/table/column.py",
+      "start_line": 307,
+      "end_line": 333,
+      "tokens": 314,
+      "context_length": 314,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn.attrs_equal_BaseColumn._formatter.1.1",
+      "distance": 0.8397197723388672,
+      "file_path": "astropy/table/column.py",
+      "start_line": 778,
+      "end_line": 805,
+      "tokens": 201,
+      "context_length": 515,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._verify_keywords.23_Column._verify_keywords.27.1",
+      "distance": 0.9104058742523193,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1137,
+      "end_line": 1198,
+      "tokens": 629,
+      "context_length": 1144
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_itertools__comparison_functions.1",
+      "distance": 0.9149181842803955,
+      "file_path": "astropy/table/column.py",
+      "start_line": 3,
+      "end_line": 55,
+      "tokens": 391,
+      "context_length": 1535,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/table/column.py__make_compare__make_compare.swapped_oper.1",
+      "distance": 0.9157131314277649,
+      "file_path": "astropy/table/column.py",
+      "start_line": 290,
+      "end_line": 305,
+      "tokens": 123,
+      "context_length": 1658,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_TableLocIndices___doctest_requires__.1",
+      "distance": 0.9214543104171753,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2,
+      "end_line": 75,
+      "tokens": 641,
+      "context_length": 2299
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column.__repr___Column.__hash__.2.1",
+      "distance": 0.9287244081497192,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 676,
+      "end_line": 702,
+      "tokens": 205,
+      "context_length": 2504
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn.__setitem___",
+      "distance": 0.9474680423736572,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1688,
+      "end_line": 1715,
+      "tokens": 269,
+      "context_length": 2773,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._verify_keywords.12_Column._verify_keywords.16",
+      "distance": 0.956275463104248,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 998,
+      "end_line": 1068,
+      "tokens": 745,
+      "context_length": 3518
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_Column.__setitem___Column.__le__.1",
+      "distance": 0.9595381617546082,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1266,
+      "end_line": 1286,
+      "tokens": 195,
+      "context_length": 3713,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.values_equal_Table.values_equal.8.1",
+      "distance": 0.9652065634727478,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3478,
+      "end_line": 3551,
+      "tokens": 641,
+      "context_length": 4354
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column.coord_type_Column.copy.5.1",
+      "distance": 0.9696877002716064,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 847,
+      "end_line": 920,
+      "tokens": 534,
+      "context_length": 4888
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._verify_keywords.17_Column._verify_keywords.22.8.2.1",
+      "distance": 0.9851663708686829,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1069,
+      "end_line": 1135,
+      "tokens": 697,
+      "context_length": 5585
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/table/table.py_ColumnType_",
+      "distance": 0.9871639013290405,
+      "file_path": "astropy/io/misc/asdf/tags/table/table.py",
+      "start_line": 96,
+      "end_line": 136,
+      "tokens": 262,
+      "context_length": 5847
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/io/votable/converters.py_numpy_dtype_to_field_mapping__all_matching_dtype.4.1",
+      "distance": 0.9871684908866882,
+      "file_path": "astropy/io/votable/converters.py",
+      "start_line": 1328,
+      "end_line": 1359,
+      "tokens": 243,
+      "context_length": 6090
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn.__new___MaskedColumn.__new__.22.1",
+      "distance": 0.9879251718521118,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1490,
+      "end_line": 1546,
+      "tokens": 657,
+      "context_length": 6747,
+      "file_pos": 5
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._rows_equal_Table._rows_equal.4.1",
+      "distance": 0.9946683645248413,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3431,
+      "end_line": 3476,
+      "tokens": 388,
+      "context_length": 7135
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/io/fits/diff.py_TableDataDiff._report_TableDataDiff._report.13",
+      "distance": 1.0097967386245728,
+      "file_path": "astropy/io/fits/diff.py",
+      "start_line": 1398,
+      "end_line": 1447,
+      "tokens": 510,
+      "context_length": 7645
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_Column.__new___Column.__new__.3.1",
+      "distance": 1.0099780559539795,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1166,
+      "end_line": 1178,
+      "tokens": 139,
+      "context_length": 7784,
+      "file_pos": 6
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_BaseHeader.check_column_names_BaseHeader.check_column_names.6.1",
+      "distance": 1.010045051574707,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 714,
+      "end_line": 749,
+      "tokens": 353,
+      "context_length": 8137
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_copy_61",
+      "distance": 1.0209360122680664,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 3,
+      "end_line": 77,
+      "tokens": 761,
+      "context_length": 8898
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/table/__init__.py__config___all__.1",
+      "distance": 1.0221176147460938,
+      "file_path": "astropy/table/__init__.py",
+      "start_line": 3,
+      "end_line": 14,
+      "tokens": 188,
+      "context_length": 9086
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/io/fits/diff.py_TableDataDiff._diff_TableDataDiff._diff.colsa.self.diff_ratio.1",
+      "distance": 1.0243984460830688,
+      "file_path": "astropy/io/fits/diff.py",
+      "start_line": 1258,
+      "end_line": 1396,
+      "tokens": 1274,
+      "context_length": 10360
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_92_DEFAULT_ASCII_TNULL.1",
+      "distance": 1.0359100103378296,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 129,
+      "end_line": 183,
+      "tokens": 663,
+      "context_length": 11023
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn_BaseColumn.__new__.11.1",
+      "distance": 1.0407700538635254,
+      "file_path": "astropy/table/column.py",
+      "start_line": 480,
+      "end_line": 537,
+      "tokens": 487,
+      "context_length": 11510,
+      "file_pos": 8
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn._encode_str_BaseColumn.tolist.1.2.1.1",
+      "distance": 1.0408260822296143,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1068,
+      "end_line": 1092,
+      "tokens": 196,
+      "context_length": 11706,
+      "file_pos": 8
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._convert_to_valid_data_type_Column._convert_to_valid_data_type.2.3.4.5.numpy_format.12.1",
+      "distance": 1.0420968532562256,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1280,
+      "end_line": 1343,
+      "tokens": 633,
+      "context_length": 12339
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.from_pandas.9_Table.info.1",
+      "distance": 1.053945779800415,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3850,
+      "end_line": 3898,
+      "tokens": 495,
+      "context_length": 12834
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_masked_AllType.1",
+      "distance": 1.0588970184326172,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 183,
+      "end_line": 267,
+      "tokens": 404,
+      "context_length": 13238
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._replace_column_warnings_Table._replace_column_warnings.13.changed_attrs.5.2",
+      "distance": 1.0608479976654053,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2319,
+      "end_line": 2374,
+      "tokens": 468,
+      "context_length": 13706
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_Column._repr_html__Column._check_string_truncate.10.1",
+      "distance": 1.0632686614990234,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1226,
+      "end_line": 1264,
+      "tokens": 322,
+      "context_length": 14028,
+      "file_pos": 8
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/cosmology/funcs/comparison.py_cosmology_equal.2_cosmology_equal.5.1",
+      "distance": 1.0649458169937134,
+      "file_path": "astropy/cosmology/funcs/comparison.py",
+      "start_line": 304,
+      "end_line": 321,
+      "tokens": 201,
+      "context_length": 14229
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumnInfo._represent_as_dict_MaskedColumnInfo._represent_as_dict.11.1",
+      "distance": 1.0650463104248047,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1376,
+      "end_line": 1408,
+      "tokens": 325,
+      "context_length": 14554,
+      "file_pos": 9
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_EcsvOutputter._convert_vals_EcsvOutputter._convert_vals.2.1.4.1",
+      "distance": 1.0651392936706543,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 236,
+      "end_line": 340,
+      "tokens": 1111,
+      "context_length": 15665
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_Column.__setattr___Column.__setattr__.3.1.3.1.1",
+      "distance": 1.0665600299835205,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1180,
+      "end_line": 1192,
+      "tokens": 131,
+      "context_length": 15796,
+      "file_pos": 10
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._get_col_cls_for_table_Table._get_col_cls_for_table.4.1",
+      "distance": 1.0667303800582886,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1337,
+      "end_line": 1360,
+      "tokens": 204,
+      "context_length": 16000
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn.searchsorted_BaseColumn.searchsorted.__doc__.1",
+      "distance": 1.066953420639038,
+      "file_path": "astropy/table/column.py",
+      "start_line": 935,
+      "end_line": 945,
+      "tokens": 159,
+      "context_length": 16159,
+      "file_pos": 10
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._repr_html__Table._is_mixin_for_table.5.1",
+      "distance": 1.067136526107788,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1525,
+      "end_line": 1583,
+      "tokens": 453,
+      "context_length": 16612
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/core.py_MaskedNDArray._eq_simple_MaskedNDArray.__ne__.6.1",
+      "distance": 1.0673176050186157,
+      "file_path": "astropy/utils/masked/core.py",
+      "start_line": 619,
+      "end_line": 646,
+      "tokens": 296,
+      "context_length": 16908
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_Column._base_repr__Column._base_repr_.2.10.1",
+      "distance": 1.0683555603027344,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1194,
+      "end_line": 1224,
+      "tokens": 253,
+      "context_length": 17161,
+      "file_pos": 11
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/table/groups.py_ColumnGroups.aggregate_ColumnGroups.aggregate.12.1",
+      "distance": 1.0701820850372314,
+      "file_path": "astropy/table/groups.py",
+      "start_line": 240,
+      "end_line": 281,
+      "tokens": 436,
+      "context_length": 17597
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._convert_col_for_table_Table._convert_col_for_table.3.1",
+      "distance": 1.0743496417999268,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1362,
+      "end_line": 1374,
+      "tokens": 124,
+      "context_length": 17721
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn._copy_attrs_slice_MaskedColumn._copy_attrs_slice.3.5.1",
+      "distance": 1.079756259918213,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1672,
+      "end_line": 1686,
+      "tokens": 184,
+      "context_length": 17905,
+      "file_pos": 12
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/cosmology/funcs/comparison.py_30_cosmology_equal.1",
+      "distance": 1.0800403356552124,
+      "file_path": "astropy/cosmology/funcs/comparison.py",
+      "start_line": 205,
+      "end_line": 303,
+      "tokens": 980,
+      "context_length": 18885
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/mrt.py_MrtHeader.write.10_MrtHeader.write.10.4.4.6.4",
+      "distance": 1.0832034349441528,
+      "file_path": "astropy/io/ascii/mrt.py",
+      "start_line": 431,
+      "end_line": 532,
+      "tokens": 1277,
+      "context_length": 20162
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W19_W20.default_args.1",
+      "distance": 1.0842162370681763,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 608,
+      "end_line": 627,
+      "tokens": 166,
+      "context_length": 20328
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._ipython_key_completions__Table.items.1.1",
+      "distance": 1.0877948999404907,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1968,
+      "end_line": 2028,
+      "tokens": 367,
+      "context_length": 20695
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_MaskedColumn_MaskedColumn.info.1",
+      "distance": 1.0880603790283203,
+      "file_path": "astropy/table/column.py",
+      "start_line": 1411,
+      "end_line": 1488,
+      "tokens": 745,
+      "context_length": 21440,
+      "file_pos": 14
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W46_W49.message_template.1",
+      "distance": 1.0896728038787842,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 999,
+      "end_line": 1036,
+      "tokens": 236,
+      "context_length": 21676
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/tabular.py_TabularType.to_tree_transform_",
+      "distance": 1.0928057432174683,
+      "file_path": "astropy/io/misc/asdf/tags/transform/tabular.py",
+      "start_line": 46,
+      "end_line": 88,
+      "tokens": 377,
+      "context_length": 22053
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column.array_8_Column.name.7.1",
+      "distance": 1.0938196182250977,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 812,
+      "end_line": 845,
+      "tokens": 301,
+      "context_length": 22354
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_ColDefs._init_from_table_ColDefs.__deepcopy__.1.1",
+      "distance": 1.0942535400390625,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1467,
+      "end_line": 1522,
+      "tokens": 490,
+      "context_length": 22844
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Moffat1DType.assert_equal_Moffat1DType.assert_equal.2",
+      "distance": 1.0949314832687378,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 389,
+      "end_line": 398,
+      "tokens": 120,
+      "context_length": 22964
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Planar2D.assert_equal_Planar2D.assert_equal.2",
+      "distance": 1.0960782766342163,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 454,
+      "end_line": 462,
+      "tokens": 113,
+      "context_length": 23077
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._verify_keywords_Column._verify_keywords.11",
+      "distance": 1.09779691696167,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 951,
+      "end_line": 997,
+      "tokens": 496,
+      "context_length": 23573
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/astropy/astropy/table/table_helpers.py_3_TimingTables.__init__.self.bool_mask.1",
+      "distance": 1.0993566513061523,
+      "file_path": "astropy/table/table_helpers.py",
+      "start_line": 9,
+      "end_line": 53,
+      "tokens": 421,
+      "context_length": 23994
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Moffat2DType.assert_equal_Moffat2DType.assert_equal.2",
+      "distance": 1.100583791732788,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 423,
+      "end_line": 433,
+      "tokens": 134,
+      "context_length": 24128
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._guess_format_Column._guess_format.3.1",
+      "distance": 1.1007531881332397,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1237,
+      "end_line": 1278,
+      "tokens": 415,
+      "context_length": 24543
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.convert_bytestring_to_unicode_Table.convert_unicode_to_bytestring.2",
+      "distance": 1.101208209991455,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2710,
+      "end_line": 2730,
+      "tokens": 191,
+      "context_length": 24734
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_KingProjectedAnalytic1DType.assert_equal_KingProjectedAnalytic1DType.assert_equal.2",
+      "distance": 1.1021229028701782,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 303,
+      "end_line": 311,
+      "tokens": 118,
+      "context_length": 24852
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/transform/functional_models.py_Gaussian2DType.assert_equal_Gaussian2DType.assert_equal.2",
+      "distance": 1.1027729511260986,
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "start_line": 269,
+      "end_line": 280,
+      "tokens": 145,
+      "context_length": 24997
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._convert_data_to_col.12_Table._convert_data_to_col.15.1",
+      "distance": 1.103794813156128,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1252,
+      "end_line": 1317,
+      "tokens": 706,
+      "context_length": 25703
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/astropy/astropy/nddata/_testing.py_3_assert_wcs_seem_equal.10",
+      "distance": 1.1053701639175415,
+      "file_path": "astropy/nddata/_testing.py",
+      "start_line": 4,
+      "end_line": 24,
+      "tokens": 179,
+      "context_length": 25882
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__cmp_recformats__cmp_recformats.2.2.2.1",
+      "distance": 1.1068360805511475,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 2311,
+      "end_line": 2320,
+      "tokens": 110,
+      "context_length": 25992
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/astropy/astropy/io/votable/validator/result.py_get_result_subsets_get_result_subsets.tables.1",
+      "distance": 1.1084694862365723,
+      "file_path": "astropy/io/votable/validator/result.py",
+      "start_line": 236,
+      "end_line": 330,
+      "tokens": 796,
+      "context_length": 26788
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/astropy/astropy/table/meta.py__get_variable_length_array_shape__get_datatype_from_dtype.5.1",
+      "distance": 1.1104294061660767,
+      "file_path": "astropy/table/meta.py",
+      "start_line": 159,
+      "end_line": 218,
+      "tokens": 511,
+      "context_length": 27299
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_ColumnInfo._represent_as_dict_ColumnInfo._represent_as_dict.38.1",
+      "distance": 1.1137140989303589,
+      "file_path": "astropy/table/column.py",
+      "start_line": 351,
+      "end_line": 409,
+      "tokens": 609,
+      "context_length": 27908,
+      "file_pos": 20
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/astropy/astropy/timeseries/core.py_BaseTimeSeries_",
+      "distance": 1.1147572994232178,
+      "file_path": "astropy/timeseries/core.py",
+      "start_line": 46,
+      "end_line": 101,
+      "tokens": 443,
+      "context_length": 28351
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_BaseColumn.__array_finalize___BaseColumn.__array_finalize__.2.9.self.info.1",
+      "distance": 1.115722417831421,
+      "file_path": "astropy/table/column.py",
+      "start_line": 662,
+      "end_line": 678,
+      "tokens": 175,
+      "context_length": 28526,
+      "file_pos": 21
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W51_W55.default_args.1",
+      "distance": 1.116823673248291,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 1054,
+      "end_line": 1105,
+      "tokens": 365,
+      "context_length": 28891
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._convert_string_dtype_Table._convert_string_dtype.2.1.2",
+      "distance": 1.119091510772705,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2680,
+      "end_line": 2708,
+      "tokens": 252,
+      "context_length": 29143
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/astropy/astropy/utils/masked/function_helpers.py_20_31",
+      "distance": 1.119929313659668,
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "start_line": 80,
+      "end_line": 154,
+      "tokens": 773,
+      "context_length": 29916
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/__init__.py_masked_",
+      "distance": 1.1207671165466309,
+      "file_path": "astropy/io/ascii/__init__.py",
+      "start_line": 7,
+      "end_line": 48,
+      "tokens": 302,
+      "context_length": 30218
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/astropy/astropy/wcs/docstrings.py_compare_crln_obs.1",
+      "distance": 1.122420072555542,
+      "file_path": "astropy/wcs/docstrings.py",
+      "start_line": 684,
+      "end_line": 773,
+      "tokens": 634,
+      "context_length": 30852
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/astropy/astropy/extern/configobj/validate.py__test2__test3.1",
+      "distance": 1.1238526105880737,
+      "file_path": "astropy/extern/configobj/validate.py",
+      "start_line": 1420,
+      "end_line": 1456,
+      "tokens": 348,
+      "context_length": 31200
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/table/column.py",
+      "position": 1,
+      "tokens": 14772,
+      "context_length": 14772
+    },
+    {
+      "file_path": "astropy/io/fits/column.py",
+      "position": 2,
+      "tokens": 22337,
+      "context_length": 37109
+    },
+    {
+      "file_path": "astropy/table/table.py",
+      "position": 3,
+      "tokens": 32807,
+      "context_length": 69916
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/table/table.py",
+      "position": 4,
+      "tokens": 999,
+      "context_length": 70915
+    },
+    {
+      "file_path": "astropy/io/votable/converters.py",
+      "position": 5,
+      "tokens": 9954,
+      "context_length": 80869
+    },
+    {
+      "file_path": "astropy/io/fits/diff.py",
+      "position": 6,
+      "tokens": 12859,
+      "context_length": 93728
+    },
+    {
+      "file_path": "astropy/io/ascii/core.py",
+      "position": 7,
+      "tokens": 13623,
+      "context_length": 107351
+    },
+    {
+      "file_path": "astropy/table/__init__.py",
+      "position": 8,
+      "tokens": 845,
+      "context_length": 108196
+    },
+    {
+      "file_path": "astropy/cosmology/funcs/comparison.py",
+      "position": 9,
+      "tokens": 3503,
+      "context_length": 111699
+    },
+    {
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "position": 10,
+      "tokens": 4197,
+      "context_length": 115896
+    },
+    {
+      "file_path": "astropy/utils/masked/core.py",
+      "position": 11,
+      "tokens": 10240,
+      "context_length": 126136
+    },
+    {
+      "file_path": "astropy/table/groups.py",
+      "position": 12,
+      "tokens": 3176,
+      "context_length": 129312
+    },
+    {
+      "file_path": "astropy/io/ascii/mrt.py",
+      "position": 13,
+      "tokens": 6040,
+      "context_length": 135352
+    },
+    {
+      "file_path": "astropy/io/votable/exceptions.py",
+      "position": 14,
+      "tokens": 13324,
+      "context_length": 148676
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/transform/tabular.py",
+      "position": 15,
+      "tokens": 739,
+      "context_length": 149415
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/transform/functional_models.py",
+      "position": 16,
+      "tokens": 7459,
+      "context_length": 156874
+    },
+    {
+      "file_path": "astropy/table/table_helpers.py",
+      "position": 17,
+      "tokens": 1555,
+      "context_length": 158429
+    },
+    {
+      "file_path": "astropy/nddata/_testing.py",
+      "position": 18,
+      "tokens": 495,
+      "context_length": 158924
+    },
+    {
+      "file_path": "astropy/io/votable/validator/result.py",
+      "position": 19,
+      "tokens": 2524,
+      "context_length": 161448
+    },
+    {
+      "file_path": "astropy/table/meta.py",
+      "position": 20,
+      "tokens": 3135,
+      "context_length": 164583
+    },
+    {
+      "file_path": "astropy/timeseries/core.py",
+      "position": 21,
+      "tokens": 714,
+      "context_length": 165297
+    },
+    {
+      "file_path": "astropy/utils/masked/function_helpers.py",
+      "position": 22,
+      "tokens": 9052,
+      "context_length": 174349
+    },
+    {
+      "file_path": "astropy/io/ascii/__init__.py",
+      "position": 23,
+      "tokens": 338,
+      "context_length": 174687
+    },
+    {
+      "file_path": "astropy/wcs/docstrings.py",
+      "position": 24,
+      "tokens": 21453,
+      "context_length": 196140
+    },
+    {
+      "file_path": "astropy/extern/configobj/validate.py",
+      "position": 25,
+      "tokens": 12632,
+      "context_length": 208772
+    }
+  ]
+}

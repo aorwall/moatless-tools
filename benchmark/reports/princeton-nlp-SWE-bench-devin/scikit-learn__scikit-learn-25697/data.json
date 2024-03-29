@@ -1,0 +1,1023 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-25697",
+  "model_patch": "diff --git a/sklearn/linear_model/_bayes.py b/sklearn/linear_model/_bayes.py\nindex 7f712b12b..efa786612 100644\n--- a/sklearn/linear_model/_bayes.py\n+++ b/sklearn/linear_model/_bayes.py\n@@ -5,6 +5,7 @@ Various bayesian regression\n # Authors: V. Michel, F. Pedregosa, A. Gramfort\n # License: BSD 3 clause\n \n+import warnings\n from math import log\n from numbers import Integral, Real\n import numpy as np\n@@ -32,7 +33,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n \n     Parameters\n     ----------\n-    n_iter : int, default=300\n+    max_iter : int, default=300\n         Maximum number of iterations. Should be greater than or equal to 1.\n \n     tol : float, default=1e-3\n@@ -162,7 +163,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n     \"\"\"\n \n     _parameter_constraints: dict = {\n-        \"n_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n+        \"max_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n         \"tol\": [Interval(Real, 0, None, closed=\"neither\")],\n         \"alpha_1\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_2\": [Interval(Real, 0, None, closed=\"left\")],\n@@ -179,7 +180,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n     def __init__(\n         self,\n         *,\n-        n_iter=300,\n+        max_iter=300,\n         tol=1.0e-3,\n         alpha_1=1.0e-6,\n         alpha_2=1.0e-6,\n@@ -192,7 +193,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n         copy_X=True,\n         verbose=False,\n     ):\n-        self.n_iter = n_iter\n+        self.max_iter = max_iter\n         self.tol = tol\n         self.alpha_1 = alpha_1\n         self.alpha_2 = alpha_2\n@@ -214,12 +215,8 @@ class BayesianRidge(RegressorMixin, LinearModel):\n             Training data.\n         y : ndarray of shape (n_samples,)\n             Target values. Will be cast to X's dtype if necessary.\n-\n         sample_weight : ndarray of shape (n_samples,), default=None\n-            Individual weights for each sample.\n-\n-            .. versionadded:: 0.20\n-               parameter *sample_weight* support to BayesianRidge.\n+            Individual weights for each sample\n \n         Returns\n         -------\n@@ -234,17 +231,9 @@ class BayesianRidge(RegressorMixin, LinearModel):\n             sample_weight = _check_sample_weight(sample_weight, X, dtype=X.dtype)\n \n         X, y, X_offset_, y_offset_, X_scale_ = _preprocess_data(\n-            X,\n-            y,\n-            self.fit_intercept,\n-            copy=self.copy_X,\n-            sample_weight=sample_weight,\n+            X, y, self.fit_intercept, copy=self.copy_X, sample_weight=sample_weight\n         )\n \n-        if sample_weight is not None:\n-            # Sample weight can be implemented via a simple rescaling.\n-            X, y, _ = _rescale_data(X, y, sample_weight)\n-\n         self.X_offset_ = X_offset_\n         self.X_scale_ = X_scale_\n         n_samples, n_features = X.shape\n@@ -273,8 +262,11 @@ class BayesianRidge(RegressorMixin, LinearModel):\n         U, S, Vh = linalg.svd(X, full_matrices=False)\n         eigen_vals_ = S**2\n \n+        coef_ = np.zeros(n_features)\n+\n         # Convergence loop of the bayesian ridge regression\n-        for iter_ in range(self.n_iter):\n+        iter_ = 0  # Initialize iter_ to ensure it's defined even if the loop doesn't execute\n+        for iter_ in range(self.max_iter):\n \n             # update posterior mean coef_ based on alpha_ and lambda_ and\n             # compute corresponding rmse\n@@ -428,6 +420,10 @@ class ARDRegression(RegressorMixin, LinearModel):\n \n     Read more in the :ref:`User Guide <bayesian_regression>`.\n \n+    .. deprecated:: 1.0\n+        The `n_iter` parameter is deprecated in version 1.0 and will be removed in version 1.2.\n+        Use `max_iter` instead.\n+\n     Parameters\n     ----------\n     n_iter : int, default=300\n@@ -542,7 +538,7 @@ class ARDRegression(RegressorMixin, LinearModel):\n     \"\"\"\n \n     _parameter_constraints: dict = {\n-        \"n_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n+        \"max_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n         \"tol\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_1\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_2\": [Interval(Real, 0, None, closed=\"left\")],\n@@ -558,27 +554,27 @@ class ARDRegression(RegressorMixin, LinearModel):\n     def __init__(\n         self,\n         *,\n-        n_iter=300,\n-        tol=1.0e-3,\n-        alpha_1=1.0e-6,\n-        alpha_2=1.0e-6,\n-        lambda_1=1.0e-6,\n-        lambda_2=1.0e-6,\n+        max_iter=300,\n+        tol=1e-3,\n+        alpha_1=1e-6,\n+        alpha_2=1e-6,\n+        lambda_1=1e-6,\n+        lambda_2=1e-6,\n         compute_score=False,\n-        threshold_lambda=1.0e4,\n+        threshold_lambda=1e4,\n         fit_intercept=True,\n         copy_X=True,\n         verbose=False,\n     ):\n-        self.n_iter = n_iter\n+        self.max_iter = max_iter\n         self.tol = tol\n-        self.fit_intercept = fit_intercept\n         self.alpha_1 = alpha_1\n         self.alpha_2 = alpha_2\n         self.lambda_1 = lambda_1\n         self.lambda_2 = lambda_2\n         self.compute_score = compute_score\n         self.threshold_lambda = threshold_lambda\n+        self.fit_intercept = fit_intercept\n         self.copy_X = copy_X\n         self.verbose = verbose\n \n@@ -648,7 +644,8 @@ class ARDRegression(RegressorMixin, LinearModel):\n             else self._update_sigma_woodbury\n         )\n         # Iterative procedure of ARDRegression\n-        for iter_ in range(self.n_iter):\n+        iter_ = 0  # Initialize iter_ to ensure it's defined even if the loop doesn't execute\n+        for iter_ in range(self.max_iter):\n             sigma_ = update_sigma(X, alpha_, lambda_, keep_lambda)\n             coef_ = update_coeff(X, y, coef_, alpha_, keep_lambda, sigma_)\n \n@@ -699,6 +696,7 @@ class ARDRegression(RegressorMixin, LinearModel):\n         self.alpha_ = alpha_\n         self.sigma_ = sigma_\n         self.lambda_ = lambda_\n+        self.n_iter_ = iter_ + 1\n         self._set_intercept(X_offset_, y_offset_, X_scale_)\n         return self\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/linear_model/_bayes.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "097c3683a73c5805a84e6eada71e4928cb35496e",
+  "patch": "diff --git a/sklearn/linear_model/_bayes.py b/sklearn/linear_model/_bayes.py\n--- a/sklearn/linear_model/_bayes.py\n+++ b/sklearn/linear_model/_bayes.py\n@@ -5,6 +5,7 @@\n # Authors: V. Michel, F. Pedregosa, A. Gramfort\n # License: BSD 3 clause\n \n+import warnings\n from math import log\n from numbers import Integral, Real\n import numpy as np\n@@ -15,7 +16,49 @@\n from ..utils.extmath import fast_logdet\n from scipy.linalg import pinvh\n from ..utils.validation import _check_sample_weight\n-from ..utils._param_validation import Interval\n+from ..utils._param_validation import Interval, Hidden, StrOptions\n+\n+\n+# TODO(1.5) Remove\n+def _deprecate_n_iter(n_iter, max_iter):\n+    \"\"\"Deprecates n_iter in favour of max_iter. Checks if the n_iter has been\n+    used instead of max_iter and generates a deprecation warning if True.\n+\n+    Parameters\n+    ----------\n+    n_iter : int,\n+        Value of n_iter attribute passed by the estimator.\n+\n+    max_iter : int, default=None\n+        Value of max_iter attribute passed by the estimator.\n+        If `None`, it corresponds to `max_iter=300`.\n+\n+    Returns\n+    -------\n+    max_iter : int,\n+        Value of max_iter which shall further be used by the estimator.\n+\n+    Notes\n+    -----\n+    This function should be completely removed in 1.5.\n+    \"\"\"\n+    if n_iter != \"deprecated\":\n+        if max_iter is not None:\n+            raise ValueError(\n+                \"Both `n_iter` and `max_iter` attributes were set. Attribute\"\n+                \" `n_iter` was deprecated in version 1.3 and will be removed in\"\n+                \" 1.5. To avoid this error, only set the `max_iter` attribute.\"\n+            )\n+        warnings.warn(\n+            \"'n_iter' was renamed to 'max_iter' in version 1.3 and \"\n+            \"will be removed in 1.5\",\n+            FutureWarning,\n+        )\n+        max_iter = n_iter\n+    elif max_iter is None:\n+        max_iter = 300\n+    return max_iter\n+\n \n ###############################################################################\n # BayesianRidge regression\n@@ -32,8 +75,12 @@ class BayesianRidge(RegressorMixin, LinearModel):\n \n     Parameters\n     ----------\n-    n_iter : int, default=300\n-        Maximum number of iterations. Should be greater than or equal to 1.\n+    max_iter : int, default=None\n+        Maximum number of iterations over the complete dataset before\n+        stopping independently of any early stopping criterion. If `None`, it\n+        corresponds to `max_iter=300`.\n+\n+        .. versionchanged:: 1.3\n \n     tol : float, default=1e-3\n         Stop the algorithm if w has converged.\n@@ -83,6 +130,13 @@ class BayesianRidge(RegressorMixin, LinearModel):\n     verbose : bool, default=False\n         Verbose mode when fitting the model.\n \n+    n_iter : int\n+        Maximum number of iterations. Should be greater than or equal to 1.\n+\n+        .. deprecated:: 1.3\n+           `n_iter` is deprecated in 1.3 and will be removed in 1.5. Use\n+           `max_iter` instead.\n+\n     Attributes\n     ----------\n     coef_ : array-like of shape (n_features,)\n@@ -90,7 +144,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n \n     intercept_ : float\n         Independent term in decision function. Set to 0.0 if\n-        ``fit_intercept = False``.\n+        `fit_intercept = False`.\n \n     alpha_ : float\n        Estimated precision of the noise.\n@@ -162,7 +216,7 @@ class BayesianRidge(RegressorMixin, LinearModel):\n     \"\"\"\n \n     _parameter_constraints: dict = {\n-        \"n_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n+        \"max_iter\": [Interval(Integral, 1, None, closed=\"left\"), None],\n         \"tol\": [Interval(Real, 0, None, closed=\"neither\")],\n         \"alpha_1\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_2\": [Interval(Real, 0, None, closed=\"left\")],\n@@ -174,12 +228,16 @@ class BayesianRidge(RegressorMixin, LinearModel):\n         \"fit_intercept\": [\"boolean\"],\n         \"copy_X\": [\"boolean\"],\n         \"verbose\": [\"verbose\"],\n+        \"n_iter\": [\n+            Interval(Integral, 1, None, closed=\"left\"),\n+            Hidden(StrOptions({\"deprecated\"})),\n+        ],\n     }\n \n     def __init__(\n         self,\n         *,\n-        n_iter=300,\n+        max_iter=None,  # TODO(1.5): Set to 300\n         tol=1.0e-3,\n         alpha_1=1.0e-6,\n         alpha_2=1.0e-6,\n@@ -191,8 +249,9 @@ def __init__(\n         fit_intercept=True,\n         copy_X=True,\n         verbose=False,\n+        n_iter=\"deprecated\",  # TODO(1.5): Remove\n     ):\n-        self.n_iter = n_iter\n+        self.max_iter = max_iter\n         self.tol = tol\n         self.alpha_1 = alpha_1\n         self.alpha_2 = alpha_2\n@@ -204,6 +263,7 @@ def __init__(\n         self.fit_intercept = fit_intercept\n         self.copy_X = copy_X\n         self.verbose = verbose\n+        self.n_iter = n_iter\n \n     def fit(self, X, y, sample_weight=None):\n         \"\"\"Fit the model.\n@@ -228,6 +288,8 @@ def fit(self, X, y, sample_weight=None):\n         \"\"\"\n         self._validate_params()\n \n+        max_iter = _deprecate_n_iter(self.n_iter, self.max_iter)\n+\n         X, y = self._validate_data(X, y, dtype=[np.float64, np.float32], y_numeric=True)\n \n         if sample_weight is not None:\n@@ -274,7 +336,7 @@ def fit(self, X, y, sample_weight=None):\n         eigen_vals_ = S**2\n \n         # Convergence loop of the bayesian ridge regression\n-        for iter_ in range(self.n_iter):\n+        for iter_ in range(max_iter):\n \n             # update posterior mean coef_ based on alpha_ and lambda_ and\n             # compute corresponding rmse\n@@ -430,8 +492,10 @@ class ARDRegression(RegressorMixin, LinearModel):\n \n     Parameters\n     ----------\n-    n_iter : int, default=300\n-        Maximum number of iterations.\n+    max_iter : int, default=None\n+        Maximum number of iterations. If `None`, it corresponds to `max_iter=300`.\n+\n+        .. versionchanged:: 1.3\n \n     tol : float, default=1e-3\n         Stop the algorithm if w has converged.\n@@ -470,6 +534,13 @@ class ARDRegression(RegressorMixin, LinearModel):\n     verbose : bool, default=False\n         Verbose mode when fitting the model.\n \n+    n_iter : int\n+        Maximum number of iterations.\n+\n+        .. deprecated:: 1.3\n+           `n_iter` is deprecated in 1.3 and will be removed in 1.5. Use\n+           `max_iter` instead.\n+\n     Attributes\n     ----------\n     coef_ : array-like of shape (n_features,)\n@@ -487,6 +558,11 @@ class ARDRegression(RegressorMixin, LinearModel):\n     scores_ : float\n         if computed, value of the objective function (to be maximized)\n \n+    n_iter_ : int\n+        The actual number of iterations to reach the stopping criterion.\n+\n+        .. versionadded:: 1.3\n+\n     intercept_ : float\n         Independent term in decision function. Set to 0.0 if\n         ``fit_intercept = False``.\n@@ -542,7 +618,7 @@ class ARDRegression(RegressorMixin, LinearModel):\n     \"\"\"\n \n     _parameter_constraints: dict = {\n-        \"n_iter\": [Interval(Integral, 1, None, closed=\"left\")],\n+        \"max_iter\": [Interval(Integral, 1, None, closed=\"left\"), None],\n         \"tol\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_1\": [Interval(Real, 0, None, closed=\"left\")],\n         \"alpha_2\": [Interval(Real, 0, None, closed=\"left\")],\n@@ -553,12 +629,16 @@ class ARDRegression(RegressorMixin, LinearModel):\n         \"fit_intercept\": [\"boolean\"],\n         \"copy_X\": [\"boolean\"],\n         \"verbose\": [\"verbose\"],\n+        \"n_iter\": [\n+            Interval(Integral, 1, None, closed=\"left\"),\n+            Hidden(StrOptions({\"deprecated\"})),\n+        ],\n     }\n \n     def __init__(\n         self,\n         *,\n-        n_iter=300,\n+        max_iter=None,  # TODO(1.5): Set to 300\n         tol=1.0e-3,\n         alpha_1=1.0e-6,\n         alpha_2=1.0e-6,\n@@ -569,8 +649,9 @@ def __init__(\n         fit_intercept=True,\n         copy_X=True,\n         verbose=False,\n+        n_iter=\"deprecated\",  # TODO(1.5): Remove\n     ):\n-        self.n_iter = n_iter\n+        self.max_iter = max_iter\n         self.tol = tol\n         self.fit_intercept = fit_intercept\n         self.alpha_1 = alpha_1\n@@ -581,6 +662,7 @@ def __init__(\n         self.threshold_lambda = threshold_lambda\n         self.copy_X = copy_X\n         self.verbose = verbose\n+        self.n_iter = n_iter\n \n     def fit(self, X, y):\n         \"\"\"Fit the model according to the given training data and parameters.\n@@ -603,6 +685,8 @@ def fit(self, X, y):\n \n         self._validate_params()\n \n+        max_iter = _deprecate_n_iter(self.n_iter, self.max_iter)\n+\n         X, y = self._validate_data(\n             X, y, dtype=[np.float64, np.float32], y_numeric=True, ensure_min_samples=2\n         )\n@@ -648,7 +732,7 @@ def update_coeff(X, y, coef_, alpha_, keep_lambda, sigma_):\n             else self._update_sigma_woodbury\n         )\n         # Iterative procedure of ARDRegression\n-        for iter_ in range(self.n_iter):\n+        for iter_ in range(max_iter):\n             sigma_ = update_sigma(X, alpha_, lambda_, keep_lambda)\n             coef_ = update_coeff(X, y, coef_, alpha_, keep_lambda, sigma_)\n \n@@ -688,6 +772,8 @@ def update_coeff(X, y, coef_, alpha_, keep_lambda, sigma_):\n             if not keep_lambda.any():\n                 break\n \n+        self.n_iter_ = iter_ + 1\n+\n         if keep_lambda.any():\n             # update sigma and mu using updated params from the last iteration\n             sigma_ = update_sigma(X, alpha_, lambda_, keep_lambda)\n",
+  "test_patch": "diff --git a/sklearn/linear_model/tests/test_bayes.py b/sklearn/linear_model/tests/test_bayes.py\n--- a/sklearn/linear_model/tests/test_bayes.py\n+++ b/sklearn/linear_model/tests/test_bayes.py\n@@ -73,7 +73,7 @@ def test_bayesian_ridge_score_values():\n         alpha_2=alpha_2,\n         lambda_1=lambda_1,\n         lambda_2=lambda_2,\n-        n_iter=1,\n+        max_iter=1,\n         fit_intercept=False,\n         compute_score=True,\n     )\n@@ -174,7 +174,7 @@ def test_update_of_sigma_in_ard():\n     # of the ARDRegression algorithm. See issue #10128.\n     X = np.array([[1, 0], [0, 0]])\n     y = np.array([0, 0])\n-    clf = ARDRegression(n_iter=1)\n+    clf = ARDRegression(max_iter=1)\n     clf.fit(X, y)\n     # With the inputs above, ARDRegression prunes both of the two coefficients\n     # in the first iteration. Hence, the expected shape of `sigma_` is (0, 0).\n@@ -292,3 +292,33 @@ def test_dtype_correctness(Estimator):\n     coef_32 = model.fit(X.astype(np.float32), y).coef_\n     coef_64 = model.fit(X.astype(np.float64), y).coef_\n     np.testing.assert_allclose(coef_32, coef_64, rtol=1e-4)\n+\n+\n+# TODO(1.5) remove\n+@pytest.mark.parametrize(\"Estimator\", [BayesianRidge, ARDRegression])\n+def test_bayesian_ridge_ard_n_iter_deprecated(Estimator):\n+    \"\"\"Check the deprecation warning of `n_iter`.\"\"\"\n+    depr_msg = (\n+        \"'n_iter' was renamed to 'max_iter' in version 1.3 and will be removed in 1.5\"\n+    )\n+    X, y = diabetes.data, diabetes.target\n+    model = Estimator(n_iter=5)\n+\n+    with pytest.warns(FutureWarning, match=depr_msg):\n+        model.fit(X, y)\n+\n+\n+# TODO(1.5) remove\n+@pytest.mark.parametrize(\"Estimator\", [BayesianRidge, ARDRegression])\n+def test_bayesian_ridge_ard_max_iter_and_n_iter_both_set(Estimator):\n+    \"\"\"Check that a ValueError is raised when both `max_iter` and `n_iter` are set.\"\"\"\n+    err_msg = (\n+        \"Both `n_iter` and `max_iter` attributes were set. Attribute\"\n+        \" `n_iter` was deprecated in version 1.3 and will be removed in\"\n+        \" 1.5. To avoid this error, only set the `max_iter` attribute.\"\n+    )\n+    X, y = diabetes.data, diabetes.target\n+    model = Estimator(n_iter=5, max_iter=5)\n+\n+    with pytest.raises(ValueError, match=err_msg):\n+        model.fit(X, y)\n",
+  "problem_statement": "Deprecate `n_iter` in favor of `max_iter` for consistency\n`BayesianRidge` and `ARDRegression` are exposing the parameter `n_iter` instead of `max_iter` as in other models. I think that we should deprecate `n_iter` and rename it `max_iter` to be consistent.\n",
+  "hints_text": "@glemaitre I would like to attempt this one !\n@saucam please go ahead and propose a pull-request. You can refer to the following documentation page to follow our deprecation rule: https://scikit-learn.org/dev/developers/contributing.html#deprecation\n@saucam ,let me know incase you need help. We can work together on this issue if it is fine with you. \n@jpangas sorry but I lost track of this one. You can go ahead with your changes as it looks like you already have some progress.\nThank you for getting back to me. I am working on the changes, should be done within the week. ",
+  "created_at": "2023-02-24T21:43:48Z",
+  "version": "1.3",
+  "FAIL_TO_PASS": "[\"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_ard_max_iter_and_n_iter_both_set[ARDRegression]\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_ard_max_iter_and_n_iter_both_set[BayesianRidge]\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_ard_n_iter_deprecated[ARDRegression]\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_ard_n_iter_deprecated[BayesianRidge]\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_score_values\", \"sklearn/linear_model/tests/test_bayes.py::test_update_of_sigma_in_ard\"]",
+  "PASS_TO_PASS": "[\"sklearn/linear_model/tests/test_bayes.py::test_ard_accuracy_on_easy_problem[42-10-100]\", \"sklearn/linear_model/tests/test_bayes.py::test_ard_accuracy_on_easy_problem[42-100-10]\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_initial_params\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_parameter\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_ridge_scores\", \"sklearn/linear_model/tests/test_bayes.py::test_bayesian_sample_weights\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_correctness[ARDRegression]\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_correctness[BayesianRidge]\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_match[ARDRegression-float32]\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_match[ARDRegression-float64]\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_match[BayesianRidge-float32]\", \"sklearn/linear_model/tests/test_bayes.py::test_dtype_match[BayesianRidge-float64]\", \"sklearn/linear_model/tests/test_bayes.py::test_prediction_bayesian_ridge_ard_with_constant_input\", \"sklearn/linear_model/tests/test_bayes.py::test_return_std\", \"sklearn/linear_model/tests/test_bayes.py::test_std_bayesian_ridge_ard_with_constant_input\", \"sklearn/linear_model/tests/test_bayes.py::test_toy_ard_object\", \"sklearn/linear_model/tests/test_bayes.py::test_toy_bayesian_ridge_object\", \"sklearn/linear_model/tests/test_bayes.py::test_update_sigma[42]\"]",
+  "environment_setup_commit": "1e8a5b833d1b58f3ab84099c4582239af854b23a",
+  "patch_files": [
+    "sklearn/linear_model/_bayes.py"
+  ],
+  "test_patch_files": [
+    "sklearn/linear_model/tests/test_bayes.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/linear_model/_bayes.py": {
+      "diffs": [
+        {
+          "start_line_old": 8,
+          "end_line_old": 8,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 156,
+          "pos": 2,
+          "context_length": 1652
+        },
+        {
+          "start_line_old": 18,
+          "end_line_old": 18,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 146,
+          "pos": 2,
+          "context_length": 1652
+        },
+        {
+          "start_line_old": 35,
+          "end_line_old": 36,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 129,
+          "pos": 2,
+          "context_length": 1652
+        },
+        {
+          "start_line_old": 86,
+          "end_line_old": 86,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 78,
+          "pos": 2,
+          "context_length": 1652
+        },
+        {
+          "start_line_old": 93,
+          "end_line_old": 93,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 71,
+          "pos": 2,
+          "context_length": 1652
+        },
+        {
+          "start_line_old": 165,
+          "end_line_old": 165,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "pos": 1,
+          "context_length": 429
+        },
+        {
+          "start_line_old": 177,
+          "end_line_old": 177,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "pos": 1,
+          "context_length": 429
+        },
+        {
+          "start_line_old": 194,
+          "end_line_old": 194,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "pos": 1,
+          "context_length": 429
+        },
+        {
+          "start_line_old": 207,
+          "end_line_old": 207,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._update_sigma_woodbury_ARDRegression._update_sigma_woodbury.n_samples.8.1",
+          "closest_snippet_line_distance": 498
+        },
+        {
+          "start_line_old": 231,
+          "end_line_old": 231,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._parameter_constraints_ARDRegression.__init__.self.verbose.1",
+          "closest_snippet_line_distance": 313,
+          "pos": 13,
+          "context_length": 8159
+        },
+        {
+          "start_line_old": 277,
+          "end_line_old": 277,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_1_BayesianRidge.1",
+          "closest_snippet_line_distance": 115,
+          "pos": 3,
+          "context_length": 2216
+        },
+        {
+          "start_line_old": 433,
+          "end_line_old": 434,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit.29_BayesianRidge.fit.41.1",
+          "closest_snippet_line_distance": 106,
+          "pos": 5,
+          "context_length": 4027
+        },
+        {
+          "start_line_old": 473,
+          "end_line_old": 473,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit.29_BayesianRidge.fit.41.1",
+          "closest_snippet_line_distance": 145,
+          "pos": 5,
+          "context_length": 4027
+        },
+        {
+          "start_line_old": 490,
+          "end_line_old": 490,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit.29_BayesianRidge.fit.41.1",
+          "closest_snippet_line_distance": 162,
+          "pos": 5,
+          "context_length": 4027
+        },
+        {
+          "start_line_old": 545,
+          "end_line_old": 545,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._update_coef__BayesianRidge._update_coef_.4.1",
+          "closest_snippet_line_distance": 164,
+          "pos": 9,
+          "context_length": 5510
+        },
+        {
+          "start_line_old": 556,
+          "end_line_old": 556,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._update_coef__BayesianRidge._update_coef_.4.1",
+          "closest_snippet_line_distance": 175,
+          "pos": 9,
+          "context_length": 5510
+        },
+        {
+          "start_line_old": 572,
+          "end_line_old": 572,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._update_coef__BayesianRidge._update_coef_.4.1",
+          "closest_snippet_line_distance": 191,
+          "pos": 9,
+          "context_length": 5510
+        },
+        {
+          "start_line_old": 584,
+          "end_line_old": 584,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._update_sigma_woodbury_ARDRegression._update_sigma_woodbury.n_samples.8.1",
+          "closest_snippet_line_distance": 121
+        },
+        {
+          "start_line_old": 606,
+          "end_line_old": 606,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit_BayesianRidge.fit.28",
+          "closest_snippet_line_distance": 330,
+          "pos": 15,
+          "context_length": 9037
+        },
+        {
+          "start_line_old": 651,
+          "end_line_old": 651,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression.fit_ARDRegression.fit.26",
+          "closest_snippet_line_distance": 1,
+          "pos": 18,
+          "context_length": 16098
+        },
+        {
+          "start_line_old": 691,
+          "end_line_old": 691,
+          "file_pos": 1,
+          "file_context_length": 6410,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression.fit_ARDRegression.fit.26",
+          "closest_snippet_line_distance": 41,
+          "pos": 18,
+          "context_length": 16098
+        }
+      ]
+    }
+  },
+  "vectors": 3935,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._parameter_constraints_BayesianRidge.__init__.self.verbose.1",
+      "distance": 1.09272038936615,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 164,
+      "end_line": 206,
+      "tokens": 429,
+      "context_length": 429,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_1_BayesianRidge.1",
+      "distance": 1.1361552476882935,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 1,
+      "end_line": 162,
+      "tokens": 1223,
+      "context_length": 1652,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit.29_BayesianRidge.fit.41.1",
+      "distance": 1.14024019241333,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 277,
+      "end_line": 328,
+      "tokens": 564,
+      "context_length": 2216,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ard.py_1_76",
+      "distance": 1.1447553634643555,
+      "file_path": "examples/linear_model/plot_ard.py",
+      "start_line": 1,
+      "end_line": 128,
+      "tokens": 822,
+      "context_length": 3038
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_17_ARDRegression.1",
+      "distance": 1.1516485214233398,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 416,
+      "end_line": 542,
+      "tokens": 989,
+      "context_length": 4027,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py__BaseRidge__BaseRidge.__init__.self.random_state.1",
+      "distance": 1.1964858770370483,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 783,
+      "end_line": 820,
+      "tokens": 288,
+      "context_length": 4315
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._update_coef__BayesianRidge._update_coef_.4.1",
+      "distance": 1.199481725692749,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 360,
+      "end_line": 381,
+      "tokens": 224,
+      "context_length": 4539,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_huber_vs_ridge.py_1_",
+      "distance": 1.208707571029663,
+      "file_path": "examples/linear_model/plot_huber_vs_ridge.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 575,
+      "context_length": 5114
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._parameter_constraints_ARDRegression.__init__.self.verbose.1",
+      "distance": 1.213028073310852,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 544,
+      "end_line": 583,
+      "tokens": 396,
+      "context_length": 5510,
+      "file_pos": 4
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/asv_benchmarks/benchmarks/linear_model.py_RidgeBenchmark_RidgeBenchmark.skip.3.1",
+      "distance": 1.219933271408081,
+      "file_path": "asv_benchmarks/benchmarks/linear_model.py",
+      "start_line": 67,
+      "end_line": 108,
+      "tokens": 255,
+      "context_length": 5765
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_base.py_40__deprecate_normalize.8.1",
+      "distance": 1.2269853353500366,
+      "file_path": "sklearn/linear_model/_base.py",
+      "start_line": 48,
+      "end_line": 126,
+      "tokens": 618,
+      "context_length": 6383
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_1_KernelRidge.1",
+      "distance": 1.2290164232254028,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 1,
+      "end_line": 132,
+      "tokens": 1248,
+      "context_length": 7631
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge.fit_BayesianRidge.fit.28",
+      "distance": 1.2331712245941162,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 208,
+      "end_line": 276,
+      "tokens": 528,
+      "context_length": 8159,
+      "file_pos": 7
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py__BaseRidge.fit.6_Ridge",
+      "distance": 1.2340024709701538,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 874,
+      "end_line": 1149,
+      "tokens": 368,
+      "context_length": 8527
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression.fit_ARDRegression.fit.26",
+      "distance": 1.2412880659103394,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 585,
+      "end_line": 650,
+      "tokens": 510,
+      "context_length": 9037,
+      "file_pos": 7
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_KernelRidge._parameter_constraints_KernelRidge._more_tags.1.1",
+      "distance": 1.2416913509368896,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 134,
+      "end_line": 171,
+      "tokens": 321,
+      "context_length": 9358
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_supervised_y_2d_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.7",
+      "distance": 1.2459121942520142,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2707,
+      "end_line": 3430,
+      "tokens": 6190,
+      "context_length": 15548
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression.fit.27_ARDRegression.fit.34.1",
+      "distance": 1.2537676095962524,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 651,
+      "end_line": 703,
+      "tokens": 550,
+      "context_length": 16098,
+      "file_pos": 8
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/__init__.py_1_",
+      "distance": 1.254273772239685,
+      "file_path": "sklearn/linear_model/__init__.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 706,
+      "context_length": 16804
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 1.2546783685684204,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 780,
+      "context_length": 17584
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ransac.py__dynamic_max_trials_RANSACRegressor",
+      "distance": 1.2578383684158325,
+      "file_path": "sklearn/linear_model/_ransac.py",
+      "start_line": 24,
+      "end_line": 622,
+      "tokens": 246,
+      "context_length": 17830
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_BayesianRidge._log_marginal_likelihood_BayesianRidge._log_marginal_likelihood.13.1",
+      "distance": 1.2626038789749146,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 383,
+      "end_line": 413,
+      "tokens": 317,
+      "context_length": 18147,
+      "file_pos": 11
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py_1_mean_variance_axis",
+      "distance": 1.2660140991210938,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 268,
+      "context_length": 18415
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_linear_model_coefficient_interpretation.py_183_column_to_drop.1",
+      "distance": 1.2685585021972656,
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "start_line": 287,
+      "end_line": 382,
+      "tokens": 796,
+      "context_length": 19211
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py_RidgeClassifier._parameter_constraints_RidgeClassifier.__init__.self.class_weight.1",
+      "distance": 1.2692182064056396,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 1397,
+      "end_line": 1425,
+      "tokens": 174,
+      "context_length": 19385
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge_curvefit.py_26_",
+      "distance": 1.2710793018341064,
+      "file_path": "examples/linear_model/plot_bayesian_ridge_curvefit.py",
+      "start_line": 64,
+      "end_line": 93,
+      "tokens": 363,
+      "context_length": 19748
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute/_iterative.py_IterativeImputer._validate_limit_IterativeImputer._validate_limit.7.1",
+      "distance": 1.2718594074249268,
+      "file_path": "sklearn/impute/_iterative.py",
+      "start_line": 651,
+      "end_line": 682,
+      "tokens": 272,
+      "context_length": 20020
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py__BaseRidge.fit__BaseRidge.fit.5",
+      "distance": 1.2744182348251343,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 822,
+      "end_line": 872,
+      "tokens": 497,
+      "context_length": 20517
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_linear_model_coefficient_interpretation.py_312_383",
+      "distance": 1.2813446521759033,
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "start_line": 483,
+      "end_line": 592,
+      "tokens": 894,
+      "context_length": 21411
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ridge_path.py_1_",
+      "distance": 1.2814178466796875,
+      "file_path": "examples/linear_model/plot_ridge_path.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 435,
+      "context_length": 21846
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py_Ridge.__init___Ridge.__init__.1",
+      "distance": 1.2909233570098877,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 1095,
+      "end_line": 1116,
+      "tokens": 129,
+      "context_length": 21975
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_n_iter_check_classifiers_regression_target.2",
+      "distance": 1.2912570238113403,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 3433,
+      "end_line": 3543,
+      "tokens": 957,
+      "context_length": 22932
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ransac.py_RANSACRegressor.fit.38_RANSACRegressor.fit.43.1",
+      "distance": 1.2916663885116577,
+      "file_path": "sklearn/linear_model/_ransac.py",
+      "start_line": 516,
+      "end_line": 562,
+      "tokens": 402,
+      "context_length": 23334
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_linear_model_coefficient_interpretation.py_cv_model_257_311",
+      "distance": 1.2935009002685547,
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "start_line": 384,
+      "end_line": 482,
+      "tokens": 752,
+      "context_length": 24086
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_theil_sen.py_TheilSenRegressor._check_subparams_TheilSenRegressor._check_subparams.6.1",
+      "distance": 1.2939082384109497,
+      "file_path": "sklearn/linear_model/_theil_sen.py",
+      "start_line": 361,
+      "end_line": 396,
+      "tokens": 320,
+      "context_length": 24406
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sgd_regression.py_np_",
+      "distance": 1.295088768005371,
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "start_line": 4,
+      "end_line": 153,
+      "tokens": 1324,
+      "context_length": 25730
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/_regression.py_max_error_max_error.4.1",
+      "distance": 1.2958879470825195,
+      "file_path": "sklearn/metrics/_regression.py",
+      "start_line": 1000,
+      "end_line": 1036,
+      "tokens": 256,
+      "context_length": 25986
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py__BaseRidgeCV__BaseRidgeCV.__init__.self.alpha_per_target.1",
+      "distance": 1.2959585189819336,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 2103,
+      "end_line": 2132,
+      "tokens": 243,
+      "context_length": 26229
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ard.py_77_",
+      "distance": 1.2998859882354736,
+      "file_path": "examples/linear_model/plot_ard.py",
+      "start_line": 129,
+      "end_line": 211,
+      "tokens": 747,
+      "context_length": 26976
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ransac.py_RANSACRegressor.1_RANSACRegressor.1",
+      "distance": 1.3023169040679932,
+      "file_path": "sklearn/linear_model/_ransac.py",
+      "start_line": 61,
+      "end_line": 234,
+      "tokens": 1664,
+      "context_length": 28640
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_display_",
+      "distance": 1.3024747371673584,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 211,
+      "end_line": 265,
+      "tokens": 510,
+      "context_length": 29150
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._update_sigma_ARDRegression._update_sigma.X_keep.6.1",
+      "distance": 1.3031437397003174,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 723,
+      "end_line": 732,
+      "tokens": 134,
+      "context_length": 29284,
+      "file_pos": 19
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_bayes.py_ARDRegression._update_sigma_woodbury_ARDRegression._update_sigma_woodbury.n_samples.8.1",
+      "distance": 1.3043289184570312,
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "start_line": 705,
+      "end_line": 721,
+      "tokens": 233,
+      "context_length": 29517,
+      "file_pos": 19
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py_Ridge.1_Ridge.1",
+      "distance": 1.3049960136413574,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 922,
+      "end_line": 1093,
+      "tokens": 1662,
+      "context_length": 31179
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_delayed__mode.2.1",
+      "distance": 1.3085322380065918,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 108,
+      "end_line": 128,
+      "tokens": 195,
+      "context_length": 31374
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_discretization.py_KBinsDiscretizer._validate_n_bins_KBinsDiscretizer._validate_n_bins.9.1",
+      "distance": 1.308833360671997,
+      "file_path": "sklearn/preprocessing/_discretization.py",
+      "start_line": 329,
+      "end_line": 352,
+      "tokens": 247,
+      "context_length": 31621
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/experimental/enable_iterative_imputer.py_1_",
+      "distance": 1.3092061281204224,
+      "file_path": "sklearn/experimental/enable_iterative_imputer.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 160,
+      "context_length": 31781
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py__RidgeGCV.fit.21__RidgeGCV.fit.29.1",
+      "distance": 1.3093136548995972,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 2027,
+      "end_line": 2100,
+      "tokens": 618,
+      "context_length": 32399
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_theil_sen.py_TheilSenRegressor_TheilSenRegressor.1",
+      "distance": 1.3106935024261475,
+      "file_path": "sklearn/linear_model/_theil_sen.py",
+      "start_line": 208,
+      "end_line": 323,
+      "tokens": 1093,
+      "context_length": 33492
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_poisson_regression_non_normal_loss.py_tree_preprocessor_191",
+      "distance": 1.3150132894515991,
+      "file_path": "examples/linear_model/plot_poisson_regression_non_normal_loss.py",
+      "start_line": 289,
+      "end_line": 390,
+      "tokens": 988,
+      "context_length": 34480
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ridge.py_RidgeClassifierCV._parameter_constraints_RidgeClassifierCV.__init__.self.class_weight.1",
+      "distance": 1.3188986778259277,
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "start_line": 2512,
+      "end_line": 2536,
+      "tokens": 177,
+      "context_length": 34657
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/deprecation.py_deprecated._decorate_class_deprecated._decorate_class.8.1",
+      "distance": 1.3214235305786133,
+      "file_path": "sklearn/utils/deprecation.py",
+      "start_line": 58,
+      "end_line": 76,
+      "tokens": 128,
+      "context_length": 34785
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_huber.py_HuberRegressor._parameter_constraints_HuberRegressor.__init__.self.tol.1",
+      "distance": 1.3248732089996338,
+      "file_path": "sklearn/linear_model/_huber.py",
+      "start_line": 250,
+      "end_line": 274,
+      "tokens": 222,
+      "context_length": 35007
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge_curvefit.py_1_25",
+      "distance": 1.325081706047058,
+      "file_path": "examples/linear_model/plot_bayesian_ridge_curvefit.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 432,
+      "context_length": 35439
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_ransac.py_RANSACRegressor.fit.36_RANSACRegressor.fit.37",
+      "distance": 1.32823646068573,
+      "file_path": "sklearn/linear_model/_ransac.py",
+      "start_line": 431,
+      "end_line": 515,
+      "tokens": 683,
+      "context_length": 36122
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_least_angle.py_LassoLarsIC.1_LassoLarsIC.1",
+      "distance": 1.3299267292022705,
+      "file_path": "sklearn/linear_model/_least_angle.py",
+      "start_line": 2016,
+      "end_line": 2181,
+      "tokens": 1594,
+      "context_length": 37716
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py__VALID_METRICS__NAN_METRICS.1",
+      "distance": 1.330761432647705,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1634,
+      "end_line": 1666,
+      "tokens": 214,
+      "context_length": 37930
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/_dict_learning.py__check_warn_deprecated_dict_learning_online",
+      "distance": 1.3322160243988037,
+      "file_path": "sklearn/decomposition/_dict_learning.py",
+      "start_line": 647,
+      "end_line": 1070,
+      "tokens": 230,
+      "context_length": 38160
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_KernelRidge.fit_KernelRidge.fit.14.1",
+      "distance": 1.3327510356903076,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 173,
+      "end_line": 217,
+      "tokens": 358,
+      "context_length": 38518
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_grid_search_stats.py_304_",
+      "distance": 1.3338961601257324,
+      "file_path": "examples/model_selection/plot_grid_search_stats.py",
+      "start_line": 449,
+      "end_line": 566,
+      "tokens": 1440,
+      "context_length": 39958
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/linear_model/_bayes.py",
+      "position": 1,
+      "tokens": 6410,
+      "context_length": 6410
+    },
+    {
+      "file_path": "examples/linear_model/plot_ard.py",
+      "position": 2,
+      "tokens": 1728,
+      "context_length": 8138
+    },
+    {
+      "file_path": "sklearn/linear_model/_ridge.py",
+      "position": 3,
+      "tokens": 21684,
+      "context_length": 29822
+    },
+    {
+      "file_path": "examples/linear_model/plot_huber_vs_ridge.py",
+      "position": 4,
+      "tokens": 597,
+      "context_length": 30419
+    },
+    {
+      "file_path": "asv_benchmarks/benchmarks/linear_model.py",
+      "position": 5,
+      "tokens": 1483,
+      "context_length": 31902
+    },
+    {
+      "file_path": "sklearn/linear_model/_base.py",
+      "position": 6,
+      "tokens": 6975,
+      "context_length": 38877
+    },
+    {
+      "file_path": "sklearn/kernel_ridge.py",
+      "position": 7,
+      "tokens": 2110,
+      "context_length": 40987
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 8,
+      "tokens": 36527,
+      "context_length": 77514
+    },
+    {
+      "file_path": "sklearn/linear_model/__init__.py",
+      "position": 9,
+      "tokens": 706,
+      "context_length": 78220
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 10,
+      "tokens": 1335,
+      "context_length": 79555
+    },
+    {
+      "file_path": "sklearn/linear_model/_ransac.py",
+      "position": 11,
+      "tokens": 4900,
+      "context_length": 84455
+    },
+    {
+      "file_path": "examples/inspection/plot_linear_model_coefficient_interpretation.py",
+      "position": 12,
+      "tokens": 6305,
+      "context_length": 90760
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge_curvefit.py",
+      "position": 13,
+      "tokens": 831,
+      "context_length": 91591
+    },
+    {
+      "file_path": "sklearn/impute/_iterative.py",
+      "position": 14,
+      "tokens": 7829,
+      "context_length": 99420
+    },
+    {
+      "file_path": "examples/linear_model/plot_ridge_path.py",
+      "position": 15,
+      "tokens": 464,
+      "context_length": 99884
+    },
+    {
+      "file_path": "sklearn/linear_model/_theil_sen.py",
+      "position": 16,
+      "tokens": 3721,
+      "context_length": 103605
+    },
+    {
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "position": 17,
+      "tokens": 1351,
+      "context_length": 104956
+    },
+    {
+      "file_path": "sklearn/metrics/_regression.py",
+      "position": 18,
+      "tokens": 14121,
+      "context_length": 119077
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "position": 19,
+      "tokens": 2438,
+      "context_length": 121515
+    },
+    {
+      "file_path": "sklearn/utils/fixes.py",
+      "position": 20,
+      "tokens": 1425,
+      "context_length": 122940
+    },
+    {
+      "file_path": "sklearn/preprocessing/_discretization.py",
+      "position": 21,
+      "tokens": 3909,
+      "context_length": 126849
+    },
+    {
+      "file_path": "sklearn/experimental/enable_iterative_imputer.py",
+      "position": 22,
+      "tokens": 160,
+      "context_length": 127009
+    },
+    {
+      "file_path": "examples/linear_model/plot_poisson_regression_non_normal_loss.py",
+      "position": 23,
+      "tokens": 5333,
+      "context_length": 132342
+    },
+    {
+      "file_path": "sklearn/utils/deprecation.py",
+      "position": 24,
+      "tokens": 712,
+      "context_length": 133054
+    },
+    {
+      "file_path": "sklearn/linear_model/_huber.py",
+      "position": 25,
+      "tokens": 3126,
+      "context_length": 136180
+    },
+    {
+      "file_path": "sklearn/linear_model/_least_angle.py",
+      "position": 26,
+      "tokens": 19871,
+      "context_length": 156051
+    },
+    {
+      "file_path": "sklearn/metrics/pairwise.py",
+      "position": 27,
+      "tokens": 18893,
+      "context_length": 174944
+    },
+    {
+      "file_path": "sklearn/decomposition/_dict_learning.py",
+      "position": 28,
+      "tokens": 18950,
+      "context_length": 193894
+    },
+    {
+      "file_path": "examples/model_selection/plot_grid_search_stats.py",
+      "position": 29,
+      "tokens": 5723,
+      "context_length": 199617
+    }
+  ]
+}

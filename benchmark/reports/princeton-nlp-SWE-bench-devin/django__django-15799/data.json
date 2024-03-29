@@ -1,0 +1,2060 @@
+{
+  "instance_id": "django__django-15799",
+  "model_patch": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex a25814b5fb..e1b5ec4d94 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -314,16 +314,11 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):\n                 kwargs[\"queryset\"] = queryset\n \n         form_field = db_field.formfield(**kwargs)\n-        if isinstance(form_field.widget, SelectMultiple) and not isinstance(\n-            form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple)\n-        ):\n-            msg = _(\n-                \"Hold down \u201cControl\u201d, or \u201cCommand\u201d on a Mac, to select more than one.\"\n-            )\n-            help_text = form_field.help_text\n-            form_field.help_text = (\n-                format_lazy(\"{} {}\", help_text, msg) if help_text else msg\n-            )\n+        if isinstance(form_field.widget, SelectMultiple):\n+            if getattr(form_field.widget, 'allow_multiple_selected', False):\n+                msg = _(\"Hold down \u201cControl\u201d, or \u201cCommand\u201d on a Mac, to select more than one.\")\n+                help_text = form_field.help_text\n+                form_field.help_text = format_lazy(\"{} {}\", help_text, msg) if help_text else msg\n         return form_field\n \n     def get_autocomplete_fields(self, request):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/contrib/admin/options.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "90d2f9f41671ef01c8e8e7b5648f95c9bf512aae",
+  "patch": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -314,8 +314,12 @@ def formfield_for_manytomany(self, db_field, request, **kwargs):\n                 kwargs[\"queryset\"] = queryset\n \n         form_field = db_field.formfield(**kwargs)\n-        if isinstance(form_field.widget, SelectMultiple) and not isinstance(\n-            form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple)\n+        if (\n+            isinstance(form_field.widget, SelectMultiple)\n+            and form_field.widget.allow_multiple_selected\n+            and not isinstance(\n+                form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple)\n+            )\n         ):\n             msg = _(\n                 \"Hold down \u201cControl\u201d, or \u201cCommand\u201d on a Mac, to select more than one.\"\n",
+  "test_patch": "diff --git a/tests/admin_widgets/tests.py b/tests/admin_widgets/tests.py\n--- a/tests/admin_widgets/tests.py\n+++ b/tests/admin_widgets/tests.py\n@@ -273,6 +273,26 @@ class AdvisorAdmin(admin.ModelAdmin):\n             \"Hold down \u201cControl\u201d, or \u201cCommand\u201d on a Mac, to select more than one.\",\n         )\n \n+    def test_m2m_widgets_no_allow_multiple_selected(self):\n+        class NoAllowMultipleSelectedWidget(forms.SelectMultiple):\n+            allow_multiple_selected = False\n+\n+        class AdvisorAdmin(admin.ModelAdmin):\n+            filter_vertical = [\"companies\"]\n+            formfield_overrides = {\n+                ManyToManyField: {\"widget\": NoAllowMultipleSelectedWidget},\n+            }\n+\n+        self.assertFormfield(\n+            Advisor,\n+            \"companies\",\n+            widgets.FilteredSelectMultiple,\n+            filter_vertical=[\"companies\"],\n+        )\n+        ma = AdvisorAdmin(Advisor, admin.site)\n+        f = ma.formfield_for_dbfield(Advisor._meta.get_field(\"companies\"), request=None)\n+        self.assertEqual(f.help_text, \"\")\n+\n \n @override_settings(ROOT_URLCONF=\"admin_widgets.urls\")\n class AdminFormfieldForDBFieldWithRequestTests(TestDataMixin, TestCase):\n",
+  "problem_statement": "SelectMultiple in ModelAdminForm display help text when allow_multiple_selected is False.\nDescription\n\t\nIn AdminForm Help text on render for SelectMultiple widget don't check, if widget.allow_multiple_selected = False.\nWidget himself on render checks it\n# django.forms.widgets rows 684-685\nif self.allow_multiple_selected:\n context['widget']['attrs']['multiple'] = True\nBut help_text for widget, whose is rendered behind widget - don't checks it. There we check only \"isinstance\" \n# django.contrib.admin.options.py rows 280-281\nif (isinstance(form_field.widget, SelectMultiple) ann not isinstance(form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple))):\n\t... # do some stuff with help text\nas a result I get \"msg\", which should not be.\n",
+  "hints_text": "rendered m2m field with allow_multiple_selected=False\nThanks for the report. As far as I understand correctly, you have a subclass of SelectMultiple with allow_multiple_selected set to False, that's quite niche. However, I agree that we should check allow_multiple_selected in both places: django/contrib/admin/options.py diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py index a25814b5fb..f959a8dc48 100644 a b class BaseModelAdmin(metaclass=forms.MediaDefiningClass): 314314 kwargs[\"queryset\"] = queryset 315315 316316 form_field = db_field.formfield(**kwargs) 317 if isinstance(form_field.widget, SelectMultiple) and not isinstance( 318 form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple) 317 if ( 318 isinstance(form_field.widget, SelectMultiple) 319 and form_field.widget.allow_multiple_selected 320 and not isinstance( 321 form_field.widget, (CheckboxSelectMultiple, AutocompleteSelectMultiple) 322 ) 319323 ): 320324 msg = _( 321325 \"Hold down \u201cControl\u201d, or \u201cCommand\u201d on a Mac, to select more than one.\"\nAs far as I understand correctly, you have a subclass of SelectMultiple with allow_multiple_selected set to False. Exactly.",
+  "created_at": "2022-06-27T02:15:54Z",
+  "version": "4.2",
+  "FAIL_TO_PASS": "[\"test_m2m_widgets_no_allow_multiple_selected (admin_widgets.tests.AdminFormfieldForDBFieldTests)\"]",
+  "PASS_TO_PASS": "[\"Ensure the user can only see their own cars in the foreign key dropdown.\", \"File widgets should render as a link when they're marked \\\"read only.\\\"\", \"Overriding the widget for DateTimeField doesn't overrides the default\", \"The autocomplete_fields, raw_id_fields, filter_vertical, and\", \"WARNING: This test doesn't use assertHTMLEqual since it will get rid\", \"Widget instances in formfield_overrides are not shared between\", \"formfield_overrides works for a custom field class.\", \"m2m fields help text as it applies to admin app (#9321).\", \"test_CharField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_DateField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_DateTimeField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_EmailField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_FileField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_ForeignKey (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_IntegerField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_TextField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_TimeField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_URLField (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_attrs (admin_widgets.tests.AdminDateWidgetTest)\", \"test_attrs (admin_widgets.tests.AdminTimeWidgetTest)\", \"test_attrs (admin_widgets.tests.AdminUUIDWidgetTests)\", \"test_changelist_ForeignKey (admin_widgets.tests.AdminForeignKeyWidgetChangeList)\", \"test_choices_with_radio_fields (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_custom_widget_render (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_field_with_choices (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_filtered_many_to_many (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_fk_related_model_not_in_admin (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_fk_to_self_model_not_in_admin (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_formfield_overrides (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_get_context_validates_url (admin_widgets.tests.AdminURLWidgetTest)\", \"test_inheritance (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_invalid_target_id (admin_widgets.tests.AdminForeignKeyRawIdWidget)\", \"test_label_and_url_for_value_invalid_uuid (admin_widgets.tests.AdminForeignKeyRawIdWidget)\", \"test_localization (admin_widgets.tests.AdminSplitDateTimeWidgetTest)\", \"test_m2m_related_model_not_in_admin (admin_widgets.tests.ManyToManyRawIdWidgetTest)\", \"test_many_to_many (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_no_can_add_related (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_nonexistent_target_id (admin_widgets.tests.AdminForeignKeyRawIdWidget)\", \"test_on_delete_cascade_rel_cant_delete_related (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_proper_manager_for_label_lookup (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_radio_fields_ForeignKey (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_radio_fields_foreignkey_formfield_overrides_empty_label (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_raw_id_ForeignKey (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_raw_id_many_to_many (admin_widgets.tests.AdminFormfieldForDBFieldTests)\", \"test_relations_to_non_primary_key (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_render (admin_widgets.tests.AdminFileWidgetTests)\", \"test_render (admin_widgets.tests.AdminSplitDateTimeWidgetTest)\", \"test_render (admin_widgets.tests.AdminURLWidgetTest)\", \"test_render (admin_widgets.tests.FilteredSelectMultipleWidgetTest)\", \"test_render (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_render (admin_widgets.tests.ManyToManyRawIdWidgetTest)\", \"test_render_disabled (admin_widgets.tests.AdminFileWidgetTests)\", \"test_render_fk_as_pk_model (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_render_idn (admin_widgets.tests.AdminURLWidgetTest)\", \"test_render_required (admin_widgets.tests.AdminFileWidgetTests)\", \"test_render_unsafe_limit_choices_to (admin_widgets.tests.ForeignKeyRawIdWidgetTest)\", \"test_select_multiple_widget_cant_change_delete_related (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_stacked_render (admin_widgets.tests.FilteredSelectMultipleWidgetTest)\", \"test_url_params_from_lookup_dict_any_iterable (admin_widgets.tests.AdminForeignKeyRawIdWidget)\", \"test_url_params_from_lookup_dict_callable (admin_widgets.tests.AdminForeignKeyRawIdWidget)\", \"test_widget_delegates_value_omitted_from_data (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_widget_is_hidden (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\", \"test_widget_is_not_hidden (admin_widgets.tests.RelatedFieldWidgetWrapperTests)\"]",
+  "environment_setup_commit": "0fbdb9784da915fce5dcc1fe82bac9b4785749e5",
+  "patch_files": [
+    "django/contrib/admin/options.py"
+  ],
+  "test_patch_files": [
+    "tests/admin_widgets/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/contrib/admin/options.py": {
+      "diffs": [
+        {
+          "start_line_old": 317,
+          "end_line_old": 318,
+          "file_pos": 4,
+          "file_context_length": 41287,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin._get_form_for_get_fields_InlineModelAdmin._has_any_perms_for_target_model.5.1",
+          "closest_snippet_line_distance": 2114,
+          "pos": 23,
+          "context_length": 7715
+        }
+      ]
+    }
+  },
+  "vectors": 3724,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectMultiple_RadioSelect.id_for_label.3.1",
+      "distance": 0.7644110918045044,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 805,
+      "end_line": 835,
+      "tokens": 226,
+      "context_length": 226
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/forms/widgets.py_CheckboxSelectMultiple_CheckboxSelectMultiple.value_omitted_from_data.3.1",
+      "distance": 0.7963660359382629,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 838,
+      "end_line": 852,
+      "tokens": 139,
+      "context_length": 365
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select_Select._choice_has_empty_value.3.1",
+      "distance": 0.845077395439148,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 725,
+      "end_line": 743,
+      "tokens": 153,
+      "context_length": 518
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select.use_required_attribute_Select.use_required_attribute.6.1",
+      "distance": 0.8472588062286377,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 745,
+      "end_line": 760,
+      "tokens": 122,
+      "context_length": 640
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/forms/fields.py_MultipleChoiceField_MultipleChoiceField.has_changed.7.1",
+      "distance": 0.8775466680526733,
+      "file_path": "django/forms/fields.py",
+      "start_line": 943,
+      "end_line": 986,
+      "tokens": 307,
+      "context_length": 947
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_1_FilteredSelectMultiple.get_context.6.1",
+      "distance": 0.9021720290184021,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 338,
+      "context_length": 1285
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.media_",
+      "distance": 0.9165355563163757,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 555,
+      "end_line": 588,
+      "tokens": 201,
+      "context_length": 1486
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view_ModelAdmin._changeform_view.14.3.title.1",
+      "distance": 0.9215867519378662,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1744,
+      "end_line": 1846,
+      "tokens": 782,
+      "context_length": 2268,
+      "file_pos": 4
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view.context_ModelAdmin._changeform_view.20.1",
+      "distance": 0.9359754323959351,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1847,
+      "end_line": 1878,
+      "tokens": 303,
+      "context_length": 2571,
+      "file_pos": 4
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField.prepare_value_",
+      "distance": 0.9394413232803345,
+      "file_path": "django/forms/models.py",
+      "start_line": 1638,
+      "end_line": 1666,
+      "tokens": 207,
+      "context_length": 2778
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 0.9394444227218628,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 114,
+      "tokens": 776,
+      "context_length": 3554,
+      "file_pos": 5
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py_help_text_for_field_display_for_field.2.12.1.1",
+      "distance": 0.9531710147857666,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 388,
+      "end_line": 427,
+      "tokens": 350,
+      "context_length": 3904
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField.clean_ModelMultipleChoiceField.clean.8.1",
+      "distance": 0.9600666761398315,
+      "file_path": "django/forms/models.py",
+      "start_line": 1584,
+      "end_line": 1599,
+      "tokens": 131,
+      "context_length": 4035
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_item_ModelAdminChecks._check_list_editable_item.1.3.1.7.1.1",
+      "distance": 0.9645935297012329,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1091,
+      "end_line": 1143,
+      "tokens": 430,
+      "context_length": 4465
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_change_form_ModelAdmin.render_change_form.10.1",
+      "distance": 0.9675157070159912,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1252,
+      "end_line": 1314,
+      "tokens": 511,
+      "context_length": 4976,
+      "file_pos": 7
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.changelist_view.23_ModelAdmin.changelist_view.31.1",
+      "distance": 0.9779137969017029,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1998,
+      "end_line": 2087,
+      "tokens": 767,
+      "context_length": 5743,
+      "file_pos": 7
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultipleHiddenInput_MultipleHiddenInput.format_value.1.1",
+      "distance": 0.9779877066612244,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 377,
+      "end_line": 412,
+      "tokens": 279,
+      "context_length": 6022
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.get_context_MultiWidget.get_context.12.1",
+      "distance": 0.9829938411712646,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 882,
+      "end_line": 915,
+      "tokens": 282,
+      "context_length": 6304
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField_ModelMultipleChoiceField.to_python.2.1",
+      "distance": 0.9917386770248413,
+      "file_path": "django/forms/models.py",
+      "start_line": 1563,
+      "end_line": 1582,
+      "tokens": 154,
+      "context_length": 6458
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin._get_form_for_get_fields_InlineModelAdmin._has_any_perms_for_target_model.5.1",
+      "distance": 0.992280900478363,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2431,
+      "end_line": 2458,
+      "tokens": 254,
+      "context_length": 6712,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget.get_context_SelectDateWidget.get_context.18.1",
+      "distance": 0.9928653836250305,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1067,
+      "end_line": 1108,
+      "tokens": 403,
+      "context_length": 7115
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ManyToManyRawIdWidget_ManyToManyRawIdWidget.format_value.1.1",
+      "distance": 0.9963871240615845,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 207,
+      "end_line": 234,
+      "tokens": 217,
+      "context_length": 7332
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.formfield_for_manytomany_BaseModelAdmin.formfield_for_manytomany.10.1",
+      "distance": 0.9968796968460083,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 283,
+      "end_line": 327,
+      "tokens": 383,
+      "context_length": 7715,
+      "file_pos": 7
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/forms/widgets.py_NullBooleanSelect_NullBooleanSelect.value_from_datadict.2.1",
+      "distance": 1.0035548210144043,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 763,
+      "end_line": 802,
+      "tokens": 240,
+      "context_length": 7955
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminIntegerFieldWidget_get_select2_language.4.1",
+      "distance": 1.0095272064208984,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 384,
+      "end_line": 466,
+      "tokens": 485,
+      "context_length": 8440
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin_AutocompleteMixin.get_url.1.1",
+      "distance": 1.0200918912887573,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 469,
+      "end_line": 488,
+      "tokens": 141,
+      "context_length": 8581
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_BoundField.subwidgets_BoundField.subwidgets.5.1",
+      "distance": 1.0237754583358765,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 36,
+      "end_line": 53,
+      "tokens": 153,
+      "context_length": 8734
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_links_item_ModelAdminChecks._check_list_filter.1.2.1.1",
+      "distance": 1.0246151685714722,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 955,
+      "end_line": 979,
+      "tokens": 197,
+      "context_length": 8931
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_item_BaseModelAdminChecks._check_autocomplete_fields_item.2.3.4.1",
+      "distance": 1.0250799655914307,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 217,
+      "end_line": 264,
+      "tokens": 333,
+      "context_length": 9264
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.optgroups_AutocompleteMixin.optgroups.12.1",
+      "distance": 1.0274016857147217,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 520,
+      "end_line": 553,
+      "tokens": 307,
+      "context_length": 9571
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget._parse_date_fmt_SelectDateWidget.id_for_label.2.1",
+      "distance": 1.0285804271697998,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1135,
+      "end_line": 1154,
+      "tokens": 144,
+      "context_length": 9715
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminTextareaWidget_AdminEmailInputWidget.__init__.1",
+      "distance": 1.032942295074463,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 346,
+      "end_line": 358,
+      "tokens": 114,
+      "context_length": 9829
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget_ChoiceWidget.options.2.1",
+      "distance": 1.0348560810089111,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 592,
+      "end_line": 626,
+      "tokens": 277,
+      "context_length": 10106
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.get_formset.DeleteProtectedModelForm_InlineModelAdmin.get_formset.18.1",
+      "distance": 1.0370250940322876,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2372,
+      "end_line": 2429,
+      "tokens": 465,
+      "context_length": 10571,
+      "file_pos": 8
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_item_ModelAdminChecks._check_list_display_item.4.1",
+      "distance": 1.0379347801208496,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 894,
+      "end_line": 928,
+      "tokens": 222,
+      "context_length": 10793
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.create_option_ChoiceWidget.create_option.5.1",
+      "distance": 1.0391536951065063,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 668,
+      "end_line": 689,
+      "tokens": 187,
+      "context_length": 10980
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_BaseModelAdminChecks._check_autocomplete_fields.2.2.1.1",
+      "distance": 1.0431678295135498,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 194,
+      "end_line": 215,
+      "tokens": 141,
+      "context_length": 11121
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminForm_AdminForm.media.3.1",
+      "distance": 1.0439318418502808,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 42,
+      "end_line": 99,
+      "tokens": 324,
+      "context_length": 11445
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_select_related_ModelAdminChecks._check_list_max_show_all.2.2.1.1",
+      "distance": 1.0477544069290161,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1040,
+      "end_line": 1071,
+      "tokens": 229,
+      "context_length": 11674
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.get_context_ChoiceWidget.format_value.4.1",
+      "distance": 1.0497972965240479,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 691,
+      "end_line": 722,
+      "tokens": 242,
+      "context_length": 11916
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_inline_formsets_ModelAdmin.get_inline_formsets.can_edit_parent.4.1",
+      "distance": 1.0554897785186768,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1673,
+      "end_line": 1709,
+      "tokens": 338,
+      "context_length": 12254,
+      "file_pos": 9
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_ModelAdminChecks._check_list_editable.2.2.1.1",
+      "distance": 1.0561918020248413,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1073,
+      "end_line": 1089,
+      "tokens": 140,
+      "context_length": 12394
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.lookup_allowed_BaseModelAdmin.lookup_allowed.14.1",
+      "distance": 1.056931734085083,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 428,
+      "end_line": 486,
+      "tokens": 509,
+      "context_length": 12903,
+      "file_pos": 9
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_json_checkbox.1",
+      "distance": 1.0576894283294678,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 227,
+      "context_length": 13130
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.fields_InlineAdminFormSet.fields.5.2.5.4",
+      "distance": 1.060865044593811,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 382,
+      "end_line": 422,
+      "tokens": 327,
+      "context_length": 13457
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget.value_from_datadict_",
+      "distance": 1.0626680850982666,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1156,
+      "end_line": 1179,
+      "tokens": 250,
+      "context_length": 13707
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_ModelAdminChecks._check_list_display.2.2.1.1",
+      "distance": 1.0628985166549683,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 879,
+      "end_line": 892,
+      "tokens": 121,
+      "context_length": 13828
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminField_AdminField.errors.1.1",
+      "distance": 1.0637645721435547,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 168,
+      "end_line": 195,
+      "tokens": 221,
+      "context_length": 14049
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/forms/widgets.py_CheckboxInput_CheckboxInput.value_omitted_from_data.3.1",
+      "distance": 1.0667704343795776,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 553,
+      "end_line": 589,
+      "tokens": 331,
+      "context_length": 14380
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_RelatedFieldWidgetWrapper.get_context_RelatedFieldWidgetWrapper.id_for_label.1.1",
+      "distance": 1.0673768520355225,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 297,
+      "end_line": 343,
+      "tokens": 439,
+      "context_length": 14819
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.optgroups_ChoiceWidget.optgroups.5.1",
+      "distance": 1.0721451044082642,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 628,
+      "end_line": 666,
+      "tokens": 240,
+      "context_length": 15059
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_form_BaseModelAdminChecks._check_filter_vertical.2.2.1.1",
+      "distance": 1.0738794803619385,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 480,
+      "end_line": 503,
+      "tokens": 188,
+      "context_length": 15247
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/forms/fields.py_ChoiceField_ChoiceField.valid_value.4.1",
+      "distance": 1.0742738246917725,
+      "file_path": "django/forms/fields.py",
+      "start_line": 852,
+      "end_line": 913,
+      "tokens": 421,
+      "context_length": 15668
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks_ModelAdminChecks.check.1.1",
+      "distance": 1.0780422687530518,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 790,
+      "end_line": 808,
+      "tokens": 183,
+      "context_length": 15851
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/forms/fields.py_TypedMultipleChoiceField_TypedMultipleChoiceField.validate.1.2.1",
+      "distance": 1.080958604812622,
+      "file_path": "django/forms/fields.py",
+      "start_line": 989,
+      "end_line": 1022,
+      "tokens": 235,
+      "context_length": 16086
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget_SelectDateWidget.__init__.7.5.self.day_none_value.1",
+      "distance": 1.082200527191162,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1017,
+      "end_line": 1065,
+      "tokens": 407,
+      "context_length": 16493
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_filter_item_BaseModelAdminChecks._check_filter_item.2.3.1.2.1.1",
+      "distance": 1.083327293395996,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 521,
+      "end_line": 537,
+      "tokens": 144,
+      "context_length": 16637
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_warnings_spherical_mercator_srid.1",
+      "distance": 1.084061861038208,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 227,
+      "context_length": 16864
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_filter_item_ModelAdminChecks._check_list_filter_item.3.4.field.3.3.1.1",
+      "distance": 1.0848268270492554,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 981,
+      "end_line": 1038,
+      "tokens": 457,
+      "context_length": 17321
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/forms/widgets.py_1_MediaOrderConflictWarning.1",
+      "distance": 1.088135004043579,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 306,
+      "context_length": 17627
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin_InlineModelAdmin.get_max_num.2.1",
+      "distance": 1.089179277420044,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2278,
+      "end_line": 2335,
+      "tokens": 476,
+      "context_length": 18103,
+      "file_pos": 10
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.needs_explicit_pk_field_InlineAdminForm.needs_explicit_pk_field.1.1",
+      "distance": 1.0892999172210693,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 499,
+      "end_line": 512,
+      "tokens": 142,
+      "context_length": 18245
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_field_spec_item_BaseModelAdminChecks._check_field_spec_item.1.5.1.3.1.2.1.1",
+      "distance": 1.0895135402679443,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 430,
+      "end_line": 458,
+      "tokens": 224,
+      "context_length": 18469
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.to_field_allowed_BaseModelAdmin.to_field_allowed.15.1",
+      "distance": 1.0921536684036255,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 488,
+      "end_line": 532,
+      "tokens": 348,
+      "context_length": 18817,
+      "file_pos": 10
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.changelist_view_ModelAdmin.changelist_view.22",
+      "distance": 1.0954036712646484,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1909,
+      "end_line": 1997,
+      "tokens": 676,
+      "context_length": 19493,
+      "file_pos": 10
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField._check_values_ModelMultipleChoiceField._check_values.10.1",
+      "distance": 1.0962214469909668,
+      "file_path": "django/forms/models.py",
+      "start_line": 1601,
+      "end_line": 1636,
+      "tokens": 288,
+      "context_length": 19781
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminDateWidget_AdminTimeWidget.__init__.2",
+      "distance": 1.098171591758728,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 51,
+      "end_line": 72,
+      "tokens": 168,
+      "context_length": 19949
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks._check_relation_InlineModelAdminChecks._check_formset.2.2.1.1",
+      "distance": 1.1014306545257568,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1275,
+      "end_line": 1319,
+      "tokens": 343,
+      "context_length": 20292
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.formfield_for_dbfield_GeoModelAdmin.formfield_for_dbfield.2.3.1.1",
+      "distance": 1.1017606258392334,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 90,
+      "end_line": 101,
+      "tokens": 139,
+      "context_length": 20431
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_delete_form_ModelAdmin.render_delete_form.4.1",
+      "distance": 1.1024143695831299,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1650,
+      "end_line": 1671,
+      "tokens": 133,
+      "context_length": 20564,
+      "file_pos": 10
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget_MultiWidget.is_hidden.1.1",
+      "distance": 1.1048448085784912,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 855,
+      "end_line": 880,
+      "tokens": 218,
+      "context_length": 20782
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_autocomplete_fields_BaseModelAdmin.get_view_on_site_url.2.2.2.1",
+      "distance": 1.106937289237976,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 329,
+      "end_line": 351,
+      "tokens": 169,
+      "context_length": 20951,
+      "file_pos": 10
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Textarea_boolean_check.1.1",
+      "distance": 1.107597827911377,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 508,
+      "end_line": 550,
+      "tokens": 279,
+      "context_length": 21230
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks._check_exclude_of_parent_model_InlineModelAdminChecks._check_exclude_of_parent_model.errors.7.2.1.1",
+      "distance": 1.1085807085037231,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1244,
+      "end_line": 1273,
+      "tokens": 196,
+      "context_length": 21426
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks_BaseModelAdminChecks.check.1.1",
+      "distance": 1.1097886562347412,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 176,
+      "end_line": 192,
+      "tokens": 155,
+      "context_length": 21581
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ForeignKeyRawIdWidget_ForeignKeyRawIdWidget.get_context.5.1",
+      "distance": 1.1118500232696533,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 123,
+      "end_line": 169,
+      "tokens": 358,
+      "context_length": 21939
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.pk_field_InlineAdminForm.ordering_field.2.1",
+      "distance": 1.1129529476165771,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 514,
+      "end_line": 532,
+      "tokens": 138,
+      "context_length": 22077
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_inlines_item_ModelAdminChecks._check_inlines_item.4.4.1.1",
+      "distance": 1.1134464740753174,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 841,
+      "end_line": 877,
+      "tokens": 268,
+      "context_length": 22345
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_formset_kwargs_ModelAdmin._create_formsets.8.1",
+      "distance": 1.1137449741363525,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2226,
+      "end_line": 2275,
+      "tokens": 446,
+      "context_length": 22791,
+      "file_pos": 10
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_ignored_options_ManyToManyField._check_ignored_options.5.1",
+      "distance": 1.1168853044509888,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1417,
+      "end_line": 1447,
+      "tokens": 172,
+      "context_length": 22963
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin_BaseModelAdmin.__init__.overrides.self.formfield_overrides.1",
+      "distance": 1.1188478469848633,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 117,
+      "end_line": 147,
+      "tokens": 223,
+      "context_length": 23186,
+      "file_pos": 11
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField.choices_ModelChoiceField.has_changed.4.1",
+      "distance": 1.1196166276931763,
+      "file_path": "django/forms/models.py",
+      "start_line": 1526,
+      "end_line": 1560,
+      "tokens": 254,
+      "context_length": 23440
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_15_ChoicesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.1223512887954712,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 299,
+      "end_line": 313,
+      "tokens": 152,
+      "context_length": 23592
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_empty_value_display_BaseModelAdmin.get_sortable_by.2.1",
+      "distance": 1.1257154941558838,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 353,
+      "end_line": 426,
+      "tokens": 500,
+      "context_length": 24092,
+      "file_pos": 12
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_links_ModelAdminChecks._check_list_display_links.4.1",
+      "distance": 1.12599778175354,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 930,
+      "end_line": 953,
+      "tokens": 195,
+      "context_length": 24287
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.build_attrs_AutocompleteMixin.build_attrs.5.1",
+      "distance": 1.1271699666976929,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 490,
+      "end_line": 518,
+      "tokens": 257,
+      "context_length": 24544
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_fieldsets_BaseModelAdminChecks._check_fieldsets.2.3.2.1",
+      "distance": 1.1279782056808472,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 348,
+      "end_line": 367,
+      "tokens": 146,
+      "context_length": 24690
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelFormOptions_ModelFormOptions.__init__.self.field_classes.1",
+      "distance": 1.1289381980895996,
+      "file_path": "django/forms/models.py",
+      "start_line": 245,
+      "end_line": 255,
+      "tokens": 131,
+      "context_length": 24821
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.get_unique_error_message_BaseModelFormSet.get_form_error.1.1",
+      "distance": 1.1314791440963745,
+      "file_path": "django/forms/models.py",
+      "start_line": 889,
+      "end_line": 912,
+      "tokens": 198,
+      "context_length": 25019
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SplitArrayWidget.get_context_SplitArrayWidget.needs_multipart_form.1.1",
+      "distance": 1.1319993734359741,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 146,
+      "end_line": 180,
+      "tokens": 270,
+      "context_length": 25289
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/contrib/admin/tests.py_AdminSeleniumTestCase.select_option_AdminSeleniumTestCase.assertCountSeleniumElements.4",
+      "distance": 1.1341476440429688,
+      "file_path": "django/contrib/admin/tests.py",
+      "start_line": 150,
+      "end_line": 183,
+      "tokens": 279,
+      "context_length": 25568
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_readonly_fields_item_BaseModelAdminChecks._check_readonly_fields_item.1.4.1.3.1.1",
+      "distance": 1.1357605457305908,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 762,
+      "end_line": 787,
+      "tokens": 158,
+      "context_length": 25726
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.has_add_permission_",
+      "distance": 1.1390916109085083,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2460,
+      "end_line": 2495,
+      "tokens": 315,
+      "context_length": 26041,
+      "file_pos": 14
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.get_map_widget.OLMap_",
+      "distance": 1.1408953666687012,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 123,
+      "end_line": 181,
+      "tokens": 565,
+      "context_length": 26606
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ForeignKeyRawIdWidget.base_url_parameters_ForeignKeyRawIdWidget.label_and_url_for_value.4.1",
+      "distance": 1.1465561389923096,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 171,
+      "end_line": 204,
+      "tokens": 244,
+      "context_length": 26850
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_value_BaseModelAdminChecks._check_view_on_site_url.1.2.1.1",
+      "distance": 1.1466312408447266,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 580,
+      "end_line": 608,
+      "tokens": 195,
+      "context_length": 27045
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/admin.py_1_GenericInlineModelAdminChecks._check_relation.gfks.2.2.2.7.1",
+      "distance": 1.1470706462860107,
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 585,
+      "context_length": 27630
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Widget_Widget.use_required_attribute.1.1",
+      "distance": 1.1475815773010254,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 232,
+      "end_line": 315,
+      "tokens": 627,
+      "context_length": 28257
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.id_for_label_MultiWidget.needs_multipart_form.1.1",
+      "distance": 1.147704839706421,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 917,
+      "end_line": 959,
+      "tokens": 302,
+      "context_length": 28559
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldline_Fieldline.errors.1.1",
+      "distance": 1.1484651565551758,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 133,
+      "end_line": 165,
+      "tokens": 256,
+      "context_length": 28815
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter_RelatedFieldListFilter.field_choices.2.1",
+      "distance": 1.1485099792480469,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 180,
+      "end_line": 225,
+      "tokens": 427,
+      "context_length": 29242
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.inline_formset_data_InlineAdminFormSet.media.3.1",
+      "distance": 1.1488150358200073,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 424,
+      "end_line": 460,
+      "tokens": 210,
+      "context_length": 29452
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_search_results.may_have_duplicates_ModelAdmin.get_search_results.7.1",
+      "distance": 1.1506946086883545,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1135,
+      "end_line": 1155,
+      "tokens": 201,
+      "context_length": 29653,
+      "file_pos": 15
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ModelDetailView_ModelDetailView.get_context_data.15",
+      "distance": 1.15073561668396,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 212,
+      "end_line": 296,
+      "tokens": 615,
+      "context_length": 30268
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_GroupAdmin_GroupAdmin.formfield_for_manytomany.2.1",
+      "distance": 1.1520558595657349,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 28,
+      "end_line": 40,
+      "tokens": 130,
+      "context_length": 30398
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks_InlineModelAdminChecks.check.2.1",
+      "distance": 1.1521610021591187,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1231,
+      "end_line": 1242,
+      "tokens": 116,
+      "context_length": 30514
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_search_fields_ModelAdminChecks._check_date_hierarchy.2.2.1.3.1.2.1.1",
+      "distance": 1.1525161266326904,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1145,
+      "end_line": 1181,
+      "tokens": 252,
+      "context_length": 30766
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/forms/widgets.py_TextInput_HiddenInput.template_name.1",
+      "distance": 1.1531879901885986,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 338,
+      "end_line": 374,
+      "tokens": 204,
+      "context_length": 30970
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminSplitDateTime_AdminSplitDateTime.get_context.4.1",
+      "distance": 1.153293490409851,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 75,
+      "end_line": 92,
+      "tokens": 145,
+      "context_length": 31115
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_BaseModelAdminChecks._check_radio_fields.2.2.1.1",
+      "distance": 1.1536517143249512,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 539,
+      "end_line": 554,
+      "tokens": 136,
+      "context_length": 31251
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/contrib/admin/tests.py_AdminSeleniumTestCase.assertSelectOptions_",
+      "distance": 1.1568514108657837,
+      "file_path": "django/contrib/admin/tests.py",
+      "start_line": 205,
+      "end_line": 235,
+      "tokens": 226,
+      "context_length": 31477
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ChoicesFieldListFilter.choices_17",
+      "distance": 1.157052993774414,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 315,
+      "end_line": 345,
+      "tokens": 229,
+      "context_length": 31706
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ClearableFileInput.get_context_ClearableFileInput.get_context.5.1",
+      "distance": 1.1577234268188477,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 470,
+      "end_line": 484,
+      "tokens": 126,
+      "context_length": 31832
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.__iter___InlineAdminFormSet.__iter__.4.1",
+      "distance": 1.1598135232925415,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 339,
+      "end_line": 380,
+      "tokens": 257,
+      "context_length": 32089
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_save_as_ModelAdminChecks._check_save_on_top.2.2.1.1",
+      "distance": 1.1599533557891846,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 810,
+      "end_line": 824,
+      "tokens": 127,
+      "context_length": 32216
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.formfield_for_choice_field_BaseModelAdmin.formfield_for_choice_field.4.1",
+      "distance": 1.1599934101104736,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 217,
+      "end_line": 234,
+      "tokens": 174,
+      "context_length": 32390,
+      "file_pos": 17
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_changelist_form_ModelAdmin.get_changelist_form.4.1",
+      "distance": 1.1604058742523193,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 866,
+      "end_line": 879,
+      "tokens": 117,
+      "context_length": 32507,
+      "file_pos": 17
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/forms/widgets.py_FileInput_FILE_INPUT_CONTRADICTION.1",
+      "distance": 1.1627225875854492,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 415,
+      "end_line": 435,
+      "tokens": 138,
+      "context_length": 32645
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminReadonlyField.contents_AdminReadonlyField.contents.4.1",
+      "distance": 1.1652408838272095,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 264,
+      "end_line": 302,
+      "tokens": 323,
+      "context_length": 32968
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_key_BaseModelAdminChecks._check_radio_fields_key.2.3.1.2.1.1",
+      "distance": 1.1654384136199951,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 556,
+      "end_line": 578,
+      "tokens": 194,
+      "context_length": 33162
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.9.3.seen_from.5.1",
+      "distance": 1.165764570236206,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1449,
+      "end_line": 1578,
+      "tokens": 984,
+      "context_length": 34146
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter.choices_RelatedFieldListFilter.choices.3.1",
+      "distance": 1.1658010482788086,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 227,
+      "end_line": 250,
+      "tokens": 202,
+      "context_length": 34348
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.apply_select_related_",
+      "distance": 1.1668877601623535,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 554,
+      "end_line": 586,
+      "tokens": 227,
+      "context_length": 34575
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_RelatedFieldWidgetWrapper_RelatedFieldWidgetWrapper.get_related_url.1.1",
+      "distance": 1.1675316095352173,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 237,
+      "end_line": 295,
+      "tokens": 436,
+      "context_length": 35011
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._get_validation_exclusions_BaseModelForm._get_validation_exclusions.6.1",
+      "distance": 1.1680474281311035,
+      "file_path": "django/forms/models.py",
+      "start_line": 386,
+      "end_line": 429,
+      "tokens": 396,
+      "context_length": 35407
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_modify.py_submit_row_submit_row.19.1",
+      "distance": 1.1682770252227783,
+      "file_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "start_line": 61,
+      "end_line": 112,
+      "tokens": 414,
+      "context_length": 35821
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Media_Media.render_js.1.1",
+      "distance": 1.1689499616622925,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 61,
+      "end_line": 108,
+      "tokens": 311,
+      "context_length": 36132
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_field_queryset_BaseModelAdmin.get_field_queryset.4.1",
+      "distance": 1.1699939966201782,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 236,
+      "end_line": 249,
+      "tokens": 139,
+      "context_length": 36271,
+      "file_pos": 19
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_1_HiddenRangeWidget.__init__.1",
+      "distance": 1.17057466506958,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 206,
+      "context_length": 36477
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ModelDetailView.get_context_data.16_ModelDetailView.get_context_data.19.1",
+      "distance": 1.1719565391540527,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 297,
+      "end_line": 391,
+      "tokens": 640,
+      "context_length": 37117
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/forms/fields.py_Field_Field.validate.1.1",
+      "distance": 1.1722569465637207,
+      "file_path": "django/forms/fields.py",
+      "start_line": 82,
+      "end_line": 177,
+      "tokens": 791,
+      "context_length": 37908
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_readonly_fields_BaseModelAdminChecks._check_readonly_fields.2.3.1.1",
+      "distance": 1.1732503175735474,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 743,
+      "end_line": 760,
+      "tokens": 139,
+      "context_length": 38047
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_list_filter_ModelAdmin.get_search_fields.2.1",
+      "distance": 1.1741490364074707,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1079,
+      "end_line": 1098,
+      "tokens": 131,
+      "context_length": 38178,
+      "file_pos": 20
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/admin.py_GenericInlineModelAdmin_",
+      "distance": 1.1745392084121704,
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "start_line": 91,
+      "end_line": 144,
+      "tokens": 420,
+      "context_length": 38598
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldset_Fieldset.__iter__.1.1",
+      "distance": 1.1768712997436523,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 102,
+      "end_line": 130,
+      "tokens": 165,
+      "context_length": 38763
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_1_ChangeListSearchForm.__init__.self.fields.1",
+      "distance": 1.1776492595672607,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 324,
+      "context_length": 39087
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_raw_id_fields_item_BaseModelAdminChecks._check_raw_id_fields_item.2.3.2.2.2.1.1",
+      "distance": 1.1821410655975342,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 284,
+      "end_line": 312,
+      "tokens": 218,
+      "context_length": 39305
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model.4_ManyToManyField._check_relationship_model.6.1",
+      "distance": 1.1825828552246094,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1580,
+      "end_line": 1678,
+      "tokens": 655,
+      "context_length": 39960
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.set_attributes_from_rel_",
+      "distance": 1.18282151222229,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1959,
+      "end_line": 1993,
+      "tokens": 266,
+      "context_length": 40226
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_BaseModelAdminChecks._check_prepopulated_fields.2.2.1.1",
+      "distance": 1.183415412902832,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 610,
+      "end_line": 628,
+      "tokens": 164,
+      "context_length": 40390
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SplitArrayWidget_SplitArrayWidget.id_for_label.2.2.1",
+      "distance": 1.1836249828338623,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 116,
+      "end_line": 144,
+      "tokens": 222,
+      "context_length": 40612
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_re_BoundField.__str__.3.1",
+      "distance": 1.1847264766693115,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 233,
+      "context_length": 40845
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.urls_ModelAdmin.media.3.1",
+      "distance": 1.1857762336730957,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 721,
+      "end_line": 738,
+      "tokens": 128,
+      "context_length": 40973,
+      "file_pos": 20
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.get_map_widget_GeoModelAdmin.get_map_widget.3.2.collection_type.1",
+      "distance": 1.1862058639526367,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 103,
+      "end_line": 121,
+      "tokens": 156,
+      "context_length": 41129
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TextField_TextField._check_db_collation.3.1",
+      "distance": 1.1874909400939941,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2333,
+      "end_line": 2367,
+      "tokens": 229,
+      "context_length": 41358
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/forms/formsets.py_1_DEFAULT_MAX_NUM.1",
+      "distance": 1.1880028247833252,
+      "file_path": "django/forms/formsets.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 210,
+      "context_length": 41568
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_AllValuesFieldListFilter.choices_AllValuesFieldListFilter.choices.4.1",
+      "distance": 1.1881060600280762,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 457,
+      "end_line": 485,
+      "tokens": 223,
+      "context_length": 41791
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_item_BaseModelAdminChecks._check_ordering.3.4.1.1",
+      "distance": 1.188881754875183,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 673,
+      "end_line": 702,
+      "tokens": 241,
+      "context_length": 42032
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeCheckMixin_DateTimeCheckMixin.5",
+      "distance": 1.1895992755889893,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1246,
+      "end_line": 1283,
+      "tokens": 245,
+      "context_length": 42277
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_inlines_ModelAdminChecks._check_inlines.2.2.1.1",
+      "distance": 1.1897077560424805,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 826,
+      "end_line": 839,
+      "tokens": 117,
+      "context_length": 42394
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_24_RelatedOnlyFieldListFilter.field_choices.3.1",
+      "distance": 1.1913002729415894,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 488,
+      "end_line": 501,
+      "tokens": 119,
+      "context_length": 42513
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/contrib/admin/views/autocomplete.py_AutocompleteJsonView.process_request_",
+      "distance": 1.192033052444458,
+      "file_path": "django/contrib/admin/views/autocomplete.py",
+      "start_line": 66,
+      "end_line": 123,
+      "tokens": 425,
+      "context_length": 42938
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_ReadOnlyPasswordHashWidget_ReadOnlyPasswordHashWidget.id_for_label.1.1",
+      "distance": 1.1942133903503418,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 33,
+      "end_line": 60,
+      "tokens": 186,
+      "context_length": 43124
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ClearableFileInput.value_from_datadict_ClearableFileInput.value_omitted_from_data.1.1",
+      "distance": 1.1953003406524658,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 486,
+      "end_line": 505,
+      "tokens": 195,
+      "context_length": 43319
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_changelist_formset_ModelAdmin.get_changelist_formset.3.1",
+      "distance": 1.1959350109100342,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 881,
+      "end_line": 896,
+      "tokens": 114,
+      "context_length": 43433,
+      "file_pos": 24
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.validate_unique_BaseModelFormSet.validate_unique.all_unique_checks.11.1",
+      "distance": 1.195945382118225,
+      "file_path": "django/forms/models.py",
+      "start_line": 796,
+      "end_line": 887,
+      "tokens": 783,
+      "context_length": 44216
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_local_fields_Model._check_local_fields.8.1",
+      "distance": 1.196246862411499,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1994,
+      "end_line": 2047,
+      "tokens": 355,
+      "context_length": 44571
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_BaseModelAdminChecks._check_prepopulated_fields_value.2.2.1.1",
+      "distance": 1.1962578296661377,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 657,
+      "end_line": 671,
+      "tokens": 141,
+      "context_length": 44712
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_raw_id_fields_BaseModelAdminChecks._check_raw_id_fields.2.2.1.1",
+      "distance": 1.1964595317840576,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 266,
+      "end_line": 282,
+      "tokens": 138,
+      "context_length": 44850
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_formsets_with_inlines_ModelAdmin.log_change.3.1",
+      "distance": 1.1971018314361572,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 898,
+      "end_line": 942,
+      "tokens": 314,
+      "context_length": 45164,
+      "file_pos": 25
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineFieldset_",
+      "distance": 1.1975853443145752,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 535,
+      "end_line": 561,
+      "tokens": 199,
+      "context_length": 45363
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin_ModelAdmin.__repr__.1.1",
+      "distance": 1.1978724002838135,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 610,
+      "end_line": 660,
+      "tokens": 349,
+      "context_length": 45712,
+      "file_pos": 25
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_field_spec_BaseModelAdminChecks._check_field_spec.2.2.1.1",
+      "distance": 1.1999855041503906,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 413,
+      "end_line": 428,
+      "tokens": 145,
+      "context_length": 45857
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelFormMetaclass_ModelFormMetaclass.__new__.13.1",
+      "distance": 1.2009754180908203,
+      "file_path": "django/forms/models.py",
+      "start_line": 258,
+      "end_line": 336,
+      "tokens": 627,
+      "context_length": 46484
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/forms/fields.py_SplitDateTimeField_SplitDateTimeField.__init__.5",
+      "distance": 1.2019274234771729,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1236,
+      "end_line": 1261,
+      "tokens": 191,
+      "context_length": 46675
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField._get_choices_ModelChoiceField._get_choices.3.9.1",
+      "distance": 1.2024232149124146,
+      "file_path": "django/forms/models.py",
+      "start_line": 1511,
+      "end_line": 1524,
+      "tokens": 176,
+      "context_length": 46851
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_inline_instances_ModelAdmin.get_inline_instances.3.1",
+      "distance": 1.2027842998504639,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 662,
+      "end_line": 677,
+      "tokens": 123,
+      "context_length": 46974,
+      "file_pos": 25
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._get_list_editable_queryset_ModelAdmin._get_list_editable_queryset.6.1",
+      "distance": 1.2036869525909424,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1893,
+      "end_line": 1907,
+      "tokens": 132,
+      "context_length": 47106,
+      "file_pos": 25
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py_display_for_value_get_model_from_relation.1.2.1",
+      "distance": 1.2038153409957886,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 430,
+      "end_line": 459,
+      "tokens": 200,
+      "context_length": 47306
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_table_uniqueness_ManyToManyField._check_table_uniqueness.8.1",
+      "distance": 1.2038915157318115,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1680,
+      "end_line": 1730,
+      "tokens": 431,
+      "context_length": 47737
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Media.render_css_Media.render_css.media.2.1",
+      "distance": 1.2055751085281372,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 110,
+      "end_line": 126,
+      "tokens": 127,
+      "context_length": 47864
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_exclude_BaseModelAdminChecks._check_exclude.2.5.1.1",
+      "distance": 1.2072060108184814,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 460,
+      "end_line": 478,
+      "tokens": 137,
+      "context_length": 48001
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminURLFieldWidget_AdminURLFieldWidget.get_context.7.1",
+      "distance": 1.2083067893981934,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 361,
+      "end_line": 381,
+      "tokens": 172,
+      "context_length": 48173
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_deleted_objects_ModelAdmin._delete_view.15.1",
+      "distance": 1.2086918354034424,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2089,
+      "end_line": 2164,
+      "tokens": 599,
+      "context_length": 48772,
+      "file_pos": 25
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm._clean_form_BaseForm.visible_fields.2.1",
+      "distance": 1.208827257156372,
+      "file_path": "django/forms/forms.py",
+      "start_line": 457,
+      "end_line": 517,
+      "tokens": 419,
+      "context_length": 49191
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_BooleanField.formfield_BooleanField.select_format.6.1",
+      "distance": 1.2093398571014404,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1095,
+      "end_line": 1114,
+      "tokens": 223,
+      "context_length": 49414
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_BooleanFieldListFilter.choices_BooleanFieldListFilter.choices.3.1",
+      "distance": 1.2106658220291138,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 275,
+      "end_line": 296,
+      "tokens": 192,
+      "context_length": 49606
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_AutoFieldMixin_AutoFieldMixin.formfield.1.1",
+      "distance": 1.210670828819275,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2667,
+      "end_line": 2717,
+      "tokens": 313,
+      "context_length": 49919
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._post_clean_BaseModelForm._post_clean.14.1",
+      "distance": 1.212753415107727,
+      "file_path": "django/forms/models.py",
+      "start_line": 468,
+      "end_line": 498,
+      "tokens": 244,
+      "context_length": 50163
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/views/generic/edit.py_ModelFormMixin_ModelFormMixin.get_form_class.3.2.3.1",
+      "distance": 1.213098406791687,
+      "file_path": "django/views/generic/edit.py",
+      "start_line": 78,
+      "end_line": 110,
+      "tokens": 269,
+      "context_length": 50432
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_filter_horizontal_BaseModelAdminChecks._check_filter_horizontal.2.2.1.1",
+      "distance": 1.2142142057418823,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 505,
+      "end_line": 519,
+      "tokens": 122,
+      "context_length": 50554
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_fields_BaseModelAdminChecks._check_fields.5.1",
+      "distance": 1.2148001194000244,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 314,
+      "end_line": 346,
+      "tokens": 233,
+      "context_length": 50787
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 1,
+      "tokens": 8260,
+      "context_length": 8260
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 2,
+      "tokens": 9636,
+      "context_length": 17896
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 3,
+      "tokens": 4184,
+      "context_length": 22080
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 4,
+      "tokens": 19207,
+      "context_length": 41287
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 5,
+      "tokens": 12244,
+      "context_length": 53531
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 6,
+      "tokens": 4206,
+      "context_length": 57737
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 7,
+      "tokens": 9532,
+      "context_length": 67269
+    },
+    {
+      "file_path": "django/forms/boundfield.py",
+      "position": 8,
+      "tokens": 2464,
+      "context_length": 69733
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 9,
+      "tokens": 3666,
+      "context_length": 73399
+    },
+    {
+      "file_path": "django/contrib/gis/admin/options.py",
+      "position": 10,
+      "tokens": 1477,
+      "context_length": 74876
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 11,
+      "tokens": 14612,
+      "context_length": 89488
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 12,
+      "tokens": 4269,
+      "context_length": 93757
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "position": 13,
+      "tokens": 1626,
+      "context_length": 95383
+    },
+    {
+      "file_path": "django/contrib/admin/tests.py",
+      "position": 14,
+      "tokens": 1642,
+      "context_length": 97025
+    },
+    {
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "position": 15,
+      "tokens": 1005,
+      "context_length": 98030
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 16,
+      "tokens": 3482,
+      "context_length": 101512
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 17,
+      "tokens": 1771,
+      "context_length": 103283
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 18,
+      "tokens": 4531,
+      "context_length": 107814
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "position": 19,
+      "tokens": 1044,
+      "context_length": 108858
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 20,
+      "tokens": 726,
+      "context_length": 109584
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 21,
+      "tokens": 18723,
+      "context_length": 128307
+    },
+    {
+      "file_path": "django/forms/formsets.py",
+      "position": 22,
+      "tokens": 4284,
+      "context_length": 132591
+    },
+    {
+      "file_path": "django/contrib/admin/views/autocomplete.py",
+      "position": 23,
+      "tokens": 841,
+      "context_length": 133432
+    },
+    {
+      "file_path": "django/contrib/auth/forms.py",
+      "position": 24,
+      "tokens": 3192,
+      "context_length": 136624
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 25,
+      "tokens": 18541,
+      "context_length": 155165
+    },
+    {
+      "file_path": "django/forms/forms.py",
+      "position": 26,
+      "tokens": 4081,
+      "context_length": 159246
+    },
+    {
+      "file_path": "django/views/generic/edit.py",
+      "position": 27,
+      "tokens": 2004,
+      "context_length": 161250
+    }
+  ]
+}

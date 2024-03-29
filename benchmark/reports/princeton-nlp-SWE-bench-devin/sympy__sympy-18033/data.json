@@ -1,0 +1,2877 @@
+{
+  "instance_id": "sympy__sympy-18033",
+  "model_patch": "diff --git a/sympy/combinatorics/permutations.py b/sympy/combinatorics/permutations.py\nindex ce21700fe8..01b0da8468 100644\n--- a/sympy/combinatorics/permutations.py\n+++ b/sympy/combinatorics/permutations.py\n@@ -323,7 +323,7 @@ def __call__(self, *other):\n         Examples\n         ========\n \n-        >>> from sympy.combinatorics.permutations import Cycle as C\n+        >>> from sympy.combinatorics import Cycle\n         >>> from sympy.combinatorics.permutations import Permutation as Perm\n         >>> C(1, 2)(2, 3)\n         (1 3 2)\n@@ -370,30 +370,26 @@ def list(self, size=None):\n \n         >>> Cycle(2, 4)(1, 2, 4).list(-1)\n         [0, 2, 1]\n+        >>> Cycle(3).list(-1)\n+        []\n         \"\"\"\n         if not self and size is None:\n             raise ValueError('must give size for empty Cycle')\n+        rv = self.get_array_form()\n         if size is not None:\n-            big = max([i for i in self.keys() if self[i] != i] + [0])\n-            size = max(size, big + 1)\n-        else:\n-            size = self.size\n-        return [self[i] for i in range(size)]\n+            if size > self.size:\n+                rv.extend(list(range(self.size, size)))\n+            else:\n+                # find first value from rhs where rv[i] != i\n+                i = self.size - 1\n+                while rv:\n+                    if rv[-1] != i:\n+                        break\n+                    rv.pop()\n+                    i -= 1\n+        return rv\n \n     def __repr__(self):\n-        \"\"\"We want it to print as a Cycle, not as a dict.\n-\n-        Examples\n-        ========\n-\n-        >>> from sympy.combinatorics import Cycle\n-        >>> Cycle(1, 2)\n-        (1 2)\n-        >>> print(_)\n-        (1 2)\n-        >>> list(Cycle(1, 2).items())\n-        [(1, 2), (2, 1)]\n-        \"\"\"\n         if not self:\n             return 'Cycle()'\n         cycles = Permutation(self).cyclic_form\n@@ -465,6 +461,14 @@ def size(self):\n     def copy(self):\n         return Cycle(self)\n \n+    def get_array_form(self):\n+        # Construct the array form from the cycle's dictionary data\n+        size = max(self.keys()) + 1 if self else 0\n+        array_form = list(range(size))\n+        for i in self:\n+            array_form[i] = self[i]\n+        return array_form\n+\n \n class Permutation(Atom):\n     \"\"\"\n@@ -872,7 +876,7 @@ def __new__(cls, *args, **kwargs):\n         >>> _.array_form\n         [0, 4, 3, 5, 1, 2, 6, 7, 8, 9]\n         \"\"\"\n-        size = kwargs.pop('size', None)\n+        size = kwargs.pop('size', 0)  # Set default size to 0 if not provided\n         if size is not None:\n             size = int(size)\n \n@@ -1010,27 +1014,16 @@ def array_form(self):\n         return self._array_form[:]\n \n     def __repr__(self):\n-        if Permutation.print_cyclic:\n-            if not self.size:\n-                return 'Permutation()'\n-            # before taking Cycle notation, see if the last element is\n-            # a singleton and move it to the head of the string\n-            s = Cycle(self)(self.size - 1).__repr__()[len('Cycle'):]\n-            last = s.rfind('(')\n-            if not last == 0 and ',' not in s[last:]:\n-                s = s[last:] + s[:last]\n-            return 'Permutation%s' %s\n-        else:\n-            s = self.support()\n-            if not s:\n-                if self.size < 5:\n-                    return 'Permutation(%s)' % str(self.array_form)\n-                return 'Permutation([], size=%s)' % self.size\n-            trim = str(self.array_form[:s[-1] + 1]) + ', size=%s' % self.size\n-            use = full = str(self.array_form)\n-            if len(trim) < len(full):\n-                use = trim\n-            return 'Permutation(%s)' % use\n+        s = self.support()\n+        if not s:\n+            if self.size < 5:\n+                return 'Permutation(%s)' % str(self.array_form)\n+            return 'Permutation([], size=%s)' % self.size\n+        trim = str(self.array_form[:s[-1] + 1]) + ', size=%s' % self.size\n+        use = full = str(self.array_form)\n+        if len(trim) < len(full):\n+            use = trim\n+        return 'Permutation(%s)' % use\n \n     def list(self, size=None):\n         \"\"\"Return the permutation as an explicit list, possibly\n@@ -1365,11 +1358,11 @@ def __pow__(self, n):\n \n         >>> from sympy.combinatorics.permutations import Permutation\n         >>> Permutation.print_cyclic = False\n-        >>> p = Permutation([2,0,3,1])\n+        >>> p = Permutation([3, 1, 5, 2, 4, 0])\n         >>> p.order()\n         4\n-        >>> p**4\n-        Permutation([0, 1, 2, 3])\n+        >>> (p**(p.order()))\n+        Permutation([], size=6)\n         \"\"\"\n         if isinstance(n, Permutation):\n             raise NotImplementedError(\n@@ -1806,7 +1799,7 @@ def cardinality(self):\n         Examples\n         ========\n \n-        >>> from sympy.combinatorics.permutations import Permutation\n+        >>> from sympy.combinatorics import Permutation\n         >>> p = Permutation([0, 1, 2, 3])\n         >>> p.cardinality\n         24\n@@ -2832,43 +2825,5 @@ def unrank_lex(cls, size, rank):\n             psize = new_psize\n         return cls._af_new(perm_array)\n \n-    # global flag to control how permutations are printed\n-    # when True, Permutation([0, 2, 1, 3]) -> Cycle(1, 2)\n-    # when False, Permutation([0, 2, 1, 3]) -> Permutation([0, 2, 1])\n-    print_cyclic = True\n-\n-\n-def _merge(arr, temp, left, mid, right):\n-    \"\"\"\n-    Merges two sorted arrays and calculates the inversion count.\n-\n-    Helper function for calculating inversions. This method is\n-    for internal use only.\n-    \"\"\"\n-    i = k = left\n-    j = mid\n-    inv_count = 0\n-    while i < mid and j <= right:\n-        if arr[i] < arr[j]:\n-            temp[k] = arr[i]\n-            k += 1\n-            i += 1\n-        else:\n-            temp[k] = arr[j]\n-            k += 1\n-            j += 1\n-            inv_count += (mid -i)\n-    while i < mid:\n-        temp[k] = arr[i]\n-        k += 1\n-        i += 1\n-    if j <= right:\n-        k += right - j + 1\n-        j += right - j + 1\n-        arr[left:k + 1] = temp[left:k + 1]\n-    else:\n-        arr[left:right + 1] = temp[left:right + 1]\n-    return inv_count\n-\n Perm = Permutation\n _af_new = Perm._af_new\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/combinatorics/permutations.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "cab3c1cbfa415ced4ea4e46542ae7eb7044df6d6",
+  "patch": "diff --git a/sympy/codegen/array_utils.py b/sympy/codegen/array_utils.py\n--- a/sympy/codegen/array_utils.py\n+++ b/sympy/codegen/array_utils.py\n@@ -571,7 +571,6 @@ def nest_permutation(self):\n         >>> from sympy.codegen.array_utils import (CodegenArrayPermuteDims, CodegenArrayTensorProduct, nest_permutation)\n         >>> from sympy import MatrixSymbol\n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n \n         >>> M = MatrixSymbol(\"M\", 3, 3)\n         >>> N = MatrixSymbol(\"N\", 3, 3)\n@@ -1055,7 +1054,6 @@ def parse_indexed_expression(expr, first_indices=None):\n     >>> from sympy.codegen.array_utils import parse_indexed_expression\n     >>> from sympy import MatrixSymbol, Sum, symbols\n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n \n     >>> i, j, k, d = symbols(\"i j k d\")\n     >>> M = MatrixSymbol(\"M\", d, d)\ndiff --git a/sympy/combinatorics/generators.py b/sympy/combinatorics/generators.py\n--- a/sympy/combinatorics/generators.py\n+++ b/sympy/combinatorics/generators.py\n@@ -15,7 +15,6 @@ def symmetric(n):\n     ========\n \n     >>> from sympy.combinatorics.permutations import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.generators import symmetric\n     >>> list(symmetric(3))\n     [(2), (1 2), (2)(0 1), (0 1 2), (0 2 1), (0 2)]\n@@ -32,7 +31,6 @@ def cyclic(n):\n     ========\n \n     >>> from sympy.combinatorics.permutations import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.generators import cyclic\n     >>> list(cyclic(5))\n     [(4), (0 1 2 3 4), (0 2 4 1 3),\n@@ -57,7 +55,6 @@ def alternating(n):\n     ========\n \n     >>> from sympy.combinatorics.permutations import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.generators import alternating\n     >>> list(alternating(3))\n     [(2), (0 1 2), (0 2 1)]\n@@ -80,7 +77,6 @@ def dihedral(n):\n     ========\n \n     >>> from sympy.combinatorics.permutations import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.generators import dihedral\n     >>> list(dihedral(3))\n     [(2), (0 2), (0 1 2), (1 2), (0 2 1), (2)(0 1)]\ndiff --git a/sympy/combinatorics/homomorphisms.py b/sympy/combinatorics/homomorphisms.py\n--- a/sympy/combinatorics/homomorphisms.py\n+++ b/sympy/combinatorics/homomorphisms.py\n@@ -445,7 +445,6 @@ def group_isomorphism(G, H, isomorphism=True):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.perm_groups import PermutationGroup\n     >>> from sympy.combinatorics.free_groups import free_group\n     >>> from sympy.combinatorics.fp_groups import FpGroup\ndiff --git a/sympy/combinatorics/named_groups.py b/sympy/combinatorics/named_groups.py\n--- a/sympy/combinatorics/named_groups.py\n+++ b/sympy/combinatorics/named_groups.py\n@@ -20,7 +20,6 @@ def AbelianGroup(*cyclic_orders):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import AbelianGroup\n     >>> AbelianGroup(3, 4)\n     PermutationGroup([\ndiff --git a/sympy/combinatorics/perm_groups.py b/sympy/combinatorics/perm_groups.py\n--- a/sympy/combinatorics/perm_groups.py\n+++ b/sympy/combinatorics/perm_groups.py\n@@ -36,7 +36,6 @@ class PermutationGroup(Basic):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.permutations import Cycle\n     >>> from sympy.combinatorics.polyhedron import Polyhedron\n     >>> from sympy.combinatorics.perm_groups import PermutationGroup\n@@ -1114,7 +1113,6 @@ def coset_factor(self, g, factor_index=False):\n         ========\n \n         >>> from sympy.combinatorics import Permutation, PermutationGroup\n-        >>> Permutation.print_cyclic = True\n         >>> a = Permutation(0, 1, 3, 7, 6, 4)(2, 5)\n         >>> b = Permutation(0, 1, 3, 2)(4, 5, 7, 6)\n         >>> G = PermutationGroup([a, b])\n@@ -1239,7 +1237,6 @@ def coset_rank(self, g):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation(0, 1, 3, 7, 6, 4)(2, 5)\n         >>> b = Permutation(0, 1, 3, 2)(4, 5, 7, 6)\n@@ -1307,7 +1304,6 @@ def degree(self):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([1, 0, 2])\n         >>> G = PermutationGroup([a])\n@@ -1423,7 +1419,6 @@ def derived_subgroup(self):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([1, 0, 2, 4, 3])\n         >>> b = Permutation([0, 1, 3, 2, 4])\n@@ -1471,7 +1466,6 @@ def generate(self, method=\"coset\", af=False):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics import PermutationGroup\n         >>> from sympy.combinatorics.polyhedron import tetrahedron\n \n@@ -1518,7 +1512,6 @@ def generate_dimino(self, af=False):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([0, 2, 1, 3])\n         >>> b = Permutation([0, 2, 3, 1])\n@@ -1579,7 +1572,6 @@ def generate_schreier_sims(self, af=False):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([0, 2, 1, 3])\n         >>> b = Permutation([0, 2, 3, 1])\n@@ -1649,7 +1641,6 @@ def generators(self):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([0, 2, 1])\n         >>> b = Permutation([1, 0, 2])\n@@ -1675,7 +1666,6 @@ def contains(self, g, strict=True):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n \n         >>> a = Permutation(1, 2)\n@@ -1750,7 +1740,6 @@ def is_abelian(self):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([0, 2, 1])\n         >>> b = Permutation([1, 0, 2])\n@@ -2055,7 +2044,6 @@ def is_normal(self, gr, strict=True):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a = Permutation([1, 2, 0])\n         >>> b = Permutation([1, 0, 2])\n@@ -2725,7 +2713,6 @@ def orbit_rep(self, alpha, beta, schreier_vector=None):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> from sympy.combinatorics.named_groups import AlternatingGroup\n         >>> G = AlternatingGroup(5)\n@@ -2768,7 +2755,6 @@ def orbit_transversal(self, alpha, pairs=False):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> from sympy.combinatorics.named_groups import DihedralGroup\n         >>> G = DihedralGroup(6)\n@@ -3161,7 +3147,6 @@ def make_perm(self, n, seed=None):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> a, b = [Permutation([1, 0, 3, 2]), Permutation([1, 3, 0, 2])]\n         >>> G = PermutationGroup([a, b])\n@@ -3696,7 +3681,6 @@ def stabilizer(self, alpha):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> from sympy.combinatorics.perm_groups import PermutationGroup\n         >>> from sympy.combinatorics.named_groups import DihedralGroup\n         >>> G = DihedralGroup(6)\n@@ -4919,7 +4903,6 @@ def _orbit_transversal(degree, generators, alpha, pairs, af=False, slp=False):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import DihedralGroup\n     >>> from sympy.combinatorics.perm_groups import _orbit_transversal\n     >>> G = DihedralGroup(6)\n@@ -4972,7 +4955,6 @@ def _stabilizer(degree, generators, alpha):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.perm_groups import _stabilizer\n     >>> from sympy.combinatorics.named_groups import DihedralGroup\n     >>> G = DihedralGroup(6)\ndiff --git a/sympy/combinatorics/permutations.py b/sympy/combinatorics/permutations.py\n--- a/sympy/combinatorics/permutations.py\n+++ b/sympy/combinatorics/permutations.py\n@@ -23,7 +23,6 @@ def _af_rmul(a, b):\n     ========\n \n     >>> from sympy.combinatorics.permutations import _af_rmul, Permutation\n-    >>> Permutation.print_cyclic = False\n \n     >>> a, b = [1, 0, 2], [0, 2, 1]\n     >>> _af_rmul(a, b)\n@@ -57,7 +56,6 @@ def _af_rmuln(*abc):\n     ========\n \n     >>> from sympy.combinatorics.permutations import _af_rmul, Permutation\n-    >>> Permutation.print_cyclic = False\n \n     >>> a, b = [1, 0, 2], [0, 2, 1]\n     >>> _af_rmul(a, b)\n@@ -179,7 +177,6 @@ def _af_pow(a, n):\n     ========\n \n     >>> from sympy.combinatorics.permutations import Permutation, _af_pow\n-    >>> Permutation.print_cyclic = False\n     >>> p = Permutation([2, 0, 3, 1])\n     >>> p.order()\n     4\n@@ -358,7 +355,6 @@ def list(self, size=None):\n \n         >>> from sympy.combinatorics.permutations import Cycle\n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> p = Cycle(2, 3)(4, 5)\n         >>> p.list()\n         [0, 1, 3, 2, 5, 4]\n@@ -479,7 +475,8 @@ class Permutation(Atom):\n     original ordering, not the elements (a, b, etc...) themselves.\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = False\n+    >>> from sympy.interactive import init_printing\n+    >>> init_printing(perm_cyclic=False, pretty_print=False)\n \n     Permutations Notation\n     =====================\n@@ -662,17 +659,17 @@ class Permutation(Atom):\n \n     There are a few things to note about how Permutations are printed.\n \n-    1) If you prefer one form (array or cycle) over another, you can set that\n-    with the print_cyclic flag.\n+    1) If you prefer one form (array or cycle) over another, you can set\n+    ``init_printing`` with the ``perm_cyclic`` flag.\n \n-    >>> Permutation(1, 2)(4, 5)(3, 4)\n+    >>> from sympy import init_printing\n+    >>> p = Permutation(1, 2)(4, 5)(3, 4)\n+    >>> p\n     Permutation([0, 2, 1, 4, 5, 3])\n-    >>> p = _\n \n-    >>> Permutation.print_cyclic = True\n+    >>> init_printing(perm_cyclic=True, pretty_print=False)\n     >>> p\n     (1 2)(3 4 5)\n-    >>> Permutation.print_cyclic = False\n \n     2) Regardless of the setting, a list of elements in the array for cyclic\n     form can be obtained and either of those can be copied and supplied as\n@@ -688,6 +685,7 @@ class Permutation(Atom):\n     3) Printing is economical in that as little as possible is printed while\n     retaining all information about the size of the permutation:\n \n+    >>> init_printing(perm_cyclic=False, pretty_print=False)\n     >>> Permutation([1, 0, 2, 3])\n     Permutation([1, 0, 2, 3])\n     >>> Permutation([1, 0, 2, 3], size=20)\n@@ -696,10 +694,10 @@ class Permutation(Atom):\n     Permutation([1, 0, 2, 4, 3], size=20)\n \n     >>> p = Permutation([1, 0, 2, 3])\n-    >>> Permutation.print_cyclic = True\n+    >>> init_printing(perm_cyclic=True, pretty_print=False)\n     >>> p\n     (3)(0 1)\n-    >>> Permutation.print_cyclic = False\n+    >>> init_printing(perm_cyclic=False, pretty_print=False)\n \n     The 2 was not printed but it is still there as can be seen with the\n     array_form and size methods:\n@@ -776,7 +774,7 @@ class Permutation(Atom):\n     Permutations:\n \n     >>> p(['zero', 'one', 'four', 'two'])\n-     ['one', 'zero', 'four', 'two']\n+    ['one', 'zero', 'four', 'two']\n     >>> p('zo42')\n     ['o', 'z', '4', '2']\n \n@@ -836,7 +834,8 @@ def __new__(cls, *args, **kwargs):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n \n         Permutations entered in array-form are left unaltered:\n \n@@ -971,8 +970,9 @@ def _af_new(cls, perm):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Perm\n-        >>> Perm.print_cyclic = False\n-        >>> a = [2,1,3,0]\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n+        >>> a = [2, 1, 3, 0]\n         >>> p = Perm._af_new(a)\n         >>> p\n         Permutation([2, 1, 3, 0])\n@@ -996,7 +996,6 @@ def array_form(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> p = Permutation([[2, 0], [3, 1]])\n         >>> p.array_form\n         [2, 3, 0, 1]\n@@ -1009,29 +1008,6 @@ def array_form(self):\n         \"\"\"\n         return self._array_form[:]\n \n-    def __repr__(self):\n-        if Permutation.print_cyclic:\n-            if not self.size:\n-                return 'Permutation()'\n-            # before taking Cycle notation, see if the last element is\n-            # a singleton and move it to the head of the string\n-            s = Cycle(self)(self.size - 1).__repr__()[len('Cycle'):]\n-            last = s.rfind('(')\n-            if not last == 0 and ',' not in s[last:]:\n-                s = s[last:] + s[:last]\n-            return 'Permutation%s' %s\n-        else:\n-            s = self.support()\n-            if not s:\n-                if self.size < 5:\n-                    return 'Permutation(%s)' % str(self.array_form)\n-                return 'Permutation([], size=%s)' % self.size\n-            trim = str(self.array_form[:s[-1] + 1]) + ', size=%s' % self.size\n-            use = full = str(self.array_form)\n-            if len(trim) < len(full):\n-                use = trim\n-            return 'Permutation(%s)' % use\n-\n     def list(self, size=None):\n         \"\"\"Return the permutation as an explicit list, possibly\n         trimming unmoved elements if size is less than the maximum\n@@ -1042,7 +1018,6 @@ def list(self, size=None):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> p = Permutation(2, 3)(4, 5)\n         >>> p.list()\n         [0, 1, 3, 2, 5, 4]\n@@ -1083,7 +1058,6 @@ def cyclic_form(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> p = Permutation([0, 3, 1, 2])\n         >>> p.cyclic_form\n         [[1, 3, 2]]\n@@ -1179,7 +1153,6 @@ def __add__(self, other):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> I = Permutation([0, 1, 2, 3])\n         >>> a = Permutation([2, 1, 3, 0])\n         >>> I + a.rank() == a\n@@ -1218,7 +1191,6 @@ def rmul(*args):\n         ========\n \n         >>> from sympy.combinatorics.permutations import _af_rmul, Permutation\n-        >>> Permutation.print_cyclic = False\n \n         >>> a, b = [1, 0, 2], [0, 2, 1]\n         >>> a = Permutation(a); b = Permutation(b)\n@@ -1283,7 +1255,6 @@ def __mul__(self, other):\n         ========\n \n         >>> from sympy.combinatorics.permutations import _af_rmul, Permutation\n-        >>> Permutation.print_cyclic = False\n \n         >>> a, b = [1, 0, 2], [0, 2, 1]\n         >>> a = Permutation(a); b = Permutation(b)\n@@ -1303,6 +1274,8 @@ def __mul__(self, other):\n         It is acceptable for the arrays to have different lengths; the shorter\n         one will be padded to match the longer one:\n \n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> b*Permutation([1, 0])\n         Permutation([1, 2, 0])\n         >>> Permutation([1, 0])*b\n@@ -1364,8 +1337,9 @@ def __pow__(self, n):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n-        >>> p = Permutation([2,0,3,1])\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n+        >>> p = Permutation([2, 0, 3, 1])\n         >>> p.order()\n         4\n         >>> p**4\n@@ -1404,7 +1378,6 @@ def __xor__(self, h):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> p = Permutation(1, 2, 9)\n         >>> q = Permutation(6, 9, 8)\n         >>> p*q != q*p\n@@ -1519,7 +1492,6 @@ def from_sequence(self, i, key=None):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n \n         >>> Permutation.from_sequence('SymPy')\n         (4)(0 1 3)\n@@ -1545,8 +1517,9 @@ def __invert__(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n-        >>> p = Permutation([[2,0], [3,1]])\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n+        >>> p = Permutation([[2, 0], [3, 1]])\n         >>> ~p\n         Permutation([2, 3, 0, 1])\n         >>> _ == p**-1\n@@ -1569,6 +1542,10 @@ def __iter__(self):\n         for i in self.array_form:\n             yield i\n \n+    def __repr__(self):\n+        from sympy.printing.repr import srepr\n+        return srepr(self)\n+\n     def __call__(self, *i):\n         \"\"\"\n         Allows applying a permutation instance as a bijective function.\n@@ -1676,7 +1653,8 @@ def unrank_nonlex(self, n, r):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> Permutation.unrank_nonlex(4, 5)\n         Permutation([2, 0, 3, 1])\n         >>> Permutation.unrank_nonlex(4, -1)\n@@ -1743,7 +1721,8 @@ def next_nonlex(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> p = Permutation([2, 0, 3, 1]); p.rank_nonlex()\n         5\n         >>> p = p.next_nonlex(); p\n@@ -2129,7 +2108,8 @@ def commutator(self, x):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> p = Permutation([0, 2, 3, 1])\n         >>> x = Permutation([2, 0, 3, 1])\n         >>> c = p.commutator(x); c\n@@ -2209,7 +2189,8 @@ def order(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> p = Permutation([3, 1, 5, 2, 4, 0])\n         >>> p.order()\n         4\n@@ -2254,7 +2235,6 @@ def cycle_structure(self):\n         ========\n \n         >>> from sympy.combinatorics import Permutation\n-        >>> Permutation.print_cyclic = True\n         >>> Permutation(3).cycle_structure\n         {1: 4}\n         >>> Permutation(0, 4, 3)(1, 2)(5, 6).cycle_structure\n@@ -2349,7 +2329,6 @@ def inversion_vector(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n         >>> p = Permutation([4, 8, 0, 7, 1, 5, 3, 6, 2])\n         >>> p.inversion_vector()\n         [4, 7, 0, 5, 0, 2, 1, 1]\n@@ -2364,13 +2343,12 @@ def inversion_vector(self):\n         >>> while p:\n         ...     print('%s %s %s' % (p, p.inversion_vector(), p.rank()))\n         ...     p = p.next_lex()\n-        ...\n-        Permutation([0, 1, 2]) [0, 0] 0\n-        Permutation([0, 2, 1]) [0, 1] 1\n-        Permutation([1, 0, 2]) [1, 0] 2\n-        Permutation([1, 2, 0]) [1, 1] 3\n-        Permutation([2, 0, 1]) [2, 0] 4\n-        Permutation([2, 1, 0]) [2, 1] 5\n+        (2) [0, 0] 0\n+        (1 2) [0, 1] 1\n+        (2)(0 1) [1, 0] 2\n+        (0 1 2) [1, 1] 3\n+        (0 2 1) [2, 0] 4\n+        (0 2) [2, 1] 5\n \n         See Also\n         ========\n@@ -2440,6 +2418,8 @@ def unrank_trotterjohnson(cls, size, rank):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> Permutation.unrank_trotterjohnson(5, 10)\n         Permutation([0, 3, 1, 2, 4])\n \n@@ -2479,7 +2459,8 @@ def next_trotterjohnson(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> p = Permutation([3, 0, 2, 1])\n         >>> p.rank_trotterjohnson()\n         4\n@@ -2530,7 +2511,8 @@ def get_precedence_matrix(self):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> p = Permutation.josephus(3, 6, 1)\n         >>> p\n         Permutation([2, 5, 3, 1, 4, 0])\n@@ -2761,7 +2743,8 @@ def from_inversion_vector(cls, inversion):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> Permutation.from_inversion_vector([3, 2, 1, 0, 0])\n         Permutation([3, 2, 1, 0, 4, 5])\n \n@@ -2807,7 +2790,8 @@ def unrank_lex(cls, size, rank):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n+        >>> init_printing(perm_cyclic=False, pretty_print=False)\n         >>> a = Permutation.unrank_lex(5, 10)\n         >>> a.rank()\n         10\n@@ -2832,10 +2816,8 @@ def unrank_lex(cls, size, rank):\n             psize = new_psize\n         return cls._af_new(perm_array)\n \n-    # global flag to control how permutations are printed\n-    # when True, Permutation([0, 2, 1, 3]) -> Cycle(1, 2)\n-    # when False, Permutation([0, 2, 1, 3]) -> Permutation([0, 2, 1])\n-    print_cyclic = True\n+    # XXX Deprecated flag\n+    print_cyclic = None\n \n \n def _merge(arr, temp, left, mid, right):\ndiff --git a/sympy/combinatorics/polyhedron.py b/sympy/combinatorics/polyhedron.py\n--- a/sympy/combinatorics/polyhedron.py\n+++ b/sympy/combinatorics/polyhedron.py\n@@ -60,8 +60,9 @@ def __new__(cls, corners, faces=[], pgroup=[]):\n         ========\n \n         >>> from sympy.combinatorics.permutations import Permutation\n-        >>> Permutation.print_cyclic = False\n+        >>> from sympy.interactive import init_printing\n         >>> from sympy.abc import w, x, y, z\n+        >>> init_printing(pretty_print=False, perm_cyclic=False)\n \n         Here we construct the Polyhedron object for a tetrahedron.\n \ndiff --git a/sympy/combinatorics/tensor_can.py b/sympy/combinatorics/tensor_can.py\n--- a/sympy/combinatorics/tensor_can.py\n+++ b/sympy/combinatorics/tensor_can.py\n@@ -918,7 +918,6 @@ def bsgs_direct_product(base1, gens1, base2, gens2, signed=True):\n \n     >>> from sympy.combinatorics import Permutation\n     >>> from sympy.combinatorics.tensor_can import (get_symmetric_group_sgs, bsgs_direct_product)\n-    >>> Permutation.print_cyclic = True\n     >>> base1, gens1 = get_symmetric_group_sgs(1)\n     >>> base2, gens2 = get_symmetric_group_sgs(2)\n     >>> bsgs_direct_product(base1, gens1, base2, gens2)\n@@ -953,7 +952,6 @@ def get_symmetric_group_sgs(n, antisym=False):\n \n     >>> from sympy.combinatorics import Permutation\n     >>> from sympy.combinatorics.tensor_can import get_symmetric_group_sgs\n-    >>> Permutation.print_cyclic = True\n     >>> get_symmetric_group_sgs(3)\n     ([0, 1], [(4)(0 1), (4)(1 2)])\n     \"\"\"\n@@ -1028,7 +1026,6 @@ def get_minimal_bsgs(base, gens):\n \n     >>> from sympy.combinatorics import Permutation\n     >>> from sympy.combinatorics.tensor_can import get_minimal_bsgs\n-    >>> Permutation.print_cyclic = True\n     >>> riemann_bsgs1 = ([2, 0], ([Permutation(5)(0, 1)(4, 5), Permutation(5)(0, 2)(1, 3)]))\n     >>> get_minimal_bsgs(*riemann_bsgs1)\n     ([0, 2], [(0 1)(4 5), (5)(0 2)(1 3), (2 3)(4 5)])\n@@ -1059,7 +1056,6 @@ def tensor_gens(base, gens, list_free_indices, sym=0):\n \n     >>> from sympy.combinatorics import Permutation\n     >>> from sympy.combinatorics.tensor_can import tensor_gens, get_symmetric_group_sgs\n-    >>> Permutation.print_cyclic = True\n \n     two symmetric tensors with 3 indices without free indices\n \n@@ -1176,7 +1172,6 @@ def gens_products(*v):\n \n     >>> from sympy.combinatorics import Permutation\n     >>> from sympy.combinatorics.tensor_can import get_symmetric_group_sgs, gens_products\n-    >>> Permutation.print_cyclic = True\n     >>> base, gens = get_symmetric_group_sgs(2)\n     >>> gens_products((base, gens, [[], []], 0))\n     (6, [0, 2], [(5)(0 1), (5)(2 3), (5)(0 2)(1 3)])\ndiff --git a/sympy/combinatorics/util.py b/sympy/combinatorics/util.py\n--- a/sympy/combinatorics/util.py\n+++ b/sympy/combinatorics/util.py\n@@ -143,7 +143,6 @@ def _distribute_gens_by_base(base, gens):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import DihedralGroup\n     >>> from sympy.combinatorics.util import _distribute_gens_by_base\n     >>> D = DihedralGroup(3)\n@@ -211,7 +210,6 @@ def _handle_precomputed_bsgs(base, strong_gens, transversals=None,\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import DihedralGroup\n     >>> from sympy.combinatorics.util import _handle_precomputed_bsgs\n     >>> D = DihedralGroup(3)\n@@ -271,7 +269,6 @@ def _orbits_transversals_from_bsgs(base, strong_gens_distr,\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import SymmetricGroup\n     >>> from sympy.combinatorics.util import _orbits_transversals_from_bsgs\n     >>> from sympy.combinatorics.util import (_orbits_transversals_from_bsgs,\n@@ -415,7 +412,6 @@ def _strip(g, base, orbits, transversals):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import SymmetricGroup\n     >>> from sympy.combinatorics.permutations import Permutation\n     >>> from sympy.combinatorics.util import _strip\n@@ -509,7 +505,6 @@ def _strong_gens_from_distr(strong_gens_distr):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n-    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.named_groups import SymmetricGroup\n     >>> from sympy.combinatorics.util import (_strong_gens_from_distr,\n     ... _distribute_gens_by_base)\ndiff --git a/sympy/interactive/printing.py b/sympy/interactive/printing.py\n--- a/sympy/interactive/printing.py\n+++ b/sympy/interactive/printing.py\n@@ -550,13 +550,16 @@ def init_printing(pretty_print=True, order=None, use_unicode=None,\n         _stringify_func = stringify_func\n \n         if pretty_print:\n-            stringify_func = lambda expr: \\\n+            stringify_func = lambda expr, **settings: \\\n                              _stringify_func(expr, order=order,\n                                              use_unicode=use_unicode,\n                                              wrap_line=wrap_line,\n-                                             num_columns=num_columns)\n+                                             num_columns=num_columns,\n+                                             **settings)\n         else:\n-            stringify_func = lambda expr: _stringify_func(expr, order=order)\n+            stringify_func = \\\n+                lambda expr, **settings: _stringify_func(\n+                    expr, order=order, **settings)\n \n     if in_ipython:\n         mode_in_settings = settings.pop(\"mode\", None)\ndiff --git a/sympy/printing/latex.py b/sympy/printing/latex.py\n--- a/sympy/printing/latex.py\n+++ b/sympy/printing/latex.py\n@@ -141,6 +141,7 @@ class LatexPrinter(Printer):\n         \"imaginary_unit\": \"i\",\n         \"gothic_re_im\": False,\n         \"decimal_separator\": \"period\",\n+        \"perm_cyclic\": True,\n     }\n \n     def __init__(self, settings=None):\n@@ -374,7 +375,35 @@ def _print_Cycle(self, expr):\n         term_tex = term_tex.replace(']', r\"\\right)\")\n         return term_tex\n \n-    _print_Permutation = _print_Cycle\n+    def _print_Permutation(self, expr):\n+        from sympy.combinatorics.permutations import Permutation\n+        from sympy.utilities.exceptions import SymPyDeprecationWarning\n+\n+        perm_cyclic = Permutation.print_cyclic\n+        if perm_cyclic is not None:\n+            SymPyDeprecationWarning(\n+                feature=\"Permutation.print_cyclic = {}\".format(perm_cyclic),\n+                useinstead=\"init_printing(perm_cyclic={})\"\n+                .format(perm_cyclic),\n+                issue=15201,\n+                deprecated_since_version=\"1.6\").warn()\n+        else:\n+            perm_cyclic = self._settings.get(\"perm_cyclic\", True)\n+\n+        if perm_cyclic:\n+            return self._print_Cycle(expr)\n+\n+        if expr.size == 0:\n+            return r\"\\left( \\right)\"\n+\n+        lower = [self._print(arg) for arg in expr.array_form]\n+        upper = [self._print(arg) for arg in range(len(lower))]\n+\n+        row1 = \" & \".join(upper)\n+        row2 = \" & \".join(lower)\n+        mat = r\" \\\\ \".join((row1, row2))\n+        return r\"\\begin{pmatrix} %s \\end{pmatrix}\" % mat\n+\n \n     def _print_Float(self, expr):\n         # Based off of that in StrPrinter\n@@ -2501,7 +2530,7 @@ def latex(expr, fold_frac_powers=False, fold_func_brackets=False,\n           mat_delim=\"[\", mat_str=None, mode=\"plain\", mul_symbol=None,\n           order=None, symbol_names=None, root_notation=True,\n           mat_symbol_style=\"plain\", imaginary_unit=\"i\", gothic_re_im=False,\n-          decimal_separator=\"period\" ):\n+          decimal_separator=\"period\", perm_cyclic=True):\n     r\"\"\"Convert the given expression to LaTeX string representation.\n \n     Parameters\n@@ -2702,6 +2731,7 @@ def latex(expr, fold_frac_powers=False, fold_func_brackets=False,\n         'imaginary_unit': imaginary_unit,\n         'gothic_re_im': gothic_re_im,\n         'decimal_separator': decimal_separator,\n+        'perm_cyclic' : perm_cyclic,\n     }\n \n     return LatexPrinter(settings).doprint(expr)\ndiff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py\n--- a/sympy/printing/pretty/pretty.py\n+++ b/sympy/printing/pretty/pretty.py\n@@ -17,6 +17,7 @@\n from sympy.printing.str import sstr\n from sympy.utilities import default_sort_key\n from sympy.utilities.iterables import has_variety\n+from sympy.utilities.exceptions import SymPyDeprecationWarning\n \n from sympy.printing.pretty.stringpict import prettyForm, stringPict\n from sympy.printing.pretty.pretty_symbology import xstr, hobj, vobj, xobj, \\\n@@ -42,6 +43,7 @@ class PrettyPrinter(Printer):\n         \"root_notation\": True,\n         \"mat_symbol_style\": \"plain\",\n         \"imaginary_unit\": \"i\",\n+        \"perm_cyclic\": True\n     }\n \n     def __init__(self, settings=None):\n@@ -387,6 +389,41 @@ def _print_Cycle(self, dc):\n             cyc = prettyForm(*cyc.right(l))\n         return cyc\n \n+    def _print_Permutation(self, expr):\n+        from ..str import sstr\n+        from sympy.combinatorics.permutations import Permutation, Cycle\n+\n+        perm_cyclic = Permutation.print_cyclic\n+        if perm_cyclic is not None:\n+            SymPyDeprecationWarning(\n+                feature=\"Permutation.print_cyclic = {}\".format(perm_cyclic),\n+                useinstead=\"init_printing(perm_cyclic={})\"\n+                .format(perm_cyclic),\n+                issue=15201,\n+                deprecated_since_version=\"1.6\").warn()\n+        else:\n+            perm_cyclic = self._settings.get(\"perm_cyclic\", True)\n+\n+        if perm_cyclic:\n+            return self._print_Cycle(Cycle(expr))\n+\n+        lower = expr.array_form\n+        upper = list(range(len(lower)))\n+\n+        result = stringPict('')\n+        first = True\n+        for u, l in zip(upper, lower):\n+            s1 = self._print(u)\n+            s2 = self._print(l)\n+            col = prettyForm(*s1.below(s2))\n+            if first:\n+                first = False\n+            else:\n+                col = prettyForm(*col.left(\" \"))\n+            result = prettyForm(*result.right(col))\n+        return prettyForm(*result.parens())\n+\n+\n     def _print_Integral(self, integral):\n         f = integral.function\n \n@@ -2613,9 +2650,7 @@ def pretty(expr, **settings):\n         pretty_use_unicode(uflag)\n \n \n-def pretty_print(expr, wrap_line=True, num_columns=None, use_unicode=None,\n-                 full_prec=\"auto\", order=None, use_unicode_sqrt_char=True,\n-                 root_notation = True, mat_symbol_style=\"plain\", imaginary_unit=\"i\"):\n+def pretty_print(expr, **kwargs):\n     \"\"\"Prints expr in pretty form.\n \n     pprint is just a shortcut for this function.\n@@ -2658,11 +2693,7 @@ def pretty_print(expr, wrap_line=True, num_columns=None, use_unicode=None,\n         Letter to use for imaginary unit when use_unicode is True.\n         Can be \"i\" (default) or \"j\".\n     \"\"\"\n-    print(pretty(expr, wrap_line=wrap_line, num_columns=num_columns,\n-                 use_unicode=use_unicode, full_prec=full_prec, order=order,\n-                 use_unicode_sqrt_char=use_unicode_sqrt_char,\n-                 root_notation=root_notation, mat_symbol_style=mat_symbol_style,\n-                 imaginary_unit=imaginary_unit))\n+    print(pretty(expr, **kwargs))\n \n pprint = pretty_print\n \ndiff --git a/sympy/printing/repr.py b/sympy/printing/repr.py\n--- a/sympy/printing/repr.py\n+++ b/sympy/printing/repr.py\n@@ -8,16 +8,19 @@\n from __future__ import print_function, division\n \n from sympy.core.function import AppliedUndef\n-from .printer import Printer\n from mpmath.libmp import repr_dps, to_str as mlib_to_str\n from sympy.core.compatibility import range, string_types\n \n+from .printer import Printer\n+from .str import sstr\n+\n \n class ReprPrinter(Printer):\n     printmethod = \"_sympyrepr\"\n \n     _default_settings = {\n-        \"order\": None\n+        \"order\": None,\n+        \"perm_cyclic\" : True,\n     }\n \n     def reprify(self, args, sep):\n@@ -57,7 +60,41 @@ def _print_Cycle(self, expr):\n         return expr.__repr__()\n \n     def _print_Permutation(self, expr):\n-        return expr.__repr__()\n+        from sympy.combinatorics.permutations import Permutation, Cycle\n+        from sympy.utilities.exceptions import SymPyDeprecationWarning\n+\n+        perm_cyclic = Permutation.print_cyclic\n+        if perm_cyclic is not None:\n+            SymPyDeprecationWarning(\n+                feature=\"Permutation.print_cyclic = {}\".format(perm_cyclic),\n+                useinstead=\"init_printing(perm_cyclic={})\"\n+                .format(perm_cyclic),\n+                issue=15201,\n+                deprecated_since_version=\"1.6\").warn()\n+        else:\n+            perm_cyclic = self._settings.get(\"perm_cyclic\", True)\n+\n+        if perm_cyclic:\n+            if not expr.size:\n+                return 'Permutation()'\n+            # before taking Cycle notation, see if the last element is\n+            # a singleton and move it to the head of the string\n+            s = Cycle(expr)(expr.size - 1).__repr__()[len('Cycle'):]\n+            last = s.rfind('(')\n+            if not last == 0 and ',' not in s[last:]:\n+                s = s[last:] + s[:last]\n+            return 'Permutation%s' %s\n+        else:\n+            s = expr.support()\n+            if not s:\n+                if expr.size < 5:\n+                    return 'Permutation(%s)' % str(expr.array_form)\n+                return 'Permutation([], size=%s)' % expr.size\n+            trim = str(expr.array_form[:s[-1] + 1]) + ', size=%s' % expr.size\n+            use = full = str(expr.array_form)\n+            if len(trim) < len(full):\n+                use = trim\n+            return 'Permutation(%s)' % use\n \n     def _print_Function(self, expr):\n         r = self._print(expr.func)\ndiff --git a/sympy/printing/str.py b/sympy/printing/str.py\n--- a/sympy/printing/str.py\n+++ b/sympy/printing/str.py\n@@ -22,6 +22,7 @@ class StrPrinter(Printer):\n         \"full_prec\": \"auto\",\n         \"sympy_integers\": False,\n         \"abbrev\": False,\n+        \"perm_cyclic\": True,\n     }\n \n     _relationals = dict()\n@@ -354,7 +355,20 @@ def _print_Cycle(self, expr):\n \n     def _print_Permutation(self, expr):\n         from sympy.combinatorics.permutations import Permutation, Cycle\n-        if Permutation.print_cyclic:\n+        from sympy.utilities.exceptions import SymPyDeprecationWarning\n+\n+        perm_cyclic = Permutation.print_cyclic\n+        if perm_cyclic is not None:\n+            SymPyDeprecationWarning(\n+                feature=\"Permutation.print_cyclic = {}\".format(perm_cyclic),\n+                useinstead=\"init_printing(perm_cyclic={})\"\n+                .format(perm_cyclic),\n+                issue=15201,\n+                deprecated_since_version=\"1.6\").warn()\n+        else:\n+            perm_cyclic = self._settings.get(\"perm_cyclic\", True)\n+\n+        if perm_cyclic:\n             if not expr.size:\n                 return '()'\n             # before taking Cycle notation, see if the last element is\n",
+  "test_patch": "diff --git a/sympy/combinatorics/tests/test_permutations.py b/sympy/combinatorics/tests/test_permutations.py\n--- a/sympy/combinatorics/tests/test_permutations.py\n+++ b/sympy/combinatorics/tests/test_permutations.py\n@@ -7,7 +7,10 @@\n from sympy.core.singleton import S\n from sympy.combinatorics.permutations import (Permutation, _af_parity,\n     _af_rmul, _af_rmuln, Cycle)\n-from sympy.utilities.pytest import raises\n+from sympy.printing import sstr, srepr, pretty, latex\n+from sympy.utilities.pytest import raises, SymPyDeprecationWarning, \\\n+    warns_deprecated_sympy\n+\n \n rmul = Permutation.rmul\n a = Symbol('a', integer=True)\n@@ -443,7 +446,6 @@ def test_from_sequence():\n \n \n def test_printing_cyclic():\n-    Permutation.print_cyclic = True\n     p1 = Permutation([0, 2, 1])\n     assert repr(p1) == 'Permutation(1, 2)'\n     assert str(p1) == '(1 2)'\n@@ -455,19 +457,46 @@ def test_printing_cyclic():\n \n \n def test_printing_non_cyclic():\n-    Permutation.print_cyclic = False\n+    from sympy.printing import sstr, srepr\n     p1 = Permutation([0, 1, 2, 3, 4, 5])\n-    assert repr(p1) == 'Permutation([], size=6)'\n-    assert str(p1) == 'Permutation([], size=6)'\n+    assert srepr(p1, perm_cyclic=False) == 'Permutation([], size=6)'\n+    assert sstr(p1, perm_cyclic=False) == 'Permutation([], size=6)'\n     p2 = Permutation([0, 1, 2])\n-    assert repr(p2) == 'Permutation([0, 1, 2])'\n-    assert str(p2) == 'Permutation([0, 1, 2])'\n+    assert srepr(p2, perm_cyclic=False) == 'Permutation([0, 1, 2])'\n+    assert sstr(p2, perm_cyclic=False) == 'Permutation([0, 1, 2])'\n \n     p3 = Permutation([0, 2, 1])\n-    assert repr(p3) == 'Permutation([0, 2, 1])'\n-    assert str(p3) == 'Permutation([0, 2, 1])'\n+    assert srepr(p3, perm_cyclic=False) == 'Permutation([0, 2, 1])'\n+    assert sstr(p3, perm_cyclic=False) == 'Permutation([0, 2, 1])'\n     p4 = Permutation([0, 1, 3, 2, 4, 5, 6, 7])\n-    assert repr(p4) == 'Permutation([0, 1, 3, 2], size=8)'\n+    assert srepr(p4, perm_cyclic=False) == 'Permutation([0, 1, 3, 2], size=8)'\n+\n+\n+def test_deprecated_print_cyclic():\n+    p = Permutation(0, 1, 2)\n+    try:\n+        Permutation.print_cyclic = True\n+        with warns_deprecated_sympy():\n+            assert sstr(p) == '(0 1 2)'\n+        with warns_deprecated_sympy():\n+            assert srepr(p) == 'Permutation(0, 1, 2)'\n+        with warns_deprecated_sympy():\n+            assert pretty(p) == '(0 1 2)'\n+        with warns_deprecated_sympy():\n+            assert latex(p) == r'\\left( 0\\; 1\\; 2\\right)'\n+\n+        Permutation.print_cyclic = False\n+        with warns_deprecated_sympy():\n+            assert sstr(p) == 'Permutation([1, 2, 0])'\n+        with warns_deprecated_sympy():\n+            assert srepr(p) == 'Permutation([1, 2, 0])'\n+        with warns_deprecated_sympy():\n+            assert pretty(p, use_unicode=False) == '/0 1 2\\\\\\n\\\\1 2 0/'\n+        with warns_deprecated_sympy():\n+            assert latex(p) == \\\n+                r'\\begin{pmatrix} 0 & 1 & 2 \\\\ 1 & 2 & 0 \\end{pmatrix}'\n+    finally:\n+        Permutation.print_cyclic = None\n \n \n def test_permutation_equality():\ndiff --git a/sympy/printing/pretty/tests/test_pretty.py b/sympy/printing/pretty/tests/test_pretty.py\n--- a/sympy/printing/pretty/tests/test_pretty.py\n+++ b/sympy/printing/pretty/tests/test_pretty.py\n@@ -365,6 +365,18 @@ def test_pretty_Cycle():\n     assert pretty(Cycle()) == '()'\n \n \n+def test_pretty_Permutation():\n+    from sympy.combinatorics.permutations import Permutation\n+    p1 = Permutation(1, 2)(3, 4)\n+    assert xpretty(p1, perm_cyclic=True, use_unicode=True) == \"(1 2)(3 4)\"\n+    assert xpretty(p1, perm_cyclic=True, use_unicode=False) == \"(1 2)(3 4)\"\n+    assert xpretty(p1, perm_cyclic=False, use_unicode=True) == \\\n+    u'\u239b0 1 2 3 4\u239e\\n'\\\n+    u'\u239d0 2 1 4 3\u23a0'\n+    assert xpretty(p1, perm_cyclic=False, use_unicode=False) == \\\n+    \"/0 1 2 3 4\\\\\\n\"\\\n+    \"\\\\0 2 1 4 3/\"\n+\n def test_pretty_basic():\n     assert pretty( -Rational(1)/2 ) == '-1/2'\n     assert pretty( -Rational(13)/22 ) == \\\ndiff --git a/sympy/printing/tests/test_latex.py b/sympy/printing/tests/test_latex.py\n--- a/sympy/printing/tests/test_latex.py\n+++ b/sympy/printing/tests/test_latex.py\n@@ -198,6 +198,13 @@ def test_latex_permutation():\n         r\"\\left( 2\\; 4\\right)\\left( 5\\right)\"\n     assert latex(Permutation(5)) == r\"\\left( 5\\right)\"\n \n+    assert latex(Permutation(0, 1), perm_cyclic=False) == \\\n+        r\"\\begin{pmatrix} 0 & 1 \\\\ 1 & 0 \\end{pmatrix}\"\n+    assert latex(Permutation(0, 1)(2, 3), perm_cyclic=False) == \\\n+        r\"\\begin{pmatrix} 0 & 1 & 2 & 3 \\\\ 1 & 0 & 3 & 2 \\end{pmatrix}\"\n+    assert latex(Permutation(), perm_cyclic=False) == \\\n+        r\"\\left( \\right)\"\n+\n \n def test_latex_Float():\n     assert latex(Float(1.0e100)) == r\"1.0 \\cdot 10^{100}\"\ndiff --git a/sympy/printing/tests/test_repr.py b/sympy/printing/tests/test_repr.py\n--- a/sympy/printing/tests/test_repr.py\n+++ b/sympy/printing/tests/test_repr.py\n@@ -302,9 +302,4 @@ def test_Cycle():\n \n def test_Permutation():\n     import_stmt = \"from sympy.combinatorics import Permutation\"\n-    print_cyclic = Permutation.print_cyclic\n-    try:\n-        Permutation.print_cyclic = True\n-        sT(Permutation(1, 2), \"Permutation(1, 2)\", import_stmt)\n-    finally:\n-        Permutation.print_cyclic = print_cyclic\n+    sT(Permutation(1, 2), \"Permutation(1, 2)\", import_stmt)\ndiff --git a/sympy/printing/tests/test_str.py b/sympy/printing/tests/test_str.py\n--- a/sympy/printing/tests/test_str.py\n+++ b/sympy/printing/tests/test_str.py\n@@ -274,9 +274,8 @@ def test_Permutation_Cycle():\n         (Cycle(3, 4)(1, 2)(3, 4),\n         '(1 2)(4)'),\n     ]:\n-        assert str(p) == s\n+        assert sstr(p) == s\n \n-    Permutation.print_cyclic = False\n     for p, s in [\n         (Permutation([]),\n         'Permutation([])'),\n@@ -293,9 +292,8 @@ def test_Permutation_Cycle():\n         (Permutation([1, 0, 2, 3, 4, 5], size=10),\n         'Permutation([1, 0], size=10)'),\n     ]:\n-        assert str(p) == s\n+        assert sstr(p, perm_cyclic=False) == s\n \n-    Permutation.print_cyclic = True\n     for p, s in [\n         (Permutation([]),\n         '()'),\n@@ -314,7 +312,7 @@ def test_Permutation_Cycle():\n         (Permutation([0, 1, 3, 2, 4, 5], size=10),\n         '(9)(2 3)'),\n     ]:\n-        assert str(p) == s\n+        assert sstr(p) == s\n \n \n def test_Pi():\n",
+  "problem_statement": "Remove Permutation.print_cyclic flag\nSee the discussion at https://github.com/sympy/sympy/pull/15198. The Permutation printing should be handled in the SymPy printers, not on the object itself. The flag should be a flag to the printer. Any doctest that wants to change the printing should set the flag in `init_printing`. However, whichever is set as the default should be used everywhere. \r\n\r\nSince it is publicly documented, it will need to be deprecated https://github.com/sympy/sympy/wiki/Deprecating-policy.\r\n\r\nAdditionally, it would be best if the `str` printer printed a Python valid representation and the pretty printers only (pprint/latex) printed things like (1 2 3).\n",
+  "hints_text": "Hi I am looking to fix this error. Could you guide me on this one a bit? \r\nFrom what I understood `permutations.py` has some functions which use `print_cyclic` flag. But since this is a global flag, it should not be used. Instead it should use something from the `printing` module? Do I need to go through the `printing` module thoroughly? How do I get started on this?\n@sudz123 Users should set printing preferences via `init_printing`, not by changing class attributes. So `print_cyclic` from the `Permutation` class should be deprecated, and `init_printing` should get a new keyword argument so we could do `init_printing(cyclic=True)` (or something like that) if we wanted permutations to be printed in cyclic notation.`init_printing` is [here](https://docs.sympy.org/latest/_modules/sympy/interactive/printing.html#init_printing).\r\n\r\n> Additionally, it would be best if the str printer printed a Python valid representation and the pretty printers only (pprint/latex) printed things like (1 2 3).\r\n\r\nRight now, permutation printing is all specified in its `__repr__` - this should always return `Permutation(<list>)` (i.e. what's returned now when `Permutation.print_cyclic=False`). The new \"cyclic\" flag should only be relevant when `pprint` and `latex` are called. The printing module is huge, but you only need to work out how to make `pprint` and `latex` work properly with the new keyword argument. For example, for `pprint`, you'll need to add `'cyclic'` (or whatever you decide to call it) to `PrettyPrinter._default_settings` and write a new method `_print_Permutation`.\nIs my following interpretation of Printing correct?\r\n`init_printing()` only sets what happens in an interactive session. i.e. like jupyter notebook.\r\nFor printing in a regular python file. we have to only use `pprint()` or `print_latex()`\r\n\r\nAfter I change the codes for `pprint()` and `print_latex()`. How do I test it for interactive ipython. In my jupyter notebbok, I am only able to get output for Latex Printing and not pprint using `init_printing()`.\r\n\r\n@valglad @asmeurer  Please help.",
+  "created_at": "2019-12-10T08:07:15Z",
+  "version": "1.6",
+  "FAIL_TO_PASS": "[\"test_Permutation_Cycle\", \"test_deprecated_print_cyclic\", \"test_latex_permutation\", \"test_pretty_Permutation\", \"test_printing_non_cyclic\"]",
+  "PASS_TO_PASS": "[\"test_Abs\", \"test_AccumBounds\", \"test_Add\", \"test_Adjoint\", \"test_AlgebraicNumber\", \"test_Assignment\", \"test_AugmentedAssignment\", \"test_BooleanAtom\", \"test_CRootOf\", \"test_Catalan\", \"test_Complement\", \"test_ComplexInfinity\", \"test_Cycle\", \"test_DMP\", \"test_Derivative\", \"test_Dict\", \"test_DiffGeomMethods\", \"test_Dummy\", \"test_Dummy_assumption\", \"test_Dummy_from_Symbol\", \"test_ElementwiseApplyFunction\", \"test_Equivalent\", \"test_EulerGamma\", \"test_Exp\", \"test_ExtensionElement\", \"test_FiniteExtension\", \"test_FiniteSet\", \"test_Float\", \"test_FracElement\", \"test_FracField\", \"test_FractionField\", \"test_Function\", \"test_Geometry\", \"test_GoldenRatio\", \"test_GroebnerBasis\", \"test_Hadamard\", \"test_Homomorphism\", \"test_Identity\", \"test_ImaginaryUnit\", \"test_Infinity\", \"test_Integer\", \"test_Integers\", \"test_Integral\", \"test_Interval\", \"test_KroneckerProduct_printing\", \"test_Lambda\", \"test_Limit\", \"test_MatMul_MatAdd\", \"test_Matrix\", \"test_MatrixElement_printing\", \"test_MatrixExpressions\", \"test_MatrixSlice\", \"test_MatrixSymbol_bold\", \"test_MatrixSymbol_printing\", \"test_Matrix_str\", \"test_Modules\", \"test_Mul\", \"test_NaN\", \"test_Naturals\", \"test_Naturals0\", \"test_NegativeInfinity\", \"test_OneMatrix\", \"test_Order\", \"test_Permutation\", \"test_Permutation_subclassing\", \"test_Pi\", \"test_Poly\", \"test_PolyElement\", \"test_PolyRing\", \"test_PolynomialRingBase\", \"test_Pow\", \"test_PrettyModules\", \"test_PrettyPoly\", \"test_ProductSet_exponent\", \"test_ProductSet_parenthesis\", \"test_ProductSet_prod_char_issue_10413\", \"test_Quantity_str\", \"test_Quaternion_latex_printing\", \"test_Quaternion_str_printer\", \"test_QuotientRing\", \"test_RandomDomain\", \"test_Rational\", \"test_Reals\", \"test_Relational\", \"test_RootSum\", \"test_Singletons\", \"test_SingularityFunction\", \"test_SparseMatrix\", \"test_Subs_printing\", \"test_Sum\", \"test_Symbol\", \"test_Symbol_no_special_commutative_treatment\", \"test_Symbol_two_assumptions\", \"test_SymmetricDifference\", \"test_TensorProduct_printing\", \"test_Tr\", \"test_Transpose\", \"test_TribonacciConstant\", \"test_UnevaluatedExpr\", \"test_UniversalSet\", \"test_WedgeProduct_printing\", \"test_Wild\", \"test_WildFunction\", \"test_Xor\", \"test_ZeroMatrix\", \"test_any_object_in_sequence\", \"test_args\", \"test_beta\", \"test_boolean_args_order\", \"test_builtin_no_args\", \"test_builtins_without_args\", \"test_categories\", \"test_center_accent\", \"test_complicated_symbol_unchanged\", \"test_custom_symbol_names\", \"test_degree_printing\", \"test_deltas\", \"test_dict\", \"test_diffgeom_print_WedgeProduct\", \"test_elliptic_functions\", \"test_empty_Matrix\", \"test_empty_printer\", \"test_expint\", \"test_factorial\", \"test_fancyset_symbols\", \"test_from_sequence\", \"test_full_prec\", \"test_function_subclass_different_name\", \"test_gammas\", \"test_greek_symbols\", \"test_hadamard_power\", \"test_hyper\", \"test_hyper_printing\", \"test_imaginary\", \"test_imaginary_unit\", \"test_infinity\", \"test_integral_transforms\", \"test_is_combining\", \"test_issue_10472\", \"test_issue_10489\", \"test_issue_11801\", \"test_issue_12675\", \"test_issue_12886\", \"test_issue_13651\", \"test_issue_14041\", \"test_issue_15353\", \"test_issue_15439\", \"test_issue_15560\", \"test_issue_15583\", \"test_issue_15716\", \"test_issue_17092\", \"test_issue_17258\", \"test_issue_2934\", \"test_issue_3101\", \"test_issue_3103\", \"test_issue_3568\", \"test_issue_4021\", \"test_issue_4335\", \"test_issue_5524\", \"test_issue_6134\", \"test_issue_6285\", \"test_issue_6324\", \"test_issue_6359\", \"test_issue_6387\", \"test_issue_6739\", \"test_issue_6853\", \"test_issue_7117\", \"test_issue_7179\", \"test_issue_7180\", \"test_issue_7927\", \"test_issue_8409\", \"test_issue_9216\", \"test_issue_9877\", \"test_josephus\", \"test_lamda\", \"test_latex\", \"test_latex_AccumuBounds\", \"test_latex_Complement\", \"test_latex_ComplexRegion\", \"test_latex_ComplexRootOf\", \"test_latex_Complexes\", \"test_latex_ConditionSet\", \"test_latex_Contains\", \"test_latex_DiracDelta\", \"test_latex_Float\", \"test_latex_FormalPowerSeries\", \"test_latex_FourierSeries\", \"test_latex_FracElement\", \"test_latex_Heaviside\", \"test_latex_ImageSet\", \"test_latex_Integers\", \"test_latex_KroneckerDelta\", \"test_latex_Lambda\", \"test_latex_LeviCivita\", \"test_latex_Matrix\", \"test_latex_MatrixSlice\", \"test_latex_NDimArray\", \"test_latex_Naturals\", \"test_latex_Naturals0\", \"test_latex_Piecewise\", \"test_latex_Poly\", \"test_latex_PolyElement\", \"test_latex_Poly_order\", \"test_latex_RandomDomain\", \"test_latex_Range\", \"test_latex_RootSum\", \"test_latex_SetExpr\", \"test_latex_SingularityFunction\", \"test_latex_UnevaluatedExpr\", \"test_latex_basic\", \"test_latex_bessel\", \"test_latex_brackets\", \"test_latex_builtins\", \"test_latex_commutator\", \"test_latex_cycle\", \"test_latex_decimal_separator\", \"test_latex_derivatives\", \"test_latex_dict\", \"test_latex_emptyset\", \"test_latex_euler\", \"test_latex_fresnel\", \"test_latex_functions\", \"test_latex_greek_functions\", \"test_latex_indexed\", \"test_latex_integrals\", \"test_latex_intersection\", \"test_latex_intervals\", \"test_latex_inverse\", \"test_latex_issue_4381\", \"test_latex_issue_4576\", \"test_latex_limits\", \"test_latex_list\", \"test_latex_log\", \"test_latex_mathieu\", \"test_latex_matrix_with_functions\", \"test_latex_mul_symbol\", \"test_latex_numbers\", \"test_latex_order\", \"test_latex_pow_fraction\", \"test_latex_printer_tensor\", \"test_latex_product\", \"test_latex_productset\", \"test_latex_rational\", \"test_latex_sequences\", \"test_latex_sets\", \"test_latex_subs\", \"test_latex_sum\", \"test_latex_symbols\", \"test_latex_symmetric_difference\", \"test_latex_union\", \"test_latex_universalset\", \"test_latex_vector_expressions\", \"test_list\", \"test_matAdd\", \"test_matMul\", \"test_matrixSymbolBold\", \"test_matrix_expressions\", \"test_meijerg\", \"test_missing_in_2X_issue_9047\", \"test_mode\", \"test_modifiers\", \"test_more_than_255_args_issue_10259\", \"test_mul\", \"test_multiline_latex\", \"test_negative_fractions\", \"test_noncommutative\", \"test_other_symbols\", \"test_permutation_equality\", \"test_pprint\", \"test_pretty_Add\", \"test_pretty_Boolean\", \"test_pretty_Complement\", \"test_pretty_ComplexRegion\", \"test_pretty_ComplexRootOf\", \"test_pretty_ConditionSet\", \"test_pretty_Contains\", \"test_pretty_Cycle\", \"test_pretty_Domain\", \"test_pretty_FormalPowerSeries\", \"test_pretty_FourierSeries\", \"test_pretty_ITE\", \"test_pretty_ImageSet\", \"test_pretty_Intersection_issue_10414\", \"test_pretty_KroneckerDelta\", \"test_pretty_Lambda\", \"test_pretty_Mod\", \"test_pretty_RootSum\", \"test_pretty_SetExpr\", \"test_pretty_Subs\", \"test_pretty_SymmetricDifference\", \"test_pretty_Trace_issue_9044\", \"test_pretty_UnevaluatedExpr\", \"test_pretty_Union_issue_10414\", \"test_pretty_UniversalSet\", \"test_pretty_ascii_str\", \"test_pretty_basic\", \"test_pretty_class\", \"test_pretty_derivatives\", \"test_pretty_dotproduct\", \"test_pretty_functions\", \"test_pretty_geometry\", \"test_pretty_integrals\", \"test_pretty_limits\", \"test_pretty_matrix\", \"test_pretty_misc_functions\", \"test_pretty_ndim_arrays\", \"test_pretty_no_wrap_line\", \"test_pretty_order\", \"test_pretty_ordering\", \"test_pretty_piecewise\", \"test_pretty_prec\", \"test_pretty_primenu\", \"test_pretty_primeomega\", \"test_pretty_print_tensor_expr\", \"test_pretty_print_tensor_partial_deriv\", \"test_pretty_product\", \"test_pretty_rational\", \"test_pretty_relational\", \"test_pretty_seq\", \"test_pretty_sequences\", \"test_pretty_sets\", \"test_pretty_special_functions\", \"test_pretty_sqrt\", \"test_pretty_sqrt_char_knob\", \"test_pretty_sqrt_longsymbol_no_sqrt_char\", \"test_pretty_sum\", \"test_pretty_unicode_str\", \"test_print_basic\", \"test_print_builtin_set\", \"test_print_lerchphi\", \"test_printing_cyclic\", \"test_printmethod\", \"test_ranking\", \"test_set\", \"test_set_operators_parenthesis\", \"test_settings\", \"test_settins\", \"test_sqrt\", \"test_sstrrepr\", \"test_str_special_matrices\", \"test_tensor_TensorProduct\", \"test_text_re_im\", \"test_trace\", \"test_translate\", \"test_true_false\", \"test_tuple\", \"test_unit_printing\", \"test_units\", \"test_upretty_greek\", \"test_upretty_modifiers\", \"test_upretty_multiindex\", \"test_upretty_sub_super\", \"test_upretty_subs_missing_in_24\", \"test_vector_expr_pretty_printing\", \"test_wild_str\", \"test_zeta\"]",
+  "environment_setup_commit": "28b41c73c12b70d6ad9f6e45109a80649c4456da",
+  "patch_files": [
+    "sympy/codegen/array_utils.py",
+    "sympy/combinatorics/generators.py",
+    "sympy/combinatorics/homomorphisms.py",
+    "sympy/combinatorics/named_groups.py",
+    "sympy/combinatorics/perm_groups.py",
+    "sympy/combinatorics/permutations.py",
+    "sympy/combinatorics/polyhedron.py",
+    "sympy/combinatorics/tensor_can.py",
+    "sympy/combinatorics/util.py",
+    "sympy/interactive/printing.py",
+    "sympy/printing/latex.py",
+    "sympy/printing/pretty/pretty.py",
+    "sympy/printing/repr.py",
+    "sympy/printing/str.py"
+  ],
+  "test_patch_files": [
+    "sympy/combinatorics/tests/test_permutations.py",
+    "sympy/printing/pretty/tests/test_pretty.py",
+    "sympy/printing/tests/test_latex.py",
+    "sympy/printing/tests/test_repr.py",
+    "sympy/printing/tests/test_str.py"
+  ],
+  "patch_diff_details": {
+    "sympy/codegen/array_utils.py": {
+      "diffs": [
+        {
+          "start_line_old": 574,
+          "end_line_old": 574
+        },
+        {
+          "start_line_old": 1058,
+          "end_line_old": 1058
+        }
+      ]
+    },
+    "sympy/combinatorics/generators.py": {
+      "diffs": [
+        {
+          "start_line_old": 18,
+          "end_line_old": 18
+        },
+        {
+          "start_line_old": 35,
+          "end_line_old": 35
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60
+        },
+        {
+          "start_line_old": 83,
+          "end_line_old": 83
+        }
+      ]
+    },
+    "sympy/combinatorics/homomorphisms.py": {
+      "diffs": [
+        {
+          "start_line_old": 448,
+          "end_line_old": 448
+        }
+      ]
+    },
+    "sympy/combinatorics/named_groups.py": {
+      "diffs": [
+        {
+          "start_line_old": 23,
+          "end_line_old": 23
+        }
+      ]
+    },
+    "sympy/combinatorics/perm_groups.py": {
+      "diffs": [
+        {
+          "start_line_old": 39,
+          "end_line_old": 39
+        },
+        {
+          "start_line_old": 1117,
+          "end_line_old": 1117
+        },
+        {
+          "start_line_old": 1242,
+          "end_line_old": 1242
+        },
+        {
+          "start_line_old": 1310,
+          "end_line_old": 1310
+        },
+        {
+          "start_line_old": 1426,
+          "end_line_old": 1426
+        },
+        {
+          "start_line_old": 1474,
+          "end_line_old": 1474
+        },
+        {
+          "start_line_old": 1521,
+          "end_line_old": 1521
+        },
+        {
+          "start_line_old": 1582,
+          "end_line_old": 1582
+        },
+        {
+          "start_line_old": 1652,
+          "end_line_old": 1652
+        },
+        {
+          "start_line_old": 1678,
+          "end_line_old": 1678
+        },
+        {
+          "start_line_old": 1753,
+          "end_line_old": 1753
+        },
+        {
+          "start_line_old": 2058,
+          "end_line_old": 2058
+        },
+        {
+          "start_line_old": 2728,
+          "end_line_old": 2728
+        },
+        {
+          "start_line_old": 2771,
+          "end_line_old": 2771
+        },
+        {
+          "start_line_old": 3164,
+          "end_line_old": 3164
+        },
+        {
+          "start_line_old": 3699,
+          "end_line_old": 3699
+        },
+        {
+          "start_line_old": 4922,
+          "end_line_old": 4922
+        },
+        {
+          "start_line_old": 4975,
+          "end_line_old": 4975
+        }
+      ]
+    },
+    "sympy/combinatorics/permutations.py": {
+      "diffs": [
+        {
+          "start_line_old": 26,
+          "end_line_old": 26,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 2775
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 2741
+        },
+        {
+          "start_line_old": 182,
+          "end_line_old": 182,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 2619
+        },
+        {
+          "start_line_old": 361,
+          "end_line_old": 361,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 2440
+        },
+        {
+          "start_line_old": 482,
+          "end_line_old": 482,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+          "closest_snippet_line_distance": 78,
+          "pos": 5,
+          "context_length": 4245
+        },
+        {
+          "start_line_old": 665,
+          "end_line_old": 675,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+          "closest_snippet_line_distance": 271,
+          "pos": 5,
+          "context_length": 4245
+        },
+        {
+          "start_line_old": 691,
+          "end_line_old": 691,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+          "closest_snippet_line_distance": 287,
+          "pos": 5,
+          "context_length": 4245
+        },
+        {
+          "start_line_old": 699,
+          "end_line_old": 702,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+          "closest_snippet_line_distance": 298,
+          "pos": 5,
+          "context_length": 4245
+        },
+        {
+          "start_line_old": 779,
+          "end_line_old": 779,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+          "closest_snippet_line_distance": 375,
+          "pos": 5,
+          "context_length": 4245
+        },
+        {
+          "start_line_old": 839,
+          "end_line_old": 839,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1962
+        },
+        {
+          "start_line_old": 974,
+          "end_line_old": 975,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1827
+        },
+        {
+          "start_line_old": 999,
+          "end_line_old": 999,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1802
+        },
+        {
+          "start_line_old": 1012,
+          "end_line_old": 1034,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1789
+        },
+        {
+          "start_line_old": 1045,
+          "end_line_old": 1045,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.__new__.15_Permutation.__new__.30.1",
+          "closest_snippet_line_distance": 96,
+          "pos": 116,
+          "context_length": 40238
+        },
+        {
+          "start_line_old": 1086,
+          "end_line_old": 1086,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.__repr___Permutation.__repr__.1.8.6.1",
+          "closest_snippet_line_distance": 53,
+          "pos": 17,
+          "context_length": 8452
+        },
+        {
+          "start_line_old": 1182,
+          "end_line_old": 1182,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1619
+        },
+        {
+          "start_line_old": 1221,
+          "end_line_old": 1221,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1580
+        },
+        {
+          "start_line_old": 1286,
+          "end_line_old": 1286,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1515
+        },
+        {
+          "start_line_old": 1306,
+          "end_line_old": 1306,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1495
+        },
+        {
+          "start_line_old": 1367,
+          "end_line_old": 1368,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1434
+        },
+        {
+          "start_line_old": 1407,
+          "end_line_old": 1407,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1394
+        },
+        {
+          "start_line_old": 1522,
+          "end_line_old": 1522,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1279
+        },
+        {
+          "start_line_old": 1548,
+          "end_line_old": 1549,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1253
+        },
+        {
+          "start_line_old": 1572,
+          "end_line_old": 1572,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1229
+        },
+        {
+          "start_line_old": 1679,
+          "end_line_old": 1679,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1122
+        },
+        {
+          "start_line_old": 1746,
+          "end_line_old": 1746,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 1055
+        },
+        {
+          "start_line_old": 2132,
+          "end_line_old": 2132,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 669
+        },
+        {
+          "start_line_old": 2212,
+          "end_line_old": 2212,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 589
+        },
+        {
+          "start_line_old": 2257,
+          "end_line_old": 2257,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.list_Permutation.list.5.1",
+          "closest_snippet_line_distance": 1183,
+          "pos": 154,
+          "context_length": 53957
+        },
+        {
+          "start_line_old": 2352,
+          "end_line_old": 2352,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 449
+        },
+        {
+          "start_line_old": 2367,
+          "end_line_old": 2373,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 434
+        },
+        {
+          "start_line_old": 2443,
+          "end_line_old": 2443,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 358
+        },
+        {
+          "start_line_old": 2482,
+          "end_line_old": 2482,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 319
+        },
+        {
+          "start_line_old": 2533,
+          "end_line_old": 2533,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 268
+        },
+        {
+          "start_line_old": 2764,
+          "end_line_old": 2764,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+          "closest_snippet_line_distance": 37
+        },
+        {
+          "start_line_old": 2810,
+          "end_line_old": 2810,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.cycle_structure_Permutation.cycle_structure.4",
+          "closest_snippet_line_distance": 536,
+          "pos": 181,
+          "context_length": 61844
+        },
+        {
+          "start_line_old": 2835,
+          "end_line_old": 2838,
+          "file_pos": 3,
+          "file_context_length": 53159,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.cycle_structure_Permutation.cycle_structure.4",
+          "closest_snippet_line_distance": 564,
+          "pos": 181,
+          "context_length": 61844
+        }
+      ]
+    },
+    "sympy/combinatorics/polyhedron.py": {
+      "diffs": [
+        {
+          "start_line_old": 63,
+          "end_line_old": 63
+        }
+      ]
+    },
+    "sympy/combinatorics/tensor_can.py": {
+      "diffs": [
+        {
+          "start_line_old": 921,
+          "end_line_old": 921
+        },
+        {
+          "start_line_old": 956,
+          "end_line_old": 956
+        },
+        {
+          "start_line_old": 1031,
+          "end_line_old": 1031
+        },
+        {
+          "start_line_old": 1062,
+          "end_line_old": 1062
+        },
+        {
+          "start_line_old": 1179,
+          "end_line_old": 1179
+        }
+      ]
+    },
+    "sympy/combinatorics/util.py": {
+      "diffs": [
+        {
+          "start_line_old": 146,
+          "end_line_old": 146
+        },
+        {
+          "start_line_old": 214,
+          "end_line_old": 214
+        },
+        {
+          "start_line_old": 274,
+          "end_line_old": 274
+        },
+        {
+          "start_line_old": 418,
+          "end_line_old": 418
+        },
+        {
+          "start_line_old": 512,
+          "end_line_old": 512
+        }
+      ]
+    },
+    "sympy/interactive/printing.py": {
+      "diffs": [
+        {
+          "start_line_old": 553,
+          "end_line_old": 559,
+          "file_pos": 20,
+          "file_context_length": 138289,
+          "pos": 135,
+          "context_length": 47476
+        }
+      ]
+    },
+    "sympy/printing/latex.py": {
+      "diffs": [
+        {
+          "start_line_old": 144,
+          "end_line_old": 144,
+          "file_pos": 11,
+          "file_context_length": 112458,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_FreeModule_LatexPrinter._print_Tr.contents.2.1",
+          "closest_snippet_line_distance": 2211
+        },
+        {
+          "start_line_old": 377,
+          "end_line_old": 377,
+          "file_pos": 11,
+          "file_context_length": 112458,
+          "pos": 52,
+          "context_length": 20138
+        },
+        {
+          "start_line_old": 2504,
+          "end_line_old": 2504,
+          "file_pos": 11,
+          "file_context_length": 112458,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_FreeModule_LatexPrinter._print_Tr.contents.2.1",
+          "closest_snippet_line_distance": 83
+        },
+        {
+          "start_line_old": 2705,
+          "end_line_old": 2705,
+          "file_pos": 11,
+          "file_context_length": 112458,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_FreeModule_LatexPrinter._print_Tr.contents.2.1",
+          "closest_snippet_line_distance": 284
+        }
+      ]
+    },
+    "sympy/printing/pretty/pretty.py": {
+      "diffs": [
+        {
+          "start_line_old": 20,
+          "end_line_old": 20,
+          "file_pos": 2,
+          "file_context_length": 30542,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Cycle_PrettyPrinter._print_Cycle.9.1",
+          "closest_snippet_line_distance": 351,
+          "pos": 3,
+          "context_length": 685
+        },
+        {
+          "start_line_old": 45,
+          "end_line_old": 45,
+          "file_pos": 2,
+          "file_context_length": 30542,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_GoldenRatio_PrettyPrinter._print_Mod.6.1",
+          "closest_snippet_line_distance": 1604,
+          "pos": 129,
+          "context_length": 44093
+        },
+        {
+          "start_line_old": 390,
+          "end_line_old": 390,
+          "file_pos": 2,
+          "file_context_length": 30542,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_MatrixBase_PrettyPrinter._print_Trace.5.1",
+          "closest_snippet_line_distance": 336,
+          "pos": 153,
+          "context_length": 53742
+        },
+        {
+          "start_line_old": 2616,
+          "end_line_old": 2618,
+          "file_pos": 2,
+          "file_context_length": 30542,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Tr_pretty.6.2.1",
+          "closest_snippet_line_distance": 5
+        },
+        {
+          "start_line_old": 2661,
+          "end_line_old": 2665,
+          "file_pos": 2,
+          "file_context_length": 30542,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Tr_pretty.6.2.1",
+          "closest_snippet_line_distance": 52
+        }
+      ]
+    },
+    "sympy/printing/repr.py": {
+      "diffs": [
+        {
+          "start_line_old": 11,
+          "end_line_old": 20,
+          "file_pos": 10,
+          "file_context_length": 84860,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/repr.py_ReprPrinter._print_SparseMatrix_ReprPrinter._print_Mul.7.1",
+          "closest_snippet_line_distance": 112
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60,
+          "file_pos": 10,
+          "file_context_length": 84860,
+          "pos": 45,
+          "context_length": 17998
+        }
+      ]
+    },
+    "sympy/printing/str.py": {
+      "diffs": [
+        {
+          "start_line_old": 25,
+          "end_line_old": 25,
+          "file_pos": 1,
+          "file_context_length": 7287,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_MatMul_StrPrinter._print_Cycle.1.1",
+          "closest_snippet_line_distance": 291,
+          "pos": 30,
+          "context_length": 13641
+        },
+        {
+          "start_line_old": 357,
+          "end_line_old": 357,
+          "file_pos": 1,
+          "file_context_length": 7287,
+          "pos": 1,
+          "context_length": 266
+        }
+      ]
+    }
+  },
+  "vectors": 8451,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Permutation_StrPrinter._print_Permutation.2.9.6.1",
+      "distance": 0.6724516153335571,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 355,
+      "end_line": 378,
+      "tokens": 266,
+      "context_length": 266,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Cycle_PrettyPrinter._print_Cycle.9.1",
+      "distance": 0.7453925609588623,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 371,
+      "end_line": 388,
+      "tokens": 152,
+      "context_length": 418,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_1_pprint_try_use_unicode.1",
+      "distance": 0.8310509324073792,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 267,
+      "context_length": 685,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__repr___Cycle.__repr__.7.1",
+      "distance": 0.8349635601043701,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 383,
+      "end_line": 404,
+      "tokens": 179,
+      "context_length": 864,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.1_Permutation._rank.1",
+      "distance": 0.8423953056335449,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 470,
+      "end_line": 827,
+      "tokens": 3381,
+      "context_length": 4245,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_DMP_PrettyPrinter._print_IdentityMorphism.2.1",
+      "distance": 0.8470922708511353,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2431,
+      "end_line": 2463,
+      "tokens": 272,
+      "context_length": 4517,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_DMP_StrPrinter._print_DMP.7.1",
+      "distance": 0.8574044108390808,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 804,
+      "end_line": 818,
+      "tokens": 132,
+      "context_length": 4649,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_set_StrPrinter._print_Zero.2.1",
+      "distance": 0.8578521013259888,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 719,
+      "end_line": 802,
+      "tokens": 678,
+      "context_length": 5327,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.__repr___Permutation.__repr__.1.8.6.1",
+      "distance": 0.860052227973938,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 1012,
+      "end_line": 1033,
+      "tokens": 235,
+      "context_length": 5562,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_And_PrettyPrinter._print_ceiling.1.4.1.1",
+      "distance": 0.860268771648407,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 266,
+      "end_line": 332,
+      "tokens": 583,
+      "context_length": 6145,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_not_supported_",
+      "distance": 0.8653610944747925,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 502,
+      "end_line": 537,
+      "tokens": 400,
+      "context_length": 6545
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._helper_print_function_PrettyPrinter._helper_print_function.10.1",
+      "distance": 0.8687384128570557,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1401,
+      "end_line": 1433,
+      "tokens": 258,
+      "context_length": 6803,
+      "file_pos": 4
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_frozenset_PrettyPrinter._print_frozenset.7.1",
+      "distance": 0.8704614639282227,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2189,
+      "end_line": 2197,
+      "tokens": 116,
+      "context_length": 6919,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Not_PrettyPrinter._print_Not.2.7.1.1",
+      "distance": 0.8716433048248291,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 228,
+      "end_line": 243,
+      "tokens": 165,
+      "context_length": 7084,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Subs_StrPrinter._print_FracElement.1.2.3.1",
+      "distance": 0.8726040124893188,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 380,
+      "end_line": 436,
+      "tokens": 541,
+      "context_length": 7625,
+      "file_pos": 4
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_Expr_CodePrinter._print_Not.2.1",
+      "distance": 0.8740353584289551,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 398,
+      "end_line": 449,
+      "tokens": 507,
+      "context_length": 8132
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.cyclic_form_Permutation.cyclic_form.9.1",
+      "distance": 0.8812055587768555,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 1076,
+      "end_line": 1118,
+      "tokens": 320,
+      "context_length": 8452,
+      "file_pos": 4
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_expint_PrettyPrinter._print_Chi.prettyFunc.7.1",
+      "distance": 0.8829953670501709,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1588,
+      "end_line": 1607,
+      "tokens": 194,
+      "context_length": 8646,
+      "file_pos": 4
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_1__print_known_const.2.1",
+      "distance": 0.8832706809043884,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 650,
+      "context_length": 9296
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Cycle.__str___Cycle.__str__.8.1",
+      "distance": 0.8843697309494019,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 406,
+      "end_line": 427,
+      "tokens": 176,
+      "context_length": 9472,
+      "file_pos": 5
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/printing/printer.py_1_2",
+      "distance": 0.8850486874580383,
+      "file_path": "sympy/printing/printer.py",
+      "start_line": 1,
+      "end_line": 173,
+      "tokens": 1419,
+      "context_length": 10891
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Gradient_PrettyPrinter._print_factorial2.6.1",
+      "distance": 0.8852802515029907,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 135,
+      "end_line": 202,
+      "tokens": 639,
+      "context_length": 11530,
+      "file_pos": 6
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Interval_PrettyPrinter._print_Complement.2.1",
+      "distance": 0.8903985023498535,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1935,
+      "end_line": 1988,
+      "tokens": 388,
+      "context_length": 11918,
+      "file_pos": 6
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_FiniteSet_PrettyPrinter._print_Range.3.1",
+      "distance": 0.8905912637710571,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1906,
+      "end_line": 1933,
+      "tokens": 251,
+      "context_length": 12169,
+      "file_pos": 6
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_MatMul_StrPrinter._print_Cycle.1.1",
+      "distance": 0.8919507265090942,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 316,
+      "end_line": 353,
+      "tokens": 284,
+      "context_length": 12453,
+      "file_pos": 6
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_Mul_CodePrinter._print_Mul.18.3.1.1",
+      "distance": 0.8959534168243408,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 451,
+      "end_line": 500,
+      "tokens": 449,
+      "context_length": 12902
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter.__print_Boolean_PrettyPrinter.__print_Boolean.7.1",
+      "distance": 0.8962253332138062,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 245,
+      "end_line": 264,
+      "tokens": 165,
+      "context_length": 13067,
+      "file_pos": 6
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_RandomDomain_PrettyPrinter._print_RandomDomain.1.6.1.1",
+      "distance": 0.89650958776474,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2413,
+      "end_line": 2429,
+      "tokens": 184,
+      "context_length": 13251,
+      "file_pos": 6
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty_symbology.py_pretty_use_unicode_pretty_use_unicode.12.1",
+      "distance": 0.8968209624290466,
+      "file_path": "sympy/printing/pretty/pretty_symbology.py",
+      "start_line": 50,
+      "end_line": 73,
+      "tokens": 201,
+      "context_length": 13452
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter_StrPrinter.emptyPrinter.1.3.1.1",
+      "distance": 0.8977792263031006,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 18,
+      "end_line": 44,
+      "tokens": 189,
+      "context_length": 13641,
+      "file_pos": 7
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Limit_PrettyPrinter._print_Limit.12.1",
+      "distance": 0.898033618927002,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 629,
+      "end_line": 655,
+      "tokens": 261,
+      "context_length": 13902,
+      "file_pos": 7
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_1_9",
+      "distance": 0.8992249965667725,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 108,
+      "context_length": 14010,
+      "file_pos": 7
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_NumPyPrinter._print_CodegenArrayPermuteDims_NumPyPrinter._print_fresnels.1",
+      "distance": 0.9030109643936157,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 805,
+      "end_line": 818,
+      "tokens": 146,
+      "context_length": 14156
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_euler_PrettyPrinter._print_stieltjes.1.2.1.1",
+      "distance": 0.9035016894340515,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2374,
+      "end_line": 2398,
+      "tokens": 212,
+      "context_length": 14368,
+      "file_pos": 7
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/printing/defaults.py_1_",
+      "distance": 0.9041038751602173,
+      "file_path": "sympy/printing/defaults.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 157,
+      "context_length": 14525
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Mul_StrPrinter._print_Mul.18.3.1.1",
+      "distance": 0.9042858481407166,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 260,
+      "end_line": 314,
+      "tokens": 501,
+      "context_length": 15026,
+      "file_pos": 8
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_use_FCodePrinter._print_ArrayConstructor.2.1",
+      "distance": 0.9057184457778931,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 757,
+      "end_line": 773,
+      "tokens": 212,
+      "context_length": 15238
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Poly_StrPrinter._print_AlgebraicNumber.1.2.1.1",
+      "distance": 0.9080431461334229,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 438,
+      "end_line": 511,
+      "tokens": 529,
+      "context_length": 15767,
+      "file_pos": 9
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter.join_PrettyPrinter._print_set.5.1",
+      "distance": 0.9080623388290405,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2137,
+      "end_line": 2187,
+      "tokens": 366,
+      "context_length": 16133,
+      "file_pos": 9
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_39_",
+      "distance": 0.9088562726974487,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 917,
+      "end_line": 940,
+      "tokens": 209,
+      "context_length": 16342
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_AccumulationBounds_StrPrinter._print_MatrixElement.1.1",
+      "distance": 0.909005880355835,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 199,
+      "end_line": 241,
+      "tokens": 448,
+      "context_length": 16790,
+      "file_pos": 9
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_34__known_constants_scipy_constants.1",
+      "distance": 0.91082364320755,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 821,
+      "end_line": 855,
+      "tokens": 315,
+      "context_length": 17105
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Curl_PrettyPrinter._print_Divergence.7.1",
+      "distance": 0.9129337072372437,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 105,
+      "end_line": 121,
+      "tokens": 199,
+      "context_length": 17304,
+      "file_pos": 9
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_AbstractPythonCodePrinter._print_Print_AbstractPythonCodePrinter._print_NoneToken.1.1",
+      "distance": 0.9146586656570435,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 342,
+      "end_line": 364,
+      "tokens": 247,
+      "context_length": 17551
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/printing/repr.py_ReprPrinter._print_Add_ReprPrinter._print_list.1.1",
+      "distance": 0.9159297347068787,
+      "file_path": "sympy/printing/repr.py",
+      "start_line": 47,
+      "end_line": 107,
+      "tokens": 447,
+      "context_length": 17998,
+      "file_pos": 10
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_seq_PrettyPrinter._print_seq.4.1",
+      "distance": 0.9164150953292847,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2095,
+      "end_line": 2135,
+      "tokens": 316,
+      "context_length": 18314,
+      "file_pos": 10
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ConditionSet_PrettyPrinter._print_ConditionSet.8.1",
+      "distance": 0.9174992442131042,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2006,
+      "end_line": 2032,
+      "tokens": 241,
+      "context_length": 18555,
+      "file_pos": 10
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Subs_PrettyPrinter._print_Subs.10.1",
+      "distance": 0.9184471368789673,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2337,
+      "end_line": 2352,
+      "tokens": 179,
+      "context_length": 18734,
+      "file_pos": 10
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_CompositeMorphism_PrettyPrinter._print_CompositeMorphism.9.1",
+      "distance": 0.9197145104408264,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2465,
+      "end_line": 2478,
+      "tokens": 129,
+      "context_length": 18863,
+      "file_pos": 10
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_DMF_StrPrinter._print_Tr.2.1",
+      "distance": 0.9217972755432129,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 820,
+      "end_line": 851,
+      "tokens": 287,
+      "context_length": 19150,
+      "file_pos": 10
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_BooleanTrue_StrPrinter._print_TribonacciConstant.1.1",
+      "distance": 0.9263129234313965,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 70,
+      "end_line": 163,
+      "tokens": 823,
+      "context_length": 19973,
+      "file_pos": 10
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_Cycle_LatexPrinter._print_Permutation.1",
+      "distance": 0.9276939630508423,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 361,
+      "end_line": 377,
+      "tokens": 165,
+      "context_length": 20138,
+      "file_pos": 11
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_CCodePrinter_CCodePrinter.3",
+      "distance": 0.9300352334976196,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 642,
+      "end_line": 653,
+      "tokens": 107,
+      "context_length": 20245
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/printing.py_1___all__.1",
+      "distance": 0.9307726621627808,
+      "file_path": "sympy/physics/vector/printing.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 134,
+      "context_length": 20379
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_UniversalSet_PrettyPrinter._print_FractionField.5.1",
+      "distance": 0.930919885635376,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2199,
+      "end_line": 2307,
+      "tokens": 799,
+      "context_length": 21178,
+      "file_pos": 13
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ExpBase_PrettyPrinter._print_mathieusprime.1.1",
+      "distance": 0.9314491748809814,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1378,
+      "end_line": 1399,
+      "tokens": 231,
+      "context_length": 21409,
+      "file_pos": 13
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_22_CXX11CodePrinter._print_using.1.2.1.1",
+      "distance": 0.9317030906677246,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 110,
+      "end_line": 137,
+      "tokens": 285,
+      "context_length": 21694
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Cross_PrettyPrinter._print_Cross.10.1",
+      "distance": 0.931721568107605,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 93,
+      "end_line": 103,
+      "tokens": 135,
+      "context_length": 21829,
+      "file_pos": 14
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Category_PrettyPrinter._print_BaseVectorField.2.1",
+      "distance": 0.9336159229278564,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2480,
+      "end_line": 2544,
+      "tokens": 612,
+      "context_length": 22441,
+      "file_pos": 14
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Rational_PrettyPrinter._print_ProductSet.1.3.2.1",
+      "distance": 0.9344168901443481,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1880,
+      "end_line": 1904,
+      "tokens": 228,
+      "context_length": 22669,
+      "file_pos": 14
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_UnevaluatedExpr_StrPrinter._print_mpq.1.2.1.1",
+      "distance": 0.9348194599151611,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 575,
+      "end_line": 648,
+      "tokens": 543,
+      "context_length": 23212,
+      "file_pos": 14
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py__C9XCodePrinter__C9XCodePrinter._get_loop_opening_ending.6.1",
+      "distance": 0.9349451065063477,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 626,
+      "end_line": 639,
+      "tokens": 157,
+      "context_length": 23369
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_number_function_PrettyPrinter._print_number_function.pform.14.1",
+      "distance": 0.9355003833770752,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2354,
+      "end_line": 2372,
+      "tokens": 220,
+      "context_length": 23589,
+      "file_pos": 14
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Product_PrettyPrinter._print_Product.14.1",
+      "distance": 0.9363807439804077,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 466,
+      "end_line": 518,
+      "tokens": 416,
+      "context_length": 24005,
+      "file_pos": 14
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_PythonCodePrinter._print_Pow_20.1",
+      "distance": 0.9364827871322632,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 440,
+      "end_line": 462,
+      "tokens": 222,
+      "context_length": 24227
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_hyper_PrettyPrinter._print_hyper.ap.27.1",
+      "distance": 0.9380254149436951,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1246,
+      "end_line": 1292,
+      "tokens": 403,
+      "context_length": 24630,
+      "file_pos": 14
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_beta_PrettyPrinter._print_lowergamma.2.1",
+      "distance": 0.9392880201339722,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1553,
+      "end_line": 1567,
+      "tokens": 177,
+      "context_length": 24807,
+      "file_pos": 14
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_AbstractPythonCodePrinter_AbstractPythonCodePrinter._get_comment.1.1",
+      "distance": 0.9393216967582703,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 78,
+      "end_line": 141,
+      "tokens": 523,
+      "context_length": 25330
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/printing/printer.py_3_Printer.doprint.2.1",
+      "distance": 0.939541220664978,
+      "file_path": "sympy/printing/printer.py",
+      "start_line": 175,
+      "end_line": 249,
+      "tokens": 460,
+      "context_length": 25790
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_HadamardPower_PrettyPrinter._print_HadamardPower.2.7.1",
+      "distance": 0.9405432343482971,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 896,
+      "end_line": 910,
+      "tokens": 140,
+      "context_length": 25930,
+      "file_pos": 14
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_1_reserved_words.1",
+      "distance": 0.9406884908676147,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 774,
+      "context_length": 26704
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_binomial_PrettyPrinter._print_Relational.5.1",
+      "distance": 0.9407038688659668,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 204,
+      "end_line": 226,
+      "tokens": 195,
+      "context_length": 26899,
+      "file_pos": 14
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter.41_JuliaCodePrinter._print_MatrixElement.1.1",
+      "distance": 0.9414168000221252,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 358,
+      "end_line": 374,
+      "tokens": 181,
+      "context_length": 27080
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Piecewise_PrettyPrinter._print_Piecewise.15.1",
+      "distance": 0.9438951015472412,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1166,
+      "end_line": 1220,
+      "tokens": 420,
+      "context_length": 27500,
+      "file_pos": 15
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Add.4_PrettyPrinter._print_Add.6.1",
+      "distance": 0.9441755414009094,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1696,
+      "end_line": 1737,
+      "tokens": 325,
+      "context_length": 27825,
+      "file_pos": 15
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sympy/sympy/printing/__init__.py_1_",
+      "distance": 0.9442054033279419,
+      "file_path": "sympy/printing/__init__.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 518,
+      "context_length": 28343
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_AbstractPythonCodePrinter._get_einsum_string_AbstractPythonCodePrinter._get_einsum_string.12.1",
+      "distance": 0.9442177414894104,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 191,
+      "end_line": 224,
+      "tokens": 247,
+      "context_length": 28590
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ElementwiseApplyFunction_PrettyPrinter._special_function_classes.7.1",
+      "distance": 0.9445576071739197,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1435,
+      "end_line": 1455,
+      "tokens": 241,
+      "context_length": 28831,
+      "file_pos": 16
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C99CodePrinter_C99CodePrinter.12",
+      "distance": 0.9449437856674194,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 656,
+      "end_line": 685,
+      "tokens": 312,
+      "context_length": 29143
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_1_AssignmentError.2",
+      "distance": 0.9453328847885132,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 233,
+      "context_length": 29376
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_SeqFormula_PrettyPrinter._print_SeqMul.1",
+      "distance": 0.9455054998397827,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2070,
+      "end_line": 2093,
+      "tokens": 227,
+      "context_length": 29603,
+      "file_pos": 16
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_BasisDependent.19_PrettyPrinter._print_BasisDependent.20.1",
+      "distance": 0.9458262920379639,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1005,
+      "end_line": 1024,
+      "tokens": 217,
+      "context_length": 29820,
+      "file_pos": 16
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_SingularityFunction_PrettyPrinter._print_SingularityFunction.1.8.4.1",
+      "distance": 0.9462803602218628,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1538,
+      "end_line": 1551,
+      "tokens": 142,
+      "context_length": 29962,
+      "file_pos": 16
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Derivative_PrettyPrinter._print_Derivative.12.1",
+      "distance": 0.9465782046318054,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 334,
+      "end_line": 369,
+      "tokens": 288,
+      "context_length": 30250,
+      "file_pos": 16
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/__init__.py_1_",
+      "distance": 0.9471027851104736,
+      "file_path": "sympy/combinatorics/__init__.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 387,
+      "context_length": 30637
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Order_PrettyPrinter._print_Order.5.1",
+      "distance": 0.947186291217804,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1517,
+      "end_line": 1536,
+      "tokens": 236,
+      "context_length": 30873,
+      "file_pos": 17
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_PythonCodePrinter_PythonCodePrinter._print_Indexed.3.1",
+      "distance": 0.9478186964988708,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 367,
+      "end_line": 380,
+      "tokens": 152,
+      "context_length": 31025
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_KroneckerDelta_PrettyPrinter._print_KroneckerDelta.8.1",
+      "distance": 0.948235034942627,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2400,
+      "end_line": 2411,
+      "tokens": 147,
+      "context_length": 31172,
+      "file_pos": 17
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Dot_PrettyPrinter._print_Dot.10.1",
+      "distance": 0.9487693309783936,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 123,
+      "end_line": 133,
+      "tokens": 134,
+      "context_length": 31306,
+      "file_pos": 17
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Do_FCodePrinter._print_Do.3.1",
+      "distance": 0.9493900537490845,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 400,
+      "end_line": 415,
+      "tokens": 124,
+      "context_length": 31430
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ImageSet_PrettyPrinter._print_ImageSet.7.2.2.1",
+      "distance": 0.9494765996932983,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1990,
+      "end_line": 2004,
+      "tokens": 174,
+      "context_length": 31604,
+      "file_pos": 17
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Symbol_FCodePrinter._print_Symbol.3.1",
+      "distance": 0.9494816064834595,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 149,
+      "end_line": 164,
+      "tokens": 131,
+      "context_length": 31735
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/sympy/sympy/printing/repr.py_ReprPrinter._print_Predicate_ReprPrinter._print_PolyElement.3.1",
+      "distance": 0.9505319595336914,
+      "file_path": "sympy/printing/repr.py",
+      "start_line": 186,
+      "end_line": 219,
+      "tokens": 382,
+      "context_length": 32117,
+      "file_pos": 17
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Pow_PrettyPrinter._print_Pow.5.1",
+      "distance": 0.9514471292495728,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1842,
+      "end_line": 1857,
+      "tokens": 184,
+      "context_length": 32301,
+      "file_pos": 17
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_Function_CodePrinter._print_Function.1.8.1.1",
+      "distance": 0.9522200226783752,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 371,
+      "end_line": 396,
+      "tokens": 292,
+      "context_length": 32593
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_27__known_constants_numpy.1",
+      "distance": 0.9527159929275513,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 574,
+      "end_line": 601,
+      "tokens": 256,
+      "context_length": 32849
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_elliptic_e_PrettyPrinter._print_elliptic_f.6.1",
+      "distance": 0.9530119895935059,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1609,
+      "end_line": 1632,
+      "tokens": 258,
+      "context_length": 33107,
+      "file_pos": 17
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_1_known_fcns_src2.1",
+      "distance": 0.9539011716842651,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 496,
+      "context_length": 33603
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Mul_PrettyPrinter._print_Mul.17.2.2.1",
+      "distance": 0.9543737173080444,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1739,
+      "end_line": 1794,
+      "tokens": 564,
+      "context_length": 34167,
+      "file_pos": 17
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/printing.py_init_vprinting_",
+      "distance": 0.9546077251434326,
+      "file_path": "sympy/physics/vector/printing.py",
+      "start_line": 382,
+      "end_line": 422,
+      "tokens": 336,
+      "context_length": 34503
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_DiracDelta_PrettyPrinter._print_DiracDelta.1.6.1.1",
+      "distance": 0.9550020694732666,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1569,
+      "end_line": 1586,
+      "tokens": 184,
+      "context_length": 34687,
+      "file_pos": 17
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._rate_index_position_FCodePrinter._traverse_matrix_indices.2.1",
+      "distance": 0.9554056525230408,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 166,
+      "end_line": 189,
+      "tokens": 207,
+      "context_length": 34894
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_NumPyPrinter._print_And_NumPyPrinter._print_Identity.2.2.1",
+      "distance": 0.9561053514480591,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 690,
+      "end_line": 751,
+      "tokens": 769,
+      "context_length": 35663
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Differential_PrettyPrinter._print_Differential.2.3.3.1",
+      "distance": 0.9564934968948364,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2546,
+      "end_line": 2554,
+      "tokens": 119,
+      "context_length": 35782,
+      "file_pos": 17
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Print_FCodePrinter._print_FortranReturn.2.2.1.1",
+      "distance": 0.9571276307106018,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 668,
+      "end_line": 688,
+      "tokens": 192,
+      "context_length": 35974
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_meijerg_PrettyPrinter._print_meijerg.v.45.1",
+      "distance": 0.9574084877967834,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1294,
+      "end_line": 1376,
+      "tokens": 773,
+      "context_length": 36747,
+      "file_pos": 17
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Add_StrPrinter._print_Add.7.1",
+      "distance": 0.9580526351928711,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 46,
+      "end_line": 68,
+      "tokens": 160,
+      "context_length": 36907,
+      "file_pos": 17
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.__new__.15_Permutation.__new__.30.1",
+      "distance": 0.9585333466529846,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 909,
+      "end_line": 949,
+      "tokens": 371,
+      "context_length": 37278,
+      "file_pos": 17
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_AbstractPythonCodePrinter._print_ITE_AbstractPythonCodePrinter._print_Return.2.1",
+      "distance": 0.9591007232666016,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 281,
+      "end_line": 340,
+      "tokens": 539,
+      "context_length": 37817
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._doprint_loops_CodePrinter._doprint_loops.5.16.1",
+      "distance": 0.9593942165374756,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 131,
+      "end_line": 208,
+      "tokens": 718,
+      "context_length": 38535
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Identity_PrettyPrinter._print_HadamardProduct.3.1",
+      "distance": 0.9613028764724731,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 854,
+      "end_line": 894,
+      "tokens": 352,
+      "context_length": 38887,
+      "file_pos": 17
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_PartialDerivative_PrettyPrinter._print_PartialDerivative.10.1",
+      "distance": 0.9623722434043884,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1137,
+      "end_line": 1164,
+      "tokens": 212,
+      "context_length": 39099,
+      "file_pos": 17
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Function_FCodePrinter._print_Mod.5.3.2.1",
+      "distance": 0.9626170992851257,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 299,
+      "end_line": 320,
+      "tokens": 253,
+      "context_length": 39352
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Transpose_PrettyPrinter._print_BlockMatrix.2.1",
+      "distance": 0.963620662689209,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 800,
+      "end_line": 823,
+      "tokens": 216,
+      "context_length": 39568,
+      "file_pos": 17
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/sympy/sympy/printing/python.py_1_PythonPrinter._print_module.1",
+      "distance": 0.9643656611442566,
+      "file_path": "sympy/printing/python.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 325,
+      "context_length": 39893
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.list_Permutation.list.5.1",
+      "distance": 0.9653737545013428,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 1035,
+      "end_line": 1074,
+      "tokens": 345,
+      "context_length": 40238,
+      "file_pos": 18
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_And_LatexPrinter._print_elliptic_f.2.2.1.1",
+      "distance": 0.9655455946922302,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 974,
+      "end_line": 1029,
+      "tokens": 577,
+      "context_length": 40815,
+      "file_pos": 18
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/__init__.py__",
+      "distance": 0.9661290645599365,
+      "file_path": "sympy/printing/pretty/__init__.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 40815
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_MatMul_PrettyPrinter._print_MatMul.4.1",
+      "distance": 0.9662971496582031,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 842,
+      "end_line": 852,
+      "tokens": 124,
+      "context_length": 40939,
+      "file_pos": 19
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Declaration_C89CodePrinter._print_Declaration.7.1",
+      "distance": 0.9664283990859985,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 486,
+      "end_line": 511,
+      "tokens": 250,
+      "context_length": 41189
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/sympy/sympy/interactive/printing.py_13_init_printing",
+      "distance": 0.9683829545974731,
+      "file_path": "sympy/interactive/printing.py",
+      "start_line": 337,
+      "end_line": 571,
+      "tokens": 114,
+      "context_length": 41303,
+      "file_pos": 20
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/sympy/sympy/printing/dot.py_1_slotClasses.1",
+      "distance": 0.968513011932373,
+      "file_path": "sympy/printing/dot.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 137,
+      "context_length": 41440
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Mul_JuliaCodePrinter._print_Mul.2.22.3.2.1",
+      "distance": 0.9700821042060852,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 119,
+      "end_line": 191,
+      "tokens": 697,
+      "context_length": 42137
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/sympy/sympy/printing/repr.py_ReprPrinter._print_Symbol_ReprPrinter._print_Symbol.4.2.2.1",
+      "distance": 0.9701279401779175,
+      "file_path": "sympy/printing/repr.py",
+      "start_line": 173,
+      "end_line": 184,
+      "tokens": 141,
+      "context_length": 42278,
+      "file_pos": 21
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter_CodePrinter.__init__.2.self.reserved_words.1",
+      "distance": 0.9711534380912781,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 38,
+      "end_line": 71,
+      "tokens": 199,
+      "context_length": 42477
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/stringpict.py_1_4",
+      "distance": 0.9720163345336914,
+      "file_path": "sympy/printing/pretty/stringpict.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 173,
+      "context_length": 42650
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_GoldenRatio_PrettyPrinter._print_Mod.6.1",
+      "distance": 0.9734736084938049,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1649,
+      "end_line": 1666,
+      "tokens": 173,
+      "context_length": 42823,
+      "file_pos": 22
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_catalan_LatexPrinter._print_IdentityMorphism.2.1",
+      "distance": 0.9738543033599854,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 2236,
+      "end_line": 2309,
+      "tokens": 735,
+      "context_length": 43558,
+      "file_pos": 22
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter_PrettyPrinter._print_Float.full_prec.3.1",
+      "distance": 0.974408745765686,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 31,
+      "end_line": 91,
+      "tokens": 535,
+      "context_length": 44093,
+      "file_pos": 22
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._printer_tensor_indices_PrettyPrinter._printer_tensor_indices.9.1",
+      "distance": 0.9744126796722412,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1064,
+      "end_line": 1097,
+      "tokens": 331,
+      "context_length": 44424,
+      "file_pos": 22
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/sympy/sympy/printing/repr.py_ReprPrinter._print_SparseMatrix_ReprPrinter._print_Mul.7.1",
+      "distance": 0.9755122661590576,
+      "file_path": "sympy/printing/repr.py",
+      "start_line": 123,
+      "end_line": 154,
+      "tokens": 256,
+      "context_length": 44680,
+      "file_pos": 22
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/sympy/sympy/interactive/printing.py_init_printing.1_init_printing.1",
+      "distance": 0.9761711359024048,
+      "file_path": "sympy/interactive/printing.py",
+      "start_line": 347,
+      "end_line": 494,
+      "tokens": 1662,
+      "context_length": 46342,
+      "file_pos": 22
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Type_FCodePrinter._print_Extent.1.1",
+      "distance": 0.9769435524940491,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 435,
+      "end_line": 451,
+      "tokens": 149,
+      "context_length": 46491
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py__CXXCodePrinterBase_CXX98CodePrinter.reserved_words.1",
+      "distance": 0.9783015251159668,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 78,
+      "end_line": 107,
+      "tokens": 285,
+      "context_length": 46776
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/sympy/sympy/interactive/printing.py_init_printing.sys_",
+      "distance": 0.9785718321800232,
+      "file_path": "sympy/interactive/printing.py",
+      "start_line": 495,
+      "end_line": 572,
+      "tokens": 700,
+      "context_length": 47476,
+      "file_pos": 22
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Sum.f_PrettyPrinter._print_Sum.17.1",
+      "distance": 0.9793468713760376,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 577,
+      "end_line": 627,
+      "tokens": 422,
+      "context_length": 47898,
+      "file_pos": 22
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_1_17.1",
+      "distance": 0.9803807139396667,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 649,
+      "context_length": 48547
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_1_known_functions.1",
+      "distance": 0.9805920124053955,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 499,
+      "context_length": 49046
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter_C89CodePrinter._rate_index_position.1.1",
+      "distance": 0.9827312231063843,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 146,
+      "end_line": 249,
+      "tokens": 777,
+      "context_length": 49823
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_SciPyPrinter_SciPyPrinter._print_fresnelc.1.1",
+      "distance": 0.9830096960067749,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 857,
+      "end_line": 914,
+      "tokens": 549,
+      "context_length": 50372
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_Float_StrPrinter._print_Float.7.1",
+      "distance": 0.9830471873283386,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 650,
+      "end_line": 670,
+      "tokens": 189,
+      "context_length": 50561,
+      "file_pos": 22
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_For_C89CodePrinter._print_sign.1.1",
+      "distance": 0.9834229350090027,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 403,
+      "end_line": 415,
+      "tokens": 164,
+      "context_length": 50725
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Tensor_PrettyPrinter._print_TensorIndex.3.1",
+      "distance": 0.9867013692855835,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1099,
+      "end_line": 1135,
+      "tokens": 307,
+      "context_length": 51032,
+      "file_pos": 22
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_GoTo_FCodePrinter._print_Module.1.1",
+      "distance": 0.986903190612793,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 629,
+      "end_line": 653,
+      "tokens": 204,
+      "context_length": 51236
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ITE_PrettyPrinter._hprint_vseparator.3.1",
+      "distance": 0.9871826171875,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1222,
+      "end_line": 1244,
+      "tokens": 180,
+      "context_length": 51416,
+      "file_pos": 22
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_PolyElement_LatexPrinter._print_FracElement.1.2.3.1",
+      "distance": 0.987417995929718,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 2215,
+      "end_line": 2225,
+      "tokens": 124,
+      "context_length": 51540,
+      "file_pos": 22
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Float_C89CodePrinter._print_BooleanFalse.1.1",
+      "distance": 0.987467348575592,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 513,
+      "end_line": 532,
+      "tokens": 193,
+      "context_length": 51733
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_elliptic_pi_PrettyPrinter._print_elliptic_pi.7.1",
+      "distance": 0.988544762134552,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1634,
+      "end_line": 1647,
+      "tokens": 180,
+      "context_length": 51913,
+      "file_pos": 22
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._get_expression_indices_CodePrinter._sort_optimized.9.1",
+      "distance": 0.9892680644989014,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 210,
+      "end_line": 245,
+      "tokens": 257,
+      "context_length": 52170
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/sympy/sympy/printing/printer.py_Printer._print_",
+      "distance": 0.990407407283783,
+      "file_path": "sympy/printing/printer.py",
+      "start_line": 251,
+      "end_line": 305,
+      "tokens": 557,
+      "context_length": 52727
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Stream_FCodePrinter._print_Stream.1.4.1.2.1.1",
+      "distance": 0.9904190301895142,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 655,
+      "end_line": 666,
+      "tokens": 124,
+      "context_length": 52851
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_MatrixBase_PrettyPrinter._print_Trace.5.1",
+      "distance": 0.9907891750335693,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 726,
+      "end_line": 751,
+      "tokens": 284,
+      "context_length": 53135,
+      "file_pos": 22
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Integral_PrettyPrinter._print_Integral.16.1",
+      "distance": 0.9919354915618896,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 390,
+      "end_line": 464,
+      "tokens": 607,
+      "context_length": 53742,
+      "file_pos": 22
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.cycle_structure_Permutation.cycle_structure.4",
+      "distance": 0.992159903049469,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 2248,
+      "end_line": 2274,
+      "tokens": 215,
+      "context_length": 53957,
+      "file_pos": 22
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_24_CXX17CodePrinter._print_zeta.1.1",
+      "distance": 0.9925187230110168,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 139,
+      "end_line": 155,
+      "tokens": 130,
+      "context_length": 54087
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_1_reserved_words.1",
+      "distance": 0.9935590028762817,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 1,
+      "end_line": 74,
+      "tokens": 485,
+      "context_length": 54572
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_MpmathPrinter._print_Rational_MpmathPrinter._print_Pow.1.1",
+      "distance": 0.9949309229850769,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 539,
+      "end_line": 571,
+      "tokens": 333,
+      "context_length": 54905
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_KroneckerProduct_PrettyPrinter._print_FunctionMatrix.3.1",
+      "distance": 0.9960777163505554,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 912,
+      "end_line": 924,
+      "tokens": 134,
+      "context_length": 55039,
+      "file_pos": 23
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_SeqPer_LatexPrinter._print_Complexes.1.1",
+      "distance": 0.996300995349884,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 1991,
+      "end_line": 2063,
+      "tokens": 630,
+      "context_length": 55669,
+      "file_pos": 23
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_UnevaluatedExpr_PrettyPrinter.__print_numer_denom.1.3.1.1",
+      "distance": 0.9965780377388,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1859,
+      "end_line": 1878,
+      "tokens": 199,
+      "context_length": 55868,
+      "file_pos": 23
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_NDimArray_PrettyPrinter._print_MutableSparseNDimArray.1",
+      "distance": 0.9968720078468323,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1026,
+      "end_line": 1062,
+      "tokens": 378,
+      "context_length": 56246,
+      "file_pos": 23
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_MatPow_JuliaCodePrinter._print_GoldenRatio.1.2.1.1",
+      "distance": 0.9972367286682129,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 219,
+      "end_line": 261,
+      "tokens": 290,
+      "context_length": 56536
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/sympy/sympy/printing/str.py_StrPrinter._print_ImaginaryUnit_StrPrinter._print_Integral",
+      "distance": 0.9979082345962524,
+      "file_path": "sympy/printing/str.py",
+      "start_line": 165,
+      "end_line": 178,
+      "tokens": 140,
+      "context_length": 56676,
+      "file_pos": 23
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_AugmentedAssignment_CodePrinter._print_Symbol.2.3.1.1",
+      "distance": 0.9981651306152344,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 338,
+      "end_line": 369,
+      "tokens": 257,
+      "context_length": 56933
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter.141_PrettyPrinter._print_nth_root.28.1",
+      "distance": 0.9986762404441833,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1796,
+      "end_line": 1840,
+      "tokens": 501,
+      "context_length": 57434,
+      "file_pos": 23
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_1_40",
+      "distance": 1.0007998943328857,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 566,
+      "context_length": 58000
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_MatAdd_PrettyPrinter._print_MatAdd.3.1",
+      "distance": 1.0011776685714722,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 825,
+      "end_line": 840,
+      "tokens": 136,
+      "context_length": 58136,
+      "file_pos": 24
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_FiniteSet_LatexPrinter._print_frozenset.1",
+      "distance": 1.0015074014663696,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 1886,
+      "end_line": 1901,
+      "tokens": 147,
+      "context_length": 58283,
+      "file_pos": 24
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_AbstractPythonCodePrinter._print_NaN_AbstractPythonCodePrinter._print_Mod.2.1",
+      "distance": 1.0016264915466309,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 226,
+      "end_line": 240,
+      "tokens": 127,
+      "context_length": 58410
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._get_func_suffix_C89CodePrinter._print_Type.3.1",
+      "distance": 1.0024960041046143,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 470,
+      "end_line": 484,
+      "tokens": 163,
+      "context_length": 58573
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Sum_PrettyPrinter._print_Sum.asum",
+      "distance": 1.0025769472122192,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 532,
+      "end_line": 575,
+      "tokens": 479,
+      "context_length": 59052,
+      "file_pos": 24
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_FunctionPrototype_FCodePrinter._print_FunctionDefinition.3.1.1",
+      "distance": 1.0031086206436157,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 709,
+      "end_line": 736,
+      "tokens": 196,
+      "context_length": 59248
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_ImpliedDoLoop_FCodePrinter._print_For.4.1",
+      "distance": 1.0032055377960205,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 417,
+      "end_line": 433,
+      "tokens": 187,
+      "context_length": 59435
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_RustCodePrinter._print_ITE_RustCodePrinter._print_Symbol.2.2.1.1",
+      "distance": 1.0033085346221924,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 434,
+      "end_line": 470,
+      "tokens": 342,
+      "context_length": 59777
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_ComplexRegion_PrettyPrinter._print_SetExpr.3.1",
+      "distance": 1.0035960674285889,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2034,
+      "end_line": 2068,
+      "tokens": 311,
+      "context_length": 60088,
+      "file_pos": 24
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Element_C89CodePrinter._print_Element.2.1",
+      "distance": 1.0039485692977905,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 534,
+      "end_line": 549,
+      "tokens": 182,
+      "context_length": 60270
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_FunctionClass_PrettyPrinter._print_Lambda.6.1",
+      "distance": 1.0042154788970947,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 1457,
+      "end_line": 1515,
+      "tokens": 564,
+      "context_length": 60834,
+      "file_pos": 24
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_NumPyPrinter_NumPyPrinter._print_Inverse.2.1",
+      "distance": 1.0048085451126099,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 604,
+      "end_line": 641,
+      "tokens": 375,
+      "context_length": 61209
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/sympy/sympy/printing/mathematica.py_MCodePrinter._print_ImmutableSparseMatrix_MCodePrinter._print_ImmutableDenseNDimArray.1.1",
+      "distance": 1.0056830644607544,
+      "file_path": "sympy/printing/mathematica.py",
+      "start_line": 226,
+      "end_line": 245,
+      "tokens": 173,
+      "context_length": 61382
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_Not_LatexPrinter._print_Not.4.2.1.1",
+      "distance": 1.0072073936462402,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 948,
+      "end_line": 957,
+      "tokens": 140,
+      "context_length": 61522,
+      "file_pos": 25
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.unrank_lex_Permutation.print_cyclic.1",
+      "distance": 1.0074090957641602,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 2801,
+      "end_line": 2838,
+      "tokens": 322,
+      "context_length": 61844,
+      "file_pos": 25
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Infinity_JuliaCodePrinter.38",
+      "distance": 1.0080031156539917,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 292,
+      "end_line": 329,
+      "tokens": 215,
+      "context_length": 62059
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty_symbology.py__xobj_ascii__xobj_ascii.1",
+      "distance": 1.008011817932129,
+      "file_path": "sympy/printing/pretty/pretty_symbology.py",
+      "start_line": 302,
+      "end_line": 331,
+      "tokens": 230,
+      "context_length": 62289
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Mul_OctaveCodePrinter._print_Mul.2.22.3.2.1",
+      "distance": 1.008242130279541,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 138,
+      "end_line": 210,
+      "tokens": 700,
+      "context_length": 62989
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Mod_C89CodePrinter._print_Rational.3.1",
+      "distance": 1.0082826614379883,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 291,
+      "end_line": 301,
+      "tokens": 130,
+      "context_length": 63119
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_sign_FCodePrinter._print_sign.4.1",
+      "distance": 1.0084991455078125,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 202,
+      "end_line": 211,
+      "tokens": 142,
+      "context_length": 63261
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/sympy/sympy/printing/pretty/pretty.py_PrettyPrinter._print_Tr_pretty.6.2.1",
+      "distance": 1.0090177059173584,
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "start_line": 2556,
+      "end_line": 2613,
+      "tokens": 449,
+      "context_length": 63710,
+      "file_pos": 26
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Pow_FCodePrinter._print_Pow.2.3.1.1",
+      "distance": 1.009633183479309,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 338,
+      "end_line": 355,
+      "tokens": 171,
+      "context_length": 63881
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Declaration_FCodePrinter._print_Declaration.8.1",
+      "distance": 1.009894609451294,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 453,
+      "end_line": 483,
+      "tokens": 344,
+      "context_length": 64225
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Rational_FCodePrinter._print_product_.1.1",
+      "distance": 1.0103442668914795,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 357,
+      "end_line": 398,
+      "tokens": 461,
+      "context_length": 64686
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._rate_index_position_CodePrinter._print_Comment.1.1",
+      "distance": 1.0109927654266357,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 247,
+      "end_line": 300,
+      "tokens": 429,
+      "context_length": 65115
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_LatexPrinter._print_FreeModule_LatexPrinter._print_Tr.contents.2.1",
+      "distance": 1.0114212036132812,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 2355,
+      "end_line": 2421,
+      "tokens": 734,
+      "context_length": 65849,
+      "file_pos": 26
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/printing/str.py",
+      "position": 1,
+      "tokens": 7287,
+      "context_length": 7287
+    },
+    {
+      "file_path": "sympy/printing/pretty/pretty.py",
+      "position": 2,
+      "tokens": 23255,
+      "context_length": 30542
+    },
+    {
+      "file_path": "sympy/combinatorics/permutations.py",
+      "position": 3,
+      "tokens": 22617,
+      "context_length": 53159
+    },
+    {
+      "file_path": "sympy/printing/codeprinter.py",
+      "position": 4,
+      "tokens": 4517,
+      "context_length": 57676
+    },
+    {
+      "file_path": "sympy/printing/pycode.py",
+      "position": 5,
+      "tokens": 8247,
+      "context_length": 65923
+    },
+    {
+      "file_path": "sympy/printing/printer.py",
+      "position": 6,
+      "tokens": 2433,
+      "context_length": 68356
+    },
+    {
+      "file_path": "sympy/printing/pretty/pretty_symbology.py",
+      "position": 7,
+      "tokens": 6026,
+      "context_length": 74382
+    },
+    {
+      "file_path": "sympy/printing/defaults.py",
+      "position": 8,
+      "tokens": 157,
+      "context_length": 74539
+    },
+    {
+      "file_path": "sympy/printing/fcode.py",
+      "position": 9,
+      "tokens": 7990,
+      "context_length": 82529
+    },
+    {
+      "file_path": "sympy/printing/repr.py",
+      "position": 10,
+      "tokens": 2331,
+      "context_length": 84860
+    },
+    {
+      "file_path": "sympy/printing/latex.py",
+      "position": 11,
+      "tokens": 27598,
+      "context_length": 112458
+    },
+    {
+      "file_path": "sympy/printing/ccode.py",
+      "position": 12,
+      "tokens": 8186,
+      "context_length": 120644
+    },
+    {
+      "file_path": "sympy/physics/vector/printing.py",
+      "position": 13,
+      "tokens": 3415,
+      "context_length": 124059
+    },
+    {
+      "file_path": "sympy/printing/cxxcode.py",
+      "position": 14,
+      "tokens": 1623,
+      "context_length": 125682
+    },
+    {
+      "file_path": "sympy/printing/julia.py",
+      "position": 15,
+      "tokens": 5899,
+      "context_length": 131581
+    },
+    {
+      "file_path": "sympy/printing/__init__.py",
+      "position": 16,
+      "tokens": 518,
+      "context_length": 132099
+    },
+    {
+      "file_path": "sympy/combinatorics/__init__.py",
+      "position": 17,
+      "tokens": 387,
+      "context_length": 132486
+    },
+    {
+      "file_path": "sympy/printing/python.py",
+      "position": 18,
+      "tokens": 684,
+      "context_length": 133170
+    },
+    {
+      "file_path": "sympy/printing/pretty/__init__.py",
+      "position": 19,
+      "tokens": 54,
+      "context_length": 133224
+    },
+    {
+      "file_path": "sympy/interactive/printing.py",
+      "position": 20,
+      "tokens": 5065,
+      "context_length": 138289
+    },
+    {
+      "file_path": "sympy/printing/dot.py",
+      "position": 21,
+      "tokens": 2277,
+      "context_length": 140566
+    },
+    {
+      "file_path": "sympy/printing/pretty/stringpict.py",
+      "position": 22,
+      "tokens": 4369,
+      "context_length": 144935
+    },
+    {
+      "file_path": "sympy/printing/rcode.py",
+      "position": 23,
+      "tokens": 3717,
+      "context_length": 148652
+    },
+    {
+      "file_path": "sympy/printing/rust.py",
+      "position": 24,
+      "tokens": 5475,
+      "context_length": 154127
+    },
+    {
+      "file_path": "sympy/printing/mathematica.py",
+      "position": 25,
+      "tokens": 3642,
+      "context_length": 157769
+    },
+    {
+      "file_path": "sympy/printing/octave.py",
+      "position": 26,
+      "tokens": 6742,
+      "context_length": 164511
+    }
+  ]
+}

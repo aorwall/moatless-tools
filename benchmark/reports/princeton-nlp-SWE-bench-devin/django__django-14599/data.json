@@ -1,0 +1,2534 @@
+{
+  "instance_id": "django__django-14599",
+  "model_patch": "diff --git a/django/middleware/csrf.py b/django/middleware/csrf.py\nindex c2a9470ab1..d217e8ab40 100644\n--- a/django/middleware/csrf.py\n+++ b/django/middleware/csrf.py\n@@ -437,15 +437,7 @@ class CsrfViewMiddleware(MiddlewareMixin):\n         return self._accept(request)\n \n     def process_response(self, request, response):\n-        if not getattr(request, 'csrf_cookie_needs_reset', False):\n-            if getattr(response, 'csrf_cookie_set', False):\n-                return response\n-\n-        if not request.META.get(\"CSRF_COOKIE_USED\", False):\n-            return response\n-\n-        # Set the CSRF cookie even if it's already set, so we renew\n-        # the expiry timer.\n-        self._set_token(request, response)\n-        response.csrf_cookie_set = True\n+        if getattr(request, 'csrf_cookie_needs_reset', False) or (request.META.get(\"CSRF_COOKIE_USED\", False) and not getattr(response, 'csrf_cookie_set', False)):\n+            self._set_token(request, response)\n+            response.csrf_cookie_set = True\n         return response\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/middleware/csrf.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "019424e44efe495bc5981eb9848c0bb398a6f068",
+  "patch": "diff --git a/django/middleware/csrf.py b/django/middleware/csrf.py\n--- a/django/middleware/csrf.py\n+++ b/django/middleware/csrf.py\n@@ -437,15 +437,25 @@ def process_view(self, request, callback, callback_args, callback_kwargs):\n         return self._accept(request)\n \n     def process_response(self, request, response):\n-        if not getattr(request, 'csrf_cookie_needs_reset', False):\n-            if getattr(response, 'csrf_cookie_set', False):\n-                return response\n-\n-        if not request.META.get(\"CSRF_COOKIE_USED\", False):\n-            return response\n+        # Send the CSRF cookie whenever the cookie is being used (even if the\n+        # client already has it) in order to renew the expiry timer, but only\n+        # if it hasn't already been sent during this request-response cycle.\n+        # Also, send the cookie no matter what if a reset was requested.\n+        if (\n+            getattr(request, 'csrf_cookie_needs_reset', False) or (\n+                request.META.get('CSRF_COOKIE_USED') and\n+                not getattr(response, 'csrf_cookie_set', False)\n+            )\n+        ):\n+            self._set_token(request, response)\n+            # Update state to prevent _set_token() from being unnecessarily\n+            # called again in process_response() by other instances of\n+            # CsrfViewMiddleware. This can happen e.g. when both a decorator\n+            # and middleware are used. However, the csrf_cookie_needs_reset\n+            # attribute is still respected in subsequent calls e.g. in case\n+            # rotate_token() is called in process_response() later by custom\n+            # middleware but before those subsequent calls.\n+            response.csrf_cookie_set = True\n+            request.csrf_cookie_needs_reset = False\n \n-        # Set the CSRF cookie even if it's already set, so we renew\n-        # the expiry timer.\n-        self._set_token(request, response)\n-        response.csrf_cookie_set = True\n         return response\n",
+  "test_patch": "diff --git a/tests/csrf_tests/tests.py b/tests/csrf_tests/tests.py\n--- a/tests/csrf_tests/tests.py\n+++ b/tests/csrf_tests/tests.py\n@@ -14,8 +14,9 @@\n from django.views.decorators.csrf import csrf_exempt, requires_csrf_token\n \n from .views import (\n-    ensure_csrf_cookie_view, non_token_view_using_request_processor,\n-    post_form_view, token_view,\n+    ensure_csrf_cookie_view, ensured_and_protected_view,\n+    non_token_view_using_request_processor, post_form_view, protected_view,\n+    sandwiched_rotate_token_view, token_view,\n )\n \n # This is a test (unmasked) CSRF cookie / secret.\n@@ -69,14 +70,30 @@ def test_mask_cipher_secret(self):\n                 self.assertMaskedSecretCorrect(masked, secret)\n \n \n+class TestingSessionStore(SessionStore):\n+    \"\"\"\n+    A version of SessionStore that stores what cookie values are passed to\n+    set_cookie() when CSRF_USE_SESSIONS=True.\n+    \"\"\"\n+    def __init__(self, *args, **kwargs):\n+        super().__init__(*args, **kwargs)\n+        # This is a list of the cookie values passed to set_cookie() over\n+        # the course of the request-response.\n+        self._cookies_set = []\n+\n+    def __setitem__(self, key, value):\n+        super().__setitem__(key, value)\n+        self._cookies_set.append(value)\n+\n+\n class TestingHttpRequest(HttpRequest):\n     \"\"\"\n-    A version of HttpRequest that allows us to change some things\n-    more easily\n+    A version of HttpRequest that lets one track and change some things more\n+    easily.\n     \"\"\"\n     def __init__(self):\n         super().__init__()\n-        self.session = SessionStore()\n+        self.session = TestingSessionStore()\n \n     def is_secure(self):\n         return getattr(self, '_is_secure_override', False)\n@@ -99,6 +116,21 @@ def _read_csrf_cookie(self, req, resp):\n         \"\"\"\n         raise NotImplementedError('This method must be implemented by a subclass.')\n \n+    def _get_cookies_set(self, req, resp):\n+        \"\"\"\n+        Return a list of the cookie values passed to set_cookie() over the\n+        course of the request-response.\n+        \"\"\"\n+        raise NotImplementedError('This method must be implemented by a subclass.')\n+\n+    def assertCookiesSet(self, req, resp, expected_secrets):\n+        \"\"\"\n+        Assert that set_cookie() was called with the given sequence of secrets.\n+        \"\"\"\n+        cookies_set = self._get_cookies_set(req, resp)\n+        secrets_set = [_unmask_cipher_token(cookie) for cookie in cookies_set]\n+        self.assertEqual(secrets_set, expected_secrets)\n+\n     def _get_request(self, method=None, cookie=None):\n         if method is None:\n             method = 'GET'\n@@ -332,6 +364,21 @@ def test_put_and_delete_allowed(self):\n         resp = mw.process_view(req, post_form_view, (), {})\n         self.assertIsNone(resp)\n \n+    def test_rotate_token_triggers_second_reset(self):\n+        \"\"\"\n+        If rotate_token() is called after the token is reset in\n+        CsrfViewMiddleware's process_response() and before another call to\n+        the same process_response(), the cookie is reset a second time.\n+        \"\"\"\n+        req = self._get_POST_request_with_token()\n+        resp = sandwiched_rotate_token_view(req)\n+        self.assertContains(resp, 'OK')\n+        csrf_cookie = self._read_csrf_cookie(req, resp)\n+        actual_secret = _unmask_cipher_token(csrf_cookie)\n+        # set_cookie() was called a second time with a different secret.\n+        self.assertCookiesSet(req, resp, [TEST_SECRET, actual_secret])\n+        self.assertNotEqual(actual_secret, TEST_SECRET)\n+\n     # Tests for the template tag method\n     def test_token_node_no_csrf_cookie(self):\n         \"\"\"\n@@ -875,6 +922,9 @@ def _read_csrf_cookie(self, req, resp):\n         csrf_cookie = resp.cookies[settings.CSRF_COOKIE_NAME]\n         return csrf_cookie.value\n \n+    def _get_cookies_set(self, req, resp):\n+        return resp._cookies_set\n+\n     def test_ensures_csrf_cookie_no_middleware(self):\n         \"\"\"\n         The ensure_csrf_cookie() decorator works without middleware.\n@@ -1016,6 +1066,32 @@ def test_masked_unmasked_combinations(self):\n                 resp = mw.process_view(req, token_view, (), {})\n                 self.assertIsNone(resp)\n \n+    def test_cookie_reset_only_once(self):\n+        \"\"\"\n+        A CSRF cookie that needs to be reset is reset only once when the view\n+        is decorated with both ensure_csrf_cookie and csrf_protect.\n+        \"\"\"\n+        # Pass an unmasked cookie to trigger a cookie reset.\n+        req = self._get_POST_request_with_token(cookie=TEST_SECRET)\n+        resp = ensured_and_protected_view(req)\n+        self.assertContains(resp, 'OK')\n+        csrf_cookie = self._read_csrf_cookie(req, resp)\n+        actual_secret = _unmask_cipher_token(csrf_cookie)\n+        self.assertEqual(actual_secret, TEST_SECRET)\n+        # set_cookie() was called only once and with the expected secret.\n+        self.assertCookiesSet(req, resp, [TEST_SECRET])\n+\n+    def test_invalid_cookie_replaced_on_GET(self):\n+        \"\"\"\n+        A CSRF cookie with the wrong format is replaced during a GET request.\n+        \"\"\"\n+        req = self._get_request(cookie='badvalue')\n+        resp = protected_view(req)\n+        self.assertContains(resp, 'OK')\n+        csrf_cookie = self._read_csrf_cookie(req, resp)\n+        self.assertTrue(csrf_cookie, msg='No CSRF cookie was sent.')\n+        self.assertEqual(len(csrf_cookie), CSRF_TOKEN_LENGTH)\n+\n     def test_bare_secret_accepted_and_replaced(self):\n         \"\"\"\n         The csrf token is reset from a bare secret.\n@@ -1089,6 +1165,9 @@ def _read_csrf_cookie(self, req, resp=None):\n             return False\n         return req.session[CSRF_SESSION_KEY]\n \n+    def _get_cookies_set(self, req, resp):\n+        return req.session._cookies_set\n+\n     def test_no_session_on_request(self):\n         msg = (\n             'CSRF_USE_SESSIONS is enabled, but request.session is not set. '\ndiff --git a/tests/csrf_tests/views.py b/tests/csrf_tests/views.py\n--- a/tests/csrf_tests/views.py\n+++ b/tests/csrf_tests/views.py\n@@ -1,8 +1,63 @@\n from django.http import HttpResponse\n-from django.middleware.csrf import get_token\n+from django.middleware.csrf import get_token, rotate_token\n from django.template import Context, RequestContext, Template\n from django.template.context_processors import csrf\n-from django.views.decorators.csrf import ensure_csrf_cookie\n+from django.utils.decorators import decorator_from_middleware\n+from django.utils.deprecation import MiddlewareMixin\n+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie\n+\n+\n+class TestingHttpResponse(HttpResponse):\n+    \"\"\"\n+    A version of HttpResponse that stores what cookie values are passed to\n+    set_cookie() when CSRF_USE_SESSIONS=False.\n+    \"\"\"\n+    def __init__(self, *args, **kwargs):\n+        super().__init__(*args, **kwargs)\n+        # This is a list of the cookie values passed to set_cookie() over\n+        # the course of the request-response.\n+        self._cookies_set = []\n+\n+    def set_cookie(self, key, value, **kwargs):\n+        super().set_cookie(key, value, **kwargs)\n+        self._cookies_set.append(value)\n+\n+\n+class _CsrfCookieRotator(MiddlewareMixin):\n+\n+    def process_response(self, request, response):\n+        rotate_token(request)\n+        return response\n+\n+\n+csrf_rotating_token = decorator_from_middleware(_CsrfCookieRotator)\n+\n+\n+@csrf_protect\n+def protected_view(request):\n+    return HttpResponse('OK')\n+\n+\n+@ensure_csrf_cookie\n+def ensure_csrf_cookie_view(request):\n+    return HttpResponse('OK')\n+\n+\n+@csrf_protect\n+@ensure_csrf_cookie\n+def ensured_and_protected_view(request):\n+    return TestingHttpResponse('OK')\n+\n+\n+@csrf_protect\n+@csrf_rotating_token\n+@ensure_csrf_cookie\n+def sandwiched_rotate_token_view(request):\n+    \"\"\"\n+    This is a view that calls rotate_token() in process_response() between two\n+    calls to CsrfViewMiddleware.process_response().\n+    \"\"\"\n+    return TestingHttpResponse('OK')\n \n \n def post_form_view(request):\n@@ -12,12 +67,6 @@ def post_form_view(request):\n \"\"\")\n \n \n-@ensure_csrf_cookie\n-def ensure_csrf_cookie_view(request):\n-    # Doesn't insert a token or anything.\n-    return HttpResponse()\n-\n-\n def token_view(request):\n     context = RequestContext(request, processors=[csrf])\n     template = Template('{% csrf_token %}')\n",
+  "problem_statement": "CsrfViewMiddleware.process_response()'s csrf_cookie_needs_reset and csrf_cookie_set logic isn't right\nDescription\n\t\nI noticed that the csrf_cookie_needs_reset and csrf_cookie_set logic inside CsrfViewMiddleware.process_response() isn't right: \u200bhttps://github.com/django/django/blob/fa35c8bdbc6aca65d94d6280fa463d5bc7baa5c0/django/middleware/csrf.py#L439-L451\nConsequently--\nself._set_token(request, response) can get called twice in some circumstances, even if response.csrf_cookie_set is true at the beginning, and\nthe cookie can fail to be reset in some circumstances, even if csrf_cookie_needs_reset is true at the beginning.\n(I previously let security@djangoproject.com know about this issue, and they said it was okay to resolve this publicly.)\n",
+  "hints_text": "",
+  "created_at": "2021-07-06T01:37:59Z",
+  "version": "4.0",
+  "FAIL_TO_PASS": "[\"A CSRF cookie that needs to be reset is reset only once when the view\", \"A CSRF cookie with the wrong format is replaced during a GET request.\"]",
+  "PASS_TO_PASS": "[\"A POST HTTP request with a good origin is accepted.\", \"A POST HTTPS request from an insecure referer should be rejected.\", \"A POST HTTPS request is accepted if it receives a good referer with\", \"A POST HTTPS request is accepted when USE_X_FORWARDED_PORT=True.\", \"A POST HTTPS request with a bad referer is rejected\", \"A POST HTTPS request with a bad referer is rejected.\", \"A POST HTTPS request with a good origin is accepted.\", \"A POST HTTPS request with a good referer is accepted where the referer\", \"A POST HTTPS request with a good referer is accepted.\", \"A POST HTTPS request with a good referer should be accepted from a\", \"A POST HTTPS request with a missing referer is rejected.\", \"A POST HTTPS request with a referer added to the CSRF_TRUSTED_ORIGINS\", \"A POST HTTPS request with a referer that matches a CSRF_TRUSTED_ORIGINS\", \"A POST request with an origin added to the CSRF_TRUSTED_ORIGINS\", \"A POST request with an origin that can't be parsed by urlparse() is\", \"A POST request with an origin that matches a CSRF_TRUSTED_ORIGINS\", \"A new token is sent if the csrf_cookie is the empty string.\", \"A request with a bad origin is rejected.\", \"A request with a null origin is rejected.\", \"A request with an origin with the wrong protocol compared to\", \"A request with an origin with wrong protocol is rejected.\", \"All combinations are allowed of (1) masked and unmasked cookies,\", \"CSRF cookie age can be set using settings.CSRF_COOKIE_AGE.\", \"CSRF cookie age does not have max age set and therefore uses\", \"CsrfTokenNode works when a CSRF cookie is created by\", \"CsrfTokenNode works when a CSRF cookie is set.\", \"CsrfTokenNode works when no CSRF cookie is set.\", \"CsrfViewMiddleware generates a 403 response if it receives an HTTPS\", \"HTTP PUT and DELETE can get through with X-CSRFToken and a cookie.\", \"HTTP PUT and DELETE methods have protection\", \"If a CSRF cookie is present and an invalid token is passed via a\", \"If a CSRF cookie is present and no token, but the csrf_exempt decorator\", \"If a CSRF cookie is present but the token is missing or invalid, the\", \"If both a cookie and a token is present, the middleware lets it through.\", \"If get_token() is not called, the view middleware does not\", \"If no CSRF cookies is present, the middleware rejects the incoming\", \"If rotate_token() is called after the token is reset in\", \"If the CSRF cookie has an incorrect length in a POST request, the\", \"If the CSRF cookie has invalid characters in a POST request, the\", \"If the token contains non-alphanumeric characters, it is ignored and a\", \"If the token is longer than expected, it is ignored and a new token is\", \"Masked and unmasked tokens are allowed both as POST and as the\", \"OSErrors during POST data reading are caught and treated as if the\", \"The csrf token is reset from a bare secret.\", \"The csrf token used in posts is changed on every request (although\", \"The ensure_csrf_cookie() decorator works with the CsrfViewMiddleware\", \"The ensure_csrf_cookie() decorator works without middleware.\", \"The session isn't saved if the CSRF cookie is unchanged.\", \"The token may be passed in a header instead of in the form.\", \"ensure_csrf_cookie() doesn't log warnings (#19436).\", \"get_token still works for a view decorated with 'csrf_exempt'.\", \"get_token() works for a view decorated solely with requires_csrf_token.\", \"settings.CSRF_HEADER_NAME can be used to customize the CSRF header name\", \"test_csrf_cookie_samesite (csrf_tests.tests.CsrfViewMiddlewareTests)\", \"test_csrf_token_on_404_stays_constant (csrf_tests.tests.CsrfInErrorHandlingViewsTests)\", \"test_mask_cipher_secret (csrf_tests.tests.CsrfFunctionTests)\", \"test_no_session_on_request (csrf_tests.tests.CsrfViewMiddlewareUseSessionsTests)\", \"test_origin_malformed_host (csrf_tests.tests.CsrfViewMiddlewareTests)\", \"test_origin_malformed_host (csrf_tests.tests.CsrfViewMiddlewareUseSessionsTests)\", \"test_unmask_cipher_token (csrf_tests.tests.CsrfFunctionTests)\"]",
+  "environment_setup_commit": "475cffd1d64c690cdad16ede4d5e81985738ceb4",
+  "patch_files": [
+    "django/middleware/csrf.py"
+  ],
+  "test_patch_files": [
+    "tests/csrf_tests/tests.py",
+    "tests/csrf_tests/views.py"
+  ],
+  "patch_diff_details": {
+    "django/middleware/csrf.py": {
+      "diffs": [
+        {
+          "start_line_old": 440,
+          "end_line_old": 450,
+          "file_pos": 1,
+          "file_context_length": 3790,
+          "pos": 1,
+          "context_length": 675
+        }
+      ]
+    }
+  },
+  "vectors": 3567,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware.process_view_",
+      "distance": 0.5532739162445068,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 384,
+      "end_line": 452,
+      "tokens": 675,
+      "context_length": 675,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware._check_token_CsrfViewMiddleware.process_request.2.2",
+      "distance": 0.6061909198760986,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 325,
+      "end_line": 382,
+      "tokens": 501,
+      "context_length": 1176,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware._get_token_CsrfViewMiddleware._get_token.1.2.5.1",
+      "distance": 0.6397137641906738,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 204,
+      "end_line": 227,
+      "tokens": 189,
+      "context_length": 1365,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware._set_token_CsrfViewMiddleware._set_token.1.2.3",
+      "distance": 0.6464998722076416,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 229,
+      "end_line": 245,
+      "tokens": 184,
+      "context_length": 1549,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware._check_referer_CsrfViewMiddleware._bad_token_message.2.1",
+      "distance": 0.6745210886001587,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 273,
+      "end_line": 323,
+      "tokens": 450,
+      "context_length": 1999,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware._origin_verified_CsrfViewMiddleware._origin_verified.7.1",
+      "distance": 0.7310078740119934,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 247,
+      "end_line": 271,
+      "tokens": 176,
+      "context_length": 2175,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_CsrfViewMiddleware_CsrfViewMiddleware._reject.3.1",
+      "distance": 0.7550578117370605,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 152,
+      "end_line": 202,
+      "tokens": 387,
+      "context_length": 2562,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/views/csrf.py_CSRF_FAILURE_TEMPLATE_CSRF_FAILURE_TEMPLATE.1",
+      "distance": 0.7608579397201538,
+      "file_path": "django/views/csrf.py",
+      "start_line": 15,
+      "end_line": 100,
+      "tokens": 835,
+      "context_length": 3397
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/views/decorators/csrf.py_1_",
+      "distance": 0.8279842734336853,
+      "file_path": "django/views/decorators/csrf.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 460,
+      "context_length": 3857
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_rotate_token_RejectRequest.__init__.self.reason.1",
+      "distance": 0.839424729347229,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 104,
+      "end_line": 149,
+      "tokens": 342,
+      "context_length": 4199,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/core/checks/security/csrf.py_inspect_check_csrf_cookie_secure.2.1",
+      "distance": 0.8547567129135132,
+      "file_path": "django/core/checks/security/csrf.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 304,
+      "context_length": 4503
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_1__get_new_csrf_string.1.1",
+      "distance": 0.8732919692993164,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 472,
+      "context_length": 4975,
+      "file_pos": 4
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/middleware/security.py_SecurityMiddleware.process_response_",
+      "distance": 0.9081153869628906,
+      "file_path": "django/middleware/security.py",
+      "start_line": 31,
+      "end_line": 58,
+      "tokens": 246,
+      "context_length": 5221
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/views/csrf.py_CSRF_FAILURE_TEMPLATE_NAME_",
+      "distance": 0.9200260043144226,
+      "file_path": "django/views/csrf.py",
+      "start_line": 101,
+      "end_line": 155,
+      "tokens": 577,
+      "context_length": 5798
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/core/checks/security/csrf.py_check_csrf_failure_view_",
+      "distance": 0.9296542406082153,
+      "file_path": "django/core/checks/security/csrf.py",
+      "start_line": 45,
+      "end_line": 68,
+      "tokens": 157,
+      "context_length": 5955
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetConfirmView_PasswordResetConfirmView.dispatch.6.1",
+      "distance": 0.9540073275566101,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 251,
+      "end_line": 291,
+      "tokens": 378,
+      "context_length": 6333
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/middleware/csrf.py_get_token_get_token.4.1",
+      "distance": 0.9590430855751038,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 85,
+      "end_line": 101,
+      "tokens": 195,
+      "context_length": 6528,
+      "file_pos": 6
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetView.form_valid_PasswordResetDoneView.title.1",
+      "distance": 0.9716320037841797,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 228,
+      "end_line": 248,
+      "tokens": 163,
+      "context_length": 6691
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/middleware/csrf.py__unmask_cipher_token__get_new_csrf_token.1.1",
+      "distance": 0.9815865755081177,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 68,
+      "end_line": 82,
+      "tokens": 156,
+      "context_length": 6847,
+      "file_pos": 6
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetView_PasswordResetView.dispatch.1.1",
+      "distance": 0.9840760231018066,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 212,
+      "end_line": 226,
+      "tokens": 133,
+      "context_length": 6980
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/views/csrf.py_1_11",
+      "distance": 1.0027098655700684,
+      "file_path": "django/views/csrf.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 132,
+      "context_length": 7112
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware.process_request_RemoteUserMiddleware.process_request.2.10.request.user.2",
+      "distance": 1.0064139366149902,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 48,
+      "end_line": 84,
+      "tokens": 360,
+      "context_length": 7472
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/sessions/middleware.py_time_",
+      "distance": 1.0149283409118652,
+      "file_path": "django/contrib/sessions/middleware.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 588,
+      "context_length": 8060
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordResetConfirmView.get_user_PasswordResetCompleteView.get_context_data.3.1",
+      "distance": 1.0210150480270386,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 293,
+      "end_line": 334,
+      "tokens": 314,
+      "context_length": 8374
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/middleware/security.py_re_SecurityMiddleware.process_request.2.2.1",
+      "distance": 1.0345906019210815,
+      "file_path": "django/middleware/security.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 278,
+      "context_length": 8652
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/views/defaults.py_bad_request_bad_request.4.1",
+      "distance": 1.0475094318389893,
+      "file_path": "django/views/defaults.py",
+      "start_line": 102,
+      "end_line": 121,
+      "tokens": 149,
+      "context_length": 8801
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/utils/cache.py__not_modified__not_modified.3.1",
+      "distance": 1.0525223016738892,
+      "file_path": "django/utils/cache.py",
+      "start_line": 135,
+      "end_line": 150,
+      "tokens": 190,
+      "context_length": 8991
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/views/decorators/clickjacking.py_xframe_options_sameorigin_",
+      "distance": 1.062072515487671,
+      "file_path": "django/views/decorators/clickjacking.py",
+      "start_line": 22,
+      "end_line": 54,
+      "tokens": 238,
+      "context_length": 9229
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_1_SuccessURLAllowedHostsMixin.get_success_url_allowed_hosts.1.1",
+      "distance": 1.0659778118133545,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 284,
+      "context_length": 9513
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/core/handlers/base.py_BaseHandler.13_",
+      "distance": 1.0771676301956177,
+      "file_path": "django/core/handlers/base.py",
+      "start_line": 320,
+      "end_line": 351,
+      "tokens": 212,
+      "context_length": 9725
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_1_W008.1",
+      "distance": 1.0837743282318115,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 660,
+      "context_length": 10385
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_PasswordChangeView_",
+      "distance": 1.0850648880004883,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 337,
+      "end_line": 369,
+      "tokens": 239,
+      "context_length": 10624
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/middleware/csrf.py__mask_cipher_secret__mask_cipher_secret.6.1",
+      "distance": 1.0887391567230225,
+      "file_path": "django/middleware/csrf.py",
+      "start_line": 56,
+      "end_line": 65,
+      "tokens": 111,
+      "context_length": 10735,
+      "file_pos": 13
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/http/__init__.py_1_",
+      "distance": 1.0950191020965576,
+      "file_path": "django/http/__init__.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 197,
+      "context_length": 10932
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/views/defaults.py_1_ERROR_PAGE_TEMPLATE.1",
+      "distance": 1.0951614379882812,
+      "file_path": "django/views/defaults.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 149,
+      "context_length": 11081
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/middleware/clickjacking.py_1_",
+      "distance": 1.0958359241485596,
+      "file_path": "django/middleware/clickjacking.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 364,
+      "context_length": 11445
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_27_PasswordContextMixin.get_context_data.3.1",
+      "distance": 1.0962116718292236,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 193,
+      "end_line": 209,
+      "tokens": 122,
+      "context_length": 11567
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_check_referrer_policy_",
+      "distance": 1.100238561630249,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 234,
+      "end_line": 258,
+      "tokens": 210,
+      "context_length": 11777
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/http/response.py_datetime__charset_from_content_type_re.1",
+      "distance": 1.1034276485443115,
+      "file_path": "django/http/response.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 176,
+      "context_length": 11953
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/contrib/auth/tokens.py_PasswordResetTokenGenerator.check_token_PasswordResetTokenGenerator.check_token.10.1",
+      "distance": 1.1101418733596802,
+      "file_path": "django/contrib/auth/tokens.py",
+      "start_line": 35,
+      "end_line": 60,
+      "tokens": 170,
+      "context_length": 12123
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/middleware/common.py_CommonMiddleware.process_request_CommonMiddleware.process_request.12.2.1",
+      "distance": 1.1119933128356934,
+      "file_path": "django/middleware/common.py",
+      "start_line": 34,
+      "end_line": 61,
+      "tokens": 257,
+      "context_length": 12380
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_W009_check_sts_include_subdomains.2.1",
+      "distance": 1.1165411472320557,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 74,
+      "end_line": 168,
+      "tokens": 746,
+      "context_length": 13126
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/core/handlers/base.py_BaseHandler._get_response_async_BaseHandler._get_response_async.14.1",
+      "distance": 1.1170666217803955,
+      "file_path": "django/core/handlers/base.py",
+      "start_line": 212,
+      "end_line": 275,
+      "tokens": 480,
+      "context_length": 13606
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_CACHE_MIDDLEWARE_ALIAS_",
+      "distance": 1.1236989498138428,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 496,
+      "end_line": 647,
+      "tokens": 943,
+      "context_length": 14549
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/utils/decorators.py_make_middleware_decorator_make_middleware_decorator",
+      "distance": 1.1286706924438477,
+      "file_path": "django/utils/decorators.py",
+      "start_line": 114,
+      "end_line": 152,
+      "tokens": 316,
+      "context_length": 14865
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/core/handlers/base.py_BaseHandler._get_response_BaseHandler._get_response.12.1",
+      "distance": 1.1303362846374512,
+      "file_path": "django/core/handlers/base.py",
+      "start_line": 160,
+      "end_line": 210,
+      "tokens": 379,
+      "context_length": 15244
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_1_sensitive_post_parameters_m.1",
+      "distance": 1.1318702697753906,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 188,
+      "context_length": 15432
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/core/checks/compatibility/django_4_0.py_1_",
+      "distance": 1.132871389389038,
+      "file_path": "django/core/checks/compatibility/django_4_0.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 138,
+      "context_length": 15570
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_cleansed_multivaluedict_SafeExceptionReporterFilter.get_cleansed_multivaluedict.4.1",
+      "distance": 1.1336907148361206,
+      "file_path": "django/views/debug.py",
+      "start_line": 150,
+      "end_line": 162,
+      "tokens": 148,
+      "context_length": 15718
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/middleware/cache.py_UpdateCacheMiddleware.process_response_UpdateCacheMiddleware.process_response.15.1",
+      "distance": 1.1338727474212646,
+      "file_path": "django/middleware/cache.py",
+      "start_line": 75,
+      "end_line": 114,
+      "tokens": 363,
+      "context_length": 16081
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/middleware/cache.py_UpdateCacheMiddleware_UpdateCacheMiddleware._should_update_cache.1.1",
+      "distance": 1.1353212594985962,
+      "file_path": "django/middleware/cache.py",
+      "start_line": 55,
+      "end_line": 73,
+      "tokens": 174,
+      "context_length": 16255
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/views/defaults.py_10_page_not_found.8.1",
+      "distance": 1.1364591121673584,
+      "file_path": "django/views/defaults.py",
+      "start_line": 27,
+      "end_line": 78,
+      "tokens": 403,
+      "context_length": 16658
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/template/context_processors.py_1_csrf.3.1",
+      "distance": 1.1367321014404297,
+      "file_path": "django/template/context_processors.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 218,
+      "context_length": 16876
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/views/defaults.py_server_error_server_error.3.1",
+      "distance": 1.1412396430969238,
+      "file_path": "django/views/defaults.py",
+      "start_line": 81,
+      "end_line": 99,
+      "tokens": 129,
+      "context_length": 17005
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/views/decorators/clickjacking.py_1_xframe_options_deny.3.1",
+      "distance": 1.14296555519104,
+      "file_path": "django/views/decorators/clickjacking.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 138,
+      "context_length": 17143
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_1_AuthenticationMiddleware.process_request.request.user.1",
+      "distance": 1.1435695886611938,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 182,
+      "context_length": 17325
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/sites/middleware.py__",
+      "distance": 1.1443166732788086,
+      "file_path": "django/contrib/sites/middleware.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 17325
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/middleware/common.py_CommonMiddleware.process_response_CommonMiddleware.process_response.8.1",
+      "distance": 1.1474535465240479,
+      "file_path": "django/middleware/common.py",
+      "start_line": 100,
+      "end_line": 115,
+      "tokens": 165,
+      "context_length": 17490
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/views/defaults.py_permission_denied_",
+      "distance": 1.1486952304840088,
+      "file_path": "django/views/defaults.py",
+      "start_line": 124,
+      "end_line": 151,
+      "tokens": 198,
+      "context_length": 17688
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_post_parameters_SafeExceptionReporterFilter.get_post_parameters.2.2.2.3.1.1",
+      "distance": 1.150384783744812,
+      "file_path": "django/views/debug.py",
+      "start_line": 164,
+      "end_line": 187,
+      "tokens": 177,
+      "context_length": 17865
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/views/decorators/cache.py_cache_control_cache_control",
+      "distance": 1.1510305404663086,
+      "file_path": "django/views/decorators/cache.py",
+      "start_line": 28,
+      "end_line": 42,
+      "tokens": 119,
+      "context_length": 17984
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/redirects/middleware.py_1_",
+      "distance": 1.1514157056808472,
+      "file_path": "django/contrib/redirects/middleware.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 354,
+      "context_length": 18338
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/core/checks/security/sessions.py_1_",
+      "distance": 1.15232253074646,
+      "file_path": "django/core/checks/security/sessions.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 572,
+      "context_length": 18910
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/middleware/common.py_CommonMiddleware.should_redirect_with_slash_CommonMiddleware.should_redirect_with_slash.3.1",
+      "distance": 1.154951572418213,
+      "file_path": "django/middleware/common.py",
+      "start_line": 63,
+      "end_line": 75,
+      "tokens": 136,
+      "context_length": 19046
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/contrib/auth/urls.py_1_",
+      "distance": 1.155799388885498,
+      "file_path": "django/contrib/auth/urls.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 224,
+      "context_length": 19270
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/http/request.py_HttpHeaders_HttpHeaders.parse_header_name.2.1",
+      "distance": 1.1561205387115479,
+      "file_path": "django/http/request.py",
+      "start_line": 375,
+      "end_line": 398,
+      "tokens": 185,
+      "context_length": 19455
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/middleware/locale.py_LocaleMiddleware.process_response_",
+      "distance": 1.1594406366348267,
+      "file_path": "django/middleware/locale.py",
+      "start_line": 28,
+      "end_line": 62,
+      "tokens": 332,
+      "context_length": 19787
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/http/response.py_ResponseHeaders.__delitem___BadHeaderError.1",
+      "distance": 1.1614551544189453,
+      "file_path": "django/http/response.py",
+      "start_line": 69,
+      "end_line": 86,
+      "tokens": 133,
+      "context_length": 19920
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware.clean_username_RemoteUserMiddleware._remove_invalid_user.2.3.1.1",
+      "distance": 1.164978265762329,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 86,
+      "end_line": 111,
+      "tokens": 192,
+      "context_length": 20112
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/views/generic/base.py_RedirectView.get_",
+      "distance": 1.1652586460113525,
+      "file_path": "django/views/generic/base.py",
+      "start_line": 191,
+      "end_line": 222,
+      "tokens": 247,
+      "context_length": 20359
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/middleware/common.py_BrokenLinkEmailsMiddleware.is_ignorable_request_",
+      "distance": 1.1687369346618652,
+      "file_path": "django/middleware/common.py",
+      "start_line": 149,
+      "end_line": 175,
+      "tokens": 254,
+      "context_length": 20613
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/contrib/flatpages/middleware.py_1_",
+      "distance": 1.1718199253082275,
+      "file_path": "django/contrib/flatpages/middleware.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 147,
+      "context_length": 20760
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/template/context.py_1_ContextDict.__exit__.1",
+      "distance": 1.1725237369537354,
+      "file_path": "django/template/context.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 128,
+      "context_length": 20888
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admindocs/middleware.py_1_",
+      "distance": 1.1737196445465088,
+      "file_path": "django/contrib/admindocs/middleware.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 254,
+      "context_length": 21142
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.admin_view.inner_AdminSite.admin_view.7.1",
+      "distance": 1.176056146621704,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 224,
+      "end_line": 243,
+      "tokens": 221,
+      "context_length": 21363
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/utils/cache.py_get_conditional_response_get_conditional_response.2.19.1",
+      "distance": 1.1774449348449707,
+      "file_path": "django/utils/cache.py",
+      "start_line": 153,
+      "end_line": 193,
+      "tokens": 453,
+      "context_length": 21816
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/core/handlers/asgi.py_logging_logger.1",
+      "distance": 1.182016134262085,
+      "file_path": "django/core/handlers/asgi.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 111,
+      "context_length": 21927
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/contrib/auth/tokens.py_PasswordResetTokenGenerator._make_token_with_timestamp_PasswordResetTokenGenerator._make_token_with_timestamp.ts_b36.4.1",
+      "distance": 1.1822630167007446,
+      "file_path": "django/contrib/auth/tokens.py",
+      "start_line": 62,
+      "end_line": 72,
+      "tokens": 133,
+      "context_length": 22060
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/core/handlers/exception.py_response_for_exception_response_for_exception.4.1",
+      "distance": 1.183882713317871,
+      "file_path": "django/core/handlers/exception.py",
+      "start_line": 54,
+      "end_line": 122,
+      "tokens": 557,
+      "context_length": 22617
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/contrib/sitemaps/views.py_datetime_x_robots_tag.2.1",
+      "distance": 1.1839462518692017,
+      "file_path": "django/contrib/sitemaps/views.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 132,
+      "context_length": 22749
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/middleware/common.py_re_CommonMiddleware.response_redirect_class.1",
+      "distance": 1.1880717277526855,
+      "file_path": "django/middleware/common.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 247,
+      "context_length": 22996
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/middleware/cache.py_FetchFromCacheMiddleware.process_request_FetchFromCacheMiddleware.process_request.12.1",
+      "distance": 1.18830144405365,
+      "file_path": "django/middleware/cache.py",
+      "start_line": 131,
+      "end_line": 157,
+      "tokens": 252,
+      "context_length": 23248
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_RemoteUserMiddleware_RemoteUserMiddleware.force_logout_if_no_header.1",
+      "distance": 1.1910896301269531,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 28,
+      "end_line": 46,
+      "tokens": 178,
+      "context_length": 23426
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseRedirect_HttpResponseForbidden.status_code.1",
+      "distance": 1.1915723085403442,
+      "file_path": "django/http/response.py",
+      "start_line": 524,
+      "end_line": 555,
+      "tokens": 153,
+      "context_length": 23579
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/auth/__init__.py_inspect_get_backends.1.1",
+      "distance": 1.1920502185821533,
+      "file_path": "django/contrib/auth/__init__.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 241,
+      "context_length": 23820
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/middleware/http.py_1_",
+      "distance": 1.1931955814361572,
+      "file_path": "django/middleware/http.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 335,
+      "context_length": 24155
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseBase.set_cookie_HttpResponseBase.set_cookie.9.2",
+      "distance": 1.1969199180603027,
+      "file_path": "django/http/response.py",
+      "start_line": 192,
+      "end_line": 236,
+      "tokens": 460,
+      "context_length": 24615
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_sensitive_post_parameters.decorator_",
+      "distance": 1.197087287902832,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 77,
+      "end_line": 93,
+      "tokens": 138,
+      "context_length": 24753
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/urls/conf.py__path_",
+      "distance": 1.19961416721344,
+      "file_path": "django/urls/conf.py",
+      "start_line": 57,
+      "end_line": 86,
+      "tokens": 222,
+      "context_length": 24975
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_DeprecationInstanceCheck_MiddlewareMixin.__call__.2.6.1",
+      "distance": 1.199979543685913,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 79,
+      "end_line": 129,
+      "tokens": 372,
+      "context_length": 25347
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/core/servers/basehttp.py_WSGIRequestHandler.get_environ_WSGIRequestHandler.handle.4.2.1",
+      "distance": 1.2070156335830688,
+      "file_path": "django/core/servers/basehttp.py",
+      "start_line": 181,
+      "end_line": 200,
+      "tokens": 170,
+      "context_length": 25517
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/contrib/messages/storage/cookie.py_CookieStorage._update_cookie_CookieStorage._update_cookie.2.2.1",
+      "distance": 1.211900234222412,
+      "file_path": "django/contrib/messages/storage/cookie.py",
+      "start_line": 93,
+      "end_line": 111,
+      "tokens": 144,
+      "context_length": 25661
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseBase.setdefault_HttpResponseBase.delete_cookie.secure.2",
+      "distance": 1.213348150253296,
+      "file_path": "django/http/response.py",
+      "start_line": 238,
+      "end_line": 258,
+      "tokens": 237,
+      "context_length": 25898
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_CsrfTokenNode_CsrfTokenNode.render.2.2.3.2.1",
+      "distance": 1.2143771648406982,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 51,
+      "end_line": 68,
+      "tokens": 152,
+      "context_length": 26050
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponse.content_8_HttpResponse.writelines.1.1",
+      "distance": 1.2155888080596924,
+      "file_path": "django/http/response.py",
+      "start_line": 350,
+      "end_line": 385,
+      "tokens": 212,
+      "context_length": 26262
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/core/handlers/wsgi.py_WSGIRequest_WSGIRequest.POST.1",
+      "distance": 1.2157940864562988,
+      "file_path": "django/core/handlers/wsgi.py",
+      "start_line": 64,
+      "end_line": 119,
+      "tokens": 486,
+      "context_length": 26748
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_check_sts_preload_check_ssl_redirect.2.1",
+      "distance": 1.2173399925231934,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 171,
+      "end_line": 196,
+      "tokens": 188,
+      "context_length": 26936
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_re_NotRegistered.1",
+      "distance": 1.2177462577819824,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 225,
+      "context_length": 27161
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/contrib/auth/mixins.py_AccessMixin.handle_no_permission_LoginRequiredMixin.dispatch.2.1",
+      "distance": 1.218698501586914,
+      "file_path": "django/contrib/auth/mixins.py",
+      "start_line": 44,
+      "end_line": 71,
+      "tokens": 235,
+      "context_length": 27396
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseRedirectBase_HttpResponseRedirectBase.__repr__.1.1",
+      "distance": 1.221224308013916,
+      "file_path": "django/http/response.py",
+      "start_line": 503,
+      "end_line": 521,
+      "tokens": 186,
+      "context_length": 27582
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/middleware/common.py_BrokenLinkEmailsMiddleware_BrokenLinkEmailsMiddleware.is_internal_request.3.1",
+      "distance": 1.2216120958328247,
+      "file_path": "django/middleware/common.py",
+      "start_line": 118,
+      "end_line": 147,
+      "tokens": 277,
+      "context_length": 27859
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/contrib/auth/tokens.py_1_PasswordResetTokenGenerator.make_token.2.1",
+      "distance": 1.2217499017715454,
+      "file_path": "django/contrib/auth/tokens.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 208,
+      "context_length": 28067
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_get_hashers_reset_hashers.1.2",
+      "distance": 1.2228959798812866,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 86,
+      "end_line": 108,
+      "tokens": 167,
+      "context_length": 28234
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_traceback_frame_variables_SafeExceptionReporterFilter.get_traceback_frame_variables.10.1",
+      "distance": 1.223832368850708,
+      "file_path": "django/views/debug.py",
+      "start_line": 203,
+      "end_line": 251,
+      "tokens": 467,
+      "context_length": 28701
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.cleanse_special_types_SafeExceptionReporterFilter.cleanse_special_types.3.1",
+      "distance": 1.2248930931091309,
+      "file_path": "django/views/debug.py",
+      "start_line": 189,
+      "end_line": 201,
+      "tokens": 143,
+      "context_length": 28844
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/views/decorators/cache.py_never_cache_",
+      "distance": 1.225136160850525,
+      "file_path": "django/views/decorators/cache.py",
+      "start_line": 45,
+      "end_line": 60,
+      "tokens": 123,
+      "context_length": 28967
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/http/request.py_HttpRequest.get_signed_cookie_HttpRequest.get_signed_cookie.4.1",
+      "distance": 1.2253705263137817,
+      "file_path": "django/http/request.py",
+      "start_line": 160,
+      "end_line": 181,
+      "tokens": 164,
+      "context_length": 29131
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/views/__init__.py__",
+      "distance": 1.225658893585205,
+      "file_path": "django/views/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 29131
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/messages/context_processors.py__",
+      "distance": 1.226647973060608,
+      "file_path": "django/contrib/messages/context_processors.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 29131
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/contrib/auth/middleware.py_PersistentRemoteUserMiddleware_",
+      "distance": 1.2273696660995483,
+      "file_path": "django/contrib/auth/middleware.py",
+      "start_line": 114,
+      "end_line": 125,
+      "tokens": 107,
+      "context_length": 29238
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/urls/base.py_reverse_reverse.7.1",
+      "distance": 1.227832317352295,
+      "file_path": "django/urls/base.py",
+      "start_line": 27,
+      "end_line": 86,
+      "tokens": 438,
+      "context_length": 29676
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_DECIMAL_SEPARATOR_CACHE_MIDDLEWARE_SECONDS.1",
+      "distance": 1.230463981628418,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 401,
+      "end_line": 495,
+      "tokens": 782,
+      "context_length": 30458
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/core/handlers/base.py_BaseHandler.resolve_request_BaseHandler.resolve_request.7.1",
+      "distance": 1.2322921752929688,
+      "file_path": "django/core/handlers/base.py",
+      "start_line": 277,
+      "end_line": 292,
+      "tokens": 125,
+      "context_length": 30583
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/http/cookie.py_1_",
+      "distance": 1.234010934829712,
+      "file_path": "django/http/cookie.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 156,
+      "context_length": 30739
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/contrib/messages/views.py__",
+      "distance": 1.2342886924743652,
+      "file_path": "django/contrib/messages/views.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 0,
+      "context_length": 30739
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_MiddlewareMixin.__acall___",
+      "distance": 1.2354729175567627,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 131,
+      "end_line": 149,
+      "tokens": 122,
+      "context_length": 30861
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/template/context.py_RequestContext.bind_template_RequestContext.new.5.1",
+      "distance": 1.237155556678772,
+      "file_path": "django/template/context.py",
+      "start_line": 233,
+      "end_line": 260,
+      "tokens": 199,
+      "context_length": 31060
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_URLResolver.resolve_error_handler_URLResolver.reverse.1.1",
+      "distance": 1.2387187480926514,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 637,
+      "end_line": 647,
+      "tokens": 120,
+      "context_length": 31180
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/core/servers/basehttp.py_WSGIRequestHandler_WSGIRequestHandler.log_message.4",
+      "distance": 1.2387197017669678,
+      "file_path": "django/core/servers/basehttp.py",
+      "start_line": 144,
+      "end_line": 179,
+      "tokens": 280,
+      "context_length": 31460
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher.decode_BCryptSHA256PasswordHasher.harden_runtime.7.2",
+      "distance": 1.2413125038146973,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 462,
+      "end_line": 500,
+      "tokens": 331,
+      "context_length": 31791
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/utils/cache.py__if_modified_since_passes_add_never_cache_headers.3",
+      "distance": 1.2417370080947876,
+      "file_path": "django/utils/cache.py",
+      "start_line": 244,
+      "end_line": 275,
+      "tokens": 257,
+      "context_length": 32048
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_URLResolver._check_custom_error_handlers_URLResolver._check_custom_error_handlers.5.1",
+      "distance": 1.2430124282836914,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 443,
+      "end_line": 471,
+      "tokens": 288,
+      "context_length": 32336
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/contrib/auth/__init__.py__clean_credentials__get_user_session_key.3.1",
+      "distance": 1.2431905269622803,
+      "file_path": "django/contrib/auth/__init__.py",
+      "start_line": 41,
+      "end_line": 60,
+      "tokens": 167,
+      "context_length": 32503
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_LogoutView.get_next_page_LogoutView.get_context_data.4.1",
+      "distance": 1.2437645196914673,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 133,
+      "end_line": 167,
+      "tokens": 269,
+      "context_length": 32772
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_URLResolver._reverse_with_prefix_",
+      "distance": 1.2451386451721191,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 649,
+      "end_line": 722,
+      "tokens": 681,
+      "context_length": 33453
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/utils/cache.py_has_vary_header__i18n_cache_key_suffix.4.1",
+      "distance": 1.2485681772232056,
+      "file_path": "django/utils/cache.py",
+      "start_line": 303,
+      "end_line": 323,
+      "tokens": 211,
+      "context_length": 33664
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseNotAllowed_Http404.1",
+      "distance": 1.2503652572631836,
+      "file_path": "django/http/response.py",
+      "start_line": 558,
+      "end_line": 583,
+      "tokens": 159,
+      "context_length": 33823
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/views/decorators.py_1_",
+      "distance": 1.2510437965393066,
+      "file_path": "django/contrib/admin/views/decorators.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 135,
+      "context_length": 33958
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/contrib/redirects/admin.py__",
+      "distance": 1.2532392740249634,
+      "file_path": "django/contrib/redirects/admin.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 33958
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/views/decorators/http.py_condition.decorator_",
+      "distance": 1.2536207437515259,
+      "file_path": "django/views/decorators/http.py",
+      "start_line": 77,
+      "end_line": 124,
+      "tokens": 366,
+      "context_length": 34324
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.2536251544952393,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 761,
+      "context_length": 35085
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/utils/cache.py_1_cc_delim_re.1",
+      "distance": 1.2541579008102417,
+      "file_path": "django/utils/cache.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 274,
+      "context_length": 35359
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/http/request.py_HttpRequest._get_full_path_HttpRequest._get_full_path.3.1",
+      "distance": 1.254772663116455,
+      "file_path": "django/http/request.py",
+      "start_line": 151,
+      "end_line": 158,
+      "tokens": 111,
+      "context_length": 35470
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_inspect_MODEL_METHODS_EXCLUDE.1",
+      "distance": 1.2548253536224365,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 234,
+      "context_length": 35704
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/http/request.py_cgi_RawPostDataException.2",
+      "distance": 1.2548742294311523,
+      "file_path": "django/http/request.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 273,
+      "context_length": 35977
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/contrib/admin/tests.py_1_AdminSeleniumTestCase.wait_until.3",
+      "distance": 1.2560442686080933,
+      "file_path": "django/contrib/admin/tests.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 265,
+      "context_length": 36242
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/middleware/common.py_CommonMiddleware.get_full_path_with_slash_CommonMiddleware.get_full_path_with_slash.6.1",
+      "distance": 1.2574808597564697,
+      "file_path": "django/middleware/common.py",
+      "start_line": 77,
+      "end_line": 98,
+      "tokens": 227,
+      "context_length": 36469
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_WatchmanReloader.request_processed_WatchmanReloader.tick.3.5",
+      "distance": 1.2587147951126099,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 550,
+      "end_line": 573,
+      "tokens": 177,
+      "context_length": 36646
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/utils/cache.py_patch_cache_control_patch_cache_control.16",
+      "distance": 1.2587611675262451,
+      "file_path": "django/utils/cache.py",
+      "start_line": 37,
+      "end_line": 102,
+      "tokens": 559,
+      "context_length": 37205
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/http/request.py_HttpRequest.body_HttpRequest._mark_post_parse_error.self._files.1",
+      "distance": 1.2597436904907227,
+      "file_path": "django/http/request.py",
+      "start_line": 290,
+      "end_line": 310,
+      "tokens": 189,
+      "context_length": 37394
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_check_debug_check_allowed_hosts.1.1",
+      "distance": 1.260406255722046,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 214,
+      "end_line": 231,
+      "tokens": 127,
+      "context_length": 37521
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/contrib/flatpages/views.py_1_flatpage.5.1",
+      "distance": 1.260847568511963,
+      "file_path": "django/contrib/flatpages/views.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 399,
+      "context_length": 37920
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/conf/__init__.py_Settings_Settings.__repr__.1.1",
+      "distance": 1.2611714601516724,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 133,
+      "end_line": 189,
+      "tokens": 511,
+      "context_length": 38431
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_sensitive_post_parameters_sensitive_post_parameters.2.1",
+      "distance": 1.2616486549377441,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 47,
+      "end_line": 75,
+      "tokens": 199,
+      "context_length": 38630
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_BIDI_125",
+      "distance": 1.2631046772003174,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 151,
+      "end_line": 266,
+      "tokens": 859,
+      "context_length": 39489
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/views/i18n.py_js_catalog_template_js_catalog_template.1",
+      "distance": 1.2632492780685425,
+      "file_path": "django/views/i18n.py",
+      "start_line": 79,
+      "end_line": 182,
+      "tokens": 702,
+      "context_length": 40191
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/core/handlers/exception.py_get_exception_response_",
+      "distance": 1.263566493988037,
+      "file_path": "django/core/handlers/exception.py",
+      "start_line": 125,
+      "end_line": 150,
+      "tokens": 167,
+      "context_length": 40358
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/middleware/cache.py_1_5",
+      "distance": 1.2636197805404663,
+      "file_path": "django/middleware/cache.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 431,
+      "context_length": 40789
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/contrib/sessions/exceptions.py__",
+      "distance": 1.2641587257385254,
+      "file_path": "django/contrib/sessions/exceptions.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 40789
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_35",
+      "distance": 1.2647390365600586,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 51,
+      "end_line": 150,
+      "tokens": 1160,
+      "context_length": 41949
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/views/decorators/http.py_1_require_safe.__doc__.1",
+      "distance": 1.2651739120483398,
+      "file_path": "django/views/decorators/http.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 350,
+      "context_length": 42299
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_check_secret_key_check_secret_key.2.1",
+      "distance": 1.2652137279510498,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 199,
+      "end_line": 211,
+      "tokens": 110,
+      "context_length": 42409
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/core/handlers/base.py_asyncio_BaseHandler.load_middleware.self._middleware_chain.1",
+      "distance": 1.2662010192871094,
+      "file_path": "django/core/handlers/base.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 743,
+      "context_length": 43152
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_ScryptPasswordHasher.decode_ScryptPasswordHasher.harden_runtime.3",
+      "distance": 1.2671966552734375,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 547,
+      "end_line": 592,
+      "tokens": 330,
+      "context_length": 43482
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/auth/decorators.py_1_user_passes_test.3.1",
+      "distance": 1.268691897392273,
+      "file_path": "django/contrib/auth/decorators.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 313,
+      "context_length": 43795
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_RoutePattern.check_RoutePattern.__str__.1.1",
+      "distance": 1.2694976329803467,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 282,
+      "end_line": 298,
+      "tokens": 160,
+      "context_length": 43955
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/utils/cache.py_patch_vary_headers_patch_vary_headers.10.2.1",
+      "distance": 1.2697445154190063,
+      "file_path": "django/utils/cache.py",
+      "start_line": 278,
+      "end_line": 300,
+      "tokens": 258,
+      "context_length": 44213
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/conf/urls/__init__.py__",
+      "distance": 1.2699832916259766,
+      "file_path": "django/conf/urls/__init__.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 44213
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/views/decorators/vary.py_1_",
+      "distance": 1.2700614929199219,
+      "file_path": "django/views/decorators/vary.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 232,
+      "context_length": 44445
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/utils/http.py__url_has_allowed_host_and_scheme_",
+      "distance": 1.2703582048416138,
+      "file_path": "django/utils/http.py",
+      "start_line": 317,
+      "end_line": 355,
+      "tokens": 402,
+      "context_length": 44847
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/core/servers/basehttp.py_ServerHandler.cleanup_headers_ServerHandler.close.2",
+      "distance": 1.2704460620880127,
+      "file_path": "django/core/servers/basehttp.py",
+      "start_line": 124,
+      "end_line": 141,
+      "tokens": 179,
+      "context_length": 45026
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/core/cache/utils.py__",
+      "distance": 1.2714006900787354,
+      "file_path": "django/core/cache/utils.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 45026
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_resetcycle_resetcycle.5.2.1",
+      "distance": 1.2733635902404785,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1167,
+      "end_line": 1190,
+      "tokens": 176,
+      "context_length": 45202
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin.user_change_password_UserAdmin.user_change_password.9.1",
+      "distance": 1.2739789485931396,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 128,
+      "end_line": 190,
+      "tokens": 476,
+      "context_length": 45678
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/views/generic/base.py_View.as_view_View.as_view.15.1",
+      "distance": 1.2750996351242065,
+      "file_path": "django/views/generic/base.py",
+      "start_line": 47,
+      "end_line": 83,
+      "tokens": 339,
+      "context_length": 46017
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter_SafeExceptionReporterFilter.cleanse_setting.5.1",
+      "distance": 1.2759886980056763,
+      "file_path": "django/views/debug.py",
+      "start_line": 88,
+      "end_line": 120,
+      "tokens": 258,
+      "context_length": 46275
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/views/generic/edit.py_1_FormMixin.get_context_data.3.1",
+      "distance": 1.2761255502700806,
+      "file_path": "django/views/generic/edit.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 481,
+      "context_length": 46756
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_PasswordResetForm.get_users_PasswordResetForm.get_users.4.1",
+      "distance": 1.2769420146942139,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 265,
+      "end_line": 281,
+      "tokens": 146,
+      "context_length": 46902
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.autocomplete_view_AdminSite.catch_all_view.2",
+      "distance": 1.2776062488555908,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 419,
+      "end_line": 433,
+      "tokens": 129,
+      "context_length": 47031
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_URLResolver.resolve_URLResolver.resolve.6",
+      "distance": 1.278023362159729,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 576,
+      "end_line": 612,
+      "tokens": 347,
+      "context_length": 47378
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_safe_settings_SafeExceptionReporterFilter.is_active.2.1",
+      "distance": 1.2783055305480957,
+      "file_path": "django/views/debug.py",
+      "start_line": 122,
+      "end_line": 148,
+      "tokens": 216,
+      "context_length": 47594
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/views/static.py_1_10",
+      "distance": 1.2795014381408691,
+      "file_path": "django/views/static.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 110,
+      "context_length": 47704
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/contrib/redirects/apps.py__",
+      "distance": 1.279832124710083,
+      "file_path": "django/contrib/redirects/apps.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 47704
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/http/request.py_HttpRequest.close_HttpRequest.readlines.1.1",
+      "distance": 1.2809678316116333,
+      "file_path": "django/http/request.py",
+      "start_line": 341,
+      "end_line": 372,
+      "tokens": 255,
+      "context_length": 47959
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.response_change_ModelAdmin.response_change.6.8.3.1",
+      "distance": 1.280992031097412,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1261,
+      "end_line": 1334,
+      "tokens": 659,
+      "context_length": 48618
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/views/debug.py_get_default_exception_reporter_filter_get_exception_reporter_class.2.1",
+      "distance": 1.2811994552612305,
+      "file_path": "django/views/debug.py",
+      "start_line": 72,
+      "end_line": 85,
+      "tokens": 115,
+      "context_length": 48733
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/contrib/auth/views.py_LoginView.get_success_url_LoginView.get_context_data.4.1",
+      "distance": 1.281257152557373,
+      "file_path": "django/contrib/auth/views.py",
+      "start_line": 66,
+      "end_line": 108,
+      "tokens": 319,
+      "context_length": 49052
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/contrib/auth/tokens.py_PasswordResetTokenGenerator._make_hash_value_",
+      "distance": 1.2813606262207031,
+      "file_path": "django/contrib/auth/tokens.py",
+      "start_line": 74,
+      "end_line": 105,
+      "tokens": 307,
+      "context_length": 49359
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0006_require_contenttypes_0002.py__",
+      "distance": 1.2819911241531372,
+      "file_path": "django/contrib/auth/migrations/0006_require_contenttypes_0002.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 49359
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/views/generic/edit.py_ProcessFormView_ProcessFormView.put.1.1",
+      "distance": 1.2822329998016357,
+      "file_path": "django/views/generic/edit.py",
+      "start_line": 129,
+      "end_line": 149,
+      "tokens": 182,
+      "context_length": 49541
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/contrib/messages/middleware.py_1_",
+      "distance": 1.2823474407196045,
+      "file_path": "django/contrib/messages/middleware.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 174,
+      "context_length": 49715
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/contrib/redirects/migrations/0001_initial.py_1_",
+      "distance": 1.2826836109161377,
+      "file_path": "django/contrib/redirects/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 268,
+      "context_length": 49983
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_SetPasswordForm_SetPasswordForm.save.4.1",
+      "distance": 1.2855972051620483,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 319,
+      "end_line": 360,
+      "tokens": 289,
+      "context_length": 50272
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.password_change_AdminSite.password_change.8.1",
+      "distance": 1.2861402034759521,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 325,
+      "end_line": 340,
+      "tokens": 158,
+      "context_length": 50430
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/http/response.py_HttpResponseBase.24_HttpResponseBase.writelines.1",
+      "distance": 1.2868152856826782,
+      "file_path": "django/http/response.py",
+      "start_line": 278,
+      "end_line": 316,
+      "tokens": 282,
+      "context_length": 50712
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/views/generic/__init__.py_1_",
+      "distance": 1.2881410121917725,
+      "file_path": "django/views/generic/__init__.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 189,
+      "context_length": 50901
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/contrib/sessions/serializers.py__",
+      "distance": 1.2884244918823242,
+      "file_path": "django/contrib/sessions/serializers.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 0,
+      "context_length": 50901
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/views/generic/base.py_logging_ContextMixin.get_context_data.3.1",
+      "distance": 1.2884547710418701,
+      "file_path": "django/views/generic/base.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 142,
+      "context_length": 51043
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/contrib/auth/forms.py_ReadOnlyPasswordHashField_UsernameField.widget_attrs.1.1",
+      "distance": 1.2890483140945435,
+      "file_path": "django/contrib/auth/forms.py",
+      "start_line": 57,
+      "end_line": 75,
+      "tokens": 124,
+      "context_length": 51167
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/template/autoreload.py_reset_loaders_",
+      "distance": 1.2890539169311523,
+      "file_path": "django/template/autoreload.py",
+      "start_line": 34,
+      "end_line": 54,
+      "tokens": 136,
+      "context_length": 51303
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._response_post_save_ModelAdmin.response_post_save_change.2.1",
+      "distance": 1.2893116474151611,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1336,
+      "end_line": 1361,
+      "tokens": 232,
+      "context_length": 51535
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/core/validators.py_ipaddress_EMPTY_VALUES.1",
+      "distance": 1.2898097038269043,
+      "file_path": "django/core/validators.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 127,
+      "context_length": 51662
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/views/decorators/debug.py_functools_sensitive_variables.4.1",
+      "distance": 1.2901924848556519,
+      "file_path": "django/views/decorators/debug.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 274,
+      "context_length": 51936
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/utils/cache.py_get_max_age__precondition_failed.3.1",
+      "distance": 1.2903711795806885,
+      "file_path": "django/utils/cache.py",
+      "start_line": 105,
+      "end_line": 132,
+      "tokens": 183,
+      "context_length": 52119
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/contrib/sites/checks.py__",
+      "distance": 1.2905797958374023,
+      "file_path": "django/contrib/sites/checks.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 52119
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/template/response.py_1_SimpleTemplateResponse.__init__.self.template_name.self._is_rendered.1",
+      "distance": 1.2912565469741821,
+      "file_path": "django/template/response.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 389,
+      "context_length": 52508
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/middleware/csrf.py",
+      "position": 1,
+      "tokens": 3790,
+      "context_length": 3790
+    },
+    {
+      "file_path": "django/views/csrf.py",
+      "position": 2,
+      "tokens": 1544,
+      "context_length": 5334
+    },
+    {
+      "file_path": "django/views/decorators/csrf.py",
+      "position": 3,
+      "tokens": 460,
+      "context_length": 5794
+    },
+    {
+      "file_path": "django/core/checks/security/csrf.py",
+      "position": 4,
+      "tokens": 462,
+      "context_length": 6256
+    },
+    {
+      "file_path": "django/middleware/security.py",
+      "position": 5,
+      "tokens": 518,
+      "context_length": 6774
+    },
+    {
+      "file_path": "django/contrib/auth/views.py",
+      "position": 6,
+      "tokens": 2730,
+      "context_length": 9504
+    },
+    {
+      "file_path": "django/contrib/auth/middleware.py",
+      "position": 7,
+      "tokens": 1005,
+      "context_length": 10509
+    },
+    {
+      "file_path": "django/contrib/sessions/middleware.py",
+      "position": 8,
+      "tokens": 589,
+      "context_length": 11098
+    },
+    {
+      "file_path": "django/views/defaults.py",
+      "position": 9,
+      "tokens": 1028,
+      "context_length": 12126
+    },
+    {
+      "file_path": "django/utils/cache.py",
+      "position": 10,
+      "tokens": 3730,
+      "context_length": 15856
+    },
+    {
+      "file_path": "django/views/decorators/clickjacking.py",
+      "position": 11,
+      "tokens": 376,
+      "context_length": 16232
+    },
+    {
+      "file_path": "django/core/handlers/base.py",
+      "position": 12,
+      "tokens": 2607,
+      "context_length": 18839
+    },
+    {
+      "file_path": "django/core/checks/security/base.py",
+      "position": 13,
+      "tokens": 2041,
+      "context_length": 20880
+    },
+    {
+      "file_path": "django/http/__init__.py",
+      "position": 14,
+      "tokens": 197,
+      "context_length": 21077
+    },
+    {
+      "file_path": "django/middleware/clickjacking.py",
+      "position": 15,
+      "tokens": 364,
+      "context_length": 21441
+    },
+    {
+      "file_path": "django/http/response.py",
+      "position": 16,
+      "tokens": 4643,
+      "context_length": 26084
+    },
+    {
+      "file_path": "django/contrib/auth/tokens.py",
+      "position": 17,
+      "tokens": 801,
+      "context_length": 26885
+    },
+    {
+      "file_path": "django/middleware/common.py",
+      "position": 18,
+      "tokens": 1529,
+      "context_length": 28414
+    },
+    {
+      "file_path": "django/conf/global_settings.py",
+      "position": 19,
+      "tokens": 5700,
+      "context_length": 34114
+    },
+    {
+      "file_path": "django/utils/decorators.py",
+      "position": 20,
+      "tokens": 1399,
+      "context_length": 35513
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 21,
+      "tokens": 1737,
+      "context_length": 37250
+    },
+    {
+      "file_path": "django/core/checks/compatibility/django_4_0.py",
+      "position": 22,
+      "tokens": 139,
+      "context_length": 37389
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 23,
+      "tokens": 4753,
+      "context_length": 42142
+    },
+    {
+      "file_path": "django/middleware/cache.py",
+      "position": 24,
+      "tokens": 1588,
+      "context_length": 43730
+    },
+    {
+      "file_path": "django/template/context_processors.py",
+      "position": 25,
+      "tokens": 489,
+      "context_length": 44219
+    },
+    {
+      "file_path": "django/contrib/sites/middleware.py",
+      "position": 26,
+      "tokens": 59,
+      "context_length": 44278
+    },
+    {
+      "file_path": "django/views/decorators/cache.py",
+      "position": 27,
+      "tokens": 459,
+      "context_length": 44737
+    },
+    {
+      "file_path": "django/contrib/redirects/middleware.py",
+      "position": 28,
+      "tokens": 355,
+      "context_length": 45092
+    },
+    {
+      "file_path": "django/core/checks/security/sessions.py",
+      "position": 29,
+      "tokens": 573,
+      "context_length": 45665
+    },
+    {
+      "file_path": "django/contrib/auth/urls.py",
+      "position": 30,
+      "tokens": 224,
+      "context_length": 45889
+    },
+    {
+      "file_path": "django/http/request.py",
+      "position": 31,
+      "tokens": 5206,
+      "context_length": 51095
+    },
+    {
+      "file_path": "django/middleware/locale.py",
+      "position": 32,
+      "tokens": 565,
+      "context_length": 51660
+    },
+    {
+      "file_path": "django/views/generic/base.py",
+      "position": 33,
+      "tokens": 1650,
+      "context_length": 53310
+    },
+    {
+      "file_path": "django/contrib/flatpages/middleware.py",
+      "position": 34,
+      "tokens": 148,
+      "context_length": 53458
+    },
+    {
+      "file_path": "django/template/context.py",
+      "position": 35,
+      "tokens": 1881,
+      "context_length": 55339
+    },
+    {
+      "file_path": "django/contrib/admindocs/middleware.py",
+      "position": 36,
+      "tokens": 255,
+      "context_length": 55594
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 37,
+      "tokens": 4429,
+      "context_length": 60023
+    },
+    {
+      "file_path": "django/core/handlers/asgi.py",
+      "position": 38,
+      "tokens": 2336,
+      "context_length": 62359
+    },
+    {
+      "file_path": "django/core/handlers/exception.py",
+      "position": 39,
+      "tokens": 1068,
+      "context_length": 63427
+    },
+    {
+      "file_path": "django/contrib/sitemaps/views.py",
+      "position": 40,
+      "tokens": 793,
+      "context_length": 64220
+    },
+    {
+      "file_path": "django/contrib/auth/__init__.py",
+      "position": 41,
+      "tokens": 1581,
+      "context_length": 65801
+    },
+    {
+      "file_path": "django/middleware/http.py",
+      "position": 42,
+      "tokens": 335,
+      "context_length": 66136
+    },
+    {
+      "file_path": "django/views/decorators/debug.py",
+      "position": 43,
+      "tokens": 595,
+      "context_length": 66731
+    },
+    {
+      "file_path": "django/urls/conf.py",
+      "position": 44,
+      "tokens": 669,
+      "context_length": 67400
+    },
+    {
+      "file_path": "django/utils/deprecation.py",
+      "position": 45,
+      "tokens": 1039,
+      "context_length": 68439
+    },
+    {
+      "file_path": "django/core/servers/basehttp.py",
+      "position": 46,
+      "tokens": 1904,
+      "context_length": 70343
+    },
+    {
+      "file_path": "django/contrib/messages/storage/cookie.py",
+      "position": 47,
+      "tokens": 1379,
+      "context_length": 71722
+    },
+    {
+      "file_path": "django/template/defaulttags.py",
+      "position": 48,
+      "tokens": 10624,
+      "context_length": 82346
+    },
+    {
+      "file_path": "django/core/handlers/wsgi.py",
+      "position": 49,
+      "tokens": 1759,
+      "context_length": 84105
+    },
+    {
+      "file_path": "django/contrib/auth/mixins.py",
+      "position": 50,
+      "tokens": 864,
+      "context_length": 84969
+    },
+    {
+      "file_path": "django/contrib/auth/hashers.py",
+      "position": 51,
+      "tokens": 5923,
+      "context_length": 90892
+    },
+    {
+      "file_path": "django/views/__init__.py",
+      "position": 52,
+      "tokens": 15,
+      "context_length": 90907
+    },
+    {
+      "file_path": "django/contrib/messages/context_processors.py",
+      "position": 53,
+      "tokens": 71,
+      "context_length": 90978
+    },
+    {
+      "file_path": "django/urls/base.py",
+      "position": 54,
+      "tokens": 1183,
+      "context_length": 92161
+    },
+    {
+      "file_path": "django/http/cookie.py",
+      "position": 55,
+      "tokens": 157,
+      "context_length": 92318
+    },
+    {
+      "file_path": "django/contrib/messages/views.py",
+      "position": 56,
+      "tokens": 96,
+      "context_length": 92414
+    },
+    {
+      "file_path": "django/urls/resolvers.py",
+      "position": 57,
+      "tokens": 5755,
+      "context_length": 98169
+    },
+    {
+      "file_path": "django/contrib/admin/views/decorators.py",
+      "position": 58,
+      "tokens": 136,
+      "context_length": 98305
+    },
+    {
+      "file_path": "django/contrib/redirects/admin.py",
+      "position": 59,
+      "tokens": 68,
+      "context_length": 98373
+    },
+    {
+      "file_path": "django/views/decorators/http.py",
+      "position": 60,
+      "tokens": 971,
+      "context_length": 99344
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 61,
+      "tokens": 18658,
+      "context_length": 118002
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 62,
+      "tokens": 3339,
+      "context_length": 121341
+    },
+    {
+      "file_path": "django/contrib/admin/tests.py",
+      "position": 63,
+      "tokens": 1478,
+      "context_length": 122819
+    },
+    {
+      "file_path": "django/utils/autoreload.py",
+      "position": 64,
+      "tokens": 5098,
+      "context_length": 127917
+    },
+    {
+      "file_path": "django/contrib/flatpages/views.py",
+      "position": 65,
+      "tokens": 590,
+      "context_length": 128507
+    },
+    {
+      "file_path": "django/conf/__init__.py",
+      "position": 66,
+      "tokens": 1837,
+      "context_length": 130344
+    },
+    {
+      "file_path": "django/views/i18n.py",
+      "position": 67,
+      "tokens": 2461,
+      "context_length": 132805
+    },
+    {
+      "file_path": "django/contrib/sessions/exceptions.py",
+      "position": 68,
+      "tokens": 71,
+      "context_length": 132876
+    },
+    {
+      "file_path": "django/contrib/auth/decorators.py",
+      "position": 69,
+      "tokens": 587,
+      "context_length": 133463
+    },
+    {
+      "file_path": "django/conf/urls/__init__.py",
+      "position": 70,
+      "tokens": 65,
+      "context_length": 133528
+    },
+    {
+      "file_path": "django/views/decorators/vary.py",
+      "position": 71,
+      "tokens": 233,
+      "context_length": 133761
+    },
+    {
+      "file_path": "django/utils/http.py",
+      "position": 72,
+      "tokens": 3242,
+      "context_length": 137003
+    },
+    {
+      "file_path": "django/core/cache/utils.py",
+      "position": 73,
+      "tokens": 79,
+      "context_length": 137082
+    },
+    {
+      "file_path": "django/views/generic/edit.py",
+      "position": 74,
+      "tokens": 1853,
+      "context_length": 138935
+    },
+    {
+      "file_path": "django/contrib/auth/forms.py",
+      "position": 75,
+      "tokens": 3126,
+      "context_length": 142061
+    },
+    {
+      "file_path": "django/views/static.py",
+      "position": 76,
+      "tokens": 1052,
+      "context_length": 143113
+    },
+    {
+      "file_path": "django/contrib/redirects/apps.py",
+      "position": 77,
+      "tokens": 51,
+      "context_length": 143164
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0006_require_contenttypes_0002.py",
+      "position": 78,
+      "tokens": 76,
+      "context_length": 143240
+    },
+    {
+      "file_path": "django/contrib/messages/middleware.py",
+      "position": 79,
+      "tokens": 175,
+      "context_length": 143415
+    },
+    {
+      "file_path": "django/contrib/redirects/migrations/0001_initial.py",
+      "position": 80,
+      "tokens": 268,
+      "context_length": 143683
+    },
+    {
+      "file_path": "django/views/generic/__init__.py",
+      "position": 81,
+      "tokens": 190,
+      "context_length": 143873
+    },
+    {
+      "file_path": "django/contrib/sessions/serializers.py",
+      "position": 82,
+      "tokens": 87,
+      "context_length": 143960
+    },
+    {
+      "file_path": "django/template/autoreload.py",
+      "position": 83,
+      "tokens": 340,
+      "context_length": 144300
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 84,
+      "tokens": 4699,
+      "context_length": 148999
+    },
+    {
+      "file_path": "django/contrib/sites/checks.py",
+      "position": 85,
+      "tokens": 79,
+      "context_length": 149078
+    },
+    {
+      "file_path": "django/template/response.py",
+      "position": 86,
+      "tokens": 1091,
+      "context_length": 150169
+    }
+  ]
+}

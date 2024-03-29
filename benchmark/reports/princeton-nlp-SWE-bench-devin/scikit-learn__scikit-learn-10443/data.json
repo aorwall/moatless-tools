@@ -1,0 +1,1124 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-10443",
+  "model_patch": "diff --git a/sklearn/feature_extraction/text.py b/sklearn/feature_extraction/text.py\nindex df0582d3d..620720f61 100644\n--- a/sklearn/feature_extraction/text.py\n+++ b/sklearn/feature_extraction/text.py\n@@ -1085,6 +1085,9 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n     sublinear_tf : boolean, default=False\n         Apply sublinear tf scaling, i.e. replace tf with 1 + log(tf).\n \n+    dtype : type, optional\n+        Type of the matrix returned by fit_transform() or transform().\n+\n     Attributes\n     ----------\n     idf_ : array, shape (n_features)\n@@ -1103,11 +1106,12 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n     \"\"\"\n \n     def __init__(self, norm='l2', use_idf=True, smooth_idf=True,\n-                 sublinear_tf=False):\n+                 sublinear_tf=False, dtype=np.float64):\n         self.norm = norm\n         self.use_idf = use_idf\n         self.smooth_idf = smooth_idf\n         self.sublinear_tf = sublinear_tf\n+        self.dtype = dtype\n \n     def fit(self, X, y=None):\n         \"\"\"Learn the idf vector (global term weights)\n@@ -1118,7 +1122,7 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n             a matrix of term/token counts\n         \"\"\"\n         if not sp.issparse(X):\n-            X = sp.csc_matrix(X)\n+            X = sp.csc_matrix(X, dtype=self.dtype)\n         if self.use_idf:\n             n_samples, n_features = X.shape\n             df = _document_frequency(X)\n@@ -1131,7 +1135,7 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n             # suppressed entirely.\n             idf = np.log(float(n_samples) / df) + 1.0\n             self._idf_diag = sp.spdiags(idf, diags=0, m=n_features,\n-                                        n=n_features, format='csr')\n+                                        n=n_features, format='csr').astype(self.dtype)\n \n         return self\n \n@@ -1156,7 +1160,7 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n             X = sp.csr_matrix(X, copy=copy)\n         else:\n             # convert counts or binary occurrences to floats\n-            X = sp.csr_matrix(X, dtype=np.float64, copy=copy)\n+            X = sp.csr_matrix(X, dtype=self.dtype, copy=copy)\n \n         n_samples, n_features = X.shape\n \n@@ -1188,10 +1192,10 @@ class TfidfTransformer(BaseEstimator, TransformerMixin):\n \n     @idf_.setter\n     def idf_(self, value):\n-        value = np.asarray(value, dtype=np.float64)\n+        value = np.asarray(value, dtype=self.dtype)\n         n_features = value.shape[0]\n         self._idf_diag = sp.spdiags(value, diags=0, m=n_features,\n-                                    n=n_features, format='csr')\n+                                    n=n_features, format='csr').astype(self.dtype)\n \n \n class TfidfVectorizer(CountVectorizer):\n@@ -1381,7 +1385,7 @@ class TfidfVectorizer(CountVectorizer):\n \n         self._tfidf = TfidfTransformer(norm=norm, use_idf=use_idf,\n                                        smooth_idf=smooth_idf,\n-                                       sublinear_tf=sublinear_tf)\n+                                       sublinear_tf=sublinear_tf, dtype=dtype)\n \n     # Broadcast the TF-IDF parameters to the underlying transformer instance\n     # for easy grid search and repr\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/feature_extraction/text.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "48f3303bfc0be26136b98e9aa95dc3b3f916daff",
+  "patch": "diff --git a/sklearn/feature_extraction/text.py b/sklearn/feature_extraction/text.py\n--- a/sklearn/feature_extraction/text.py\n+++ b/sklearn/feature_extraction/text.py\n@@ -11,7 +11,7 @@\n The :mod:`sklearn.feature_extraction.text` submodule gathers utilities to\n build feature vectors from text documents.\n \"\"\"\n-from __future__ import unicode_literals\n+from __future__ import unicode_literals, division\n \n import array\n from collections import Mapping, defaultdict\n@@ -19,6 +19,7 @@\n from operator import itemgetter\n import re\n import unicodedata\n+import warnings\n \n import numpy as np\n import scipy.sparse as sp\n@@ -29,7 +30,7 @@\n from ..preprocessing import normalize\n from .hashing import FeatureHasher\n from .stop_words import ENGLISH_STOP_WORDS\n-from ..utils.validation import check_is_fitted\n+from ..utils.validation import check_is_fitted, check_array, FLOAT_DTYPES\n from ..utils.fixes import sp_version\n \n __all__ = ['CountVectorizer',\n@@ -573,7 +574,7 @@ def _document_frequency(X):\n     if sp.isspmatrix_csr(X):\n         return np.bincount(X.indices, minlength=X.shape[1])\n     else:\n-        return np.diff(sp.csc_matrix(X, copy=False).indptr)\n+        return np.diff(X.indptr)\n \n \n class CountVectorizer(BaseEstimator, VectorizerMixin):\n@@ -1117,11 +1118,14 @@ def fit(self, X, y=None):\n         X : sparse matrix, [n_samples, n_features]\n             a matrix of term/token counts\n         \"\"\"\n+        X = check_array(X, accept_sparse=('csr', 'csc'))\n         if not sp.issparse(X):\n-            X = sp.csc_matrix(X)\n+            X = sp.csr_matrix(X)\n+        dtype = X.dtype if X.dtype in FLOAT_DTYPES else np.float64\n+\n         if self.use_idf:\n             n_samples, n_features = X.shape\n-            df = _document_frequency(X)\n+            df = _document_frequency(X).astype(dtype)\n \n             # perform idf smoothing if required\n             df += int(self.smooth_idf)\n@@ -1129,9 +1133,11 @@ def fit(self, X, y=None):\n \n             # log+1 instead of log makes sure terms with zero idf don't get\n             # suppressed entirely.\n-            idf = np.log(float(n_samples) / df) + 1.0\n-            self._idf_diag = sp.spdiags(idf, diags=0, m=n_features,\n-                                        n=n_features, format='csr')\n+            idf = np.log(n_samples / df) + 1\n+            self._idf_diag = sp.diags(idf, offsets=0,\n+                                      shape=(n_features, n_features),\n+                                      format='csr',\n+                                      dtype=dtype)\n \n         return self\n \n@@ -1151,12 +1157,9 @@ def transform(self, X, copy=True):\n         -------\n         vectors : sparse matrix, [n_samples, n_features]\n         \"\"\"\n-        if hasattr(X, 'dtype') and np.issubdtype(X.dtype, np.floating):\n-            # preserve float family dtype\n-            X = sp.csr_matrix(X, copy=copy)\n-        else:\n-            # convert counts or binary occurrences to floats\n-            X = sp.csr_matrix(X, dtype=np.float64, copy=copy)\n+        X = check_array(X, accept_sparse='csr', dtype=FLOAT_DTYPES, copy=copy)\n+        if not sp.issparse(X):\n+            X = sp.csr_matrix(X, dtype=np.float64)\n \n         n_samples, n_features = X.shape\n \n@@ -1367,7 +1370,7 @@ def __init__(self, input='content', encoding='utf-8',\n                  stop_words=None, token_pattern=r\"(?u)\\b\\w\\w+\\b\",\n                  ngram_range=(1, 1), max_df=1.0, min_df=1,\n                  max_features=None, vocabulary=None, binary=False,\n-                 dtype=np.int64, norm='l2', use_idf=True, smooth_idf=True,\n+                 dtype=np.float64, norm='l2', use_idf=True, smooth_idf=True,\n                  sublinear_tf=False):\n \n         super(TfidfVectorizer, self).__init__(\n@@ -1432,6 +1435,13 @@ def idf_(self, value):\n                                  (len(value), len(self.vocabulary)))\n         self._tfidf.idf_ = value\n \n+    def _check_params(self):\n+        if self.dtype not in FLOAT_DTYPES:\n+            warnings.warn(\"Only {} 'dtype' should be used. {} 'dtype' will \"\n+                          \"be converted to np.float64.\"\n+                          .format(FLOAT_DTYPES, self.dtype),\n+                          UserWarning)\n+\n     def fit(self, raw_documents, y=None):\n         \"\"\"Learn vocabulary and idf from training set.\n \n@@ -1444,6 +1454,7 @@ def fit(self, raw_documents, y=None):\n         -------\n         self : TfidfVectorizer\n         \"\"\"\n+        self._check_params()\n         X = super(TfidfVectorizer, self).fit_transform(raw_documents)\n         self._tfidf.fit(X)\n         return self\n@@ -1464,6 +1475,7 @@ def fit_transform(self, raw_documents, y=None):\n         X : sparse matrix, [n_samples, n_features]\n             Tf-idf-weighted document-term matrix.\n         \"\"\"\n+        self._check_params()\n         X = super(TfidfVectorizer, self).fit_transform(raw_documents)\n         self._tfidf.fit(X)\n         # X is already a transformed view of raw_documents so\n",
+  "test_patch": "diff --git a/sklearn/feature_extraction/tests/test_text.py b/sklearn/feature_extraction/tests/test_text.py\n--- a/sklearn/feature_extraction/tests/test_text.py\n+++ b/sklearn/feature_extraction/tests/test_text.py\n@@ -1,6 +1,9 @@\n from __future__ import unicode_literals\n import warnings\n \n+import pytest\n+from scipy import sparse\n+\n from sklearn.feature_extraction.text import strip_tags\n from sklearn.feature_extraction.text import strip_accents_unicode\n from sklearn.feature_extraction.text import strip_accents_ascii\n@@ -28,15 +31,14 @@\n                                    assert_in, assert_less, assert_greater,\n                                    assert_warns_message, assert_raise_message,\n                                    clean_warning_registry, ignore_warnings,\n-                                   SkipTest, assert_raises)\n+                                   SkipTest, assert_raises,\n+                                   assert_allclose_dense_sparse)\n \n from collections import defaultdict, Mapping\n from functools import partial\n import pickle\n from io import StringIO\n \n-import pytest\n-\n JUNK_FOOD_DOCS = (\n     \"the pizza pizza beer copyright\",\n     \"the pizza burger beer copyright\",\n@@ -1042,6 +1044,42 @@ def test_vectorizer_string_object_as_input():\n             ValueError, message, vec.transform, \"hello world!\")\n \n \n+@pytest.mark.parametrize(\"X_dtype\", [np.float32, np.float64])\n+def test_tfidf_transformer_type(X_dtype):\n+    X = sparse.rand(10, 20000, dtype=X_dtype, random_state=42)\n+    X_trans = TfidfTransformer().fit_transform(X)\n+    assert X_trans.dtype == X.dtype\n+\n+\n+def test_tfidf_transformer_sparse():\n+    X = sparse.rand(10, 20000, dtype=np.float64, random_state=42)\n+    X_csc = sparse.csc_matrix(X)\n+    X_csr = sparse.csr_matrix(X)\n+\n+    X_trans_csc = TfidfTransformer().fit_transform(X_csc)\n+    X_trans_csr = TfidfTransformer().fit_transform(X_csr)\n+    assert_allclose_dense_sparse(X_trans_csc, X_trans_csr)\n+    assert X_trans_csc.format == X_trans_csr.format\n+\n+\n+@pytest.mark.parametrize(\n+    \"vectorizer_dtype, output_dtype, expected_warning, msg_warning\",\n+    [(np.int32, np.float64, UserWarning, \"'dtype' should be used.\"),\n+     (np.int64, np.float64, UserWarning, \"'dtype' should be used.\"),\n+     (np.float32, np.float32, None, None),\n+     (np.float64, np.float64, None, None)]\n+)\n+def test_tfidf_vectorizer_type(vectorizer_dtype, output_dtype,\n+                               expected_warning, msg_warning):\n+    X = np.array([\"numpy\", \"scipy\", \"sklearn\"])\n+    vectorizer = TfidfVectorizer(dtype=vectorizer_dtype)\n+    with pytest.warns(expected_warning, match=msg_warning) as record:\n+            X_idf = vectorizer.fit_transform(X)\n+    if expected_warning is None:\n+        assert len(record) == 0\n+    assert X_idf.dtype == output_dtype\n+\n+\n @pytest.mark.parametrize(\"vec\", [\n         HashingVectorizer(ngram_range=(2, 1)),\n         CountVectorizer(ngram_range=(2, 1)),\n",
+  "problem_statement": "TfidfVectorizer dtype argument ignored\n#### Description\r\nTfidfVectorizer's fit/fit_transform output is always np.float64 instead of the specified dtype\r\n\r\n#### Steps/Code to Reproduce\r\n```py\r\nfrom sklearn.feature_extraction.text import TfidfVectorizer\r\ntest = TfidfVectorizer(dtype=np.float32)\r\nprint(test.fit_transform([\"Help I have a bug\"]).dtype)\r\n```\r\n\r\n#### Expected Results\r\n```py\r\ndtype('float32')\r\n```\r\n\r\n#### Actual Results\r\n```py\r\ndtype('float64')\r\n```\r\n\r\n#### Versions\r\n```\r\nDarwin-17.2.0-x86_64-i386-64bit\r\nPython 3.6.1 |Anaconda 4.4.0 (x86_64)| (default, May 11 2017, 13:04:09) \r\n[GCC 4.2.1 Compatible Apple LLVM 6.0 (clang-600.0.57)]\r\nNumPy 1.13.3\r\nSciPy 1.0.0\r\nScikit-Learn 0.19.0\r\n```\r\n  \n",
+  "hints_text": "",
+  "created_at": "2018-01-10T04:02:32Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/feature_extraction/tests/test_text.py::test_tfidf_transformer_type[float32]\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_type[float32-float32-None-None]\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_type[int32-float64-UserWarning-'dtype'\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_type[int64-float64-UserWarning-'dtype'\"]",
+  "PASS_TO_PASS": "[\"sklearn/feature_extraction/tests/test_text.py::test_char_ngram_analyzer\", \"sklearn/feature_extraction/tests/test_text.py::test_char_wb_ngram_analyzer\", \"sklearn/feature_extraction/tests/test_text.py::test_count_binary_occurrences\", \"sklearn/feature_extraction/tests/test_text.py::test_count_vectorizer_max_features\", \"sklearn/feature_extraction/tests/test_text.py::test_count_vectorizer_pipeline_grid_selection\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_custom_vocabulary\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_custom_vocabulary_gap_index\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_custom_vocabulary_pipeline\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_custom_vocabulary_repeated_indices\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_empty_vocabulary\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_stop_words\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_vocab_dicts_when_pickling\", \"sklearn/feature_extraction/tests/test_text.py::test_countvectorizer_vocab_sets_when_pickling\", \"sklearn/feature_extraction/tests/test_text.py::test_feature_names\", \"sklearn/feature_extraction/tests/test_text.py::test_fit_countvectorizer_twice\", \"sklearn/feature_extraction/tests/test_text.py::test_hashed_binary_occurrences\", \"sklearn/feature_extraction/tests/test_text.py::test_hashing_vectorizer\", \"sklearn/feature_extraction/tests/test_text.py::test_hashingvectorizer_nan_in_docs\", \"sklearn/feature_extraction/tests/test_text.py::test_non_unique_vocab\", \"sklearn/feature_extraction/tests/test_text.py::test_pickling_transformer\", \"sklearn/feature_extraction/tests/test_text.py::test_pickling_vectorizer\", \"sklearn/feature_extraction/tests/test_text.py::test_stop_words_removal\", \"sklearn/feature_extraction/tests/test_text.py::test_strip_accents\", \"sklearn/feature_extraction/tests/test_text.py::test_sublinear_tf\", \"sklearn/feature_extraction/tests/test_text.py::test_tf_idf_smoothing\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_no_smoothing\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_transformer_sparse\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_transformer_type[float64]\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_setter\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_setters\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_type[float64-float64-None-None]\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidf_vectorizer_with_fixed_vocabulary\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidfvectorizer_binary\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidfvectorizer_export_idf\", \"sklearn/feature_extraction/tests/test_text.py::test_tfidfvectorizer_invalid_idf_attr\", \"sklearn/feature_extraction/tests/test_text.py::test_to_ascii\", \"sklearn/feature_extraction/tests/test_text.py::test_transformer_idf_setter\", \"sklearn/feature_extraction/tests/test_text.py::test_unicode_decode_error\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_inverse_transform\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_max_df\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_max_features\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_min_df\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_pipeline_cross_validation\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_pipeline_grid_selection\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_string_object_as_input\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_unicode\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizer_vocab_clone\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizers_invalid_ngram_range[vec0]\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizers_invalid_ngram_range[vec1]\", \"sklearn/feature_extraction/tests/test_text.py::test_vectorizers_invalid_ngram_range[vec2]\", \"sklearn/feature_extraction/tests/test_text.py::test_word_analyzer_unigrams\", \"sklearn/feature_extraction/tests/test_text.py::test_word_analyzer_unigrams_and_bigrams\", \"sklearn/feature_extraction/tests/test_text.py::test_word_ngram_analyzer\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/feature_extraction/text.py"
+  ],
+  "test_patch_files": [
+    "sklearn/feature_extraction/tests/test_text.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/feature_extraction/text.py": {
+      "diffs": [
+        {
+          "start_line_old": 14,
+          "end_line_old": 14,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer_CountVectorizer.1",
+          "closest_snippet_line_distance": 565,
+          "pos": 31,
+          "context_length": 15396
+        },
+        {
+          "start_line_old": 22,
+          "end_line_old": 22,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer_CountVectorizer.1",
+          "closest_snippet_line_distance": 557,
+          "pos": 31,
+          "context_length": 15396
+        },
+        {
+          "start_line_old": 32,
+          "end_line_old": 32,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer_CountVectorizer.1",
+          "closest_snippet_line_distance": 547,
+          "pos": 31,
+          "context_length": 15396
+        },
+        {
+          "start_line_old": 576,
+          "end_line_old": 576,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer.transform_CountVectorizer.transform.8.1",
+          "closest_snippet_line_distance": 376,
+          "pos": 62,
+          "context_length": 27618
+        },
+        {
+          "start_line_old": 1120,
+          "end_line_old": 1123,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.transform_TfidfTransformer.transform.7.1",
+          "closest_snippet_line_distance": 18,
+          "pos": 7,
+          "context_length": 3813
+        },
+        {
+          "start_line_old": 1132,
+          "end_line_old": 1134,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.transform_TfidfTransformer.transform.7.1",
+          "closest_snippet_line_distance": 6,
+          "pos": 7,
+          "context_length": 3813
+        },
+        {
+          "start_line_old": 1154,
+          "end_line_old": 1159,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer_TfidfVectorizer.1",
+          "closest_snippet_line_distance": 43,
+          "pos": 5,
+          "context_length": 3393
+        },
+        {
+          "start_line_old": 1370,
+          "end_line_old": 1370,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.__init___TfidfTransformer.fit.4.1",
+          "closest_snippet_line_distance": 234,
+          "pos": 8,
+          "context_length": 4486
+        },
+        {
+          "start_line_old": 1435,
+          "end_line_old": 1435,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.__init___TfidfTransformer.fit.4.1",
+          "closest_snippet_line_distance": 299,
+          "pos": 8,
+          "context_length": 4486
+        },
+        {
+          "start_line_old": 1447,
+          "end_line_old": 1447,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.__init___TfidfTransformer.fit.4.1",
+          "closest_snippet_line_distance": 311,
+          "pos": 8,
+          "context_length": 4486
+        },
+        {
+          "start_line_old": 1467,
+          "end_line_old": 1467,
+          "file_pos": 2,
+          "file_context_length": 14770,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer.transform_",
+          "closest_snippet_line_distance": 6,
+          "pos": 11,
+          "context_length": 5352
+        }
+      ]
+    }
+  },
+  "vectors": 2936,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer._transform_DictVectorizer._transform.5",
+      "distance": 0.8764382600784302,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 137,
+      "end_line": 211,
+      "tokens": 606,
+      "context_length": 606
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.idf__TfidfTransformer.idf__6.self._idf_diag.1",
+      "distance": 0.9327641129493713,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1183,
+      "end_line": 1194,
+      "tokens": 132,
+      "context_length": 738,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer_TfidfTransformer.1",
+      "distance": 1.0065782070159912,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1030,
+      "end_line": 1103,
+      "tokens": 836,
+      "context_length": 1574,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer_TfidfVectorizer.1",
+      "distance": 1.0184667110443115,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1197,
+      "end_line": 1362,
+      "tokens": 1486,
+      "context_length": 3060,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.transform_TfidfTransformer.transform.7.1",
+      "distance": 1.0774579048156738,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1138,
+      "end_line": 1181,
+      "tokens": 333,
+      "context_length": 3393,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.fit_transform_DictVectorizer.fit_transform.2.1",
+      "distance": 1.081118106842041,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 213,
+      "end_line": 231,
+      "tokens": 144,
+      "context_length": 3537
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfTransformer.__init___TfidfTransformer.fit.4.1",
+      "distance": 1.0833944082260132,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1105,
+      "end_line": 1136,
+      "tokens": 276,
+      "context_length": 3813,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer.__init___TfidfVectorizer.fit.4.1",
+      "distance": 1.0881471633911133,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1364,
+      "end_line": 1449,
+      "tokens": 673,
+      "context_length": 4486,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer.transform_",
+      "distance": 1.0980695486068726,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1473,
+      "end_line": 1497,
+      "tokens": 174,
+      "context_length": 4660,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_text_vectorizers.py_1_",
+      "distance": 1.0996127128601074,
+      "file_path": "benchmarks/bench_text_vectorizers.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 532,
+      "context_length": 5192
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_TfidfVectorizer.fit_transform_TfidfVectorizer.fit_transform.6.1",
+      "distance": 1.1076598167419434,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1451,
+      "end_line": 1471,
+      "tokens": 160,
+      "context_length": 5352,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.transform_DictVectorizer.get_feature_names.2.1",
+      "distance": 1.1157538890838623,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 274,
+      "end_line": 318,
+      "tokens": 314,
+      "context_length": 5666
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_4_DictVectorizer.__init__.self.sort.1",
+      "distance": 1.1201012134552002,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 5,
+      "end_line": 101,
+      "tokens": 798,
+      "context_length": 6464
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_VectorizerMixin._validate_vocabulary_VectorizerMixin._validate_vocabulary.2.6.self.fixed_vocabulary_.1",
+      "distance": 1.1224017143249512,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 273,
+      "end_line": 299,
+      "tokens": 230,
+      "context_length": 6694,
+      "file_pos": 3
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_26__return_float_dtype.5.1",
+      "distance": 1.129475474357605,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 33,
+      "end_line": 55,
+      "tokens": 157,
+      "context_length": 6851
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_hashing_vs_dict_vectorizer.py_1_",
+      "distance": 1.139549732208252,
+      "file_path": "examples/text/plot_hashing_vs_dict_vectorizer.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 802,
+      "context_length": 7653
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_HashingVectorizer.__init___HashingVectorizer.fit.6.1",
+      "distance": 1.1445591449737549,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 467,
+      "end_line": 512,
+      "tokens": 377,
+      "context_length": 8030,
+      "file_pos": 5
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._sparse_fit_Imputer._sparse_fit.8.7.columns_all.7.5.3.1",
+      "distance": 1.147942304611206,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 173,
+      "end_line": 251,
+      "tokens": 675,
+      "context_length": 8705
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dtype_object_check_complex_data.X.5",
+      "distance": 1.153617262840271,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 520,
+      "end_line": 555,
+      "tokens": 328,
+      "context_length": 9033
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._sparse_fit_SimpleImputer._sparse_fit.5.7.columns_all.7.5.3.1",
+      "distance": 1.1567548513412476,
+      "file_path": "sklearn/impute.py",
+      "start_line": 164,
+      "end_line": 235,
+      "tokens": 575,
+      "context_length": 9608
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer.__init___CountVectorizer.__init__.self.dtype.1",
+      "distance": 1.1580727100372314,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 729,
+      "end_line": 760,
+      "tokens": 319,
+      "context_length": 9927,
+      "file_pos": 8
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.inverse_transform_DictVectorizer.inverse_transform.8.1",
+      "distance": 1.1593406200408936,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 233,
+      "end_line": 272,
+      "tokens": 320,
+      "context_length": 10247
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/twenty_newsgroups.py_fetch_20newsgroups_vectorized_fetch_20newsgroups_vectorized.11",
+      "distance": 1.1593575477600098,
+      "file_path": "sklearn/datasets/twenty_newsgroups.py",
+      "start_line": 279,
+      "end_line": 362,
+      "tokens": 770,
+      "context_length": 11017
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_VectorizerMixin._check_vocabulary_VectorizerMixin._validate_params.3.1",
+      "distance": 1.1755242347717285,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 301,
+      "end_line": 316,
+      "tokens": 146,
+      "context_length": 11163,
+      "file_pos": 9
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.12.4.2.1",
+      "distance": 1.1761901378631592,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 852,
+      "end_line": 926,
+      "tokens": 702,
+      "context_length": 11865
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._dense_fit_Imputer._dense_fit.6.9.6.5.1",
+      "distance": 1.177342176437378,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 253,
+      "end_line": 296,
+      "tokens": 438,
+      "context_length": 12303
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/externals/_pilutil.py_bytescale_bytescale.12.1",
+      "distance": 1.1822974681854248,
+      "file_path": "sklearn/externals/_pilutil.py",
+      "start_line": 69,
+      "end_line": 140,
+      "tokens": 678,
+      "context_length": 12981
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_as_float_array_as_float_array.2.4.2.1",
+      "distance": 1.1838738918304443,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 65,
+      "end_line": 111,
+      "tokens": 465,
+      "context_length": 13446
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer_CountVectorizer.1",
+      "distance": 1.1871635913848877,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 579,
+      "end_line": 727,
+      "tokens": 1362,
+      "context_length": 14808,
+      "file_pos": 11
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer._dense_fit_SimpleImputer._dense_fit.6.9.X.5.1",
+      "distance": 1.187907338142395,
+      "file_path": "sklearn/impute.py",
+      "start_line": 237,
+      "end_line": 281,
+      "tokens": 415,
+      "context_length": 15223
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_1___all__.1",
+      "distance": 1.190509557723999,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 173,
+      "context_length": 15396,
+      "file_pos": 11
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/forest.py_RandomTreesEmbedding.fit_transform_RandomTreesEmbedding.fit_transform.8.1",
+      "distance": 1.1961621046066284,
+      "file_path": "sklearn/ensemble/forest.py",
+      "start_line": 1902,
+      "end_line": 1935,
+      "tokens": 306,
+      "context_length": 15702
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_HashingVectorizer_HashingVectorizer.1",
+      "distance": 1.200258493423462,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 319,
+      "end_line": 466,
+      "tokens": 1341,
+      "context_length": 17043,
+      "file_pos": 12
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/sparsefuncs.py_sp__raise_error_wrong_axis.1.1",
+      "distance": 1.201763391494751,
+      "file_path": "sklearn/utils/sparsefuncs.py",
+      "start_line": 6,
+      "end_line": 26,
+      "tokens": 182,
+      "context_length": 17225
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_1_20.3.divide.6.1",
+      "distance": 1.2018753290176392,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 443,
+      "context_length": 17668
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/svmlight_format.py__open_and_load__open_and_load.11.1",
+      "distance": 1.2086800336837769,
+      "file_path": "sklearn/datasets/svmlight_format.py",
+      "start_line": 167,
+      "end_line": 189,
+      "tokens": 273,
+      "context_length": 17941
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.fit_DictVectorizer.fit.8.1",
+      "distance": 1.2091151475906372,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 103,
+      "end_line": 135,
+      "tokens": 213,
+      "context_length": 18154
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py_sys_",
+      "distance": 1.2160792350769043,
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 80,
+      "tokens": 633,
+      "context_length": 18787
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/isotonic.py_IsotonicRegression.transform_IsotonicRegression.transform.7.1",
+      "distance": 1.2187581062316895,
+      "file_path": "sklearn/isotonic.py",
+      "start_line": 364,
+      "end_line": 389,
+      "tokens": 211,
+      "context_length": 18998
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/fastica_.py_FastICA._fit_FastICA._fit.7.1",
+      "distance": 1.231835126876831,
+      "file_path": "sklearn/decomposition/fastica_.py",
+      "start_line": 471,
+      "end_line": 508,
+      "tokens": 316,
+      "context_length": 19314
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 1.2320096492767334,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 827,
+      "end_line": 849,
+      "tokens": 248,
+      "context_length": 19562
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_dtypes_check_estimators_dtypes.10.5.1.1",
+      "distance": 1.232795238494873,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 994,
+      "end_line": 1017,
+      "tokens": 269,
+      "context_length": 19831
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.2357091903686523,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1043,
+      "end_line": 1111,
+      "tokens": 601,
+      "context_length": 20432
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/hashing.py_FeatureHasher.__init___FeatureHasher.__init__.self.non_negative.1",
+      "distance": 1.2365118265151978,
+      "file_path": "sklearn/feature_extraction/hashing.py",
+      "start_line": 88,
+      "end_line": 100,
+      "tokens": 139,
+      "context_length": 20571
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer.fit_Imputer.fit.10.1",
+      "distance": 1.2411987781524658,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 129,
+      "end_line": 171,
+      "tokens": 382,
+      "context_length": 20953
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_inputs_QuantileTransformer._check_inputs.8.1",
+      "distance": 1.2412941455841064,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2401,
+      "end_line": 2420,
+      "tokens": 215,
+      "context_length": 21168
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer.transform_QuantileTransformer.transform.4.1",
+      "distance": 1.2426671981811523,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2465,
+      "end_line": 2484,
+      "tokens": 161,
+      "context_length": 21329
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_load_data_load_data.22.1",
+      "distance": 1.2462866306304932,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 71,
+      "end_line": 97,
+      "tokens": 265,
+      "context_length": 21594
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/externals/_pilutil.py_2___all__.1",
+      "distance": 1.2481160163879395,
+      "file_path": "sklearn/externals/_pilutil.py",
+      "start_line": 43,
+      "end_line": 66,
+      "tokens": 176,
+      "context_length": 21770
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py_sys_",
+      "distance": 1.2482333183288574,
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 64,
+      "tokens": 441,
+      "context_length": 22211
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_MICEImputer.fit_transform_MICEImputer.fit_transform.29.1",
+      "distance": 1.2489975690841675,
+      "file_path": "sklearn/impute.py",
+      "start_line": 718,
+      "end_line": 798,
+      "tokens": 731,
+      "context_length": 22942
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_21_23.3.2",
+      "distance": 1.2503718137741089,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 74,
+      "end_line": 150,
+      "tokens": 754,
+      "context_length": 23696
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array.19_check_array.22.1",
+      "distance": 1.2504494190216064,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 549,
+      "end_line": 565,
+      "tokens": 230,
+      "context_length": 23926
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_71_assert_no_warnings.2",
+      "distance": 1.251516342163086,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 249,
+      "end_line": 266,
+      "tokens": 164,
+      "context_length": 24090
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.2537978887557983,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 758,
+      "end_line": 789,
+      "tokens": 297,
+      "context_length": 24387
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/manifold/t_sne.py_TSNE._fit.13_TSNE._fit.20.1",
+      "distance": 1.256504774093628,
+      "file_path": "sklearn/manifold/t_sne.py",
+      "start_line": 713,
+      "end_line": 806,
+      "tokens": 896,
+      "context_length": 25283
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_CategoricalEncoder.__init___CategoricalEncoder.fit.12.1",
+      "distance": 1.2570335865020752,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2978,
+      "end_line": 3045,
+      "tokens": 541,
+      "context_length": 25824
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_random_projections.py_bench_scikit_transformer_bench_scikit_transformer.15.1",
+      "distance": 1.257177472114563,
+      "file_path": "benchmarks/bench_random_projections.py",
+      "start_line": 48,
+      "end_line": 67,
+      "tokens": 122,
+      "context_length": 25946
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer.transform_CountVectorizer.transform.8.1",
+      "distance": 1.2575939893722534,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 952,
+      "end_line": 982,
+      "tokens": 199,
+      "context_length": 26145,
+      "file_pos": 25
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/pca.py_RandomizedPCA._fit_RandomizedPCA._fit.16.1",
+      "distance": 1.2592475414276123,
+      "file_path": "sklearn/decomposition/pca.py",
+      "start_line": 724,
+      "end_line": 765,
+      "tokens": 399,
+      "context_length": 26544
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/hashing.py_numbers_FeatureHasher.1",
+      "distance": 1.259650468826294,
+      "file_path": "sklearn/feature_extraction/hashing.py",
+      "start_line": 4,
+      "end_line": 86,
+      "tokens": 802,
+      "context_length": 27346
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_HashingVectorizer.fit_transform__document_frequency.2.2.1.1",
+      "distance": 1.2600321769714355,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 544,
+      "end_line": 576,
+      "tokens": 272,
+      "context_length": 27618,
+      "file_pos": 26
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/impute.py_SimpleImputer.fit_SimpleImputer.fit.7.1",
+      "distance": 1.260417103767395,
+      "file_path": "sklearn/impute.py",
+      "start_line": 128,
+      "end_line": 162,
+      "tokens": 263,
+      "context_length": 27881
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation.transform_LatentDirichletAllocation.transform.4.1",
+      "distance": 1.2605923414230347,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 617,
+      "end_line": 635,
+      "tokens": 146,
+      "context_length": 28027
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation._unnormalized_transform_LatentDirichletAllocation._unnormalized_transform.8.1",
+      "distance": 1.2609012126922607,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 586,
+      "end_line": 615,
+      "tokens": 249,
+      "context_length": 28276
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_is_fitted_QuantileTransformer._check_is_fitted.4.1",
+      "distance": 1.261991024017334,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2422,
+      "end_line": 2430,
+      "tokens": 119,
+      "context_length": 28395
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_power_transformer.py_1_axes_list.1",
+      "distance": 1.2620573043823242,
+      "file_path": "examples/preprocessing/plot_power_transformer.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 619,
+      "context_length": 29014
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_133_",
+      "distance": 1.263113260269165,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 322,
+      "end_line": 356,
+      "tokens": 287,
+      "context_length": 29301
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer._transform_",
+      "distance": 1.2641891241073608,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 167,
+      "end_line": 185,
+      "tokens": 170,
+      "context_length": 29471
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py__fit_one_transformer__fit_transform_one.4.1",
+      "distance": 1.2659956216812134,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 575,
+      "end_line": 596,
+      "tokens": 164,
+      "context_length": 29635
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit1d_check_fit1d.rnd.9",
+      "distance": 1.2695940732955933,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 792,
+      "end_line": 807,
+      "tokens": 139,
+      "context_length": 29774
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/bicluster/plot_bicluster_newsgroups.py_1_start_time_31.1",
+      "distance": 1.2710950374603271,
+      "file_path": "examples/bicluster/plot_bicluster_newsgroups.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 759,
+      "context_length": 30533
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_1__norm.2.1",
+      "distance": 1.2713980674743652,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 298,
+      "context_length": 30831
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/nmf.py__fit_coordinate_descent.6__fit_coordinate_descent.7.1",
+      "distance": 1.2733092308044434,
+      "file_path": "sklearn/decomposition/nmf.py",
+      "start_line": 481,
+      "end_line": 506,
+      "tokens": 247,
+      "context_length": 31078
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_1_50",
+      "distance": 1.2734715938568115,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 765,
+      "context_length": 31843
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "position": 1,
+      "tokens": 2719,
+      "context_length": 2719
+    },
+    {
+      "file_path": "sklearn/feature_extraction/text.py",
+      "position": 2,
+      "tokens": 12051,
+      "context_length": 14770
+    },
+    {
+      "file_path": "benchmarks/bench_text_vectorizers.py",
+      "position": 3,
+      "tokens": 532,
+      "context_length": 15302
+    },
+    {
+      "file_path": "sklearn/metrics/pairwise.py",
+      "position": 4,
+      "tokens": 11569,
+      "context_length": 26871
+    },
+    {
+      "file_path": "examples/text/plot_hashing_vs_dict_vectorizer.py",
+      "position": 5,
+      "tokens": 819,
+      "context_length": 27690
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 6,
+      "tokens": 2942,
+      "context_length": 30632
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 7,
+      "tokens": 19592,
+      "context_length": 50224
+    },
+    {
+      "file_path": "sklearn/impute.py",
+      "position": 8,
+      "tokens": 7159,
+      "context_length": 57383
+    },
+    {
+      "file_path": "sklearn/datasets/twenty_newsgroups.py",
+      "position": 9,
+      "tokens": 3269,
+      "context_length": 60652
+    },
+    {
+      "file_path": "sklearn/externals/_pilutil.py",
+      "position": 10,
+      "tokens": 4605,
+      "context_length": 65257
+    },
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 11,
+      "tokens": 7383,
+      "context_length": 72640
+    },
+    {
+      "file_path": "sklearn/ensemble/forest.py",
+      "position": 12,
+      "tokens": 16992,
+      "context_length": 89632
+    },
+    {
+      "file_path": "sklearn/utils/sparsefuncs.py",
+      "position": 13,
+      "tokens": 3332,
+      "context_length": 92964
+    },
+    {
+      "file_path": "sklearn/utils/fixes.py",
+      "position": 14,
+      "tokens": 2716,
+      "context_length": 95680
+    },
+    {
+      "file_path": "sklearn/datasets/svmlight_format.py",
+      "position": 15,
+      "tokens": 4511,
+      "context_length": 100191
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "position": 16,
+      "tokens": 726,
+      "context_length": 100917
+    },
+    {
+      "file_path": "sklearn/isotonic.py",
+      "position": 17,
+      "tokens": 3378,
+      "context_length": 104295
+    },
+    {
+      "file_path": "sklearn/decomposition/fastica_.py",
+      "position": 18,
+      "tokens": 4764,
+      "context_length": 109059
+    },
+    {
+      "file_path": "sklearn/feature_extraction/hashing.py",
+      "position": 19,
+      "tokens": 1537,
+      "context_length": 110596
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 20,
+      "tokens": 26030,
+      "context_length": 136626
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 21,
+      "tokens": 1903,
+      "context_length": 138529
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "position": 22,
+      "tokens": 534,
+      "context_length": 139063
+    },
+    {
+      "file_path": "sklearn/utils/testing.py",
+      "position": 23,
+      "tokens": 6919,
+      "context_length": 145982
+    },
+    {
+      "file_path": "sklearn/manifold/t_sne.py",
+      "position": 24,
+      "tokens": 8487,
+      "context_length": 154469
+    },
+    {
+      "file_path": "benchmarks/bench_random_projections.py",
+      "position": 25,
+      "tokens": 1760,
+      "context_length": 156229
+    },
+    {
+      "file_path": "sklearn/decomposition/pca.py",
+      "position": 26,
+      "tokens": 7199,
+      "context_length": 163428
+    },
+    {
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "position": 27,
+      "tokens": 6658,
+      "context_length": 170086
+    },
+    {
+      "file_path": "examples/preprocessing/plot_power_transformer.py",
+      "position": 28,
+      "tokens": 853,
+      "context_length": 170939
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 29,
+      "tokens": 3102,
+      "context_length": 174041
+    },
+    {
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "position": 30,
+      "tokens": 1388,
+      "context_length": 175429
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 31,
+      "tokens": 6293,
+      "context_length": 181722
+    },
+    {
+      "file_path": "examples/bicluster/plot_bicluster_newsgroups.py",
+      "position": 32,
+      "tokens": 1383,
+      "context_length": 183105
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 33,
+      "tokens": 3913,
+      "context_length": 187018
+    },
+    {
+      "file_path": "sklearn/decomposition/nmf.py",
+      "position": 34,
+      "tokens": 11694,
+      "context_length": 198712
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 35,
+      "tokens": 1123,
+      "context_length": 199835
+    }
+  ]
+}

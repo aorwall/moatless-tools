@@ -1,0 +1,1372 @@
+{
+  "instance_id": "pydata__xarray-7019",
+  "model_patch": "diff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\nindex 2336883d..aa40b69b 100644\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -73,7 +73,7 @@ from xarray.core.merge import (\n )\n from xarray.core.missing import get_clean_interp_index\n from xarray.core.options import OPTIONS, _get_keep_attrs\n-from xarray.core.pycompat import array_type, is_duck_array, is_duck_dask_array\n+from xarray.core.parallel_computation_interface import ParallelComputationInterface\n from xarray.core.types import QuantileMethods, T_Dataset\n from xarray.core.utils import (\n     Default,\n@@ -741,25 +741,40 @@ class Dataset(\n         --------\n         dask.compute\n         \"\"\"\n-        # access .data to coerce everything to numpy or dask arrays\n-        lazy_data = {\n-            k: v._data for k, v in self.variables.items() if is_duck_dask_array(v._data)\n-        }\n-        if lazy_data:\n-            import dask.array as da\n+        def compute(self, **kwargs):\n+            \"\"\"Manually trigger loading of this dataset's data from disk or a remote source into memory and return a new dataset. The original is left unaltered.\n \n-            # evaluate all the dask arrays simultaneously\n-            evaluated_data = da.compute(*lazy_data.values(), **kwargs)\n+            This is particularly useful when working with many file objects on disk.\n \n-            for k, data in zip(lazy_data, evaluated_data):\n-                self.variables[k].data = data\n+            Parameters\n+            ----------\n+            **kwargs : dict\n+                Additional keyword arguments passed on to the computation interface's compute method.\n \n-        # load everything else sequentially\n-        for k, v in self.variables.items():\n-            if k not in lazy_data:\n-                v.load()\n+            See Also\n+            --------\n+            ParallelComputationInterface.compute\n+            \"\"\"\n+            # access .data to coerce everything to numpy or computation interface arrays\n+            lazy_data = {\n+                k: v._data for k, v in self.variables.items() if is_duck_dask_array(v._data)\n+            }\n+            if lazy_data:\n+                # Create an instance of the computation interface\n+                computation_interface = ParallelComputationInterface()\n \n-        return self\n+                # evaluate all the computation interface arrays simultaneously\n+                evaluated_data = computation_interface.compute(*lazy_data.values(), **kwargs)\n+\n+                for k, data in zip(lazy_data, evaluated_data):\n+                    self.variables[k].data = data\n+\n+            # load everything else sequentially\n+            for k, v in self.variables.items():\n+                if k not in lazy_data:\n+                    v.load()\n+\n+            return self\n \n     def __dask_tokenize__(self):\n         from dask.base import normalize_token\n@@ -806,15 +821,15 @@ class Dataset(\n \n     @property\n     def __dask_optimize__(self):\n-        import dask.array as da\n-\n-        return da.Array.__dask_optimize__\n+        return self._parallel_computation_interface.get_optimize_function()\n \n     @property\n     def __dask_scheduler__(self):\n-        import dask.array as da\n+        return self._parallel_computation_interface.get_scheduler()\n \n-        return da.Array.__dask_scheduler__\n+    def __init__(self, *args, **kwargs):\n+        super().__init__(*args, **kwargs)\n+        self._parallel_computation_interface = ParallelComputationInterface()\n \n     def __dask_postcompute__(self):\n         return self._dask_postcompute, ()\n@@ -2227,11 +2242,11 @@ class Dataset(\n         token : str, optional\n             Token uniquely identifying this dataset.\n         lock : bool, default: False\n-            Passed on to :py:func:`dask.array.from_array`, if the array is not\n-            already as dask array.\n+            If the array is not already as dask array, this will be passed on to the\n+            computation interface.\n         inline_array: bool, default: False\n-            Passed on to :py:func:`dask.array.from_array`, if the array is not\n-            already as dask array.\n+            If the array is not already as dask array, this will be passed on to the\n+            computation interface.\n         **chunks_kwargs : {dim: chunks, ...}, optional\n             The keyword arguments form of ``chunks``.\n             One of chunks or chunks_kwargs must be provided\n@@ -2245,7 +2260,6 @@ class Dataset(\n         Dataset.chunks\n         Dataset.chunksizes\n         xarray.unify_chunks\n-        dask.array.from_array\n         \"\"\"\n         if chunks is None and chunks_kwargs is None:\n             warnings.warn(\n@@ -2266,8 +2280,12 @@ class Dataset(\n                 f\"some chunks keys are not dimensions on this object: {bad_dims}\"\n             )\n \n+        # Create an instance of the DaskComputationInterface\n+        dask_interface = DaskComputationInterface()\n+\n         variables = {\n-            k: _maybe_chunk(k, v, chunks, token, lock, name_prefix)\n+            k: dask_interface.array_from_template(v, chunks, name_prefix=name_prefix, lock=lock, inline_array=inline_array)\n+            if not is_duck_dask_array(v._data) else v._data.rechunk(chunks)\n             for k, v in self.variables.items()\n         }\n         return self._replace(variables)\n@@ -6394,8 +6412,7 @@ class Dataset(\n         dask.dataframe.DataFrame\n         \"\"\"\n \n-        import dask.array as da\n-        import dask.dataframe as dd\n+        from xarray.core.parallel_computation_interface import ParallelComputationInterface\n \n         ordered_dims = self._normalize_dim_order(dim_order=dim_order)\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/dataset.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "964d350a80fe21d4babf939c108986d5fd90a2cf",
+  "patch": "diff --git a/xarray/backends/api.py b/xarray/backends/api.py\n--- a/xarray/backends/api.py\n+++ b/xarray/backends/api.py\n@@ -6,7 +6,16 @@\n from glob import glob\n from io import BytesIO\n from numbers import Number\n-from typing import TYPE_CHECKING, Any, Callable, Final, Literal, Union, cast, overload\n+from typing import (\n+    TYPE_CHECKING,\n+    Any,\n+    Callable,\n+    Final,\n+    Literal,\n+    Union,\n+    cast,\n+    overload,\n+)\n \n import numpy as np\n \n@@ -20,9 +29,11 @@\n     _nested_combine,\n     combine_by_coords,\n )\n+from xarray.core.daskmanager import DaskManager\n from xarray.core.dataarray import DataArray\n from xarray.core.dataset import Dataset, _get_chunk, _maybe_chunk\n from xarray.core.indexes import Index\n+from xarray.core.parallelcompat import guess_chunkmanager\n from xarray.core.utils import is_remote_uri\n \n if TYPE_CHECKING:\n@@ -38,6 +49,7 @@\n         CompatOptions,\n         JoinOptions,\n         NestedSequence,\n+        T_Chunks,\n     )\n \n     T_NetcdfEngine = Literal[\"netcdf4\", \"scipy\", \"h5netcdf\"]\n@@ -48,7 +60,6 @@\n         str,  # no nice typing support for custom backends\n         None,\n     ]\n-    T_Chunks = Union[int, dict[Any, Any], Literal[\"auto\"], None]\n     T_NetcdfTypes = Literal[\n         \"NETCDF4\", \"NETCDF4_CLASSIC\", \"NETCDF3_64BIT\", \"NETCDF3_CLASSIC\"\n     ]\n@@ -297,17 +308,27 @@ def _chunk_ds(\n     chunks,\n     overwrite_encoded_chunks,\n     inline_array,\n+    chunked_array_type,\n+    from_array_kwargs,\n     **extra_tokens,\n ):\n-    from dask.base import tokenize\n+    chunkmanager = guess_chunkmanager(chunked_array_type)\n+\n+    # TODO refactor to move this dask-specific logic inside the DaskManager class\n+    if isinstance(chunkmanager, DaskManager):\n+        from dask.base import tokenize\n \n-    mtime = _get_mtime(filename_or_obj)\n-    token = tokenize(filename_or_obj, mtime, engine, chunks, **extra_tokens)\n-    name_prefix = f\"open_dataset-{token}\"\n+        mtime = _get_mtime(filename_or_obj)\n+        token = tokenize(filename_or_obj, mtime, engine, chunks, **extra_tokens)\n+        name_prefix = \"open_dataset-\"\n+    else:\n+        # not used\n+        token = (None,)\n+        name_prefix = None\n \n     variables = {}\n     for name, var in backend_ds.variables.items():\n-        var_chunks = _get_chunk(var, chunks)\n+        var_chunks = _get_chunk(var, chunks, chunkmanager)\n         variables[name] = _maybe_chunk(\n             name,\n             var,\n@@ -316,6 +337,8 @@ def _chunk_ds(\n             name_prefix=name_prefix,\n             token=token,\n             inline_array=inline_array,\n+            chunked_array_type=chunkmanager,\n+            from_array_kwargs=from_array_kwargs.copy(),\n         )\n     return backend_ds._replace(variables)\n \n@@ -328,6 +351,8 @@ def _dataset_from_backend_dataset(\n     cache,\n     overwrite_encoded_chunks,\n     inline_array,\n+    chunked_array_type,\n+    from_array_kwargs,\n     **extra_tokens,\n ):\n     if not isinstance(chunks, (int, dict)) and chunks not in {None, \"auto\"}:\n@@ -346,6 +371,8 @@ def _dataset_from_backend_dataset(\n             chunks,\n             overwrite_encoded_chunks,\n             inline_array,\n+            chunked_array_type,\n+            from_array_kwargs,\n             **extra_tokens,\n         )\n \n@@ -373,6 +400,8 @@ def open_dataset(\n     decode_coords: Literal[\"coordinates\", \"all\"] | bool | None = None,\n     drop_variables: str | Iterable[str] | None = None,\n     inline_array: bool = False,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n     backend_kwargs: dict[str, Any] | None = None,\n     **kwargs,\n ) -> Dataset:\n@@ -465,6 +494,15 @@ def open_dataset(\n         itself, and each chunk refers to that task by its key. With\n         ``inline_array=True``, Dask will instead inline the array directly\n         in the values of the task graph. See :py:func:`dask.array.from_array`.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce this datasets' arrays to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        For example if :py:func:`dask.array.Array` objects are used for chunking, additional kwargs will be passed\n+        to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n     backend_kwargs: dict\n         Additional keyword arguments passed on to the engine open function,\n         equivalent to `**kwargs`.\n@@ -508,6 +546,9 @@ def open_dataset(\n     if engine is None:\n         engine = plugins.guess_engine(filename_or_obj)\n \n+    if from_array_kwargs is None:\n+        from_array_kwargs = {}\n+\n     backend = plugins.get_backend(engine)\n \n     decoders = _resolve_decoders_kwargs(\n@@ -536,6 +577,8 @@ def open_dataset(\n         cache,\n         overwrite_encoded_chunks,\n         inline_array,\n+        chunked_array_type,\n+        from_array_kwargs,\n         drop_variables=drop_variables,\n         **decoders,\n         **kwargs,\n@@ -546,8 +589,8 @@ def open_dataset(\n def open_dataarray(\n     filename_or_obj: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore,\n     *,\n-    engine: T_Engine = None,\n-    chunks: T_Chunks = None,\n+    engine: T_Engine | None = None,\n+    chunks: T_Chunks | None = None,\n     cache: bool | None = None,\n     decode_cf: bool | None = None,\n     mask_and_scale: bool | None = None,\n@@ -558,6 +601,8 @@ def open_dataarray(\n     decode_coords: Literal[\"coordinates\", \"all\"] | bool | None = None,\n     drop_variables: str | Iterable[str] | None = None,\n     inline_array: bool = False,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n     backend_kwargs: dict[str, Any] | None = None,\n     **kwargs,\n ) -> DataArray:\n@@ -652,6 +697,15 @@ def open_dataarray(\n         itself, and each chunk refers to that task by its key. With\n         ``inline_array=True``, Dask will instead inline the array directly\n         in the values of the task graph. See :py:func:`dask.array.from_array`.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce the underlying data array to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        For example if :py:func:`dask.array.Array` objects are used for chunking, additional kwargs will be passed\n+        to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n     backend_kwargs: dict\n         Additional keyword arguments passed on to the engine open function,\n         equivalent to `**kwargs`.\n@@ -695,6 +749,8 @@ def open_dataarray(\n         cache=cache,\n         drop_variables=drop_variables,\n         inline_array=inline_array,\n+        chunked_array_type=chunked_array_type,\n+        from_array_kwargs=from_array_kwargs,\n         backend_kwargs=backend_kwargs,\n         use_cftime=use_cftime,\n         decode_timedelta=decode_timedelta,\n@@ -726,7 +782,7 @@ def open_dataarray(\n \n def open_mfdataset(\n     paths: str | NestedSequence[str | os.PathLike],\n-    chunks: T_Chunks = None,\n+    chunks: T_Chunks | None = None,\n     concat_dim: str\n     | DataArray\n     | Index\n@@ -736,7 +792,7 @@ def open_mfdataset(\n     | None = None,\n     compat: CompatOptions = \"no_conflicts\",\n     preprocess: Callable[[Dataset], Dataset] | None = None,\n-    engine: T_Engine = None,\n+    engine: T_Engine | None = None,\n     data_vars: Literal[\"all\", \"minimal\", \"different\"] | list[str] = \"all\",\n     coords=\"different\",\n     combine: Literal[\"by_coords\", \"nested\"] = \"by_coords\",\n@@ -1490,6 +1546,7 @@ def to_zarr(\n     safe_chunks: bool = True,\n     storage_options: dict[str, str] | None = None,\n     zarr_version: int | None = None,\n+    chunkmanager_store_kwargs: dict[str, Any] | None = None,\n ) -> backends.ZarrStore:\n     ...\n \n@@ -1512,6 +1569,7 @@ def to_zarr(\n     safe_chunks: bool = True,\n     storage_options: dict[str, str] | None = None,\n     zarr_version: int | None = None,\n+    chunkmanager_store_kwargs: dict[str, Any] | None = None,\n ) -> Delayed:\n     ...\n \n@@ -1531,6 +1589,7 @@ def to_zarr(\n     safe_chunks: bool = True,\n     storage_options: dict[str, str] | None = None,\n     zarr_version: int | None = None,\n+    chunkmanager_store_kwargs: dict[str, Any] | None = None,\n ) -> backends.ZarrStore | Delayed:\n     \"\"\"This function creates an appropriate datastore for writing a dataset to\n     a zarr ztore\n@@ -1652,7 +1711,9 @@ def to_zarr(\n     writer = ArrayWriter()\n     # TODO: figure out how to properly handle unlimited_dims\n     dump_to_store(dataset, zstore, writer, encoding=encoding)\n-    writes = writer.sync(compute=compute)\n+    writes = writer.sync(\n+        compute=compute, chunkmanager_store_kwargs=chunkmanager_store_kwargs\n+    )\n \n     if compute:\n         _finalize_store(writes, zstore)\ndiff --git a/xarray/backends/common.py b/xarray/backends/common.py\n--- a/xarray/backends/common.py\n+++ b/xarray/backends/common.py\n@@ -11,7 +11,8 @@\n \n from xarray.conventions import cf_encoder\n from xarray.core import indexing\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.parallelcompat import get_chunked_array_type\n+from xarray.core.pycompat import is_chunked_array\n from xarray.core.utils import FrozenDict, NdimSizeLenMixin, is_remote_uri\n \n if TYPE_CHECKING:\n@@ -153,7 +154,7 @@ def __init__(self, lock=None):\n         self.lock = lock\n \n     def add(self, source, target, region=None):\n-        if is_duck_dask_array(source):\n+        if is_chunked_array(source):\n             self.sources.append(source)\n             self.targets.append(target)\n             self.regions.append(region)\n@@ -163,21 +164,25 @@ def add(self, source, target, region=None):\n             else:\n                 target[...] = source\n \n-    def sync(self, compute=True):\n+    def sync(self, compute=True, chunkmanager_store_kwargs=None):\n         if self.sources:\n-            import dask.array as da\n+            chunkmanager = get_chunked_array_type(*self.sources)\n \n             # TODO: consider wrapping targets with dask.delayed, if this makes\n             # for any discernible difference in perforance, e.g.,\n             # targets = [dask.delayed(t) for t in self.targets]\n \n-            delayed_store = da.store(\n+            if chunkmanager_store_kwargs is None:\n+                chunkmanager_store_kwargs = {}\n+\n+            delayed_store = chunkmanager.store(\n                 self.sources,\n                 self.targets,\n                 lock=self.lock,\n                 compute=compute,\n                 flush=True,\n                 regions=self.regions,\n+                **chunkmanager_store_kwargs,\n             )\n             self.sources = []\n             self.targets = []\ndiff --git a/xarray/backends/plugins.py b/xarray/backends/plugins.py\n--- a/xarray/backends/plugins.py\n+++ b/xarray/backends/plugins.py\n@@ -146,7 +146,7 @@ def refresh_engines() -> None:\n \n def guess_engine(\n     store_spec: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore,\n-):\n+) -> str | type[BackendEntrypoint]:\n     engines = list_engines()\n \n     for engine, backend in engines.items():\ndiff --git a/xarray/backends/zarr.py b/xarray/backends/zarr.py\n--- a/xarray/backends/zarr.py\n+++ b/xarray/backends/zarr.py\n@@ -19,6 +19,7 @@\n )\n from xarray.backends.store import StoreBackendEntrypoint\n from xarray.core import indexing\n+from xarray.core.parallelcompat import guess_chunkmanager\n from xarray.core.pycompat import integer_types\n from xarray.core.utils import (\n     FrozenDict,\n@@ -716,6 +717,8 @@ def open_zarr(\n     decode_timedelta=None,\n     use_cftime=None,\n     zarr_version=None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n     **kwargs,\n ):\n     \"\"\"Load and decode a dataset from a Zarr store.\n@@ -800,6 +803,15 @@ def open_zarr(\n         The desired zarr spec version to target (currently 2 or 3). The default\n         of None will attempt to determine the zarr version from ``store`` when\n         possible, otherwise defaulting to 2.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce this datasets' arrays to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict, optional\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        Defaults to {'manager': 'dask'}, meaning additional kwargs will be passed eventually to\n+        :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n \n     Returns\n     -------\n@@ -817,12 +829,17 @@ def open_zarr(\n     \"\"\"\n     from xarray.backends.api import open_dataset\n \n+    if from_array_kwargs is None:\n+        from_array_kwargs = {}\n+\n     if chunks == \"auto\":\n         try:\n-            import dask.array  # noqa\n+            guess_chunkmanager(\n+                chunked_array_type\n+            )  # attempt to import that parallel backend\n \n             chunks = {}\n-        except ImportError:\n+        except ValueError:\n             chunks = None\n \n     if kwargs:\n@@ -851,6 +868,8 @@ def open_zarr(\n         engine=\"zarr\",\n         chunks=chunks,\n         drop_variables=drop_variables,\n+        chunked_array_type=chunked_array_type,\n+        from_array_kwargs=from_array_kwargs,\n         backend_kwargs=backend_kwargs,\n         decode_timedelta=decode_timedelta,\n         use_cftime=use_cftime,\ndiff --git a/xarray/coding/strings.py b/xarray/coding/strings.py\n--- a/xarray/coding/strings.py\n+++ b/xarray/coding/strings.py\n@@ -14,7 +14,7 @@\n     unpack_for_encoding,\n )\n from xarray.core import indexing\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.parallelcompat import get_chunked_array_type, is_chunked_array\n from xarray.core.variable import Variable\n \n \n@@ -134,10 +134,10 @@ def bytes_to_char(arr):\n     if arr.dtype.kind != \"S\":\n         raise ValueError(\"argument must have a fixed-width bytes dtype\")\n \n-    if is_duck_dask_array(arr):\n-        import dask.array as da\n+    if is_chunked_array(arr):\n+        chunkmanager = get_chunked_array_type(arr)\n \n-        return da.map_blocks(\n+        return chunkmanager.map_blocks(\n             _numpy_bytes_to_char,\n             arr,\n             dtype=\"S1\",\n@@ -169,8 +169,8 @@ def char_to_bytes(arr):\n         # can't make an S0 dtype\n         return np.zeros(arr.shape[:-1], dtype=np.string_)\n \n-    if is_duck_dask_array(arr):\n-        import dask.array as da\n+    if is_chunked_array(arr):\n+        chunkmanager = get_chunked_array_type(arr)\n \n         if len(arr.chunks[-1]) > 1:\n             raise ValueError(\n@@ -179,7 +179,7 @@ def char_to_bytes(arr):\n             )\n \n         dtype = np.dtype(\"S\" + str(arr.shape[-1]))\n-        return da.map_blocks(\n+        return chunkmanager.map_blocks(\n             _numpy_char_to_bytes,\n             arr,\n             dtype=dtype,\ndiff --git a/xarray/coding/variables.py b/xarray/coding/variables.py\n--- a/xarray/coding/variables.py\n+++ b/xarray/coding/variables.py\n@@ -10,7 +10,8 @@\n import pandas as pd\n \n from xarray.core import dtypes, duck_array_ops, indexing\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.parallelcompat import get_chunked_array_type\n+from xarray.core.pycompat import is_chunked_array\n from xarray.core.variable import Variable\n \n if TYPE_CHECKING:\n@@ -57,7 +58,7 @@ class _ElementwiseFunctionArray(indexing.ExplicitlyIndexedNDArrayMixin):\n     \"\"\"\n \n     def __init__(self, array, func: Callable, dtype: np.typing.DTypeLike):\n-        assert not is_duck_dask_array(array)\n+        assert not is_chunked_array(array)\n         self.array = indexing.as_indexable(array)\n         self.func = func\n         self._dtype = dtype\n@@ -158,10 +159,10 @@ def lazy_elemwise_func(array, func: Callable, dtype: np.typing.DTypeLike):\n     -------\n     Either a dask.array.Array or _ElementwiseFunctionArray.\n     \"\"\"\n-    if is_duck_dask_array(array):\n-        import dask.array as da\n+    if is_chunked_array(array):\n+        chunkmanager = get_chunked_array_type(array)\n \n-        return da.map_blocks(func, array, dtype=dtype)\n+        return chunkmanager.map_blocks(func, array, dtype=dtype)\n     else:\n         return _ElementwiseFunctionArray(array, func, dtype)\n \n@@ -330,7 +331,7 @@ def encode(self, variable: Variable, name: T_Name = None) -> Variable:\n \n         if \"scale_factor\" in encoding or \"add_offset\" in encoding:\n             dtype = _choose_float_dtype(data.dtype, \"add_offset\" in encoding)\n-            data = data.astype(dtype=dtype, copy=True)\n+            data = duck_array_ops.astype(data, dtype=dtype, copy=True)\n         if \"add_offset\" in encoding:\n             data -= pop_to(encoding, attrs, \"add_offset\", name=name)\n         if \"scale_factor\" in encoding:\n@@ -377,7 +378,7 @@ def encode(self, variable: Variable, name: T_Name = None) -> Variable:\n             if \"_FillValue\" in attrs:\n                 new_fill = signed_dtype.type(attrs[\"_FillValue\"])\n                 attrs[\"_FillValue\"] = new_fill\n-            data = duck_array_ops.around(data).astype(signed_dtype)\n+            data = duck_array_ops.astype(duck_array_ops.around(data), signed_dtype)\n \n             return Variable(dims, data, attrs, encoding, fastpath=True)\n         else:\ndiff --git a/xarray/core/common.py b/xarray/core/common.py\n--- a/xarray/core/common.py\n+++ b/xarray/core/common.py\n@@ -13,8 +13,9 @@\n from xarray.core import dtypes, duck_array_ops, formatting, formatting_html, ops\n from xarray.core.indexing import BasicIndexer, ExplicitlyIndexed\n from xarray.core.options import OPTIONS, _get_keep_attrs\n+from xarray.core.parallelcompat import get_chunked_array_type, guess_chunkmanager\n from xarray.core.pdcompat import _convert_base_to_offset\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.pycompat import is_chunked_array\n from xarray.core.utils import (\n     Frozen,\n     either_dict_or_kwargs,\n@@ -46,6 +47,7 @@\n         DTypeLikeSave,\n         ScalarOrArray,\n         SideOptions,\n+        T_Chunks,\n         T_DataWithCoords,\n         T_Variable,\n     )\n@@ -159,7 +161,7 @@ def __int__(self: Any) -> int:\n     def __complex__(self: Any) -> complex:\n         return complex(self.values)\n \n-    def __array__(self: Any, dtype: DTypeLike = None) -> np.ndarray:\n+    def __array__(self: Any, dtype: DTypeLike | None = None) -> np.ndarray:\n         return np.asarray(self.values, dtype=dtype)\n \n     def __repr__(self) -> str:\n@@ -1396,28 +1398,52 @@ def __getitem__(self, value):\n \n @overload\n def full_like(\n-    other: DataArray, fill_value: Any, dtype: DTypeLikeSave = None\n+    other: DataArray,\n+    fill_value: Any,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> DataArray:\n     ...\n \n \n @overload\n def full_like(\n-    other: Dataset, fill_value: Any, dtype: DTypeMaybeMapping = None\n+    other: Dataset,\n+    fill_value: Any,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset:\n     ...\n \n \n @overload\n def full_like(\n-    other: Variable, fill_value: Any, dtype: DTypeLikeSave = None\n+    other: Variable,\n+    fill_value: Any,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Variable:\n     ...\n \n \n @overload\n def full_like(\n-    other: Dataset | DataArray, fill_value: Any, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray,\n+    fill_value: Any,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = {},\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray:\n     ...\n \n@@ -1426,7 +1452,11 @@ def full_like(\n def full_like(\n     other: Dataset | DataArray | Variable,\n     fill_value: Any,\n-    dtype: DTypeMaybeMapping = None,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n     ...\n \n@@ -1434,9 +1464,16 @@ def full_like(\n def full_like(\n     other: Dataset | DataArray | Variable,\n     fill_value: Any,\n-    dtype: DTypeMaybeMapping = None,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n-    \"\"\"Return a new object with the same shape and type as a given object.\n+    \"\"\"\n+    Return a new object with the same shape and type as a given object.\n+\n+    Returned object will be chunked if if the given object is chunked, or if chunks or chunked_array_type are specified.\n \n     Parameters\n     ----------\n@@ -1449,6 +1486,18 @@ def full_like(\n     dtype : dtype or dict-like of dtype, optional\n         dtype of the new array. If a dict-like, maps dtypes to\n         variables. If omitted, it defaults to other.dtype.\n+    chunks : int, \"auto\", tuple of int or mapping of Hashable to int, optional\n+        Chunk sizes along each dimension, e.g., ``5``, ``\"auto\"``, ``(5, 5)`` or\n+        ``{\"x\": 5, \"y\": 5}``.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce the underlying data array to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict, optional\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        For example, with dask as the default chunked array type, this method would pass additional kwargs\n+        to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n \n     Returns\n     -------\n@@ -1562,7 +1611,12 @@ def full_like(\n \n         data_vars = {\n             k: _full_like_variable(\n-                v.variable, fill_value.get(k, dtypes.NA), dtype_.get(k, None)\n+                v.variable,\n+                fill_value.get(k, dtypes.NA),\n+                dtype_.get(k, None),\n+                chunks,\n+                chunked_array_type,\n+                from_array_kwargs,\n             )\n             for k, v in other.data_vars.items()\n         }\n@@ -1571,7 +1625,14 @@ def full_like(\n         if isinstance(dtype, Mapping):\n             raise ValueError(\"'dtype' cannot be dict-like when passing a DataArray\")\n         return DataArray(\n-            _full_like_variable(other.variable, fill_value, dtype),\n+            _full_like_variable(\n+                other.variable,\n+                fill_value,\n+                dtype,\n+                chunks,\n+                chunked_array_type,\n+                from_array_kwargs,\n+            ),\n             dims=other.dims,\n             coords=other.coords,\n             attrs=other.attrs,\n@@ -1580,13 +1641,20 @@ def full_like(\n     elif isinstance(other, Variable):\n         if isinstance(dtype, Mapping):\n             raise ValueError(\"'dtype' cannot be dict-like when passing a Variable\")\n-        return _full_like_variable(other, fill_value, dtype)\n+        return _full_like_variable(\n+            other, fill_value, dtype, chunks, chunked_array_type, from_array_kwargs\n+        )\n     else:\n         raise TypeError(\"Expected DataArray, Dataset, or Variable\")\n \n \n def _full_like_variable(\n-    other: Variable, fill_value: Any, dtype: DTypeLike = None\n+    other: Variable,\n+    fill_value: Any,\n+    dtype: DTypeLike | None = None,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Variable:\n     \"\"\"Inner function of full_like, where other must be a variable\"\"\"\n     from xarray.core.variable import Variable\n@@ -1594,13 +1662,28 @@ def _full_like_variable(\n     if fill_value is dtypes.NA:\n         fill_value = dtypes.get_fill_value(dtype if dtype is not None else other.dtype)\n \n-    if is_duck_dask_array(other.data):\n-        import dask.array\n+    if (\n+        is_chunked_array(other.data)\n+        or chunked_array_type is not None\n+        or chunks is not None\n+    ):\n+        if chunked_array_type is None:\n+            chunkmanager = get_chunked_array_type(other.data)\n+        else:\n+            chunkmanager = guess_chunkmanager(chunked_array_type)\n \n         if dtype is None:\n             dtype = other.dtype\n-        data = dask.array.full(\n-            other.shape, fill_value, dtype=dtype, chunks=other.data.chunks\n+\n+        if from_array_kwargs is None:\n+            from_array_kwargs = {}\n+\n+        data = chunkmanager.array_api.full(\n+            other.shape,\n+            fill_value,\n+            dtype=dtype,\n+            chunks=chunks if chunks else other.data.chunks,\n+            **from_array_kwargs,\n         )\n     else:\n         data = np.full_like(other.data, fill_value, dtype=dtype)\n@@ -1609,36 +1692,72 @@ def _full_like_variable(\n \n \n @overload\n-def zeros_like(other: DataArray, dtype: DTypeLikeSave = None) -> DataArray:\n+def zeros_like(\n+    other: DataArray,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> DataArray:\n     ...\n \n \n @overload\n-def zeros_like(other: Dataset, dtype: DTypeMaybeMapping = None) -> Dataset:\n+def zeros_like(\n+    other: Dataset,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> Dataset:\n     ...\n \n \n @overload\n-def zeros_like(other: Variable, dtype: DTypeLikeSave = None) -> Variable:\n+def zeros_like(\n+    other: Variable,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> Variable:\n     ...\n \n \n @overload\n def zeros_like(\n-    other: Dataset | DataArray, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray:\n     ...\n \n \n @overload\n def zeros_like(\n-    other: Dataset | DataArray | Variable, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray | Variable,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n     ...\n \n \n def zeros_like(\n-    other: Dataset | DataArray | Variable, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray | Variable,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n     \"\"\"Return a new object of zeros with the same shape and\n     type as a given dataarray or dataset.\n@@ -1649,6 +1768,18 @@ def zeros_like(\n         The reference object. The output will have the same dimensions and coordinates as this object.\n     dtype : dtype, optional\n         dtype of the new array. If omitted, it defaults to other.dtype.\n+    chunks : int, \"auto\", tuple of int or mapping of Hashable to int, optional\n+        Chunk sizes along each dimension, e.g., ``5``, ``\"auto\"``, ``(5, 5)`` or\n+        ``{\"x\": 5, \"y\": 5}``.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce the underlying data array to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict, optional\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        For example, with dask as the default chunked array type, this method would pass additional kwargs\n+        to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n \n     Returns\n     -------\n@@ -1692,40 +1823,83 @@ def zeros_like(\n     full_like\n \n     \"\"\"\n-    return full_like(other, 0, dtype)\n+    return full_like(\n+        other,\n+        0,\n+        dtype,\n+        chunks=chunks,\n+        chunked_array_type=chunked_array_type,\n+        from_array_kwargs=from_array_kwargs,\n+    )\n \n \n @overload\n-def ones_like(other: DataArray, dtype: DTypeLikeSave = None) -> DataArray:\n+def ones_like(\n+    other: DataArray,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> DataArray:\n     ...\n \n \n @overload\n-def ones_like(other: Dataset, dtype: DTypeMaybeMapping = None) -> Dataset:\n+def ones_like(\n+    other: Dataset,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> Dataset:\n     ...\n \n \n @overload\n-def ones_like(other: Variable, dtype: DTypeLikeSave = None) -> Variable:\n+def ones_like(\n+    other: Variable,\n+    dtype: DTypeLikeSave | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n+) -> Variable:\n     ...\n \n \n @overload\n def ones_like(\n-    other: Dataset | DataArray, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray:\n     ...\n \n \n @overload\n def ones_like(\n-    other: Dataset | DataArray | Variable, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray | Variable,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n     ...\n \n \n def ones_like(\n-    other: Dataset | DataArray | Variable, dtype: DTypeMaybeMapping = None\n+    other: Dataset | DataArray | Variable,\n+    dtype: DTypeMaybeMapping | None = None,\n+    *,\n+    chunks: T_Chunks = None,\n+    chunked_array_type: str | None = None,\n+    from_array_kwargs: dict[str, Any] | None = None,\n ) -> Dataset | DataArray | Variable:\n     \"\"\"Return a new object of ones with the same shape and\n     type as a given dataarray or dataset.\n@@ -1736,6 +1910,18 @@ def ones_like(\n         The reference object. The output will have the same dimensions and coordinates as this object.\n     dtype : dtype, optional\n         dtype of the new array. If omitted, it defaults to other.dtype.\n+    chunks : int, \"auto\", tuple of int or mapping of Hashable to int, optional\n+        Chunk sizes along each dimension, e.g., ``5``, ``\"auto\"``, ``(5, 5)`` or\n+        ``{\"x\": 5, \"y\": 5}``.\n+    chunked_array_type: str, optional\n+        Which chunked array type to coerce the underlying data array to.\n+        Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+        Experimental API that should not be relied upon.\n+    from_array_kwargs: dict, optional\n+        Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+        chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+        For example, with dask as the default chunked array type, this method would pass additional kwargs\n+        to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n \n     Returns\n     -------\n@@ -1771,7 +1957,14 @@ def ones_like(\n     full_like\n \n     \"\"\"\n-    return full_like(other, 1, dtype)\n+    return full_like(\n+        other,\n+        1,\n+        dtype,\n+        chunks=chunks,\n+        chunked_array_type=chunked_array_type,\n+        from_array_kwargs=from_array_kwargs,\n+    )\n \n \n def get_chunksizes(\ndiff --git a/xarray/core/computation.py b/xarray/core/computation.py\n--- a/xarray/core/computation.py\n+++ b/xarray/core/computation.py\n@@ -20,7 +20,8 @@\n from xarray.core.indexes import Index, filter_indexes_from_coords\n from xarray.core.merge import merge_attrs, merge_coordinates_without_align\n from xarray.core.options import OPTIONS, _get_keep_attrs\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.parallelcompat import get_chunked_array_type\n+from xarray.core.pycompat import is_chunked_array, is_duck_dask_array\n from xarray.core.types import Dims, T_DataArray\n from xarray.core.utils import is_dict_like, is_scalar\n from xarray.core.variable import Variable\n@@ -675,16 +676,18 @@ def apply_variable_ufunc(\n         for arg, core_dims in zip(args, signature.input_core_dims)\n     ]\n \n-    if any(is_duck_dask_array(array) for array in input_data):\n+    if any(is_chunked_array(array) for array in input_data):\n         if dask == \"forbidden\":\n             raise ValueError(\n-                \"apply_ufunc encountered a dask array on an \"\n-                \"argument, but handling for dask arrays has not \"\n+                \"apply_ufunc encountered a chunked array on an \"\n+                \"argument, but handling for chunked arrays has not \"\n                 \"been enabled. Either set the ``dask`` argument \"\n                 \"or load your data into memory first with \"\n                 \"``.load()`` or ``.compute()``\"\n             )\n         elif dask == \"parallelized\":\n+            chunkmanager = get_chunked_array_type(*input_data)\n+\n             numpy_func = func\n \n             if dask_gufunc_kwargs is None:\n@@ -697,7 +700,7 @@ def apply_variable_ufunc(\n                 for n, (data, core_dims) in enumerate(\n                     zip(input_data, signature.input_core_dims)\n                 ):\n-                    if is_duck_dask_array(data):\n+                    if is_chunked_array(data):\n                         # core dimensions cannot span multiple chunks\n                         for axis, dim in enumerate(core_dims, start=-len(core_dims)):\n                             if len(data.chunks[axis]) != 1:\n@@ -705,7 +708,7 @@ def apply_variable_ufunc(\n                                     f\"dimension {dim} on {n}th function argument to \"\n                                     \"apply_ufunc with dask='parallelized' consists of \"\n                                     \"multiple chunks, but is also a core dimension. To \"\n-                                    \"fix, either rechunk into a single dask array chunk along \"\n+                                    \"fix, either rechunk into a single array chunk along \"\n                                     f\"this dimension, i.e., ``.chunk(dict({dim}=-1))``, or \"\n                                     \"pass ``allow_rechunk=True`` in ``dask_gufunc_kwargs`` \"\n                                     \"but beware that this may significantly increase memory usage.\"\n@@ -732,9 +735,7 @@ def apply_variable_ufunc(\n                     )\n \n             def func(*arrays):\n-                import dask.array as da\n-\n-                res = da.apply_gufunc(\n+                res = chunkmanager.apply_gufunc(\n                     numpy_func,\n                     signature.to_gufunc_string(exclude_dims),\n                     *arrays,\n@@ -749,8 +750,7 @@ def func(*arrays):\n             pass\n         else:\n             raise ValueError(\n-                \"unknown setting for dask array handling in \"\n-                \"apply_ufunc: {}\".format(dask)\n+                \"unknown setting for chunked array handling in \" f\"apply_ufunc: {dask}\"\n             )\n     else:\n         if vectorize:\n@@ -812,7 +812,7 @@ def func(*arrays):\n \n def apply_array_ufunc(func, *args, dask=\"forbidden\"):\n     \"\"\"Apply a ndarray level function over ndarray objects.\"\"\"\n-    if any(is_duck_dask_array(arg) for arg in args):\n+    if any(is_chunked_array(arg) for arg in args):\n         if dask == \"forbidden\":\n             raise ValueError(\n                 \"apply_ufunc encountered a dask array on an \"\n@@ -2013,7 +2013,7 @@ def to_floatable(x: DataArray) -> DataArray:\n             )\n         elif x.dtype.kind == \"m\":\n             # timedeltas\n-            return x.astype(float)\n+            return duck_array_ops.astype(x, dtype=float)\n         return x\n \n     if isinstance(data, Dataset):\n@@ -2061,12 +2061,11 @@ def _calc_idxminmax(\n     # This will run argmin or argmax.\n     indx = func(array, dim=dim, axis=None, keep_attrs=keep_attrs, skipna=skipna)\n \n-    # Handle dask arrays.\n-    if is_duck_dask_array(array.data):\n-        import dask.array\n-\n+    # Handle chunked arrays (e.g. dask).\n+    if is_chunked_array(array.data):\n+        chunkmanager = get_chunked_array_type(array.data)\n         chunks = dict(zip(array.dims, array.chunks))\n-        dask_coord = dask.array.from_array(array[dim].data, chunks=chunks[dim])\n+        dask_coord = chunkmanager.from_array(array[dim].data, chunks=chunks[dim])\n         res = indx.copy(data=dask_coord[indx.data.ravel()].reshape(indx.shape))\n         # we need to attach back the dim name\n         res.name = dim\n@@ -2153,16 +2152,14 @@ def unify_chunks(*objects: Dataset | DataArray) -> tuple[Dataset | DataArray, ..\n     if not unify_chunks_args:\n         return objects\n \n-    # Run dask.array.core.unify_chunks\n-    from dask.array.core import unify_chunks\n-\n-    _, dask_data = unify_chunks(*unify_chunks_args)\n-    dask_data_iter = iter(dask_data)\n+    chunkmanager = get_chunked_array_type(*[arg for arg in unify_chunks_args])\n+    _, chunked_data = chunkmanager.unify_chunks(*unify_chunks_args)\n+    chunked_data_iter = iter(chunked_data)\n     out: list[Dataset | DataArray] = []\n     for obj, ds in zip(objects, datasets):\n         for k, v in ds._variables.items():\n             if v.chunks is not None:\n-                ds._variables[k] = v.copy(data=next(dask_data_iter))\n+                ds._variables[k] = v.copy(data=next(chunked_data_iter))\n         out.append(obj._from_temp_dataset(ds) if isinstance(obj, DataArray) else ds)\n \n     return tuple(out)\ndiff --git a/xarray/core/dask_array_ops.py b/xarray/core/dask_array_ops.py\n--- a/xarray/core/dask_array_ops.py\n+++ b/xarray/core/dask_array_ops.py\n@@ -1,9 +1,5 @@\n from __future__ import annotations\n \n-from functools import partial\n-\n-from numpy.core.multiarray import normalize_axis_index  # type: ignore[attr-defined]\n-\n from xarray.core import dtypes, nputils\n \n \n@@ -96,36 +92,3 @@ def _fill_with_last_one(a, b):\n         axis=axis,\n         dtype=array.dtype,\n     )\n-\n-\n-def _first_last_wrapper(array, *, axis, op, keepdims):\n-    return op(array, axis, keepdims=keepdims)\n-\n-\n-def _first_or_last(darray, axis, op):\n-    import dask.array\n-\n-    # This will raise the same error message seen for numpy\n-    axis = normalize_axis_index(axis, darray.ndim)\n-\n-    wrapped_op = partial(_first_last_wrapper, op=op)\n-    return dask.array.reduction(\n-        darray,\n-        chunk=wrapped_op,\n-        aggregate=wrapped_op,\n-        axis=axis,\n-        dtype=darray.dtype,\n-        keepdims=False,  # match numpy version\n-    )\n-\n-\n-def nanfirst(darray, axis):\n-    from xarray.core.duck_array_ops import nanfirst\n-\n-    return _first_or_last(darray, axis, op=nanfirst)\n-\n-\n-def nanlast(darray, axis):\n-    from xarray.core.duck_array_ops import nanlast\n-\n-    return _first_or_last(darray, axis, op=nanlast)\ndiff --git a/xarray/core/daskmanager.py b/xarray/core/daskmanager.py\nnew file mode 100644\n--- /dev/null\n+++ b/xarray/core/daskmanager.py\n@@ -0,0 +1,215 @@\n+from __future__ import annotations\n+\n+from collections.abc import Iterable, Sequence\n+from typing import TYPE_CHECKING, Any, Callable\n+\n+import numpy as np\n+from packaging.version import Version\n+\n+from xarray.core.duck_array_ops import dask_available\n+from xarray.core.indexing import ImplicitToExplicitIndexingAdapter\n+from xarray.core.parallelcompat import ChunkManagerEntrypoint, T_ChunkedArray\n+from xarray.core.pycompat import is_duck_dask_array\n+\n+if TYPE_CHECKING:\n+    from xarray.core.types import DaskArray, T_Chunks, T_NormalizedChunks\n+\n+\n+class DaskManager(ChunkManagerEntrypoint[\"DaskArray\"]):\n+    array_cls: type[DaskArray]\n+    available: bool = dask_available\n+\n+    def __init__(self) -> None:\n+        # TODO can we replace this with a class attribute instead?\n+\n+        from dask.array import Array\n+\n+        self.array_cls = Array\n+\n+    def is_chunked_array(self, data: Any) -> bool:\n+        return is_duck_dask_array(data)\n+\n+    def chunks(self, data: DaskArray) -> T_NormalizedChunks:\n+        return data.chunks\n+\n+    def normalize_chunks(\n+        self,\n+        chunks: T_Chunks | T_NormalizedChunks,\n+        shape: tuple[int, ...] | None = None,\n+        limit: int | None = None,\n+        dtype: np.dtype | None = None,\n+        previous_chunks: T_NormalizedChunks | None = None,\n+    ) -> T_NormalizedChunks:\n+        \"\"\"Called by open_dataset\"\"\"\n+        from dask.array.core import normalize_chunks\n+\n+        return normalize_chunks(\n+            chunks,\n+            shape=shape,\n+            limit=limit,\n+            dtype=dtype,\n+            previous_chunks=previous_chunks,\n+        )\n+\n+    def from_array(self, data: Any, chunks, **kwargs) -> DaskArray:\n+        import dask.array as da\n+\n+        if isinstance(data, ImplicitToExplicitIndexingAdapter):\n+            # lazily loaded backend array classes should use NumPy array operations.\n+            kwargs[\"meta\"] = np.ndarray\n+\n+        return da.from_array(\n+            data,\n+            chunks,\n+            **kwargs,\n+        )\n+\n+    def compute(self, *data: DaskArray, **kwargs) -> tuple[np.ndarray, ...]:\n+        from dask.array import compute\n+\n+        return compute(*data, **kwargs)\n+\n+    @property\n+    def array_api(self) -> Any:\n+        from dask import array as da\n+\n+        return da\n+\n+    def reduction(\n+        self,\n+        arr: T_ChunkedArray,\n+        func: Callable,\n+        combine_func: Callable | None = None,\n+        aggregate_func: Callable | None = None,\n+        axis: int | Sequence[int] | None = None,\n+        dtype: np.dtype | None = None,\n+        keepdims: bool = False,\n+    ) -> T_ChunkedArray:\n+        from dask.array import reduction\n+\n+        return reduction(\n+            arr,\n+            chunk=func,\n+            combine=combine_func,\n+            aggregate=aggregate_func,\n+            axis=axis,\n+            dtype=dtype,\n+            keepdims=keepdims,\n+        )\n+\n+    def apply_gufunc(\n+        self,\n+        func: Callable,\n+        signature: str,\n+        *args: Any,\n+        axes: Sequence[tuple[int, ...]] | None = None,\n+        axis: int | None = None,\n+        keepdims: bool = False,\n+        output_dtypes: Sequence[np.typing.DTypeLike] | None = None,\n+        output_sizes: dict[str, int] | None = None,\n+        vectorize: bool | None = None,\n+        allow_rechunk: bool = False,\n+        meta: tuple[np.ndarray, ...] | None = None,\n+        **kwargs,\n+    ):\n+        from dask.array.gufunc import apply_gufunc\n+\n+        return apply_gufunc(\n+            func,\n+            signature,\n+            *args,\n+            axes=axes,\n+            axis=axis,\n+            keepdims=keepdims,\n+            output_dtypes=output_dtypes,\n+            output_sizes=output_sizes,\n+            vectorize=vectorize,\n+            allow_rechunk=allow_rechunk,\n+            meta=meta,\n+            **kwargs,\n+        )\n+\n+    def map_blocks(\n+        self,\n+        func: Callable,\n+        *args: Any,\n+        dtype: np.typing.DTypeLike | None = None,\n+        chunks: tuple[int, ...] | None = None,\n+        drop_axis: int | Sequence[int] | None = None,\n+        new_axis: int | Sequence[int] | None = None,\n+        **kwargs,\n+    ):\n+        import dask\n+        from dask.array import map_blocks\n+\n+        if drop_axis is None and Version(dask.__version__) < Version(\"2022.9.1\"):\n+            # See https://github.com/pydata/xarray/pull/7019#discussion_r1196729489\n+            # TODO remove once dask minimum version >= 2022.9.1\n+            drop_axis = []\n+\n+        # pass through name, meta, token as kwargs\n+        return map_blocks(\n+            func,\n+            *args,\n+            dtype=dtype,\n+            chunks=chunks,\n+            drop_axis=drop_axis,\n+            new_axis=new_axis,\n+            **kwargs,\n+        )\n+\n+    def blockwise(\n+        self,\n+        func: Callable,\n+        out_ind: Iterable,\n+        *args: Any,\n+        # can't type this as mypy assumes args are all same type, but dask blockwise args alternate types\n+        name: str | None = None,\n+        token=None,\n+        dtype: np.dtype | None = None,\n+        adjust_chunks: dict[Any, Callable] | None = None,\n+        new_axes: dict[Any, int] | None = None,\n+        align_arrays: bool = True,\n+        concatenate: bool | None = None,\n+        meta=None,\n+        **kwargs,\n+    ):\n+        from dask.array import blockwise\n+\n+        return blockwise(\n+            func,\n+            out_ind,\n+            *args,\n+            name=name,\n+            token=token,\n+            dtype=dtype,\n+            adjust_chunks=adjust_chunks,\n+            new_axes=new_axes,\n+            align_arrays=align_arrays,\n+            concatenate=concatenate,\n+            meta=meta,\n+            **kwargs,\n+        )\n+\n+    def unify_chunks(\n+        self,\n+        *args: Any,  # can't type this as mypy assumes args are all same type, but dask unify_chunks args alternate types\n+        **kwargs,\n+    ) -> tuple[dict[str, T_NormalizedChunks], list[DaskArray]]:\n+        from dask.array.core import unify_chunks\n+\n+        return unify_chunks(*args, **kwargs)\n+\n+    def store(\n+        self,\n+        sources: DaskArray | Sequence[DaskArray],\n+        targets: Any,\n+        **kwargs,\n+    ):\n+        from dask.array import store\n+\n+        return store(\n+            sources=sources,\n+            targets=targets,\n+            **kwargs,\n+        )\ndiff --git a/xarray/core/dataarray.py b/xarray/core/dataarray.py\n--- a/xarray/core/dataarray.py\n+++ b/xarray/core/dataarray.py\n@@ -77,6 +77,7 @@\n     from xarray.backends import ZarrStore\n     from xarray.backends.api import T_NetcdfEngine, T_NetcdfTypes\n     from xarray.core.groupby import DataArrayGroupBy\n+    from xarray.core.parallelcompat import ChunkManagerEntrypoint\n     from xarray.core.resample import DataArrayResample\n     from xarray.core.rolling import DataArrayCoarsen, DataArrayRolling\n     from xarray.core.types import (\n@@ -1264,6 +1265,8 @@ def chunk(\n         token: str | None = None,\n         lock: bool = False,\n         inline_array: bool = False,\n+        chunked_array_type: str | ChunkManagerEntrypoint | None = None,\n+        from_array_kwargs=None,\n         **chunks_kwargs: Any,\n     ) -> T_DataArray:\n         \"\"\"Coerce this array's data into a dask arrays with the given chunks.\n@@ -1285,12 +1288,21 @@ def chunk(\n             Prefix for the name of the new dask array.\n         token : str, optional\n             Token uniquely identifying this array.\n-        lock : optional\n+        lock : bool, default: False\n             Passed on to :py:func:`dask.array.from_array`, if the array is not\n             already as dask array.\n-        inline_array: optional\n+        inline_array: bool, default: False\n             Passed on to :py:func:`dask.array.from_array`, if the array is not\n             already as dask array.\n+        chunked_array_type: str, optional\n+            Which chunked array type to coerce the underlying data array to.\n+            Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEntryPoint` system.\n+            Experimental API that should not be relied upon.\n+        from_array_kwargs: dict, optional\n+            Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+            chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+            For example, with dask as the default chunked array type, this method would pass additional kwargs\n+            to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n         **chunks_kwargs : {dim: chunks, ...}, optional\n             The keyword arguments form of ``chunks``.\n             One of chunks or chunks_kwargs must be provided.\n@@ -1328,6 +1340,8 @@ def chunk(\n             token=token,\n             lock=lock,\n             inline_array=inline_array,\n+            chunked_array_type=chunked_array_type,\n+            from_array_kwargs=from_array_kwargs,\n         )\n         return self._from_temp_dataset(ds)\n \ndiff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -51,6 +51,7 @@\n )\n from xarray.core.computation import unify_chunks\n from xarray.core.coordinates import DatasetCoordinates, assert_coordinate_consistent\n+from xarray.core.daskmanager import DaskManager\n from xarray.core.duck_array_ops import datetime_to_numeric\n from xarray.core.indexes import (\n     Index,\n@@ -73,7 +74,16 @@\n )\n from xarray.core.missing import get_clean_interp_index\n from xarray.core.options import OPTIONS, _get_keep_attrs\n-from xarray.core.pycompat import array_type, is_duck_array, is_duck_dask_array\n+from xarray.core.parallelcompat import (\n+    get_chunked_array_type,\n+    guess_chunkmanager,\n+)\n+from xarray.core.pycompat import (\n+    array_type,\n+    is_chunked_array,\n+    is_duck_array,\n+    is_duck_dask_array,\n+)\n from xarray.core.types import QuantileMethods, T_Dataset\n from xarray.core.utils import (\n     Default,\n@@ -107,6 +117,7 @@\n     from xarray.core.dataarray import DataArray\n     from xarray.core.groupby import DatasetGroupBy\n     from xarray.core.merge import CoercibleMapping\n+    from xarray.core.parallelcompat import ChunkManagerEntrypoint\n     from xarray.core.resample import DatasetResample\n     from xarray.core.rolling import DatasetCoarsen, DatasetRolling\n     from xarray.core.types import (\n@@ -202,13 +213,11 @@ def _assert_empty(args: tuple, msg: str = \"%s\") -> None:\n         raise ValueError(msg % args)\n \n \n-def _get_chunk(var, chunks):\n+def _get_chunk(var: Variable, chunks, chunkmanager: ChunkManagerEntrypoint):\n     \"\"\"\n     Return map from each dim to chunk sizes, accounting for backend's preferred chunks.\n     \"\"\"\n \n-    import dask.array as da\n-\n     if isinstance(var, IndexVariable):\n         return {}\n     dims = var.dims\n@@ -225,7 +234,8 @@ def _get_chunk(var, chunks):\n         chunks.get(dim, None) or preferred_chunk_sizes\n         for dim, preferred_chunk_sizes in zip(dims, preferred_chunk_shape)\n     )\n-    chunk_shape = da.core.normalize_chunks(\n+\n+    chunk_shape = chunkmanager.normalize_chunks(\n         chunk_shape, shape=shape, dtype=var.dtype, previous_chunks=preferred_chunk_shape\n     )\n \n@@ -242,7 +252,7 @@ def _get_chunk(var, chunks):\n             # expresses the preferred chunks, the sequence sums to the size.\n             preferred_stops = (\n                 range(preferred_chunk_sizes, size, preferred_chunk_sizes)\n-                if isinstance(preferred_chunk_sizes, Number)\n+                if isinstance(preferred_chunk_sizes, int)\n                 else itertools.accumulate(preferred_chunk_sizes[:-1])\n             )\n             # Gather any stop indices of the specified chunks that are not a stop index\n@@ -253,7 +263,7 @@ def _get_chunk(var, chunks):\n             )\n             if breaks:\n                 warnings.warn(\n-                    \"The specified Dask chunks separate the stored chunks along \"\n+                    \"The specified chunks separate the stored chunks along \"\n                     f'dimension \"{dim}\" starting at index {min(breaks)}. This could '\n                     \"degrade performance. Instead, consider rechunking after loading.\"\n                 )\n@@ -270,18 +280,37 @@ def _maybe_chunk(\n     name_prefix=\"xarray-\",\n     overwrite_encoded_chunks=False,\n     inline_array=False,\n+    chunked_array_type: str | ChunkManagerEntrypoint | None = None,\n+    from_array_kwargs=None,\n ):\n-    from dask.base import tokenize\n-\n     if chunks is not None:\n         chunks = {dim: chunks[dim] for dim in var.dims if dim in chunks}\n+\n     if var.ndim:\n-        # when rechunking by different amounts, make sure dask names change\n-        # by provinding chunks as an input to tokenize.\n-        # subtle bugs result otherwise. see GH3350\n-        token2 = tokenize(name, token if token else var._data, chunks)\n-        name2 = f\"{name_prefix}{name}-{token2}\"\n-        var = var.chunk(chunks, name=name2, lock=lock, inline_array=inline_array)\n+        chunked_array_type = guess_chunkmanager(\n+            chunked_array_type\n+        )  # coerce string to ChunkManagerEntrypoint type\n+        if isinstance(chunked_array_type, DaskManager):\n+            from dask.base import tokenize\n+\n+            # when rechunking by different amounts, make sure dask names change\n+            # by providing chunks as an input to tokenize.\n+            # subtle bugs result otherwise. see GH3350\n+            token2 = tokenize(name, token if token else var._data, chunks)\n+            name2 = f\"{name_prefix}{name}-{token2}\"\n+\n+            from_array_kwargs = utils.consolidate_dask_from_array_kwargs(\n+                from_array_kwargs,\n+                name=name2,\n+                lock=lock,\n+                inline_array=inline_array,\n+            )\n+\n+        var = var.chunk(\n+            chunks,\n+            chunked_array_type=chunked_array_type,\n+            from_array_kwargs=from_array_kwargs,\n+        )\n \n         if overwrite_encoded_chunks and var.chunks is not None:\n             var.encoding[\"chunks\"] = tuple(x[0] for x in var.chunks)\n@@ -743,13 +772,13 @@ def load(self: T_Dataset, **kwargs) -> T_Dataset:\n         \"\"\"\n         # access .data to coerce everything to numpy or dask arrays\n         lazy_data = {\n-            k: v._data for k, v in self.variables.items() if is_duck_dask_array(v._data)\n+            k: v._data for k, v in self.variables.items() if is_chunked_array(v._data)\n         }\n         if lazy_data:\n-            import dask.array as da\n+            chunkmanager = get_chunked_array_type(*lazy_data.values())\n \n-            # evaluate all the dask arrays simultaneously\n-            evaluated_data = da.compute(*lazy_data.values(), **kwargs)\n+            # evaluate all the chunked arrays simultaneously\n+            evaluated_data = chunkmanager.compute(*lazy_data.values(), **kwargs)\n \n             for k, data in zip(lazy_data, evaluated_data):\n                 self.variables[k].data = data\n@@ -1575,7 +1604,7 @@ def _setitem_check(self, key, value):\n                 val = np.array(val)\n \n             # type conversion\n-            new_value[name] = val.astype(var_k.dtype, copy=False)\n+            new_value[name] = duck_array_ops.astype(val, dtype=var_k.dtype, copy=False)\n \n         # check consistency of dimension sizes and dimension coordinates\n         if isinstance(value, DataArray) or isinstance(value, Dataset):\n@@ -1945,6 +1974,7 @@ def to_zarr(\n         safe_chunks: bool = True,\n         storage_options: dict[str, str] | None = None,\n         zarr_version: int | None = None,\n+        chunkmanager_store_kwargs: dict[str, Any] | None = None,\n     ) -> ZarrStore:\n         ...\n \n@@ -1966,6 +1996,7 @@ def to_zarr(\n         safe_chunks: bool = True,\n         storage_options: dict[str, str] | None = None,\n         zarr_version: int | None = None,\n+        chunkmanager_store_kwargs: dict[str, Any] | None = None,\n     ) -> Delayed:\n         ...\n \n@@ -1984,6 +2015,7 @@ def to_zarr(\n         safe_chunks: bool = True,\n         storage_options: dict[str, str] | None = None,\n         zarr_version: int | None = None,\n+        chunkmanager_store_kwargs: dict[str, Any] | None = None,\n     ) -> ZarrStore | Delayed:\n         \"\"\"Write dataset contents to a zarr group.\n \n@@ -2072,6 +2104,10 @@ def to_zarr(\n             The desired zarr spec version to target (currently 2 or 3). The\n             default of None will attempt to determine the zarr version from\n             ``store`` when possible, otherwise defaulting to 2.\n+        chunkmanager_store_kwargs : dict, optional\n+            Additional keyword arguments passed on to the `ChunkManager.store` method used to store\n+            chunked arrays. For example for a dask array additional kwargs will be passed eventually to\n+            :py:func:`dask.array.store()`. Experimental API that should not be relied upon.\n \n         Returns\n         -------\n@@ -2117,6 +2153,7 @@ def to_zarr(\n             region=region,\n             safe_chunks=safe_chunks,\n             zarr_version=zarr_version,\n+            chunkmanager_store_kwargs=chunkmanager_store_kwargs,\n         )\n \n     def __repr__(self) -> str:\n@@ -2205,6 +2242,8 @@ def chunk(\n         token: str | None = None,\n         lock: bool = False,\n         inline_array: bool = False,\n+        chunked_array_type: str | ChunkManagerEntrypoint | None = None,\n+        from_array_kwargs=None,\n         **chunks_kwargs: None | int | str | tuple[int, ...],\n     ) -> T_Dataset:\n         \"\"\"Coerce all arrays in this dataset into dask arrays with the given\n@@ -2232,6 +2271,15 @@ def chunk(\n         inline_array: bool, default: False\n             Passed on to :py:func:`dask.array.from_array`, if the array is not\n             already as dask array.\n+        chunked_array_type: str, optional\n+            Which chunked array type to coerce this datasets' arrays to.\n+            Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEnetryPoint` system.\n+            Experimental API that should not be relied upon.\n+        from_array_kwargs: dict, optional\n+            Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+            chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+            For example, with dask as the default chunked array type, this method would pass additional kwargs\n+            to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n         **chunks_kwargs : {dim: chunks, ...}, optional\n             The keyword arguments form of ``chunks``.\n             One of chunks or chunks_kwargs must be provided\n@@ -2266,8 +2314,22 @@ def chunk(\n                 f\"some chunks keys are not dimensions on this object: {bad_dims}\"\n             )\n \n+        chunkmanager = guess_chunkmanager(chunked_array_type)\n+        if from_array_kwargs is None:\n+            from_array_kwargs = {}\n+\n         variables = {\n-            k: _maybe_chunk(k, v, chunks, token, lock, name_prefix)\n+            k: _maybe_chunk(\n+                k,\n+                v,\n+                chunks,\n+                token,\n+                lock,\n+                name_prefix,\n+                inline_array=inline_array,\n+                chunked_array_type=chunkmanager,\n+                from_array_kwargs=from_array_kwargs.copy(),\n+            )\n             for k, v in self.variables.items()\n         }\n         return self._replace(variables)\n@@ -2305,7 +2367,7 @@ def _validate_indexers(\n                 if v.dtype.kind in \"US\":\n                     index = self._indexes[k].to_pandas_index()\n                     if isinstance(index, pd.DatetimeIndex):\n-                        v = v.astype(\"datetime64[ns]\")\n+                        v = duck_array_ops.astype(v, dtype=\"datetime64[ns]\")\n                     elif isinstance(index, CFTimeIndex):\n                         v = _parse_array_of_cftime_strings(v, index.date_type)\n \ndiff --git a/xarray/core/duck_array_ops.py b/xarray/core/duck_array_ops.py\n--- a/xarray/core/duck_array_ops.py\n+++ b/xarray/core/duck_array_ops.py\n@@ -9,6 +9,7 @@\n import datetime\n import inspect\n import warnings\n+from functools import partial\n from importlib import import_module\n \n import numpy as np\n@@ -29,10 +30,11 @@\n     zeros_like,  # noqa\n )\n from numpy import concatenate as _concatenate\n+from numpy.core.multiarray import normalize_axis_index  # type: ignore[attr-defined]\n from numpy.lib.stride_tricks import sliding_window_view  # noqa\n \n from xarray.core import dask_array_ops, dtypes, nputils\n-from xarray.core.nputils import nanfirst, nanlast\n+from xarray.core.parallelcompat import get_chunked_array_type, is_chunked_array\n from xarray.core.pycompat import array_type, is_duck_dask_array\n from xarray.core.utils import is_duck_array, module_available\n \n@@ -640,10 +642,10 @@ def first(values, axis, skipna=None):\n     \"\"\"Return the first non-NA elements in this array along the given axis\"\"\"\n     if (skipna or skipna is None) and values.dtype.kind not in \"iSU\":\n         # only bother for dtypes that can hold NaN\n-        if is_duck_dask_array(values):\n-            return dask_array_ops.nanfirst(values, axis)\n+        if is_chunked_array(values):\n+            return chunked_nanfirst(values, axis)\n         else:\n-            return nanfirst(values, axis)\n+            return nputils.nanfirst(values, axis)\n     return take(values, 0, axis=axis)\n \n \n@@ -651,10 +653,10 @@ def last(values, axis, skipna=None):\n     \"\"\"Return the last non-NA elements in this array along the given axis\"\"\"\n     if (skipna or skipna is None) and values.dtype.kind not in \"iSU\":\n         # only bother for dtypes that can hold NaN\n-        if is_duck_dask_array(values):\n-            return dask_array_ops.nanlast(values, axis)\n+        if is_chunked_array(values):\n+            return chunked_nanlast(values, axis)\n         else:\n-            return nanlast(values, axis)\n+            return nputils.nanlast(values, axis)\n     return take(values, -1, axis=axis)\n \n \n@@ -673,3 +675,32 @@ def push(array, n, axis):\n         return dask_array_ops.push(array, n, axis)\n     else:\n         return push(array, n, axis)\n+\n+\n+def _first_last_wrapper(array, *, axis, op, keepdims):\n+    return op(array, axis, keepdims=keepdims)\n+\n+\n+def _chunked_first_or_last(darray, axis, op):\n+    chunkmanager = get_chunked_array_type(darray)\n+\n+    # This will raise the same error message seen for numpy\n+    axis = normalize_axis_index(axis, darray.ndim)\n+\n+    wrapped_op = partial(_first_last_wrapper, op=op)\n+    return chunkmanager.reduction(\n+        darray,\n+        func=wrapped_op,\n+        aggregate_func=wrapped_op,\n+        axis=axis,\n+        dtype=darray.dtype,\n+        keepdims=False,  # match numpy version\n+    )\n+\n+\n+def chunked_nanfirst(darray, axis):\n+    return _chunked_first_or_last(darray, axis, op=nputils.nanfirst)\n+\n+\n+def chunked_nanlast(darray, axis):\n+    return _chunked_first_or_last(darray, axis, op=nputils.nanlast)\ndiff --git a/xarray/core/indexing.py b/xarray/core/indexing.py\n--- a/xarray/core/indexing.py\n+++ b/xarray/core/indexing.py\n@@ -17,6 +17,7 @@\n from xarray.core import duck_array_ops\n from xarray.core.nputils import NumpyVIndexAdapter\n from xarray.core.options import OPTIONS\n+from xarray.core.parallelcompat import get_chunked_array_type, is_chunked_array\n from xarray.core.pycompat import (\n     array_type,\n     integer_types,\n@@ -1142,16 +1143,15 @@ def _arrayize_vectorized_indexer(indexer, shape):\n     return VectorizedIndexer(tuple(new_key))\n \n \n-def _dask_array_with_chunks_hint(array, chunks):\n-    \"\"\"Create a dask array using the chunks hint for dimensions of size > 1.\"\"\"\n-    import dask.array as da\n+def _chunked_array_with_chunks_hint(array, chunks, chunkmanager):\n+    \"\"\"Create a chunked array using the chunks hint for dimensions of size > 1.\"\"\"\n \n     if len(chunks) < array.ndim:\n         raise ValueError(\"not enough chunks in hint\")\n     new_chunks = []\n     for chunk, size in zip(chunks, array.shape):\n         new_chunks.append(chunk if size > 1 else (1,))\n-    return da.from_array(array, new_chunks)\n+    return chunkmanager.from_array(array, new_chunks)\n \n \n def _logical_any(args):\n@@ -1165,8 +1165,11 @@ def _masked_result_drop_slice(key, data=None):\n     new_keys = []\n     for k in key:\n         if isinstance(k, np.ndarray):\n-            if is_duck_dask_array(data):\n-                new_keys.append(_dask_array_with_chunks_hint(k, chunks_hint))\n+            if is_chunked_array(data):\n+                chunkmanager = get_chunked_array_type(data)\n+                new_keys.append(\n+                    _chunked_array_with_chunks_hint(k, chunks_hint, chunkmanager)\n+                )\n             elif isinstance(data, array_type(\"sparse\")):\n                 import sparse\n \ndiff --git a/xarray/core/missing.py b/xarray/core/missing.py\n--- a/xarray/core/missing.py\n+++ b/xarray/core/missing.py\n@@ -15,7 +15,7 @@\n from xarray.core.computation import apply_ufunc\n from xarray.core.duck_array_ops import datetime_to_numeric, push, timedelta_to_numeric\n from xarray.core.options import OPTIONS, _get_keep_attrs\n-from xarray.core.pycompat import is_duck_dask_array\n+from xarray.core.parallelcompat import get_chunked_array_type, is_chunked_array\n from xarray.core.types import Interp1dOptions, InterpOptions\n from xarray.core.utils import OrderedSet, is_scalar\n from xarray.core.variable import Variable, broadcast_variables\n@@ -693,8 +693,8 @@ def interp_func(var, x, new_x, method: InterpOptions, kwargs):\n     else:\n         func, kwargs = _get_interpolator_nd(method, **kwargs)\n \n-    if is_duck_dask_array(var):\n-        import dask.array as da\n+    if is_chunked_array(var):\n+        chunkmanager = get_chunked_array_type(var)\n \n         ndim = var.ndim\n         nconst = ndim - len(x)\n@@ -716,7 +716,7 @@ def interp_func(var, x, new_x, method: InterpOptions, kwargs):\n             *new_x_arginds,\n         )\n \n-        _, rechunked = da.unify_chunks(*args)\n+        _, rechunked = chunkmanager.unify_chunks(*args)\n \n         args = tuple(elem for pair in zip(rechunked, args[1::2]) for elem in pair)\n \n@@ -741,8 +741,8 @@ def interp_func(var, x, new_x, method: InterpOptions, kwargs):\n \n         meta = var._meta\n \n-        return da.blockwise(\n-            _dask_aware_interpnd,\n+        return chunkmanager.blockwise(\n+            _chunked_aware_interpnd,\n             out_ind,\n             *args,\n             interp_func=func,\n@@ -785,8 +785,8 @@ def _interpnd(var, x, new_x, func, kwargs):\n     return rslt.reshape(rslt.shape[:-1] + new_x[0].shape)\n \n \n-def _dask_aware_interpnd(var, *coords, interp_func, interp_kwargs, localize=True):\n-    \"\"\"Wrapper for `_interpnd` through `blockwise`\n+def _chunked_aware_interpnd(var, *coords, interp_func, interp_kwargs, localize=True):\n+    \"\"\"Wrapper for `_interpnd` through `blockwise` for chunked arrays.\n \n     The first half arrays in `coords` are original coordinates,\n     the other half are destination coordinates\ndiff --git a/xarray/core/nanops.py b/xarray/core/nanops.py\n--- a/xarray/core/nanops.py\n+++ b/xarray/core/nanops.py\n@@ -6,6 +6,7 @@\n \n from xarray.core import dtypes, nputils, utils\n from xarray.core.duck_array_ops import (\n+    astype,\n     count,\n     fillna,\n     isnull,\n@@ -22,7 +23,7 @@ def _maybe_null_out(result, axis, mask, min_count=1):\n     if axis is not None and getattr(result, \"ndim\", False):\n         null_mask = (np.take(mask.shape, axis).prod() - mask.sum(axis) - min_count) < 0\n         dtype, fill_value = dtypes.maybe_promote(result.dtype)\n-        result = where(null_mask, fill_value, result.astype(dtype))\n+        result = where(null_mask, fill_value, astype(result, dtype))\n \n     elif getattr(result, \"dtype\", None) not in dtypes.NAT_TYPES:\n         null_mask = mask.size - mask.sum()\n@@ -140,7 +141,7 @@ def _nanvar_object(value, axis=None, ddof=0, keepdims=False, **kwargs):\n     value_mean = _nanmean_ddof_object(\n         ddof=0, value=value, axis=axis, keepdims=True, **kwargs\n     )\n-    squared = (value.astype(value_mean.dtype) - value_mean) ** 2\n+    squared = (astype(value, value_mean.dtype) - value_mean) ** 2\n     return _nanmean_ddof_object(ddof, squared, axis=axis, keepdims=keepdims, **kwargs)\n \n \ndiff --git a/xarray/core/parallelcompat.py b/xarray/core/parallelcompat.py\nnew file mode 100644\n--- /dev/null\n+++ b/xarray/core/parallelcompat.py\n@@ -0,0 +1,280 @@\n+\"\"\"\n+The code in this module is an experiment in going from N=1 to N=2 parallel computing frameworks in xarray.\n+It could later be used as the basis for a public interface allowing any N frameworks to interoperate with xarray,\n+but for now it is just a private experiment.\n+\"\"\"\n+from __future__ import annotations\n+\n+import functools\n+import sys\n+from abc import ABC, abstractmethod\n+from collections.abc import Iterable, Sequence\n+from importlib.metadata import EntryPoint, entry_points\n+from typing import (\n+    TYPE_CHECKING,\n+    Any,\n+    Callable,\n+    Generic,\n+    TypeVar,\n+)\n+\n+import numpy as np\n+\n+from xarray.core.pycompat import is_chunked_array\n+\n+T_ChunkedArray = TypeVar(\"T_ChunkedArray\")\n+\n+if TYPE_CHECKING:\n+    from xarray.core.types import T_Chunks, T_NormalizedChunks\n+\n+\n+@functools.lru_cache(maxsize=1)\n+def list_chunkmanagers() -> dict[str, ChunkManagerEntrypoint]:\n+    \"\"\"\n+    Return a dictionary of available chunk managers and their ChunkManagerEntrypoint objects.\n+\n+    Notes\n+    -----\n+    # New selection mechanism introduced with Python 3.10. See GH6514.\n+    \"\"\"\n+    if sys.version_info >= (3, 10):\n+        entrypoints = entry_points(group=\"xarray.chunkmanagers\")\n+    else:\n+        entrypoints = entry_points().get(\"xarray.chunkmanagers\", ())\n+\n+    return load_chunkmanagers(entrypoints)\n+\n+\n+def load_chunkmanagers(\n+    entrypoints: Sequence[EntryPoint],\n+) -> dict[str, ChunkManagerEntrypoint]:\n+    \"\"\"Load entrypoints and instantiate chunkmanagers only once.\"\"\"\n+\n+    loaded_entrypoints = {\n+        entrypoint.name: entrypoint.load() for entrypoint in entrypoints\n+    }\n+\n+    available_chunkmanagers = {\n+        name: chunkmanager()\n+        for name, chunkmanager in loaded_entrypoints.items()\n+        if chunkmanager.available\n+    }\n+    return available_chunkmanagers\n+\n+\n+def guess_chunkmanager(\n+    manager: str | ChunkManagerEntrypoint | None,\n+) -> ChunkManagerEntrypoint:\n+    \"\"\"\n+    Get namespace of chunk-handling methods, guessing from what's available.\n+\n+    If the name of a specific ChunkManager is given (e.g. \"dask\"), then use that.\n+    Else use whatever is installed, defaulting to dask if there are multiple options.\n+    \"\"\"\n+\n+    chunkmanagers = list_chunkmanagers()\n+\n+    if manager is None:\n+        if len(chunkmanagers) == 1:\n+            # use the only option available\n+            manager = next(iter(chunkmanagers.keys()))\n+        else:\n+            # default to trying to use dask\n+            manager = \"dask\"\n+\n+    if isinstance(manager, str):\n+        if manager not in chunkmanagers:\n+            raise ValueError(\n+                f\"unrecognized chunk manager {manager} - must be one of: {list(chunkmanagers)}\"\n+            )\n+\n+        return chunkmanagers[manager]\n+    elif isinstance(manager, ChunkManagerEntrypoint):\n+        # already a valid ChunkManager so just pass through\n+        return manager\n+    else:\n+        raise TypeError(\n+            f\"manager must be a string or instance of ChunkManagerEntrypoint, but received type {type(manager)}\"\n+        )\n+\n+\n+def get_chunked_array_type(*args) -> ChunkManagerEntrypoint:\n+    \"\"\"\n+    Detects which parallel backend should be used for given set of arrays.\n+\n+    Also checks that all arrays are of same chunking type (i.e. not a mix of cubed and dask).\n+    \"\"\"\n+\n+    # TODO this list is probably redundant with something inside xarray.apply_ufunc\n+    ALLOWED_NON_CHUNKED_TYPES = {int, float, np.ndarray}\n+\n+    chunked_arrays = [\n+        a\n+        for a in args\n+        if is_chunked_array(a) and type(a) not in ALLOWED_NON_CHUNKED_TYPES\n+    ]\n+\n+    # Asserts all arrays are the same type (or numpy etc.)\n+    chunked_array_types = {type(a) for a in chunked_arrays}\n+    if len(chunked_array_types) > 1:\n+        raise TypeError(\n+            f\"Mixing chunked array types is not supported, but received multiple types: {chunked_array_types}\"\n+        )\n+    elif len(chunked_array_types) == 0:\n+        raise TypeError(\"Expected a chunked array but none were found\")\n+\n+    # iterate over defined chunk managers, seeing if each recognises this array type\n+    chunked_arr = chunked_arrays[0]\n+    chunkmanagers = list_chunkmanagers()\n+    selected = [\n+        chunkmanager\n+        for chunkmanager in chunkmanagers.values()\n+        if chunkmanager.is_chunked_array(chunked_arr)\n+    ]\n+    if not selected:\n+        raise TypeError(\n+            f\"Could not find a Chunk Manager which recognises type {type(chunked_arr)}\"\n+        )\n+    elif len(selected) >= 2:\n+        raise TypeError(f\"Multiple ChunkManagers recognise type {type(chunked_arr)}\")\n+    else:\n+        return selected[0]\n+\n+\n+class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):\n+    \"\"\"\n+    Adapter between a particular parallel computing framework and xarray.\n+\n+    Attributes\n+    ----------\n+    array_cls\n+        Type of the array class this parallel computing framework provides.\n+\n+        Parallel frameworks need to provide an array class that supports the array API standard.\n+        Used for type checking.\n+    \"\"\"\n+\n+    array_cls: type[T_ChunkedArray]\n+    available: bool = True\n+\n+    @abstractmethod\n+    def __init__(self) -> None:\n+        raise NotImplementedError()\n+\n+    def is_chunked_array(self, data: Any) -> bool:\n+        return isinstance(data, self.array_cls)\n+\n+    @abstractmethod\n+    def chunks(self, data: T_ChunkedArray) -> T_NormalizedChunks:\n+        raise NotImplementedError()\n+\n+    @abstractmethod\n+    def normalize_chunks(\n+        self,\n+        chunks: T_Chunks | T_NormalizedChunks,\n+        shape: tuple[int, ...] | None = None,\n+        limit: int | None = None,\n+        dtype: np.dtype | None = None,\n+        previous_chunks: T_NormalizedChunks | None = None,\n+    ) -> T_NormalizedChunks:\n+        \"\"\"Called by open_dataset\"\"\"\n+        raise NotImplementedError()\n+\n+    @abstractmethod\n+    def from_array(\n+        self, data: np.ndarray, chunks: T_Chunks, **kwargs\n+    ) -> T_ChunkedArray:\n+        \"\"\"Called when .chunk is called on an xarray object that is not already chunked.\"\"\"\n+        raise NotImplementedError()\n+\n+    def rechunk(\n+        self,\n+        data: T_ChunkedArray,\n+        chunks: T_NormalizedChunks | tuple[int, ...] | T_Chunks,\n+        **kwargs,\n+    ) -> T_ChunkedArray:\n+        \"\"\"Called when .chunk is called on an xarray object that is already chunked.\"\"\"\n+        return data.rechunk(chunks, **kwargs)  # type: ignore[attr-defined]\n+\n+    @abstractmethod\n+    def compute(self, *data: T_ChunkedArray, **kwargs) -> tuple[np.ndarray, ...]:\n+        \"\"\"Used anytime something needs to computed, including multiple arrays at once.\"\"\"\n+        raise NotImplementedError()\n+\n+    @property\n+    def array_api(self) -> Any:\n+        \"\"\"Return the array_api namespace following the python array API standard.\"\"\"\n+        raise NotImplementedError()\n+\n+    def reduction(\n+        self,\n+        arr: T_ChunkedArray,\n+        func: Callable,\n+        combine_func: Callable | None = None,\n+        aggregate_func: Callable | None = None,\n+        axis: int | Sequence[int] | None = None,\n+        dtype: np.dtype | None = None,\n+        keepdims: bool = False,\n+    ) -> T_ChunkedArray:\n+        \"\"\"Used in some reductions like nanfirst, which is used by groupby.first\"\"\"\n+        raise NotImplementedError()\n+\n+    @abstractmethod\n+    def apply_gufunc(\n+        self,\n+        func: Callable,\n+        signature: str,\n+        *args: Any,\n+        axes: Sequence[tuple[int, ...]] | None = None,\n+        keepdims: bool = False,\n+        output_dtypes: Sequence[np.typing.DTypeLike] | None = None,\n+        vectorize: bool | None = None,\n+        **kwargs,\n+    ):\n+        \"\"\"\n+        Called inside xarray.apply_ufunc, so must be supplied for vast majority of xarray computations to be supported.\n+        \"\"\"\n+        raise NotImplementedError()\n+\n+    def map_blocks(\n+        self,\n+        func: Callable,\n+        *args: Any,\n+        dtype: np.typing.DTypeLike | None = None,\n+        chunks: tuple[int, ...] | None = None,\n+        drop_axis: int | Sequence[int] | None = None,\n+        new_axis: int | Sequence[int] | None = None,\n+        **kwargs,\n+    ):\n+        \"\"\"Called in elementwise operations, but notably not called in xarray.map_blocks.\"\"\"\n+        raise NotImplementedError()\n+\n+    def blockwise(\n+        self,\n+        func: Callable,\n+        out_ind: Iterable,\n+        *args: Any,  # can't type this as mypy assumes args are all same type, but dask blockwise args alternate types\n+        adjust_chunks: dict[Any, Callable] | None = None,\n+        new_axes: dict[Any, int] | None = None,\n+        align_arrays: bool = True,\n+        **kwargs,\n+    ):\n+        \"\"\"Called by some niche functions in xarray.\"\"\"\n+        raise NotImplementedError()\n+\n+    def unify_chunks(\n+        self,\n+        *args: Any,  # can't type this as mypy assumes args are all same type, but dask unify_chunks args alternate types\n+        **kwargs,\n+    ) -> tuple[dict[str, T_NormalizedChunks], list[T_ChunkedArray]]:\n+        \"\"\"Called by xr.unify_chunks.\"\"\"\n+        raise NotImplementedError()\n+\n+    def store(\n+        self,\n+        sources: T_ChunkedArray | Sequence[T_ChunkedArray],\n+        targets: Any,\n+        **kwargs: dict[str, Any],\n+    ):\n+        \"\"\"Used when writing to any backend.\"\"\"\n+        raise NotImplementedError()\ndiff --git a/xarray/core/pycompat.py b/xarray/core/pycompat.py\n--- a/xarray/core/pycompat.py\n+++ b/xarray/core/pycompat.py\n@@ -12,7 +12,7 @@\n integer_types = (int, np.integer)\n \n if TYPE_CHECKING:\n-    ModType = Literal[\"dask\", \"pint\", \"cupy\", \"sparse\"]\n+    ModType = Literal[\"dask\", \"pint\", \"cupy\", \"sparse\", \"cubed\"]\n     DuckArrayTypes = tuple[type[Any], ...]  # TODO: improve this? maybe Generic\n \n \n@@ -30,7 +30,7 @@ class DuckArrayModule:\n     available: bool\n \n     def __init__(self, mod: ModType) -> None:\n-        duck_array_module: ModuleType | None = None\n+        duck_array_module: ModuleType | None\n         duck_array_version: Version\n         duck_array_type: DuckArrayTypes\n         try:\n@@ -45,6 +45,8 @@ def __init__(self, mod: ModType) -> None:\n                 duck_array_type = (duck_array_module.ndarray,)\n             elif mod == \"sparse\":\n                 duck_array_type = (duck_array_module.SparseArray,)\n+            elif mod == \"cubed\":\n+                duck_array_type = (duck_array_module.Array,)\n             else:\n                 raise NotImplementedError\n \n@@ -81,5 +83,9 @@ def is_duck_dask_array(x):\n     return is_duck_array(x) and is_dask_collection(x)\n \n \n+def is_chunked_array(x) -> bool:\n+    return is_duck_dask_array(x) or (is_duck_array(x) and hasattr(x, \"chunks\"))\n+\n+\n def is_0d_dask_array(x):\n     return is_duck_dask_array(x) and is_scalar(x)\ndiff --git a/xarray/core/rolling.py b/xarray/core/rolling.py\n--- a/xarray/core/rolling.py\n+++ b/xarray/core/rolling.py\n@@ -158,9 +158,9 @@ def method(self, keep_attrs=None, **kwargs):\n         return method\n \n     def _mean(self, keep_attrs, **kwargs):\n-        result = self.sum(keep_attrs=False, **kwargs) / self.count(\n-            keep_attrs=False\n-        ).astype(self.obj.dtype, copy=False)\n+        result = self.sum(keep_attrs=False, **kwargs) / duck_array_ops.astype(\n+            self.count(keep_attrs=False), dtype=self.obj.dtype, copy=False\n+        )\n         if keep_attrs:\n             result.attrs = self.obj.attrs\n         return result\ndiff --git a/xarray/core/types.py b/xarray/core/types.py\n--- a/xarray/core/types.py\n+++ b/xarray/core/types.py\n@@ -33,6 +33,16 @@\n     except ImportError:\n         DaskArray = np.ndarray  # type: ignore\n \n+    try:\n+        from cubed import Array as CubedArray\n+    except ImportError:\n+        CubedArray = np.ndarray\n+\n+    try:\n+        from zarr.core import Array as ZarrArray\n+    except ImportError:\n+        ZarrArray = np.ndarray\n+\n     # TODO: Turn on when https://github.com/python/mypy/issues/11871 is fixed.\n     # Can be uncommented if using pyright though.\n     # import sys\n@@ -105,6 +115,9 @@\n Dims = Union[str, Iterable[Hashable], \"ellipsis\", None]\n OrderedDims = Union[str, Sequence[Union[Hashable, \"ellipsis\"]], \"ellipsis\", None]\n \n+T_Chunks = Union[int, dict[Any, Any], Literal[\"auto\"], None]\n+T_NormalizedChunks = tuple[tuple[int, ...], ...]\n+\n ErrorOptions = Literal[\"raise\", \"ignore\"]\n ErrorOptionsWithWarn = Literal[\"raise\", \"warn\", \"ignore\"]\n \ndiff --git a/xarray/core/utils.py b/xarray/core/utils.py\n--- a/xarray/core/utils.py\n+++ b/xarray/core/utils.py\n@@ -1202,3 +1202,66 @@ def emit_user_level_warning(message, category=None):\n     \"\"\"Emit a warning at the user level by inspecting the stack trace.\"\"\"\n     stacklevel = find_stack_level()\n     warnings.warn(message, category=category, stacklevel=stacklevel)\n+\n+\n+def consolidate_dask_from_array_kwargs(\n+    from_array_kwargs: dict,\n+    name: str | None = None,\n+    lock: bool | None = None,\n+    inline_array: bool | None = None,\n+) -> dict:\n+    \"\"\"\n+    Merge dask-specific kwargs with arbitrary from_array_kwargs dict.\n+\n+    Temporary function, to be deleted once explicitly passing dask-specific kwargs to .chunk() is deprecated.\n+    \"\"\"\n+\n+    from_array_kwargs = _resolve_doubly_passed_kwarg(\n+        from_array_kwargs,\n+        kwarg_name=\"name\",\n+        passed_kwarg_value=name,\n+        default=None,\n+        err_msg_dict_name=\"from_array_kwargs\",\n+    )\n+    from_array_kwargs = _resolve_doubly_passed_kwarg(\n+        from_array_kwargs,\n+        kwarg_name=\"lock\",\n+        passed_kwarg_value=lock,\n+        default=False,\n+        err_msg_dict_name=\"from_array_kwargs\",\n+    )\n+    from_array_kwargs = _resolve_doubly_passed_kwarg(\n+        from_array_kwargs,\n+        kwarg_name=\"inline_array\",\n+        passed_kwarg_value=inline_array,\n+        default=False,\n+        err_msg_dict_name=\"from_array_kwargs\",\n+    )\n+\n+    return from_array_kwargs\n+\n+\n+def _resolve_doubly_passed_kwarg(\n+    kwargs_dict: dict,\n+    kwarg_name: str,\n+    passed_kwarg_value: str | bool | None,\n+    default: bool | None,\n+    err_msg_dict_name: str,\n+) -> dict:\n+    # if in kwargs_dict but not passed explicitly then just pass kwargs_dict through unaltered\n+    if kwarg_name in kwargs_dict and passed_kwarg_value is None:\n+        pass\n+    # if passed explicitly but not in kwargs_dict then use that\n+    elif kwarg_name not in kwargs_dict and passed_kwarg_value is not None:\n+        kwargs_dict[kwarg_name] = passed_kwarg_value\n+    # if in neither then use default\n+    elif kwarg_name not in kwargs_dict and passed_kwarg_value is None:\n+        kwargs_dict[kwarg_name] = default\n+    # if in both then raise\n+    else:\n+        raise ValueError(\n+            f\"argument {kwarg_name} cannot be passed both as a keyword argument and within \"\n+            f\"the {err_msg_dict_name} dictionary\"\n+        )\n+\n+    return kwargs_dict\ndiff --git a/xarray/core/variable.py b/xarray/core/variable.py\n--- a/xarray/core/variable.py\n+++ b/xarray/core/variable.py\n@@ -26,10 +26,15 @@\n     as_indexable,\n )\n from xarray.core.options import OPTIONS, _get_keep_attrs\n+from xarray.core.parallelcompat import (\n+    get_chunked_array_type,\n+    guess_chunkmanager,\n+)\n from xarray.core.pycompat import (\n     array_type,\n     integer_types,\n     is_0d_dask_array,\n+    is_chunked_array,\n     is_duck_dask_array,\n )\n from xarray.core.utils import (\n@@ -54,6 +59,7 @@\n BASIC_INDEXING_TYPES = integer_types + (slice,)\n \n if TYPE_CHECKING:\n+    from xarray.core.parallelcompat import ChunkManagerEntrypoint\n     from xarray.core.types import (\n         Dims,\n         ErrorOptionsWithWarn,\n@@ -194,10 +200,10 @@ def _as_nanosecond_precision(data):\n             nanosecond_precision_dtype = pd.DatetimeTZDtype(\"ns\", dtype.tz)\n         else:\n             nanosecond_precision_dtype = \"datetime64[ns]\"\n-        return data.astype(nanosecond_precision_dtype)\n+        return duck_array_ops.astype(data, nanosecond_precision_dtype)\n     elif dtype.kind == \"m\" and dtype != np.dtype(\"timedelta64[ns]\"):\n         utils.emit_user_level_warning(NON_NANOSECOND_WARNING.format(case=\"timedelta\"))\n-        return data.astype(\"timedelta64[ns]\")\n+        return duck_array_ops.astype(data, \"timedelta64[ns]\")\n     else:\n         return data\n \n@@ -368,7 +374,7 @@ def __init__(self, dims, data, attrs=None, encoding=None, fastpath=False):\n             self.encoding = encoding\n \n     @property\n-    def dtype(self):\n+    def dtype(self) -> np.dtype:\n         \"\"\"\n         Data-type of the array\u2019s elements.\n \n@@ -380,7 +386,7 @@ def dtype(self):\n         return self._data.dtype\n \n     @property\n-    def shape(self):\n+    def shape(self) -> tuple[int, ...]:\n         \"\"\"\n         Tuple of array dimensions.\n \n@@ -533,8 +539,10 @@ def load(self, **kwargs):\n         --------\n         dask.array.compute\n         \"\"\"\n-        if is_duck_dask_array(self._data):\n-            self._data = as_compatible_data(self._data.compute(**kwargs))\n+        if is_chunked_array(self._data):\n+            chunkmanager = get_chunked_array_type(self._data)\n+            loaded_data, *_ = chunkmanager.compute(self._data, **kwargs)\n+            self._data = as_compatible_data(loaded_data)\n         elif isinstance(self._data, indexing.ExplicitlyIndexed):\n             self._data = self._data.get_duck_array()\n         elif not is_duck_array(self._data):\n@@ -1166,8 +1174,10 @@ def chunk(\n             | Mapping[Any, None | int | tuple[int, ...]]\n         ) = {},\n         name: str | None = None,\n-        lock: bool = False,\n-        inline_array: bool = False,\n+        lock: bool | None = None,\n+        inline_array: bool | None = None,\n+        chunked_array_type: str | ChunkManagerEntrypoint | None = None,\n+        from_array_kwargs=None,\n         **chunks_kwargs: Any,\n     ) -> Variable:\n         \"\"\"Coerce this array's data into a dask array with the given chunks.\n@@ -1188,12 +1198,21 @@ def chunk(\n         name : str, optional\n             Used to generate the name for this array in the internal dask\n             graph. Does not need not be unique.\n-        lock : optional\n+        lock : bool, default: False\n             Passed on to :py:func:`dask.array.from_array`, if the array is not\n             already as dask array.\n-        inline_array: optional\n+        inline_array : bool, default: False\n             Passed on to :py:func:`dask.array.from_array`, if the array is not\n             already as dask array.\n+        chunked_array_type: str, optional\n+            Which chunked array type to coerce this datasets' arrays to.\n+            Defaults to 'dask' if installed, else whatever is registered via the `ChunkManagerEntrypoint` system.\n+            Experimental API that should not be relied upon.\n+        from_array_kwargs: dict, optional\n+            Additional keyword arguments passed on to the `ChunkManagerEntrypoint.from_array` method used to create\n+            chunked arrays, via whichever chunk manager is specified through the `chunked_array_type` kwarg.\n+            For example, with dask as the default chunked array type, this method would pass additional kwargs\n+            to :py:func:`dask.array.from_array`. Experimental API that should not be relied upon.\n         **chunks_kwargs : {dim: chunks, ...}, optional\n             The keyword arguments form of ``chunks``.\n             One of chunks or chunks_kwargs must be provided.\n@@ -1209,7 +1228,6 @@ def chunk(\n         xarray.unify_chunks\n         dask.array.from_array\n         \"\"\"\n-        import dask.array as da\n \n         if chunks is None:\n             warnings.warn(\n@@ -1220,6 +1238,8 @@ def chunk(\n             chunks = {}\n \n         if isinstance(chunks, (float, str, int, tuple, list)):\n+            # TODO we shouldn't assume here that other chunkmanagers can handle these types\n+            # TODO should we call normalize_chunks here?\n             pass  # dask.array.from_array can handle these directly\n         else:\n             chunks = either_dict_or_kwargs(chunks, chunks_kwargs, \"chunk\")\n@@ -1227,9 +1247,22 @@ def chunk(\n         if utils.is_dict_like(chunks):\n             chunks = {self.get_axis_num(dim): chunk for dim, chunk in chunks.items()}\n \n+        chunkmanager = guess_chunkmanager(chunked_array_type)\n+\n+        if from_array_kwargs is None:\n+            from_array_kwargs = {}\n+\n+        # TODO deprecate passing these dask-specific arguments explicitly. In future just pass everything via from_array_kwargs\n+        _from_array_kwargs = utils.consolidate_dask_from_array_kwargs(\n+            from_array_kwargs,\n+            name=name,\n+            lock=lock,\n+            inline_array=inline_array,\n+        )\n+\n         data = self._data\n-        if is_duck_dask_array(data):\n-            data = data.rechunk(chunks)\n+        if chunkmanager.is_chunked_array(data):\n+            data = chunkmanager.rechunk(data, chunks)  # type: ignore[arg-type]\n         else:\n             if isinstance(data, indexing.ExplicitlyIndexed):\n                 # Unambiguously handle array storage backends (like NetCDF4 and h5py)\n@@ -1244,17 +1277,13 @@ def chunk(\n                     data, indexing.OuterIndexer\n                 )\n \n-                # All of our lazily loaded backend array classes should use NumPy\n-                # array operations.\n-                kwargs = {\"meta\": np.ndarray}\n-            else:\n-                kwargs = {}\n-\n             if utils.is_dict_like(chunks):\n-                chunks = tuple(chunks.get(n, s) for n, s in enumerate(self.shape))\n+                chunks = tuple(chunks.get(n, s) for n, s in enumerate(data.shape))\n \n-            data = da.from_array(\n-                data, chunks, name=name, lock=lock, inline_array=inline_array, **kwargs\n+            data = chunkmanager.from_array(\n+                data,\n+                chunks,  # type: ignore[arg-type]\n+                **_from_array_kwargs,\n             )\n \n         return self._replace(data=data)\n@@ -1266,7 +1295,8 @@ def to_numpy(self) -> np.ndarray:\n \n         # TODO first attempt to call .to_numpy() once some libraries implement it\n         if hasattr(data, \"chunks\"):\n-            data = data.compute()\n+            chunkmanager = get_chunked_array_type(data)\n+            data, *_ = chunkmanager.compute(data)\n         if isinstance(data, array_type(\"cupy\")):\n             data = data.get()\n         # pint has to be imported dynamically as pint imports xarray\n@@ -2903,7 +2933,15 @@ def values(self, values):\n             f\"Please use DataArray.assign_coords, Dataset.assign_coords or Dataset.assign as appropriate.\"\n         )\n \n-    def chunk(self, chunks={}, name=None, lock=False, inline_array=False):\n+    def chunk(\n+        self,\n+        chunks={},\n+        name=None,\n+        lock=False,\n+        inline_array=False,\n+        chunked_array_type=None,\n+        from_array_kwargs=None,\n+    ):\n         # Dummy - do not chunk. This method is invoked e.g. by Dataset.chunk()\n         return self.copy(deep=False)\n \ndiff --git a/xarray/core/weighted.py b/xarray/core/weighted.py\n--- a/xarray/core/weighted.py\n+++ b/xarray/core/weighted.py\n@@ -238,7 +238,10 @@ def _sum_of_weights(self, da: DataArray, dim: Dims = None) -> DataArray:\n         # (and not 2); GH4074\n         if self.weights.dtype == bool:\n             sum_of_weights = self._reduce(\n-                mask, self.weights.astype(int), dim=dim, skipna=False\n+                mask,\n+                duck_array_ops.astype(self.weights, dtype=int),\n+                dim=dim,\n+                skipna=False,\n             )\n         else:\n             sum_of_weights = self._reduce(mask, self.weights, dim=dim, skipna=False)\n",
+  "test_patch": "diff --git a/xarray/tests/test_dask.py b/xarray/tests/test_dask.py\n--- a/xarray/tests/test_dask.py\n+++ b/xarray/tests/test_dask.py\n@@ -904,13 +904,12 @@ def test_to_dask_dataframe_dim_order(self):\n \n @pytest.mark.parametrize(\"method\", [\"load\", \"compute\"])\n def test_dask_kwargs_variable(method):\n-    x = Variable(\"y\", da.from_array(np.arange(3), chunks=(2,)))\n-    # args should be passed on to da.Array.compute()\n-    with mock.patch.object(\n-        da.Array, \"compute\", return_value=np.arange(3)\n-    ) as mock_compute:\n+    chunked_array = da.from_array(np.arange(3), chunks=(2,))\n+    x = Variable(\"y\", chunked_array)\n+    # args should be passed on to dask.compute() (via DaskManager.compute())\n+    with mock.patch.object(da, \"compute\", return_value=(np.arange(3),)) as mock_compute:\n         getattr(x, method)(foo=\"bar\")\n-    mock_compute.assert_called_with(foo=\"bar\")\n+    mock_compute.assert_called_with(chunked_array, foo=\"bar\")\n \n \n @pytest.mark.parametrize(\"method\", [\"load\", \"compute\", \"persist\"])\ndiff --git a/xarray/tests/test_parallelcompat.py b/xarray/tests/test_parallelcompat.py\nnew file mode 100644\n--- /dev/null\n+++ b/xarray/tests/test_parallelcompat.py\n@@ -0,0 +1,219 @@\n+from __future__ import annotations\n+\n+from typing import Any\n+\n+import numpy as np\n+import pytest\n+\n+from xarray.core.daskmanager import DaskManager\n+from xarray.core.parallelcompat import (\n+    ChunkManagerEntrypoint,\n+    get_chunked_array_type,\n+    guess_chunkmanager,\n+    list_chunkmanagers,\n+)\n+from xarray.core.types import T_Chunks, T_NormalizedChunks\n+from xarray.tests import has_dask, requires_dask\n+\n+\n+class DummyChunkedArray(np.ndarray):\n+    \"\"\"\n+    Mock-up of a chunked array class.\n+\n+    Adds a (non-functional) .chunks attribute by following this example in the numpy docs\n+    https://numpy.org/doc/stable/user/basics.subclassing.html#simple-example-adding-an-extra-attribute-to-ndarray\n+    \"\"\"\n+\n+    chunks: T_NormalizedChunks\n+\n+    def __new__(\n+        cls,\n+        shape,\n+        dtype=float,\n+        buffer=None,\n+        offset=0,\n+        strides=None,\n+        order=None,\n+        chunks=None,\n+    ):\n+        obj = super().__new__(cls, shape, dtype, buffer, offset, strides, order)\n+        obj.chunks = chunks\n+        return obj\n+\n+    def __array_finalize__(self, obj):\n+        if obj is None:\n+            return\n+        self.chunks = getattr(obj, \"chunks\", None)\n+\n+    def rechunk(self, chunks, **kwargs):\n+        copied = self.copy()\n+        copied.chunks = chunks\n+        return copied\n+\n+\n+class DummyChunkManager(ChunkManagerEntrypoint):\n+    \"\"\"Mock-up of ChunkManager class for DummyChunkedArray\"\"\"\n+\n+    def __init__(self):\n+        self.array_cls = DummyChunkedArray\n+\n+    def is_chunked_array(self, data: Any) -> bool:\n+        return isinstance(data, DummyChunkedArray)\n+\n+    def chunks(self, data: DummyChunkedArray) -> T_NormalizedChunks:\n+        return data.chunks\n+\n+    def normalize_chunks(\n+        self,\n+        chunks: T_Chunks | T_NormalizedChunks,\n+        shape: tuple[int, ...] | None = None,\n+        limit: int | None = None,\n+        dtype: np.dtype | None = None,\n+        previous_chunks: T_NormalizedChunks | None = None,\n+    ) -> T_NormalizedChunks:\n+        from dask.array.core import normalize_chunks\n+\n+        return normalize_chunks(chunks, shape, limit, dtype, previous_chunks)\n+\n+    def from_array(\n+        self, data: np.ndarray, chunks: T_Chunks, **kwargs\n+    ) -> DummyChunkedArray:\n+        from dask import array as da\n+\n+        return da.from_array(data, chunks, **kwargs)\n+\n+    def rechunk(self, data: DummyChunkedArray, chunks, **kwargs) -> DummyChunkedArray:\n+        return data.rechunk(chunks, **kwargs)\n+\n+    def compute(self, *data: DummyChunkedArray, **kwargs) -> tuple[np.ndarray, ...]:\n+        from dask.array import compute\n+\n+        return compute(*data, **kwargs)\n+\n+    def apply_gufunc(\n+        self,\n+        func,\n+        signature,\n+        *args,\n+        axes=None,\n+        axis=None,\n+        keepdims=False,\n+        output_dtypes=None,\n+        output_sizes=None,\n+        vectorize=None,\n+        allow_rechunk=False,\n+        meta=None,\n+        **kwargs,\n+    ):\n+        from dask.array.gufunc import apply_gufunc\n+\n+        return apply_gufunc(\n+            func,\n+            signature,\n+            *args,\n+            axes=axes,\n+            axis=axis,\n+            keepdims=keepdims,\n+            output_dtypes=output_dtypes,\n+            output_sizes=output_sizes,\n+            vectorize=vectorize,\n+            allow_rechunk=allow_rechunk,\n+            meta=meta,\n+            **kwargs,\n+        )\n+\n+\n+@pytest.fixture\n+def register_dummy_chunkmanager(monkeypatch):\n+    \"\"\"\n+    Mocks the registering of an additional ChunkManagerEntrypoint.\n+\n+    This preserves the presence of the existing DaskManager, so a test that relies on this and DaskManager both being\n+    returned from list_chunkmanagers() at once would still work.\n+\n+    The monkeypatching changes the behavior of list_chunkmanagers when called inside xarray.core.parallelcompat,\n+    but not when called from this tests file.\n+    \"\"\"\n+    # Should include DaskManager iff dask is available to be imported\n+    preregistered_chunkmanagers = list_chunkmanagers()\n+\n+    monkeypatch.setattr(\n+        \"xarray.core.parallelcompat.list_chunkmanagers\",\n+        lambda: {\"dummy\": DummyChunkManager()} | preregistered_chunkmanagers,\n+    )\n+    yield\n+\n+\n+class TestGetChunkManager:\n+    def test_get_chunkmanger(self, register_dummy_chunkmanager) -> None:\n+        chunkmanager = guess_chunkmanager(\"dummy\")\n+        assert isinstance(chunkmanager, DummyChunkManager)\n+\n+    def test_fail_on_nonexistent_chunkmanager(self) -> None:\n+        with pytest.raises(ValueError, match=\"unrecognized chunk manager foo\"):\n+            guess_chunkmanager(\"foo\")\n+\n+    @requires_dask\n+    def test_get_dask_if_installed(self) -> None:\n+        chunkmanager = guess_chunkmanager(None)\n+        assert isinstance(chunkmanager, DaskManager)\n+\n+    @pytest.mark.skipif(has_dask, reason=\"requires dask not to be installed\")\n+    def test_dont_get_dask_if_not_installed(self) -> None:\n+        with pytest.raises(ValueError, match=\"unrecognized chunk manager dask\"):\n+            guess_chunkmanager(\"dask\")\n+\n+    @requires_dask\n+    def test_choose_dask_over_other_chunkmanagers(\n+        self, register_dummy_chunkmanager\n+    ) -> None:\n+        chunk_manager = guess_chunkmanager(None)\n+        assert isinstance(chunk_manager, DaskManager)\n+\n+\n+class TestGetChunkedArrayType:\n+    def test_detect_chunked_arrays(self, register_dummy_chunkmanager) -> None:\n+        dummy_arr = DummyChunkedArray([1, 2, 3])\n+\n+        chunk_manager = get_chunked_array_type(dummy_arr)\n+        assert isinstance(chunk_manager, DummyChunkManager)\n+\n+    def test_ignore_inmemory_arrays(self, register_dummy_chunkmanager) -> None:\n+        dummy_arr = DummyChunkedArray([1, 2, 3])\n+\n+        chunk_manager = get_chunked_array_type(*[dummy_arr, 1.0, np.array([5, 6])])\n+        assert isinstance(chunk_manager, DummyChunkManager)\n+\n+        with pytest.raises(TypeError, match=\"Expected a chunked array\"):\n+            get_chunked_array_type(5.0)\n+\n+    def test_raise_if_no_arrays_chunked(self, register_dummy_chunkmanager) -> None:\n+        with pytest.raises(TypeError, match=\"Expected a chunked array \"):\n+            get_chunked_array_type(*[1.0, np.array([5, 6])])\n+\n+    def test_raise_if_no_matching_chunkmanagers(self) -> None:\n+        dummy_arr = DummyChunkedArray([1, 2, 3])\n+\n+        with pytest.raises(\n+            TypeError, match=\"Could not find a Chunk Manager which recognises\"\n+        ):\n+            get_chunked_array_type(dummy_arr)\n+\n+    @requires_dask\n+    def test_detect_dask_if_installed(self) -> None:\n+        import dask.array as da\n+\n+        dask_arr = da.from_array([1, 2, 3], chunks=(1,))\n+\n+        chunk_manager = get_chunked_array_type(dask_arr)\n+        assert isinstance(chunk_manager, DaskManager)\n+\n+    @requires_dask\n+    def test_raise_on_mixed_array_types(self, register_dummy_chunkmanager) -> None:\n+        import dask.array as da\n+\n+        dummy_arr = DummyChunkedArray([1, 2, 3])\n+        dask_arr = da.from_array([1, 2, 3], chunks=(1,))\n+\n+        with pytest.raises(TypeError, match=\"received multiple types\"):\n+            get_chunked_array_type(*[dask_arr, dummy_arr])\ndiff --git a/xarray/tests/test_plugins.py b/xarray/tests/test_plugins.py\n--- a/xarray/tests/test_plugins.py\n+++ b/xarray/tests/test_plugins.py\n@@ -236,6 +236,7 @@ def test_lazy_import() -> None:\n         \"sparse\",\n         \"cupy\",\n         \"pint\",\n+        \"cubed\",\n     ]\n     # ensure that none of the above modules has been imported before\n     modules_backup = {}\n",
+  "problem_statement": "Alternative parallel execution frameworks in xarray\n### Is your feature request related to a problem?\n\nSince early on the project xarray has supported wrapping `dask.array` objects in a first-class manner. However recent work on flexible array wrapping has made it possible to wrap all sorts of array types (and with #6804 we should support wrapping any array that conforms to the [array API standard](https://data-apis.org/array-api/latest/index.html)).\r\n\r\nCurrently though the only way to parallelize array operations with xarray \"automatically\" is to use dask. (You could use [xarray-beam](https://github.com/google/xarray-beam) or other options too but they don't \"automatically\" generate the computation for you like dask does.)\r\n\r\nWhen dask is the only type of parallel framework exposing an array-like API then there is no need for flexibility, but now we have nascent projects like [cubed](https://github.com/tomwhite/cubed) to consider too. @tomwhite \n\n### Describe the solution you'd like\n\nRefactor the internals so that dask is one option among many, and that any newer options can plug in in an extensible way.\r\n\r\nIn particular cubed deliberately uses the same API as `dask.array`, exposing:\r\n1) the methods needed to conform to the array API standard\r\n2) a `.chunk` and `.compute` method, which we could dispatch to\r\n3) dask-like functions to create computation graphs including [`blockwise`](https://github.com/tomwhite/cubed/blob/400dc9adcf21c8b468fce9f24e8d4b8cb9ef2f11/cubed/core/ops.py#L43), [`map_blocks`](https://github.com/tomwhite/cubed/blob/400dc9adcf21c8b468fce9f24e8d4b8cb9ef2f11/cubed/core/ops.py#L221), and [`rechunk`](https://github.com/tomwhite/cubed/blob/main/cubed/primitive/rechunk.py)\r\n\r\nI would like to see xarray able to wrap any array-like object which offers this set of methods / functions, and call the corresponding version of that method for the correct library (i.e. dask vs cubed) automatically.\r\n\r\nThat way users could try different parallel execution frameworks simply via a switch like \r\n```python\r\nds.chunk(**chunk_pattern, manager=\"dask\")\r\n```\r\nand see which one works best for their particular problem.\n\n### Describe alternatives you've considered\n\nIf we leave it the way it is now then xarray will not be truly flexible in this respect.\r\n\r\nAny library can wrap (or subclass if they are really brave) xarray objects to provide parallelism but that's not the same level of flexibility.\n\n### Additional context\n\n[cubed repo](https://github.com/tomwhite/cubed)\r\n\r\n[PR](https://github.com/pydata/xarray/pull/6804) about making xarray able to wrap objects conforming to the new [array API standard](https://data-apis.org/array-api/latest/index.html)\r\n\r\ncc @shoyer @rabernat @dcherian @keewis \n",
+  "hints_text": "This sounds great! We should finish up https://github.com/pydata/xarray/pull/4972 to make it easier to test.\nAnother parallel framework would be [Ramba](https://github.com/Python-for-HPC/ramba) \r\n\r\ncc @DrTodd13\nSounds good to me. The challenge will be defining a parallel computing API that works across all these projects, with their slightly different models.\nat SciPy i learned of [fugue](https://github.com/fugue-project/fugue) which tries to provide a unified API for distributed DataFrames on top of Spark and Dask. it could be a great source of inspiration. \nThanks for opening this @TomNicholas \r\n\r\n> The challenge will be defining a parallel computing API that works across all these projects, with their slightly different models.\r\n\r\nAgreed. I feel like there's already an implicit set of \"chunked array\" methods that xarray expects from Dask that could be formalised a bit and exposed as an integration point.",
+  "created_at": "2022-09-10T22:02:18Z",
+  "version": "2022.06",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_parallelcompat.py::TestGetChunkManager::test_dont_get_dask_if_not_installed\", \"xarray/tests/test_parallelcompat.py::TestGetChunkManager::test_fail_on_nonexistent_chunkmanager\", \"xarray/tests/test_parallelcompat.py::TestGetChunkManager::test_get_chunkmanger\", \"xarray/tests/test_parallelcompat.py::TestGetChunkedArrayType::test_detect_chunked_arrays\", \"xarray/tests/test_parallelcompat.py::TestGetChunkedArrayType::test_ignore_inmemory_arrays\", \"xarray/tests/test_parallelcompat.py::TestGetChunkedArrayType::test_raise_if_no_arrays_chunked\", \"xarray/tests/test_parallelcompat.py::TestGetChunkedArrayType::test_raise_if_no_matching_chunkmanagers\", \"xarray/tests/test_plugins.py::test_backends_dict_from_pkg\", \"xarray/tests/test_plugins.py::test_broken_plugin\", \"xarray/tests/test_plugins.py::test_build_engines\", \"xarray/tests/test_plugins.py::test_build_engines_sorted\", \"xarray/tests/test_plugins.py::test_engines_not_installed\", \"xarray/tests/test_plugins.py::test_lazy_import\", \"xarray/tests/test_plugins.py::test_list_engines\", \"xarray/tests/test_plugins.py::test_no_matching_engine_found\", \"xarray/tests/test_plugins.py::test_refresh_engines\", \"xarray/tests/test_plugins.py::test_remove_duplicates\", \"xarray/tests/test_plugins.py::test_remove_duplicates_warnings\", \"xarray/tests/test_plugins.py::test_set_missing_parameters\", \"xarray/tests/test_plugins.py::test_set_missing_parameters_raise_error\"]",
+  "PASS_TO_PASS": "[]",
+  "environment_setup_commit": "50ea159bfd0872635ebf4281e741f3c87f0bef6b",
+  "patch_files": [
+    "xarray/backends/api.py",
+    "xarray/backends/common.py",
+    "xarray/backends/plugins.py",
+    "xarray/backends/zarr.py",
+    "xarray/coding/strings.py",
+    "xarray/coding/variables.py",
+    "xarray/core/common.py",
+    "xarray/core/computation.py",
+    "xarray/core/dask_array_ops.py",
+    "xarray/core/daskmanager.py",
+    "xarray/core/dataarray.py",
+    "xarray/core/dataset.py",
+    "xarray/core/duck_array_ops.py",
+    "xarray/core/indexing.py",
+    "xarray/core/missing.py",
+    "xarray/core/nanops.py",
+    "xarray/core/parallelcompat.py",
+    "xarray/core/pycompat.py",
+    "xarray/core/rolling.py",
+    "xarray/core/types.py",
+    "xarray/core/utils.py",
+    "xarray/core/variable.py",
+    "xarray/core/weighted.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_dask.py",
+    "xarray/tests/test_parallelcompat.py",
+    "xarray/tests/test_plugins.py"
+  ],
+  "patch_diff_details": {
+    "xarray/backends/api.py": {
+      "diffs": [
+        {
+          "start_line_old": 9,
+          "end_line_old": 9,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "pos": 24,
+          "context_length": 13305
+        },
+        {
+          "start_line_old": 23,
+          "end_line_old": 23,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "pos": 24,
+          "context_length": 13305
+        },
+        {
+          "start_line_old": 41,
+          "end_line_old": 41,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "pos": 24,
+          "context_length": 13305
+        },
+        {
+          "start_line_old": 51,
+          "end_line_old": 51,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "pos": 24,
+          "context_length": 13305
+        },
+        {
+          "start_line_old": 300,
+          "end_line_old": 308,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 240
+        },
+        {
+          "start_line_old": 319,
+          "end_line_old": 319,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 251
+        },
+        {
+          "start_line_old": 331,
+          "end_line_old": 331,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 263
+        },
+        {
+          "start_line_old": 349,
+          "end_line_old": 349,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 281
+        },
+        {
+          "start_line_old": 376,
+          "end_line_old": 376,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 308
+        },
+        {
+          "start_line_old": 468,
+          "end_line_old": 468,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 400
+        },
+        {
+          "start_line_old": 511,
+          "end_line_old": 511,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 443
+        },
+        {
+          "start_line_old": 539,
+          "end_line_old": 539,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 471
+        },
+        {
+          "start_line_old": 549,
+          "end_line_old": 550,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 482
+        },
+        {
+          "start_line_old": 561,
+          "end_line_old": 561,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 493
+        },
+        {
+          "start_line_old": 655,
+          "end_line_old": 655,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 587
+        },
+        {
+          "start_line_old": 698,
+          "end_line_old": 698,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 630
+        },
+        {
+          "start_line_old": 729,
+          "end_line_old": 729,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 661
+        },
+        {
+          "start_line_old": 739,
+          "end_line_old": 739,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 671
+        },
+        {
+          "start_line_old": 1493,
+          "end_line_old": 1493,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 1425
+        },
+        {
+          "start_line_old": 1515,
+          "end_line_old": 1515,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 1447
+        },
+        {
+          "start_line_old": 1534,
+          "end_line_old": 1534,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 1466
+        },
+        {
+          "start_line_old": 1655,
+          "end_line_old": 1655,
+          "file_pos": 9,
+          "file_context_length": 126772,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+          "closest_snippet_line_distance": 1587
+        }
+      ]
+    },
+    "xarray/backends/common.py": {
+      "diffs": [
+        {
+          "start_line_old": 14,
+          "end_line_old": 14
+        },
+        {
+          "start_line_old": 156,
+          "end_line_old": 156
+        },
+        {
+          "start_line_old": 166,
+          "end_line_old": 174
+        }
+      ]
+    },
+    "xarray/backends/plugins.py": {
+      "diffs": [
+        {
+          "start_line_old": 149,
+          "end_line_old": 149
+        }
+      ]
+    },
+    "xarray/backends/zarr.py": {
+      "diffs": [
+        {
+          "start_line_old": 22,
+          "end_line_old": 22
+        },
+        {
+          "start_line_old": 719,
+          "end_line_old": 719
+        },
+        {
+          "start_line_old": 803,
+          "end_line_old": 803
+        },
+        {
+          "start_line_old": 820,
+          "end_line_old": 823
+        },
+        {
+          "start_line_old": 854,
+          "end_line_old": 854
+        }
+      ]
+    },
+    "xarray/coding/strings.py": {
+      "diffs": [
+        {
+          "start_line_old": 17,
+          "end_line_old": 17
+        },
+        {
+          "start_line_old": 137,
+          "end_line_old": 140
+        },
+        {
+          "start_line_old": 172,
+          "end_line_old": 173
+        },
+        {
+          "start_line_old": 182,
+          "end_line_old": 182
+        }
+      ]
+    },
+    "xarray/coding/variables.py": {
+      "diffs": [
+        {
+          "start_line_old": 13,
+          "end_line_old": 13
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60
+        },
+        {
+          "start_line_old": 161,
+          "end_line_old": 164
+        },
+        {
+          "start_line_old": 333,
+          "end_line_old": 333
+        },
+        {
+          "start_line_old": 380,
+          "end_line_old": 380
+        }
+      ]
+    },
+    "xarray/core/common.py": {
+      "diffs": [
+        {
+          "start_line_old": 16,
+          "end_line_old": 16,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "pos": 6,
+          "context_length": 4254
+        },
+        {
+          "start_line_old": 49,
+          "end_line_old": 49,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "pos": 6,
+          "context_length": 4254
+        },
+        {
+          "start_line_old": 162,
+          "end_line_old": 162,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 1235
+        },
+        {
+          "start_line_old": 1399,
+          "end_line_old": 1420,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+          "closest_snippet_line_distance": 1361,
+          "pos": 11,
+          "context_length": 6113
+        },
+        {
+          "start_line_old": 1429,
+          "end_line_old": 1429,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+          "closest_snippet_line_distance": 1370,
+          "pos": 11,
+          "context_length": 6113
+        },
+        {
+          "start_line_old": 1437,
+          "end_line_old": 1439,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 8
+        },
+        {
+          "start_line_old": 1452,
+          "end_line_old": 1452,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 21
+        },
+        {
+          "start_line_old": 1565,
+          "end_line_old": 1565,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 134
+        },
+        {
+          "start_line_old": 1574,
+          "end_line_old": 1574,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 143
+        },
+        {
+          "start_line_old": 1583,
+          "end_line_old": 1589,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 158
+        },
+        {
+          "start_line_old": 1597,
+          "end_line_old": 1603,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 172
+        },
+        {
+          "start_line_old": 1612,
+          "end_line_old": 1641,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 210
+        },
+        {
+          "start_line_old": 1652,
+          "end_line_old": 1652,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 221
+        },
+        {
+          "start_line_old": 1695,
+          "end_line_old": 1728,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 297
+        },
+        {
+          "start_line_old": 1739,
+          "end_line_old": 1739,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 308
+        },
+        {
+          "start_line_old": 1774,
+          "end_line_old": 1774,
+          "file_pos": 4,
+          "file_context_length": 85853,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+          "closest_snippet_line_distance": 343
+        }
+      ]
+    },
+    "xarray/core/computation.py": {
+      "diffs": [
+        {
+          "start_line_old": 23,
+          "end_line_old": 23,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+          "closest_snippet_line_distance": 1684
+        },
+        {
+          "start_line_old": 678,
+          "end_line_old": 682,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+          "closest_snippet_line_distance": 410,
+          "pos": 18,
+          "context_length": 10372
+        },
+        {
+          "start_line_old": 700,
+          "end_line_old": 700,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+          "closest_snippet_line_distance": 388,
+          "pos": 18,
+          "context_length": 10372
+        },
+        {
+          "start_line_old": 708,
+          "end_line_old": 708,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+          "closest_snippet_line_distance": 380,
+          "pos": 18,
+          "context_length": 10372
+        },
+        {
+          "start_line_old": 735,
+          "end_line_old": 737,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+          "closest_snippet_line_distance": 353,
+          "pos": 18,
+          "context_length": 10372
+        },
+        {
+          "start_line_old": 752,
+          "end_line_old": 753,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+          "closest_snippet_line_distance": 336,
+          "pos": 18,
+          "context_length": 10372
+        },
+        {
+          "start_line_old": 815,
+          "end_line_old": 815,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+          "closest_snippet_line_distance": 892
+        },
+        {
+          "start_line_old": 2016,
+          "end_line_old": 2016,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+          "closest_snippet_line_distance": 246
+        },
+        {
+          "start_line_old": 2064,
+          "end_line_old": 2069,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+          "closest_snippet_line_distance": 299
+        },
+        {
+          "start_line_old": 2156,
+          "end_line_old": 2165,
+          "file_pos": 8,
+          "file_context_length": 112032,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+          "closest_snippet_line_distance": 395
+        }
+      ]
+    },
+    "xarray/core/dask_array_ops.py": {
+      "diffs": [
+        {
+          "start_line_old": 3,
+          "end_line_old": 6,
+          "file_pos": 7,
+          "file_context_length": 93272,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dask_array_ops.py_push_push.8.1",
+          "closest_snippet_line_distance": 59
+        },
+        {
+          "start_line_old": 99,
+          "end_line_old": 131,
+          "file_pos": 7,
+          "file_context_length": 93272,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dask_array_ops.py_push_push.8.1",
+          "closest_snippet_line_distance": 33
+        }
+      ]
+    },
+    "xarray/core/daskmanager.py": {
+      "diffs": [
+        {
+          "start_line_old": 0,
+          "end_line_old": 0
+        }
+      ]
+    },
+    "xarray/core/dataarray.py": {
+      "diffs": [
+        {
+          "start_line_old": 80,
+          "end_line_old": 80,
+          "file_pos": 3,
+          "file_context_length": 70436,
+          "pos": 4,
+          "context_length": 3139
+        },
+        {
+          "start_line_old": 1267,
+          "end_line_old": 1267,
+          "file_pos": 3,
+          "file_context_length": 70436,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.__dask_tokenize___DataArray.persist.3.1",
+          "closest_snippet_line_distance": 148
+        },
+        {
+          "start_line_old": 1288,
+          "end_line_old": 1291,
+          "file_pos": 3,
+          "file_context_length": 70436,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.__dask_tokenize___DataArray.persist.3.1",
+          "closest_snippet_line_distance": 172
+        },
+        {
+          "start_line_old": 1331,
+          "end_line_old": 1331,
+          "file_pos": 3,
+          "file_context_length": 70436,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.__dask_tokenize___DataArray.persist.3.1",
+          "closest_snippet_line_distance": 212
+        }
+      ]
+    },
+    "xarray/core/dataset.py": {
+      "diffs": [
+        {
+          "start_line_old": 54,
+          "end_line_old": 54,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "pos": 26,
+          "context_length": 13995
+        },
+        {
+          "start_line_old": 76,
+          "end_line_old": 76,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "pos": 26,
+          "context_length": 13995
+        },
+        {
+          "start_line_old": 110,
+          "end_line_old": 110,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 11
+        },
+        {
+          "start_line_old": 205,
+          "end_line_old": 211,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 112
+        },
+        {
+          "start_line_old": 228,
+          "end_line_old": 228,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 129
+        },
+        {
+          "start_line_old": 245,
+          "end_line_old": 245,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 146
+        },
+        {
+          "start_line_old": 256,
+          "end_line_old": 256,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 157
+        },
+        {
+          "start_line_old": 273,
+          "end_line_old": 283,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 184
+        },
+        {
+          "start_line_old": 746,
+          "end_line_old": 752,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 653
+        },
+        {
+          "start_line_old": 1578,
+          "end_line_old": 1578,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 1479
+        },
+        {
+          "start_line_old": 1948,
+          "end_line_old": 1948,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 1849
+        },
+        {
+          "start_line_old": 1969,
+          "end_line_old": 1969,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 1870
+        },
+        {
+          "start_line_old": 1987,
+          "end_line_old": 1987,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 1888
+        },
+        {
+          "start_line_old": 2075,
+          "end_line_old": 2075,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 1976
+        },
+        {
+          "start_line_old": 2120,
+          "end_line_old": 2120,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 2021
+        },
+        {
+          "start_line_old": 2208,
+          "end_line_old": 2208,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 2109
+        },
+        {
+          "start_line_old": 2235,
+          "end_line_old": 2235,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 2136
+        },
+        {
+          "start_line_old": 2269,
+          "end_line_old": 2269,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 2170
+        },
+        {
+          "start_line_old": 2308,
+          "end_line_old": 2308,
+          "file_pos": 11,
+          "file_context_length": 219544,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+          "closest_snippet_line_distance": 2209
+        }
+      ]
+    },
+    "xarray/core/duck_array_ops.py": {
+      "diffs": [
+        {
+          "start_line_old": 12,
+          "end_line_old": 12,
+          "file_pos": 6,
+          "file_context_length": 92255,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_mean.numeric_only_",
+          "closest_snippet_line_distance": 601,
+          "pos": 12,
+          "context_length": 6390
+        },
+        {
+          "start_line_old": 32,
+          "end_line_old": 32,
+          "file_pos": 6,
+          "file_context_length": 92255,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_mean.numeric_only_",
+          "closest_snippet_line_distance": 581,
+          "pos": 12,
+          "context_length": 6390
+        },
+        {
+          "start_line_old": 643,
+          "end_line_old": 646,
+          "file_pos": 6,
+          "file_context_length": 92255,
+          "pos": 9,
+          "context_length": 5652
+        },
+        {
+          "start_line_old": 654,
+          "end_line_old": 657,
+          "file_pos": 6,
+          "file_context_length": 92255,
+          "pos": 9,
+          "context_length": 5652
+        },
+        {
+          "start_line_old": 676,
+          "end_line_old": 676,
+          "file_pos": 6,
+          "file_context_length": 92255,
+          "pos": 9,
+          "context_length": 5652
+        }
+      ]
+    },
+    "xarray/core/indexing.py": {
+      "diffs": [
+        {
+          "start_line_old": 20,
+          "end_line_old": 20,
+          "file_pos": 10,
+          "file_context_length": 140006,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/indexing.py__dask_array_with_chunks_hint__logical_any.1.1",
+          "closest_snippet_line_distance": 1125
+        },
+        {
+          "start_line_old": 1145,
+          "end_line_old": 1154,
+          "file_pos": 10,
+          "file_context_length": 140006,
+          "pos": 25,
+          "context_length": 13421
+        },
+        {
+          "start_line_old": 1168,
+          "end_line_old": 1169,
+          "file_pos": 10,
+          "file_context_length": 140006,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/indexing.py__dask_array_with_chunks_hint__logical_any.1.1",
+          "closest_snippet_line_distance": 11
+        }
+      ]
+    },
+    "xarray/core/missing.py": {
+      "diffs": [
+        {
+          "start_line_old": 18,
+          "end_line_old": 18
+        },
+        {
+          "start_line_old": 696,
+          "end_line_old": 697
+        },
+        {
+          "start_line_old": 719,
+          "end_line_old": 719
+        },
+        {
+          "start_line_old": 744,
+          "end_line_old": 745
+        },
+        {
+          "start_line_old": 788,
+          "end_line_old": 789
+        }
+      ]
+    },
+    "xarray/core/nanops.py": {
+      "diffs": [
+        {
+          "start_line_old": 9,
+          "end_line_old": 9
+        },
+        {
+          "start_line_old": 25,
+          "end_line_old": 25
+        },
+        {
+          "start_line_old": 143,
+          "end_line_old": 143
+        }
+      ]
+    },
+    "xarray/core/parallelcompat.py": {
+      "diffs": [
+        {
+          "start_line_old": 0,
+          "end_line_old": 0
+        }
+      ]
+    },
+    "xarray/core/pycompat.py": {
+      "diffs": [
+        {
+          "start_line_old": 15,
+          "end_line_old": 15
+        },
+        {
+          "start_line_old": 33,
+          "end_line_old": 33
+        },
+        {
+          "start_line_old": 48,
+          "end_line_old": 48
+        },
+        {
+          "start_line_old": 84,
+          "end_line_old": 84
+        }
+      ]
+    },
+    "xarray/core/rolling.py": {
+      "diffs": [
+        {
+          "start_line_old": 161,
+          "end_line_old": 163
+        }
+      ]
+    },
+    "xarray/core/types.py": {
+      "diffs": [
+        {
+          "start_line_old": 36,
+          "end_line_old": 36,
+          "file_pos": 2,
+          "file_context_length": 6821,
+          "pos": 2,
+          "context_length": 1610
+        },
+        {
+          "start_line_old": 108,
+          "end_line_old": 108,
+          "file_pos": 2,
+          "file_context_length": 6821,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/types.py_1_T_DataWithCoords.1",
+          "closest_snippet_line_distance": 11,
+          "pos": 5,
+          "context_length": 3876
+        }
+      ]
+    },
+    "xarray/core/utils.py": {
+      "diffs": [
+        {
+          "start_line_old": 1205,
+          "end_line_old": 1205
+        }
+      ]
+    },
+    "xarray/core/variable.py": {
+      "diffs": [
+        {
+          "start_line_old": 29,
+          "end_line_old": 29
+        },
+        {
+          "start_line_old": 57,
+          "end_line_old": 57
+        },
+        {
+          "start_line_old": 197,
+          "end_line_old": 200
+        },
+        {
+          "start_line_old": 371,
+          "end_line_old": 371
+        },
+        {
+          "start_line_old": 383,
+          "end_line_old": 383
+        },
+        {
+          "start_line_old": 536,
+          "end_line_old": 537
+        },
+        {
+          "start_line_old": 1169,
+          "end_line_old": 1170
+        },
+        {
+          "start_line_old": 1191,
+          "end_line_old": 1194
+        },
+        {
+          "start_line_old": 1212,
+          "end_line_old": 1212
+        },
+        {
+          "start_line_old": 1223,
+          "end_line_old": 1223
+        },
+        {
+          "start_line_old": 1230,
+          "end_line_old": 1231
+        },
+        {
+          "start_line_old": 1247,
+          "end_line_old": 1257
+        },
+        {
+          "start_line_old": 1269,
+          "end_line_old": 1269
+        },
+        {
+          "start_line_old": 2906,
+          "end_line_old": 2906
+        }
+      ]
+    },
+    "xarray/core/weighted.py": {
+      "diffs": [
+        {
+          "start_line_old": 241,
+          "end_line_old": 241
+        }
+      ]
+    }
+  },
+  "vectors": 1358,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks.38_map_blocks.46.result[index].encoding.1",
+      "distance": 0.8219826817512512,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 477,
+      "end_line": 556,
+      "tokens": 792,
+      "context_length": 792
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_1_T_DataWithCoords.1",
+      "distance": 0.8361234664916992,
+      "file_path": "xarray/core/types.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 818,
+      "context_length": 1610,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks.3_map_blocks.23.3.indexes.3.1",
+      "distance": 0.8464947938919067,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 299,
+      "end_line": 379,
+      "tokens": 778,
+      "context_length": 2388
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_1_30.T_XarrayOther.1",
+      "distance": 0.8522878885269165,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 102,
+      "tokens": 751,
+      "context_length": 3139,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_ScalarOrArray_NestedSequence.1",
+      "distance": 0.8874117136001587,
+      "file_path": "xarray/core/types.py",
+      "start_line": 99,
+      "end_line": 179,
+      "tokens": 737,
+      "context_length": 3876,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+      "distance": 0.9124440550804138,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 378,
+      "context_length": 4254,
+      "file_pos": 4
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_1_",
+      "distance": 0.9236116409301758,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 687,
+      "context_length": 4941
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_1_assert_chunks_compatible.3.1.1",
+      "distance": 0.9255348443984985,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 187,
+      "context_length": 5128
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_mean.numeric_only_",
+      "distance": 0.9395574927330017,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 613,
+      "end_line": 676,
+      "tokens": 524,
+      "context_length": 5652,
+      "file_pos": 6
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks.47_",
+      "distance": 0.942669689655304,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 558,
+      "end_line": 583,
+      "tokens": 272,
+      "context_length": 5924
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_full_like_full_like_33.1",
+      "distance": 0.944500207901001,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1397,
+      "end_line": 1431,
+      "tokens": 189,
+      "context_length": 6113,
+      "file_pos": 6
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_1_get_array_namespace.1.2.1.1",
+      "distance": 0.9502132534980774,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 277,
+      "context_length": 6390,
+      "file_pos": 6
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/dask_array_ops.py__first_last_wrapper_",
+      "distance": 0.9508015513420105,
+      "file_path": "xarray/core/dask_array_ops.py",
+      "start_line": 101,
+      "end_line": 132,
+      "tokens": 207,
+      "context_length": 6597,
+      "file_pos": 7
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks.24_map_blocks.output_chunk_bounds.1",
+      "distance": 0.951682448387146,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 381,
+      "end_line": 421,
+      "tokens": 461,
+      "context_length": 7058
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks_map_blocks.1",
+      "distance": 0.958277702331543,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 147,
+      "end_line": 249,
+      "tokens": 1298,
+      "context_length": 8356
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_apply_ufunc.2_apply_ufunc.variables_vfunc.1",
+      "distance": 0.9668183326721191,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 1088,
+      "end_line": 1163,
+      "tokens": 789,
+      "context_length": 9145,
+      "file_pos": 8
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks._wrapper_map_blocks._wrapper.12.1",
+      "distance": 0.9668575525283813,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 251,
+      "end_line": 297,
+      "tokens": 423,
+      "context_length": 9568
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_apply_variable_ufunc.7_apply_variable_ufunc.result_data.1",
+      "distance": 0.9677672386169434,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 678,
+      "end_line": 761,
+      "tokens": 804,
+      "context_length": 10372,
+      "file_pos": 8
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.__dask_tokenize___DataArray.persist.3.1",
+      "distance": 0.9683605432510376,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1018,
+      "end_line": 1119,
+      "tokens": 817,
+      "context_length": 11189,
+      "file_pos": 8
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py__dask_or_eager_func__dask_or_eager_func.3.1",
+      "distance": 0.9695698022842407,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 49,
+      "end_line": 68,
+      "tokens": 130,
+      "context_length": 11319,
+      "file_pos": 8
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_map_blocks.subset_dataset_to_block_map_blocks.subset_dataset_to_block.10.1",
+      "distance": 0.9723117351531982,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 423,
+      "end_line": 475,
+      "tokens": 510,
+      "context_length": 11829
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/dask_array_ops.py_push_push.8.1",
+      "distance": 0.9726612567901611,
+      "file_path": "xarray/core/dask_array_ops.py",
+      "start_line": 62,
+      "end_line": 98,
+      "tokens": 311,
+      "context_length": 12140,
+      "file_pos": 8
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_dot.4_dot.29.1",
+      "distance": 0.976185142993927,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 1707,
+      "end_line": 1770,
+      "tokens": 613,
+      "context_length": 12753,
+      "file_pos": 8
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/backends/api.py_1_ENGINES.1",
+      "distance": 0.9765502214431763,
+      "file_path": "xarray/backends/api.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 552,
+      "context_length": 13305,
+      "file_pos": 9
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py__dask_array_with_chunks_hint__logical_any.1.1",
+      "distance": 0.9896032214164734,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1145,
+      "end_line": 1158,
+      "tokens": 116,
+      "context_length": 13421,
+      "file_pos": 10
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1_38",
+      "distance": 0.9919941425323486,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 574,
+      "context_length": 13995,
+      "file_pos": 11
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/parallel.py",
+      "position": 1,
+      "tokens": 5126,
+      "context_length": 5126
+    },
+    {
+      "file_path": "xarray/core/types.py",
+      "position": 2,
+      "tokens": 1695,
+      "context_length": 6821
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 3,
+      "tokens": 63615,
+      "context_length": 70436
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 4,
+      "tokens": 15417,
+      "context_length": 85853
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 5,
+      "tokens": 687,
+      "context_length": 86540
+    },
+    {
+      "file_path": "xarray/core/duck_array_ops.py",
+      "position": 6,
+      "tokens": 5715,
+      "context_length": 92255
+    },
+    {
+      "file_path": "xarray/core/dask_array_ops.py",
+      "position": 7,
+      "tokens": 1017,
+      "context_length": 93272
+    },
+    {
+      "file_path": "xarray/core/computation.py",
+      "position": 8,
+      "tokens": 18760,
+      "context_length": 112032
+    },
+    {
+      "file_path": "xarray/backends/api.py",
+      "position": 9,
+      "tokens": 14740,
+      "context_length": 126772
+    },
+    {
+      "file_path": "xarray/core/indexing.py",
+      "position": 10,
+      "tokens": 13234,
+      "context_length": 140006
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 11,
+      "tokens": 79538,
+      "context_length": 219544
+    }
+  ]
+}

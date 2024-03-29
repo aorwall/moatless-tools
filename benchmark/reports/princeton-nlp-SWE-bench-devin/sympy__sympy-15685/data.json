@@ -1,0 +1,897 @@
+{
+  "instance_id": "sympy__sympy-15685",
+  "model_patch": "diff --git a/sympy/physics/units/quantities.py b/sympy/physics/units/quantities.py\nindex 8677f7ce57..9ab351f7b7 100644\n--- a/sympy/physics/units/quantities.py\n+++ b/sympy/physics/units/quantities.py\n@@ -130,21 +130,21 @@ def abbrev(self):\n         return self._abbrev\n \n     @property\n-    def scale_factor(self):\n+    def _scale_factor(self):\n         \"\"\"\n         Overall magnitude of the quantity as compared to the canonical units.\n         \"\"\"\n         return Quantity.SI_quantity_scale_factors.get(self, S.One)\n \n     def _eval_is_positive(self):\n-        return self.scale_factor.is_positive\n+        return self._scale_factor.is_positive\n \n     def _eval_is_constant(self):\n-        return self.scale_factor.is_constant()\n+        return self._scale_factor.is_constant()\n \n     def _eval_Abs(self):\n-        scale_factor = Abs(self.scale_factor)\n-        if scale_factor == self.scale_factor:\n+        scale_factor = Abs(self._scale_factor)\n+        if scale_factor == self._scale_factor:\n             return self\n         return None\n         q = self.func(self.name, self.abbrev)\n@@ -179,7 +179,7 @@ def get_dimensional_expr(expr):\n     def _collect_factor_and_dimension(expr):\n         \"\"\"Return tuple with factor expression and dimension expression.\"\"\"\n         if isinstance(expr, Quantity):\n-            return expr.scale_factor, expr.dimension\n+            return expr._scale_factor, expr.dimension\n         elif isinstance(expr, Mul):\n             factor = 1\n             dimension = Dimension(1)\n@@ -246,4 +246,4 @@ def convert_to(self, other):\n     @property\n     def free_symbols(self):\n         \"\"\"Return free symbols from quantity.\"\"\"\n-        return self.scale_factor.free_symbols\n+        return self._scale_factor.free_symbols\ndiff --git a/sympy/physics/units/util.py b/sympy/physics/units/util.py\nindex 9175c4158b..4dd0263952 100644\n--- a/sympy/physics/units/util.py\n+++ b/sympy/physics/units/util.py\n@@ -119,7 +119,7 @@ def get_total_scale_factor(expr):\n         elif isinstance(expr, Pow):\n             return get_total_scale_factor(expr.base) ** expr.exp\n         elif isinstance(expr, Quantity):\n-            return expr.scale_factor\n+            return expr._scale_factor\n         return expr\n \n     depmat = _get_conversion_matrix_for_expr(expr, target_units)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/physics/units/quantities.py",
+    "sympy/physics/units/util.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "9ac430347eb80809a1dd89bbf5dad7ca593bbe63",
+  "patch": "diff --git a/sympy/physics/units/definitions.py b/sympy/physics/units/definitions.py\n--- a/sympy/physics/units/definitions.py\n+++ b/sympy/physics/units/definitions.py\n@@ -50,22 +50,13 @@\n meter.set_dimension(length)\n meter.set_scale_factor(One)\n \n-# gram; used to define its prefixed units\n-g = gram = grams = Quantity(\"gram\", abbrev=\"g\")\n-gram.set_dimension(mass)\n-gram.set_scale_factor(One)\n-\n-# NOTE: the `kilogram` has scale factor 1000. In SI, kg is a base unit, but\n-# nonetheless we are trying to be compatible with the `kilo` prefix. In a\n-# similar manner, people using CGS or gaussian units could argue that the\n-# `centimeter` rather than `meter` is the fundamental unit for length, but the\n-# scale factor of `centimeter` will be kept as 1/100 to be compatible with the\n-# `centi` prefix.  The current state of the code assumes SI unit dimensions, in\n+# NOTE: the `kilogram` has scale factor of 1 in SI.\n+# The current state of the code assumes SI unit dimensions, in\n # the future this module will be modified in order to be unit system-neutral\n # (that is, support all kinds of unit systems).\n kg = kilogram = kilograms = Quantity(\"kilogram\", abbrev=\"kg\")\n kilogram.set_dimension(mass)\n-kilogram.set_scale_factor(kilo*gram)\n+kilogram.set_scale_factor(One)\n \n s = second = seconds = Quantity(\"second\", abbrev=\"s\")\n second.set_dimension(time)\n@@ -87,6 +78,9 @@\n candela.set_dimension(luminous_intensity)\n candela.set_scale_factor(One)\n \n+g = gram = grams = Quantity(\"gram\", abbrev=\"g\")\n+gram.set_dimension(mass)\n+gram.set_scale_factor(kilogram/kilo)\n \n mg = milligram = milligrams = Quantity(\"milligram\", abbrev=\"mg\")\n milligram.set_dimension(mass)\n",
+  "test_patch": "diff --git a/sympy/physics/units/tests/test_unitsystem.py b/sympy/physics/units/tests/test_unitsystem.py\n--- a/sympy/physics/units/tests/test_unitsystem.py\n+++ b/sympy/physics/units/tests/test_unitsystem.py\n@@ -53,7 +53,7 @@ def test_print_unit_base():\n \n     mksa = UnitSystem((m, kg, s, A), (Js,))\n     with warns_deprecated_sympy():\n-        assert mksa.print_unit_base(Js) == m**2*kg*s**-1/1000\n+        assert mksa.print_unit_base(Js) == m**2*kg*s**-1\n \n \n def test_extend():\n",
+  "problem_statement": "Make .scale_factor private in the units module\n* sympy version: 1.3\r\n* Python version: 3.6.6\r\n* Operating System: Win10\r\n\r\n### Description\r\n\r\nDividing a Quantity with dimension voltage by a Quantity with dimension current yields ohm/1000 when I expected ohm. In the SI system, 1 V/ 1 A = 1 \u03a9.\r\n\r\n### What I Did\r\n\r\n```\r\n>>> from sympy.physics.units import Quantity, voltage, current, ohm, convert_to\r\n>>> vs = Quantity('vs')\r\n>>> vs.set_dimension(voltage)\r\n>>> vs_i = Quantity('vs_i')\r\n>>> vs_i.set_dimension(current)\r\n>>> convert_to(vs/vs_i, ohm)\r\nohm/1000\r\n```\r\n\r\n### Further discussion\r\nThe problem is related to the kilogram workaround and the property `scale_factor`. The default scale_factor for a Quantity is 1.\r\n```\r\n>>> vs.scale_factor\r\n1.0\r\n```\r\n\r\nThe docstring for `scale_factor' states:\r\n\r\n> Overall magnitude of the quantity as compared to the canonical units.\r\n\r\nBut, the scale factor for ohm is 1000.\r\n```\r\n>>> ohm.scale_factor\r\n1000\r\n\r\nThis value of 1000 conflicts with the definition. `scale_factor` is a user facing property and should be consistent with the unit system definition, in this case the SI. The kilogram workaround should be an internal implementation factor and not exposed to the user.\n",
+  "hints_text": "@asmeurer I want to work on this issue, can you please help? I am understanding the issue but not sure how to fix it.\nI would like to work on this issue.\nYou are not setting the scale factors of the quantities you define.",
+  "created_at": "2018-12-23T07:13:37Z",
+  "version": "1.4",
+  "FAIL_TO_PASS": "[\"test_print_unit_base\"]",
+  "PASS_TO_PASS": "[\"test_definition\", \"test_dim\", \"test_error_definition\", \"test_extend\", \"test_str_repr\"]",
+  "environment_setup_commit": "73b3f90093754c5ed1561bd885242330e3583004",
+  "patch_files": [
+    "sympy/physics/units/definitions.py"
+  ],
+  "test_patch_files": [
+    "sympy/physics/units/tests/test_unitsystem.py"
+  ],
+  "patch_diff_details": {
+    "sympy/physics/units/definitions.py": {
+      "diffs": [
+        {
+          "start_line_old": 53,
+          "end_line_old": 68,
+          "file_pos": 2,
+          "file_context_length": 7043,
+          "pos": 2,
+          "context_length": 897
+        },
+        {
+          "start_line_old": 90,
+          "end_line_old": 90,
+          "file_pos": 2,
+          "file_context_length": 7043,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_becquerel_193",
+          "closest_snippet_line_distance": 88,
+          "pos": 7,
+          "context_length": 3841
+        }
+      ]
+    }
+  },
+  "vectors": 7935,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity.set_scale_factor_Quantity.set_scale_factor.7",
+      "distance": 0.6290069222450256,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 102,
+      "end_line": 112,
+      "tokens": 141,
+      "context_length": 141
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_1_cd.candela.candelas.1",
+      "distance": 0.6776931285858154,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 756,
+      "context_length": 897,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_373_",
+      "distance": 0.7035536766052246,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 514,
+      "end_line": 592,
+      "tokens": 712,
+      "context_length": 1609,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/physics/units/__init__.py_1_exbi",
+      "distance": 0.7322773933410645,
+      "file_path": "sympy/physics/units/__init__.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 515,
+      "context_length": 2124
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity.8_Quantity.set_dimension.5",
+      "distance": 0.7630242109298706,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 74,
+      "end_line": 100,
+      "tokens": 221,
+      "context_length": 2345
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_becquerel_193",
+      "distance": 0.769959568977356,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 178,
+      "end_line": 275,
+      "tokens": 743,
+      "context_length": 3088,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_60_124",
+      "distance": 0.7807309627532959,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 87,
+      "end_line": 177,
+      "tokens": 753,
+      "context_length": 3841,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_313_372",
+      "distance": 0.790786862373352,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 433,
+      "end_line": 513,
+      "tokens": 741,
+      "context_length": 4582,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity.convert_to_",
+      "distance": 0.7996654510498047,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 226,
+      "end_line": 250,
+      "tokens": 154,
+      "context_length": 4736
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_h_stefan.stefan_boltzmann_constant.1",
+      "distance": 0.8023245334625244,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 277,
+      "end_line": 364,
+      "tokens": 757,
+      "context_length": 5493,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py_quantity_simplify_quantity_simplify.10.1",
+      "distance": 0.8117101192474365,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 133,
+      "end_line": 167,
+      "tokens": 286,
+      "context_length": 5779
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity.name_Quantity._eval_subs.1.1.1",
+      "distance": 0.8200802803039551,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 114,
+      "end_line": 154,
+      "tokens": 237,
+      "context_length": 6016
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity.get_dimensional_expr_Quantity.get_dimensional_expr.2.1",
+      "distance": 0.8558032512664795,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 156,
+      "end_line": 176,
+      "tokens": 194,
+      "context_length": 6210
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/physics/units/definitions.py_260_312",
+      "distance": 0.8576050996780396,
+      "file_path": "sympy/physics/units/definitions.py",
+      "start_line": 365,
+      "end_line": 432,
+      "tokens": 746,
+      "context_length": 6956,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity_Quantity.__new__.13.1",
+      "distance": 0.8585971593856812,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 18,
+      "end_line": 72,
+      "tokens": 368,
+      "context_length": 7324
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/physics/units/unitsystem.py_1_UnitSystem.extend.4.1",
+      "distance": 0.8744432926177979,
+      "file_path": "sympy/physics/units/unitsystem.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 551,
+      "context_length": 7875
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py_convert_to_convert_to.10.1",
+      "distance": 0.8850610852241516,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 61,
+      "end_line": 130,
+      "tokens": 669,
+      "context_length": 8544
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/physics/units/systems/si.py_1_",
+      "distance": 0.887991189956665,
+      "file_path": "sympy/physics/units/systems/si.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 400,
+      "context_length": 8944
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/physics/units/__init__.py_exbibytes_exbibytes",
+      "distance": 0.8924871683120728,
+      "file_path": "sympy/physics/units/__init__.py",
+      "start_line": 85,
+      "end_line": 211,
+      "tokens": 998,
+      "context_length": 9942
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_1_9",
+      "distance": 0.8958311676979065,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 107,
+      "context_length": 10049
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_12_information.1",
+      "distance": 0.904450535774231,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 272,
+      "end_line": 308,
+      "tokens": 322,
+      "context_length": 10371
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py_1_10",
+      "distance": 0.9486416578292847,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 112,
+      "context_length": 10483
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/physics/units/unitsystem.py_UnitSystem.print_unit_base_",
+      "distance": 0.9493876695632935,
+      "file_path": "sympy/physics/units/unitsystem.py",
+      "start_line": 79,
+      "end_line": 115,
+      "tokens": 201,
+      "context_length": 10684
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_dimsys_MKS_",
+      "distance": 0.9499280452728271,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 667,
+      "end_line": 712,
+      "tokens": 425,
+      "context_length": 11109
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/physics/units/systems/natural.py_1_",
+      "distance": 0.9632478952407837,
+      "file_path": "sympy/physics/units/systems/natural.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 228,
+      "context_length": 11337
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_1_10",
+      "distance": 0.9776668548583984,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 190,
+      "context_length": 11527
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/physics/units/quantities.py_Quantity._collect_factor_and_dimension_Quantity._collect_factor_and_dimension.2.8.1.1",
+      "distance": 0.9807147979736328,
+      "file_path": "sympy/physics/units/quantities.py",
+      "start_line": 178,
+      "end_line": 224,
+      "tokens": 439,
+      "context_length": 11966
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/physics/units/systems/mksa.py_1_",
+      "distance": 0.984286904335022,
+      "file_path": "sympy/physics/units/systems/mksa.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 251,
+      "context_length": 12217
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/physics/units/__init__.py_find_unit_",
+      "distance": 0.9909311532974243,
+      "file_path": "sympy/physics/units/__init__.py",
+      "start_line": 214,
+      "end_line": 263,
+      "tokens": 427,
+      "context_length": 12644
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/physics/units/systems/mks.py_1_",
+      "distance": 0.9967595934867859,
+      "file_path": "sympy/physics/units/systems/mks.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 288,
+      "context_length": 12932
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_Dimension_Dimension.is_real.1",
+      "distance": 1.0111923217773438,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 27,
+      "end_line": 79,
+      "tokens": 355,
+      "context_length": 13287
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.dim_can_vector_DimensionSystem.is_consistent.5.1",
+      "distance": 1.020119309425354,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 602,
+      "end_line": 664,
+      "tokens": 369,
+      "context_length": 13656
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_Dimension.__add___Dimension._get_dimensional_dependencies_for_name.2.1",
+      "distance": 1.0219687223434448,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 154,
+      "end_line": 236,
+      "tokens": 627,
+      "context_length": 14283
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/physics/units/prefixes.py_1_Prefix.__rtruediv__.1",
+      "distance": 1.0302319526672363,
+      "file_path": "sympy/physics/units/prefixes.py",
+      "start_line": 1,
+      "end_line": 118,
+      "tokens": 805,
+      "context_length": 15088
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.base_dims_DimensionSystem._get_dimensional_dependencies_for_name.6.3.3.1.1",
+      "distance": 1.0338066816329956,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 401,
+      "end_line": 445,
+      "tokens": 300,
+      "context_length": 15388
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py_dim_simplify_dim_simplify.4.1",
+      "distance": 1.0523611307144165,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 19,
+      "end_line": 37,
+      "tokens": 153,
+      "context_length": 15541
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_44_DimensionSystem.__new__.19.1",
+      "distance": 1.0534040927886963,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 310,
+      "end_line": 399,
+      "tokens": 694,
+      "context_length": 16235
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py__get_conversion_matrix_for_expr__get_conversion_matrix_for_expr.12.1",
+      "distance": 1.0612056255340576,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 40,
+      "end_line": 58,
+      "tokens": 226,
+      "context_length": 16461
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.__call___DimensionSystem.list_can_dims.4.1",
+      "distance": 1.0619616508483887,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 521,
+      "end_line": 559,
+      "tokens": 237,
+      "context_length": 16698
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.get_dimensional_dependencies_DimensionSystem.equivalent_dims.3.1",
+      "distance": 1.0620746612548828,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 447,
+      "end_line": 461,
+      "tokens": 142,
+      "context_length": 16840
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_Dimension.name_Dimension.__neg__.1.1",
+      "distance": 1.0695478916168213,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 105,
+      "end_line": 134,
+      "tokens": 161,
+      "context_length": 17001
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_I_",
+      "distance": 1.0757869482040405,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3880,
+      "end_line": 3936,
+      "tokens": 358,
+      "context_length": 17359
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.sort_dims_DimensionSystem.sort_dims.3.1",
+      "distance": 1.0788052082061768,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 481,
+      "end_line": 499,
+      "tokens": 125,
+      "context_length": 17484
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_Dimension._register_as_base_dim_Dimension._register_as_base_dim.dimsys_default._args.1",
+      "distance": 1.0802963972091675,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 136,
+      "end_line": 152,
+      "tokens": 159,
+      "context_length": 17643
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_Dimension.__new___Dimension.__new__.7.1",
+      "distance": 1.0844577550888062,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 81,
+      "end_line": 103,
+      "tokens": 142,
+      "context_length": 17785
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/physics/units/systems/__init__.py__",
+      "distance": 1.1039824485778809,
+      "file_path": "sympy/physics/units/systems/__init__.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 17785
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.can_transf_matrix_DimensionSystem.can_transf_matrix.4.1",
+      "distance": 1.1168767213821411,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 583,
+      "end_line": 600,
+      "tokens": 136,
+      "context_length": 17921
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.inv_can_transf_matrix_DimensionSystem.inv_can_transf_matrix.3.1",
+      "distance": 1.1201692819595337,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 561,
+      "end_line": 581,
+      "tokens": 172,
+      "context_length": 18093
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.__getitem___DimensionSystem.__getitem__.6.1",
+      "distance": 1.1260251998901367,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 501,
+      "end_line": 519,
+      "tokens": 125,
+      "context_length": 18218
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_ImaginaryUnit_ImaginaryUnit._eval_conjugate.1.1",
+      "distance": 1.1281647682189941,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3800,
+      "end_line": 3843,
+      "tokens": 236,
+      "context_length": 18454
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/physics/units/dimensions.py_DimensionSystem.extend_DimensionSystem.extend.4.1",
+      "distance": 1.1363029479980469,
+      "file_path": "sympy/physics/units/dimensions.py",
+      "start_line": 463,
+      "end_line": 479,
+      "tokens": 149,
+      "context_length": 18603
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/physics/units/prefixes.py_yotta_",
+      "distance": 1.1410759687423706,
+      "file_path": "sympy/physics/units/prefixes.py",
+      "start_line": 153,
+      "end_line": 217,
+      "tokens": 600,
+      "context_length": 19203
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/physics/units/util.py_check_dimensions_",
+      "distance": 1.1477453708648682,
+      "file_path": "sympy/physics/units/util.py",
+      "start_line": 170,
+      "end_line": 213,
+      "tokens": 347,
+      "context_length": 19550
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/series/fourier.py_FourierSeries.scale_FourierSeries.scale.8.1",
+      "distance": 1.1532325744628906,
+      "file_path": "sympy/series/fourier.py",
+      "start_line": 318,
+      "end_line": 345,
+      "tokens": 236,
+      "context_length": 19786
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/constants.py_1_",
+      "distance": 1.1601192951202393,
+      "file_path": "sympy/physics/quantum/constants.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 362,
+      "context_length": 20148
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/sho1d.py_NumberOp._eval_commutator_RaisingOp_NumberOp._represent_XOp.6",
+      "distance": 1.1679524183273315,
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "start_line": 380,
+      "end_line": 395,
+      "tokens": 139,
+      "context_length": 20287
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_1_mpmath",
+      "distance": 1.1736714839935303,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 404,
+      "context_length": 20691
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/core/backend.py_os_",
+      "distance": 1.1740124225616455,
+      "file_path": "sympy/core/backend.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 357,
+      "context_length": 21048
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/operatorordering.py__normal_ordered_form_factor__normal_ordered_form_factor.7.2.2.1",
+      "distance": 1.1744548082351685,
+      "file_path": "sympy/physics/quantum/operatorordering.py",
+      "start_line": 37,
+      "end_line": 143,
+      "tokens": 843,
+      "context_length": 21891
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/__init__.py_1_",
+      "distance": 1.177390217781067,
+      "file_path": "sympy/__init__.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 601,
+      "context_length": 22492
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_1_14",
+      "distance": 1.181797742843628,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 174,
+      "context_length": 22666
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/sho1d.py_1_SHOOp._eval_hilbert_space.1.1",
+      "distance": 1.1828341484069824,
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 248,
+      "context_length": 22914
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/sho1d.py_NumberOp._represent_NumberOp_NumberOp._represent_NumberOp.7.1",
+      "distance": 1.183529019355774,
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "start_line": 397,
+      "end_line": 409,
+      "tokens": 133,
+      "context_length": 23047
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/series/limits.py_1_14",
+      "distance": 1.1838005781173706,
+      "file_path": "sympy/series/limits.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 151,
+      "context_length": 23198
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_1__LOG2.1",
+      "distance": 1.1846392154693604,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 320,
+      "context_length": 23518
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_ImaginaryUnit._eval_power_ImaginaryUnit._mpc_.1.1",
+      "distance": 1.1853413581848145,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3845,
+      "end_line": 3878,
+      "tokens": 288,
+      "context_length": 23806
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/physics/units/prefixes.py_prefix_unit_prefix_unit.5.1",
+      "distance": 1.185353398323059,
+      "file_path": "sympy/physics/units/prefixes.py",
+      "start_line": 121,
+      "end_line": 150,
+      "tokens": 249,
+      "context_length": 24055
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode.py_ode_nth_linear_constant_coeff_homogeneous.x_ode_nth_linear_constant_coeff_undetermined_coefficients.4.1",
+      "distance": 1.185936450958252,
+      "file_path": "sympy/solvers/ode.py",
+      "start_line": 4948,
+      "end_line": 5088,
+      "tokens": 1543,
+      "context_length": 25598
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/spin.py_1_m_values.4.1",
+      "distance": 1.1860311031341553,
+      "file_path": "sympy/physics/quantum/spin.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 482,
+      "context_length": 26080
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/physics/units/quantities.py",
+      "position": 1,
+      "tokens": 1832,
+      "context_length": 1832
+    },
+    {
+      "file_path": "sympy/physics/units/definitions.py",
+      "position": 2,
+      "tokens": 5211,
+      "context_length": 7043
+    },
+    {
+      "file_path": "sympy/physics/units/__init__.py",
+      "position": 3,
+      "tokens": 1940,
+      "context_length": 8983
+    },
+    {
+      "file_path": "sympy/physics/units/util.py",
+      "position": 4,
+      "tokens": 1797,
+      "context_length": 10780
+    },
+    {
+      "file_path": "sympy/physics/units/unitsystem.py",
+      "position": 5,
+      "tokens": 748,
+      "context_length": 11528
+    },
+    {
+      "file_path": "sympy/physics/units/systems/si.py",
+      "position": 6,
+      "tokens": 400,
+      "context_length": 11928
+    },
+    {
+      "file_path": "sympy/physics/units/dimensions.py",
+      "position": 7,
+      "tokens": 4982,
+      "context_length": 16910
+    },
+    {
+      "file_path": "sympy/physics/units/systems/natural.py",
+      "position": 8,
+      "tokens": 228,
+      "context_length": 17138
+    },
+    {
+      "file_path": "sympy/physics/units/systems/mksa.py",
+      "position": 9,
+      "tokens": 251,
+      "context_length": 17389
+    },
+    {
+      "file_path": "sympy/physics/units/systems/mks.py",
+      "position": 10,
+      "tokens": 288,
+      "context_length": 17677
+    },
+    {
+      "file_path": "sympy/physics/units/prefixes.py",
+      "position": 11,
+      "tokens": 1656,
+      "context_length": 19333
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 12,
+      "tokens": 29633,
+      "context_length": 48966
+    },
+    {
+      "file_path": "sympy/physics/units/systems/__init__.py",
+      "position": 13,
+      "tokens": 77,
+      "context_length": 49043
+    },
+    {
+      "file_path": "sympy/series/fourier.py",
+      "position": 14,
+      "tokens": 3680,
+      "context_length": 52723
+    },
+    {
+      "file_path": "sympy/physics/quantum/constants.py",
+      "position": 15,
+      "tokens": 362,
+      "context_length": 53085
+    },
+    {
+      "file_path": "sympy/physics/quantum/sho1d.py",
+      "position": 16,
+      "tokens": 5470,
+      "context_length": 58555
+    },
+    {
+      "file_path": "sympy/simplify/simplify.py",
+      "position": 17,
+      "tokens": 16054,
+      "context_length": 74609
+    },
+    {
+      "file_path": "sympy/core/backend.py",
+      "position": 18,
+      "tokens": 358,
+      "context_length": 74967
+    },
+    {
+      "file_path": "sympy/physics/quantum/operatorordering.py",
+      "position": 19,
+      "tokens": 2337,
+      "context_length": 77304
+    },
+    {
+      "file_path": "sympy/__init__.py",
+      "position": 20,
+      "tokens": 601,
+      "context_length": 77905
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 21,
+      "tokens": 10310,
+      "context_length": 88215
+    },
+    {
+      "file_path": "sympy/series/limits.py",
+      "position": 22,
+      "tokens": 2138,
+      "context_length": 90353
+    },
+    {
+      "file_path": "sympy/solvers/ode.py",
+      "position": 23,
+      "tokens": 104767,
+      "context_length": 195120
+    },
+    {
+      "file_path": "sympy/physics/quantum/spin.py",
+      "position": 24,
+      "tokens": 20371,
+      "context_length": 215491
+    }
+  ]
+}

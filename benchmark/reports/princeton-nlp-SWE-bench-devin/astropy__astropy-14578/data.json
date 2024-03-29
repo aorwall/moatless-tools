@@ -1,0 +1,1033 @@
+{
+  "instance_id": "astropy__astropy-14578",
+  "model_patch": "diff --git a/astropy/io/fits/column.py b/astropy/io/fits/column.py\nindex 47f6e39fe8..cce13bcfcb 100644\n--- a/astropy/io/fits/column.py\n+++ b/astropy/io/fits/column.py\n@@ -287,6 +287,34 @@ class _BaseColumnFormat(str):\n         \"\"\"\n         return cls.from_recformat(format.recformat)\n \n+    @lazyproperty\n+    def dtype(self):\n+        \"\"\"\n+        The Numpy dtype object created from the format's associated recformat.\n+        \"\"\"\n+        return np.dtype(self.recformat)\n+\n+    @classmethod\n+    def from_recformat(cls, recformat):\n+        \"\"\"Creates a column format from a Numpy record dtype format.\"\"\"\n+        return cls(_convert_format(recformat, reverse=True))\n+\n+    @lazyproperty\n+    def recformat(self):\n+        \"\"\"Returns the equivalent Numpy record format string.\"\"\"\n+        return _convert_format(self)\n+\n+    @lazyproperty\n+    def canonical(self):\n+        \"\"\"\n+        Returns a 'canonical' string representation of this format.\n+\n+        This is in the proper form of rTa where T is the single character data\n+        type code, a is the optional part, and r is the repeat.  If repeat == 1\n+        (the default) it is left out of this representation.\n+        \"\"\"\n+        raise NotImplementedError(\"Subclasses should implement this property.\")\n+\n \n class _ColumnFormat(_BaseColumnFormat):\n     \"\"\"\n@@ -1287,7 +1315,7 @@ class Column(NotifierMixin):\n         return valid, invalid\n \n     @classmethod\n-    def _determine_formats(cls, format, start, dim, ascii):\n+    def _determine_formats(cls, format, start, dim, ascii, column_data=None):\n         \"\"\"\n         Given a format string and whether or not the Column is for an\n         ASCII table (ascii=None means unspecified, but lean toward binary table\n@@ -1312,9 +1340,9 @@ class Column(NotifierMixin):\n             # best to guess what the user intended.\n             format, recformat = cls._guess_format(format, start, dim)\n         elif not ascii and not isinstance(format, _BaseColumnFormat):\n-            format, recformat = cls._convert_format(format, _ColumnFormat)\n+            format, recformat = cls._convert_format(format, _ColumnFormat, column_data=column_data)\n         elif ascii and not isinstance(format, _AsciiColumnFormat):\n-            format, recformat = cls._convert_format(format, _AsciiColumnFormat)\n+            format, recformat = cls._convert_format(format, _AsciiColumnFormat, column_data=column_data)\n         else:\n             # The format is already acceptable and unambiguous\n             recformat = format.recformat\n@@ -1350,7 +1378,7 @@ class Column(NotifierMixin):\n             guess_format = _ColumnFormat\n \n         try:\n-            format, recformat = cls._convert_format(format, guess_format)\n+            format, recformat = cls._convert_format(format, guess_format, column_data=column_data)\n         except VerifyError:\n             # For whatever reason our guess was wrong (for example if we got\n             # just 'F' that's not a valid binary format, but it an ASCII format\n@@ -1360,7 +1388,7 @@ class Column(NotifierMixin):\n             )\n             # If this fails too we're out of options--it is truly an invalid\n             # format, or at least not supported\n-            format, recformat = cls._convert_format(format, guess_format)\n+            format, recformat = cls._convert_format(format, guess_format, column_data=column_data)\n \n         return format, recformat\n \n@@ -2440,7 +2468,7 @@ def _convert_fits2record(format):\n     return output_format\n \n \n-def _convert_record2fits(format):\n+def _convert_record2fits(format, column_data):  # Added column_data parameter\n     \"\"\"\n     Convert record format spec to FITS format spec.\n     \"\"\"\n@@ -2479,6 +2507,13 @@ def _convert_record2fits(format):\n         else:\n             repeat = \"\"\n         output_format = repeat + NUMPY2FITS[recformat]\n+    elif dtype.char == 'O':\n+        try:\n+            # Attempt to convert object columns to strings\n+            output_format = 'A' + str(max(len(str(item)) for item in column_data))\n+        except Exception as e:\n+            raise ValueError(f\"Cannot convert object column to FITS format: {e}. \"\n+                             \"Consider converting the column to a string or another supported data type before writing to FITS.\")\n     else:\n         raise ValueError(f\"Illegal format `{format}`.\")\n \n@@ -2509,18 +2544,18 @@ def _dtype_to_recformat(dtype):\n     return recformat, kind, dtype\n \n \n-def _convert_format(format, reverse=False):\n+def _convert_format(format, reverse=False, column_data=None):\n     \"\"\"\n     Convert FITS format spec to record format spec.  Do the opposite if\n     reverse=True.\n     \"\"\"\n     if reverse:\n-        return _convert_record2fits(format)\n+        return _convert_record2fits(format, column_data)\n     else:\n         return _convert_fits2record(format)\n \n \n-def _convert_ascii_format(format, reverse=False):\n+def _convert_ascii_format(format, reverse=False, column_data=None):\n     \"\"\"Convert ASCII table format spec to record format spec.\"\"\"\n     if reverse:\n         recformat, kind, dtype = _dtype_to_recformat(format)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/io/fits/column.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "c748299218dcbd9e15caef558722cc04aa658fad",
+  "patch": "diff --git a/astropy/io/fits/column.py b/astropy/io/fits/column.py\n--- a/astropy/io/fits/column.py\n+++ b/astropy/io/fits/column.py\n@@ -1528,7 +1528,19 @@ def _init_from_array(self, array):\n         for idx in range(len(array.dtype)):\n             cname = array.dtype.names[idx]\n             ftype = array.dtype.fields[cname][0]\n-            format = self._col_format_cls.from_recformat(ftype)\n+\n+            if ftype.kind == \"O\":\n+                dtypes = {np.array(array[cname][i]).dtype for i in range(len(array))}\n+                if (len(dtypes) > 1) or (np.dtype(\"O\") in dtypes):\n+                    raise TypeError(\n+                        f\"Column '{cname}' contains unsupported object types or \"\n+                        f\"mixed types: {dtypes}\"\n+                    )\n+                ftype = dtypes.pop()\n+                format = self._col_format_cls.from_recformat(ftype)\n+                format = f\"P{format}()\"\n+            else:\n+                format = self._col_format_cls.from_recformat(ftype)\n \n             # Determine the appropriate dimensions for items in the column\n             dim = array.dtype[idx].shape[::-1]\n",
+  "test_patch": "diff --git a/astropy/io/fits/tests/test_connect.py b/astropy/io/fits/tests/test_connect.py\n--- a/astropy/io/fits/tests/test_connect.py\n+++ b/astropy/io/fits/tests/test_connect.py\n@@ -414,6 +414,61 @@ def test_mask_str_on_read(self, tmp_path):\n         tab = Table.read(filename, mask_invalid=False)\n         assert tab.mask is None\n \n+    def test_heterogeneous_VLA_tables(self, tmp_path):\n+        \"\"\"\n+        Check the behaviour of heterogeneous VLA object.\n+        \"\"\"\n+        filename = tmp_path / \"test_table_object.fits\"\n+        msg = \"Column 'col1' contains unsupported object types or mixed types: \"\n+\n+        # The column format fix the type of the arrays in the VLF object.\n+        a = np.array([45, 30])\n+        b = np.array([11.0, 12.0, 13])\n+        var = np.array([a, b], dtype=object)\n+        tab = Table({\"col1\": var})\n+        with pytest.raises(TypeError, match=msg):\n+            tab.write(filename)\n+\n+        # Strings in the VLF object can't be added to the table\n+        a = np.array([\"five\", \"thirty\"])\n+        b = np.array([11.0, 12.0, 13])\n+        var = np.array([a, b], dtype=object)\n+        with pytest.raises(TypeError, match=msg):\n+            tab.write(filename)\n+\n+    def test_write_object_tables_with_unified(self, tmp_path):\n+        \"\"\"\n+        Write objects with the unified I/O interface.\n+        See https://github.com/astropy/astropy/issues/1906\n+        \"\"\"\n+        filename = tmp_path / \"test_table_object.fits\"\n+        msg = r\"Column 'col1' contains unsupported object types or mixed types: {dtype\\('O'\\)}\"\n+        # Make a FITS table with an object column\n+        tab = Table({\"col1\": [None]})\n+        with pytest.raises(TypeError, match=msg):\n+            tab.write(filename)\n+\n+    def test_write_VLA_tables_with_unified(self, tmp_path):\n+        \"\"\"\n+        Write VLA objects with the unified I/O interface.\n+        See https://github.com/astropy/astropy/issues/11323\n+        \"\"\"\n+\n+        filename = tmp_path / \"test_table_VLA.fits\"\n+        # Make a FITS table with a variable-length array column\n+        a = np.array([45, 30])\n+        b = np.array([11, 12, 13])\n+        c = np.array([45, 55, 65, 75])\n+        var = np.array([a, b, c], dtype=object)\n+\n+        tabw = Table({\"col1\": var})\n+        tabw.write(filename)\n+\n+        tab = Table.read(filename)\n+        assert np.array_equal(tab[0][\"col1\"], np.array([45, 30]))\n+        assert np.array_equal(tab[1][\"col1\"], np.array([11, 12, 13]))\n+        assert np.array_equal(tab[2][\"col1\"], np.array([45, 55, 65, 75]))\n+\n \n class TestMultipleHDU:\n     def setup_class(self):\ndiff --git a/astropy/io/fits/tests/test_table.py b/astropy/io/fits/tests/test_table.py\n--- a/astropy/io/fits/tests/test_table.py\n+++ b/astropy/io/fits/tests/test_table.py\n@@ -3313,6 +3313,31 @@ def test_multidim_VLA_tables(self):\n                 hdus[1].data[\"test\"][1], np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])\n             )\n \n+    def test_heterogeneous_VLA_tables(self):\n+        \"\"\"\n+        Check the behaviour of heterogeneous VLA object.\n+        \"\"\"\n+\n+        # The column format fix the type of the arrays in the VLF object.\n+        a = np.array([45, 30])\n+        b = np.array([11.0, 12.0, 13])\n+        var = np.array([a, b], dtype=object)\n+\n+        c1 = fits.Column(name=\"var\", format=\"PJ()\", array=var)\n+        hdu = fits.BinTableHDU.from_columns([c1])\n+        assert hdu.data[0].array.dtype[0].subdtype[0] == \"int32\"\n+\n+        # Strings in the VLF object can't be added to the table\n+        a = np.array([45, \"thirty\"])\n+        b = np.array([11.0, 12.0, 13])\n+        var = np.array([a, b], dtype=object)\n+\n+        c1 = fits.Column(name=\"var\", format=\"PJ()\", array=var)\n+        with pytest.raises(\n+            ValueError, match=r\"invalid literal for int\\(\\) with base 10\"\n+        ):\n+            fits.BinTableHDU.from_columns([c1])\n+\n \n # These are tests that solely test the Column and ColDefs interfaces and\n # related functionality without directly involving full tables; currently there\n",
+  "problem_statement": "Writing a Table to FITS fails if the table contains objects\nThe following works fine:\n\n``` Python\nfrom astropy.table import Table\nTable([{'col1': None}]).write('/tmp/tmp.txt', format='ascii')\n```\n\nwhereas the following fails:\n\n``` Python\nTable([{'col1': None}]).write('/tmp/tmp.fits', format='fits')\n```\n\nwith\n\n```\n/home/gb/bin/anaconda/lib/python2.7/site-packages/astropy-0.4.dev6667-py2.7-linux-x86_64.egg/astropy/io/fits/column.pyc in _convert_record2fits(format)\n   1727         output_format = repeat + NUMPY2FITS[recformat]\n   1728     else:\n-> 1729         raise ValueError('Illegal format %s.' % format)\n   1730 \n   1731     return output_format\n\nValueError: Illegal format object.\n```\n\nThis behaviour is seen whenever a Table contains an object, i.e. io/fits/column.py does not know how to deal with `dtype('O')`.\n\nI wonder if we want the Table API to write objects to files by their string representation as a default, or otherwise provide a more meaningful error message?\n\n",
+  "hints_text": "Hm. I wonder if there's a place in the I/O registry for readers/writers to provide some means of listing what data formats they can accept--or at least rejecting formats that they don't accept.  Maybe something to think about as part of #962 ?\n\nI should add--I think the current behavior is \"correct\"--any convention for storing arbitrary Python objects in a FITS file would be ad-hoc and not helpful.  I think it's fine that this is currently rejected.  But I agree that it should have been handled differently.\n\nI agree with @embray that the best solution here is just to provide a more helpful error message.  In addition `io.ascii` should probably check the column dtypes and make sure they can reliably serialized.  The fact that `None` worked was a bit of an accident and as @embray said not very helpful because it doesn't round trip back to `None`.\n\nAgreed! I wouldn't have posted the issue had there been a clear error message explaining that object X isn't supported by FITS.\n\nWe could also consider skipping unsupported columns and raising a warning.\n\nI would be more inclined to tell the user in the exception which columns need to be removed and how to do it.  But just raising warnings doesn't always get peoples attention, e.g. in the case of processing scripts with lots of output.\n\nNot critical for 1.0 so removing milestone (but if someone feels like implementing it in the next few days, feel free to!)\n",
+  "created_at": "2023-03-24T20:31:26Z",
+  "version": "5.1",
+  "FAIL_TO_PASS": "[\"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_heterogeneous_VLA_tables\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_VLA_tables_with_unified\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_object_tables_with_unified\"]",
+  "PASS_TO_PASS": "[\"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_in_last_hdu[0]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_in_last_hdu[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_in_last_hdu[third]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_0\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_1[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_1[first]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_2[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_2[second]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_3[3]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_3[third]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_missing[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_missing[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_missing[3]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_missing[]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_missing[second]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_warning[0]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_warning[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_hdu_warning[third]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_single_table[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_single_table[None]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_hdulist_with_single_table[first]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_single_hdu[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_single_hdu[None]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_from_single_hdu[first]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_in_last_hdu[0]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_in_last_hdu[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_in_last_hdu[third]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_0\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_1[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_1[first]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_2[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_2[second]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_3[3]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_3[third]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_4\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_missing[1]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_missing[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_missing[3]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_missing[]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_missing[second]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_warning[0]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_warning[2]\", \"astropy/io/fits/tests/test_connect.py::TestMultipleHDU::test_read_with_hdu_warning[third]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[False]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_character_as_bytes[True]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_mask_nans_on_read\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_mask_null_on_read\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_mask_str_on_read\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_masked\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_masked_nan[False]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_masked_nan[True]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_masked_serialize_data_mask\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_memmap\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_oned_single_element\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_read_from_fileobj\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_read_with_nonstandard_units\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_read_with_unit_aliases[QTable]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_read_with_unit_aliases[Table]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_meta\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_meta_conflicting\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_noextension\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_simple_pathlib\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_custom_units_qtable\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[QTable]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_format[Table]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[QTable]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_with_units[Table]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_append\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_drop_nonstandard_units[QTable]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_drop_nonstandard_units[Table]\", \"astropy/io/fits/tests/test_connect.py::TestSingleTable::test_write_overwrite\", \"astropy/io/fits/tests/test_connect.py::test_bool_column\", \"astropy/io/fits/tests/test_connect.py::test_convert_comment_convention\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_as_one[QTable]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_as_one[Table]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col0]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col10]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col11]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col12]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col13]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col14]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col15]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col16]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col17]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col18]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col1]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col2]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col3]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col4]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col5]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col6]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col7]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col8]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[QTable-name_col9]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col0]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col13]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col14]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col15]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col16]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col17]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col18]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col1]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col2]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col3]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col4]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col5]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col6]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col7]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_per_column[Table-name_col8]\", \"astropy/io/fits/tests/test_connect.py::test_fits_mixins_qtable_to_table\", \"astropy/io/fits/tests/test_connect.py::test_fortran_to_python_format[E20.7-{:20.7e}]\", \"astropy/io/fits/tests/test_connect.py::test_fortran_to_python_format[G15.4E2-{:15.4g}]\", \"astropy/io/fits/tests/test_connect.py::test_fortran_to_python_format[I6.5-{:6d}]\", \"astropy/io/fits/tests/test_connect.py::test_fortran_to_python_format[L8-{:>8}]\", \"astropy/io/fits/tests/test_connect.py::test_fortran_to_python_format[Z5.10-{:5x}]\", \"astropy/io/fits/tests/test_connect.py::test_info_attributes_with_no_mixins\", \"astropy/io/fits/tests/test_connect.py::test_is_fits_gh_14305\", \"astropy/io/fits/tests/test_connect.py::test_logical_python_to_tdisp\", \"astropy/io/fits/tests/test_connect.py::test_masking_regression_1795\", \"astropy/io/fits/tests/test_connect.py::test_meta_not_modified\", \"astropy/io/fits/tests/test_connect.py::test_parse_tdisp_format[A21-format_return4]\", \"astropy/io/fits/tests/test_connect.py::test_parse_tdisp_format[B5.10-format_return2]\", \"astropy/io/fits/tests/test_connect.py::test_parse_tdisp_format[E10.5E3-format_return3]\", \"astropy/io/fits/tests/test_connect.py::test_parse_tdisp_format[EN10.5-format_return0]\", \"astropy/io/fits/tests/test_connect.py::test_parse_tdisp_format[F6.2-format_return1]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[%.4f-F13.4]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[%10s-A10]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[%5.3g-G5.3]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[3d-I3]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[7.3f-F7.3]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[{:3d}-I3]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[{:7.4f}-F7.4]\", \"astropy/io/fits/tests/test_connect.py::test_python_to_tdisp[{:>4}-A4]\", \"astropy/io/fits/tests/test_connect.py::test_round_trip_masked_table_serialize_mask[class]\", \"astropy/io/fits/tests/test_connect.py::test_round_trip_masked_table_serialize_mask[names]\", \"astropy/io/fits/tests/test_connect.py::test_round_trip_masked_table_serialize_mask[set_cols]\", \"astropy/io/fits/tests/test_connect.py::test_scale_error\", \"astropy/io/fits/tests/test_connect.py::test_unicode_column\", \"astropy/io/fits/tests/test_connect.py::test_unit_warnings_read_write\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_coldefs_init_from_array\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_array_type_mismatch\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_attribute_change_after_removal\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_format_interpretation\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_lookup_by_name\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_formats[keys0]\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_formats[keys1]\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_formats[keys2]\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_formats[keys3]\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_formats[keys4]\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_keywords\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_column_verify_start\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_new_coldefs_with_invalid_seqence\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_p_column_deepcopy\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_pickle\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_x_column_deepcopy\", \"astropy/io/fits/tests/test_table.py::TestColumnFunctions::test_zero_precision_float_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_add_data_by_rows\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_adding_a_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_adding_a_column_inplace\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_adding_a_column_to_file\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_appending_a_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_array_broadcasting\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_array_slicing\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_array_slicing_readonly\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_ascii_floattypes\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_ascii_inttypes\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_ascii_table\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_assign_multiple_rows_to_table\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_attribute_field_shadowing\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_bin_table_hdu_constructor\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_bin_table_init_from_string_array_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_bin_table_with_logical_array\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_binary_table\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_bintable_to_asciitable\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_blank_field_zero\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_bool_column_update\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_column_array_type_mismatch\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_column_endianness\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_column_with_scaling\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_columns_with_truncating_tdim\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_constructor_copies_header\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_constructor_name_arg\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_constructor_ver_arg\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_dim_column_byte_order_mismatch\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_dump_load_array_colums\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_dump_load_round_trip[table.fits]\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_dump_load_round_trip[tb.fits]\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_dump_overwrite\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_endianness\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_fits_rec_column_access\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_fits_rec_from_existing\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_fits_record_len\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_load_guess_format\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_mask_array\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_merge_tables\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_mismatched_tform_and_tdim\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_missing_tnull\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_modify_column_attributes\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_multi_dimensional_columns\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_multidimension_table_from_numpy_rec_columns\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_new_fitsrec\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_new_table_from_recarray\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_new_table_with_fits_rec\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_new_table_with_nd_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_new_table_with_ndarray\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_numpy_ndarray_to_bintablehdu\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_numpy_ndarray_to_bintablehdu_with_unicode\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_oned_array_single_element\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_open[]\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_open[home_is_data,\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_open[home_is_data]\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_pickle\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_pseudo_unsigned_ints\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_recarray_to_bintablehdu\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_removing_a_column_from_file\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_removing_a_column_inplace\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_slice_a_row\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_slicing\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_string_array_round_trip\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_string_column_padding\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_table_from_bool_fields\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_table_from_bool_fields2\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_table_from_columns_of_other_table\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_table_none\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_table_with_zero_width_column\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_tdim_of_size_one\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_unicode_colname\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_unncessary_table_load\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_update_string_column_inplace\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_verify_data_references\", \"astropy/io/fits/tests/test_table.py::TestTableFunctions::test_zero_length_table\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_copy_vla\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_empty_vla_raw_data\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_extend_variable_length_array\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_getdata_vla\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_heterogeneous_VLA_tables\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_multidim_VLA_tables\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_tolist\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_tolist_from_file\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_variable_length_columns\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_variable_length_table_format_pa_from_list\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_variable_length_table_format_pa_from_object_array\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_variable_length_table_format_pd_from_list\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_variable_length_table_format_pd_from_object_array\", \"astropy/io/fits/tests/test_table.py::TestVLATables::test_vla_with_gap\", \"astropy/io/fits/tests/test_table.py::test_a3dtable\", \"astropy/io/fits/tests/test_table.py::test_empty_table\", \"astropy/io/fits/tests/test_table.py::test_invalid_file\", \"astropy/io/fits/tests/test_table.py::test_new_column_attributes_preserved\", \"astropy/io/fits/tests/test_table.py::test_regression_5383\", \"astropy/io/fits/tests/test_table.py::test_regression_scalar_indexing\", \"astropy/io/fits/tests/test_table.py::test_table_to_hdu\", \"astropy/io/fits/tests/test_table.py::test_unit_parse_strict\"]",
+  "environment_setup_commit": "5f74eacbcc7fff707a44d8eb58adaa514cb7dcb5",
+  "patch_files": [
+    "astropy/io/fits/column.py"
+  ],
+  "test_patch_files": [
+    "astropy/io/fits/tests/test_connect.py",
+    "astropy/io/fits/tests/test_table.py"
+  ],
+  "patch_diff_details": {
+    "astropy/io/fits/column.py": {
+      "diffs": [
+        {
+          "start_line_old": 1531,
+          "end_line_old": 1531,
+          "file_pos": 3,
+          "file_context_length": 39864,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/io/fits/column.py_92_DEFAULT_ASCII_TNULL.1",
+          "closest_snippet_line_distance": 1300
+        }
+      ]
+    }
+  },
+  "vectors": 4622,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/io/fits/connect.py_write_table_fits_",
+      "distance": 0.5948184728622437,
+      "file_path": "astropy/io/fits/connect.py",
+      "start_line": 417,
+      "end_line": 454,
+      "tokens": 263,
+      "context_length": 263
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W37_W37.default_args.1",
+      "distance": 0.7590206861495972,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 883,
+      "end_line": 895,
+      "tokens": 153,
+      "context_length": 416
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/io/fits/connect.py_read_table_fits_read_table_fits.1",
+      "distance": 0.7620956897735596,
+      "file_path": "astropy/io/fits/connect.py",
+      "start_line": 121,
+      "end_line": 183,
+      "tokens": 758,
+      "context_length": 1174
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__ColumnFormat__ColumnFormat.__new__.5.1",
+      "distance": 0.7712018489837646,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 291,
+      "end_line": 315,
+      "tokens": 223,
+      "context_length": 1397,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/table/connect.py_TableWrite_",
+      "distance": 0.771265983581543,
+      "file_path": "astropy/table/connect.py",
+      "start_line": 83,
+      "end_line": 131,
+      "tokens": 400,
+      "context_length": 1797
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/io/fits/connect.py_read_table_fits.7_read_table_fits.17.1",
+      "distance": 0.7991631031036377,
+      "file_path": "astropy/io/fits/connect.py",
+      "start_line": 261,
+      "end_line": 339,
+      "tokens": 650,
+      "context_length": 2447
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._writedata_by_row_BinTableHDU._writedata_by_row.5.1.5.5",
+      "distance": 0.8010057210922241,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1034,
+      "end_line": 1057,
+      "tokens": 245,
+      "context_length": 2692
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/io/fits/connect.py_read_table_fits.2_read_table_fits.columns.1",
+      "distance": 0.8078439235687256,
+      "file_path": "astropy/io/fits/connect.py",
+      "start_line": 184,
+      "end_line": 260,
+      "tokens": 621,
+      "context_length": 3313
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU.14_BinTableHDU._dump_data.6",
+      "distance": 0.8085617423057556,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1263,
+      "end_line": 1287,
+      "tokens": 211,
+      "context_length": 3524
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__AsciiColumnFormat__AsciiColumnFormat.recformat.2.1",
+      "distance": 0.8116800785064697,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 344,
+      "end_line": 390,
+      "tokens": 439,
+      "context_length": 3963,
+      "file_pos": 5
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/io/fits/convenience.py_table_to_hdu.17_table_to_hdu.18.1",
+      "distance": 0.8138551712036133,
+      "file_path": "astropy/io/fits/convenience.py",
+      "start_line": 626,
+      "end_line": 658,
+      "tokens": 238,
+      "context_length": 4201
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._writedata_internal_BinTableHDU._writedata_internal.5.1",
+      "distance": 0.8145992159843445,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 984,
+      "end_line": 1032,
+      "tokens": 407,
+      "context_length": 4608
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__convert_ascii_format__convert_ascii_format.2.8.10.1",
+      "distance": 0.824568510055542,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 2523,
+      "end_line": 2575,
+      "tokens": 544,
+      "context_length": 5152,
+      "file_pos": 6
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_itertools___doctest_requires__.1",
+      "distance": 0.8269561529159546,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2,
+      "end_line": 90,
+      "tokens": 660,
+      "context_length": 5812
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitsrec.py_FITS_rec._convert_ascii_FITS_rec._convert_ascii.21.1",
+      "distance": 0.8281000852584839,
+      "file_path": "astropy/io/fits/fitsrec.py",
+      "start_line": 847,
+      "end_line": 885,
+      "tokens": 418,
+      "context_length": 6230
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_TableHDU._get_tbdata_TableHDU._get_tbdata.16.1",
+      "distance": 0.8288751840591431,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 803,
+      "end_line": 834,
+      "tokens": 315,
+      "context_length": 6545
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/io/fits/convenience.py_table_to_hdu.13_table_to_hdu.16.6.col.time_ref_pos.1",
+      "distance": 0.8288754224777222,
+      "file_path": "astropy/io/fits/convenience.py",
+      "start_line": 556,
+      "end_line": 624,
+      "tokens": 654,
+      "context_length": 7199
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_126__FormatQ._descriptor_format.1",
+      "distance": 0.8298647403717041,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 426,
+      "end_line": 480,
+      "tokens": 514,
+      "context_length": 7713,
+      "file_pos": 8
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_contextlib_FITSTableDumpDialect.skipinitialspace.1",
+      "distance": 0.8311913013458252,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 4,
+      "end_line": 55,
+      "tokens": 337,
+      "context_length": 8050
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table.ref_8_Table.format.2.1",
+      "distance": 0.8315685987472534,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2464,
+      "end_line": 2483,
+      "tokens": 171,
+      "context_length": 8221
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._dump_coldefs_BinTableHDU._dump_coldefs.7.1",
+      "distance": 0.8320251703262329,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1342,
+      "end_line": 1366,
+      "tokens": 207,
+      "context_length": 8428
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py_write_write.2",
+      "distance": 0.8332270979881287,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 922,
+      "end_line": 996,
+      "tokens": 549,
+      "context_length": 8977
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__convert_record2fits__convert_record2fits.11.1",
+      "distance": 0.8377794027328491,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 2443,
+      "end_line": 2485,
+      "tokens": 359,
+      "context_length": 9336,
+      "file_pos": 10
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__convert_fits2record__convert_fits2record.4.1",
+      "distance": 0.8415690660476685,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 2406,
+      "end_line": 2440,
+      "tokens": 310,
+      "context_length": 9646,
+      "file_pos": 10
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__FormatX__FormatX.tform.1.1",
+      "distance": 0.8425394296646118,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 408,
+      "end_line": 423,
+      "tokens": 130,
+      "context_length": 9776,
+      "file_pos": 10
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table.format_10_Table.format_10.self._format.1",
+      "distance": 0.8459306359291077,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2485,
+      "end_line": 2504,
+      "tokens": 170,
+      "context_length": 9946
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._dump_data.8_BinTableHDU._dump_data.9.1",
+      "distance": 0.8494705557823181,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1301,
+      "end_line": 1340,
+      "tokens": 365,
+      "context_length": 10311
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._guess_format_Column._guess_format.3.1",
+      "distance": 0.8531786799430847,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1324,
+      "end_line": 1365,
+      "tokens": 414,
+      "context_length": 10725,
+      "file_pos": 10
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__BaseColumnFormat__BaseColumnFormat.from_column_format.2.1",
+      "distance": 0.8559924364089966,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 249,
+      "end_line": 288,
+      "tokens": 238,
+      "context_length": 10963,
+      "file_pos": 10
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._determine_formats_Column._determine_formats.8.1",
+      "distance": 0.8561010360717773,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1289,
+      "end_line": 1322,
+      "tokens": 386,
+      "context_length": 11349,
+      "file_pos": 10
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._dump_data.format_value_BinTableHDU._dump_data.format_value.1.5.2.1",
+      "distance": 0.8568398952484131,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1288,
+      "end_line": 1299,
+      "tokens": 157,
+      "context_length": 11506
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._parse_fits_Table._parse_fits.8.1",
+      "distance": 0.8573593497276306,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 3042,
+      "end_line": 3086,
+      "tokens": 315,
+      "context_length": 11821
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W19_W20.default_args.1",
+      "distance": 0.8580510020256042,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 631,
+      "end_line": 651,
+      "tokens": 168,
+      "context_length": 11989
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column.coord_type_Column.copy.5.1",
+      "distance": 0.8592071533203125,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 897,
+      "end_line": 964,
+      "tokens": 516,
+      "context_length": 12505,
+      "file_pos": 10
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_TableOutputter_TableOutputter.__call__.3",
+      "distance": 0.8648535013198853,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 1173,
+      "end_line": 1200,
+      "tokens": 221,
+      "context_length": 12726
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/io/fits/scripts/fitsheader.py_TableHeaderFormatter_TableHeaderFormatter._parse_internal.5.1",
+      "distance": 0.8691116571426392,
+      "file_path": "astropy/io/fits/scripts/fitsheader.py",
+      "start_line": 239,
+      "end_line": 268,
+      "tokens": 205,
+      "context_length": 12931
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/io/fits/convenience.py_table_to_hdu.11_table_to_hdu.12",
+      "distance": 0.8717354536056519,
+      "file_path": "astropy/io/fits/convenience.py",
+      "start_line": 513,
+      "end_line": 555,
+      "tokens": 521,
+      "context_length": 13452
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/io/votable/connect.py_write_table_votable_",
+      "distance": 0.8751371502876282,
+      "file_path": "astropy/io/votable/connect.py",
+      "start_line": 131,
+      "end_line": 182,
+      "tokens": 412,
+      "context_length": 13864
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__dtype_to_recformat__convert_format.2.2.1.1",
+      "distance": 0.8766306042671204,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 2488,
+      "end_line": 2520,
+      "tokens": 239,
+      "context_length": 14103,
+      "file_pos": 13
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._load_data.format_value_BinTableHDU._load_data.format_value.2.3.1.1",
+      "distance": 0.877617359161377,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1462,
+      "end_line": 1473,
+      "tokens": 163,
+      "context_length": 14266
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._write_binary_Table._write_binary.4.1.5",
+      "distance": 0.8827935457229614,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 3191,
+      "end_line": 3225,
+      "tokens": 277,
+      "context_length": 14543
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py__ColumnFormat.from_recformat__ColumnFormat.canonical.3.1",
+      "distance": 0.8853340148925781,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 317,
+      "end_line": 341,
+      "tokens": 192,
+      "context_length": 14735,
+      "file_pos": 13
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/connect.py_write_table_",
+      "distance": 0.8870840072631836,
+      "file_path": "astropy/io/misc/asdf/connect.py",
+      "start_line": 59,
+      "end_line": 119,
+      "tokens": 518,
+      "context_length": 15253
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_ColDefs._init_from_table_ColDefs._init_from_table.17",
+      "distance": 0.8943164348602295,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1565,
+      "end_line": 1614,
+      "tokens": 447,
+      "context_length": 15700,
+      "file_pos": 14
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py_time_to_fits.19_",
+      "distance": 0.8963025808334351,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 587,
+      "end_line": 656,
+      "tokens": 635,
+      "context_length": 16335
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/docs.py_READ_KWARG_TYPES_",
+      "distance": 0.8968098163604736,
+      "file_path": "astropy/io/ascii/docs.py",
+      "start_line": 97,
+      "end_line": 190,
+      "tokens": 813,
+      "context_length": 17148
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._write_tabledata_Table._write_tabledata.3.2.5.8.5",
+      "distance": 0.8978931903839111,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 3130,
+      "end_line": 3189,
+      "tokens": 420,
+      "context_length": 17568
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/cosmology/io/table.py_table_identify_",
+      "distance": 0.8987245559692383,
+      "file_path": "astropy/cosmology/io/table.py",
+      "start_line": 239,
+      "end_line": 258,
+      "tokens": 131,
+      "context_length": 17699
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._tdump_file_format_BinTableHDU._tdump_file_format.1",
+      "distance": 0.8987409472465515,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1059,
+      "end_line": 1112,
+      "tokens": 678,
+      "context_length": 18377
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column._convert_to_valid_data_type_Column._convert_to_valid_data_type.2.3.4.5.numpy_format.12.1",
+      "distance": 0.9008008241653442,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 1367,
+      "end_line": 1434,
+      "tokens": 647,
+      "context_length": 19024,
+      "file_pos": 17
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py__guess.26__guess.26.3.2.5.7",
+      "distance": 0.9008245468139648,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 571,
+      "end_line": 650,
+      "tokens": 645,
+      "context_length": 19669
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/io/fits/convenience.py_tabledump_tabledump.8.4.1.1",
+      "distance": 0.9029785394668579,
+      "file_path": "astropy/io/fits/convenience.py",
+      "start_line": 941,
+      "end_line": 998,
+      "tokens": 497,
+      "context_length": 20166
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.add_column.2_Table.add_column.18.move_names.2.1",
+      "distance": 0.9058293104171753,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2382,
+      "end_line": 2434,
+      "tokens": 568,
+      "context_length": 20734
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py__check_dtype_is_str_EcsvOutputter.__call__.out.8.1",
+      "distance": 0.9074862003326416,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 233,
+      "end_line": 259,
+      "tokens": 228,
+      "context_length": 20962
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W13_W13.default_args.1",
+      "distance": 0.9075549840927124,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 541,
+      "end_line": 567,
+      "tokens": 254,
+      "context_length": 21216
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/astropy/astropy/io/misc/hdf5.py_write_table_hdf5_write_table_hdf5.5.2.1",
+      "distance": 0.911829948425293,
+      "file_path": "astropy/io/misc/hdf5.py",
+      "start_line": 209,
+      "end_line": 271,
+      "tokens": 582,
+      "context_length": 21798
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py__TableBaseHDU._prewriteto__TableBaseHDU._prewriteto.2.1",
+      "distance": 0.9127287864685059,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 542,
+      "end_line": 569,
+      "tokens": 342,
+      "context_length": 22140
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.to_pandas.tbl_Table.to_pandas.14.1",
+      "distance": 0.9136766195297241,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3973,
+      "end_line": 4033,
+      "tokens": 527,
+      "context_length": 22667
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/astropy/astropy/io/fits/scripts/fitsheader.py_print_headers_as_table_print_headers_as_table.8",
+      "distance": 0.9137862324714661,
+      "file_path": "astropy/io/fits/scripts/fitsheader.py",
+      "start_line": 296,
+      "end_line": 329,
+      "tokens": 226,
+      "context_length": 22893
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU.dump_BinTableHDU.12.1",
+      "distance": 0.9140511751174927,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1114,
+      "end_line": 1184,
+      "tokens": 589,
+      "context_length": 23482
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py__binary_table_byte_swap_",
+      "distance": 0.9142399430274963,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1546,
+      "end_line": 1613,
+      "tokens": 473,
+      "context_length": 23955
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_QTable._convert_col_for_table_",
+      "distance": 0.9158294796943665,
+      "file_path": "astropy/table/table.py",
+      "start_line": 4220,
+      "end_line": 4242,
+      "tokens": 223,
+      "context_length": 24178
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._convert_data_to_col.12_Table._convert_data_to_col.15.1",
+      "distance": 0.9166179895401001,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1322,
+      "end_line": 1398,
+      "tokens": 753,
+      "context_length": 24931
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._check_names_dtype_Table._check_names_dtype.3.1",
+      "distance": 0.9169747233390808,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1148,
+      "end_line": 1159,
+      "tokens": 124,
+      "context_length": 25055
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_Column.array_8_Column.name.7.1",
+      "distance": 0.917861819267273,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 860,
+      "end_line": 895,
+      "tokens": 303,
+      "context_length": 25358,
+      "file_pos": 19
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/astropy/astropy/io/misc/hdf5.py_write_table_hdf5.6_write_table_hdf5.20.3.dset.1",
+      "distance": 0.9187575578689575,
+      "file_path": "astropy/io/misc/hdf5.py",
+      "start_line": 273,
+      "end_line": 368,
+      "tokens": 778,
+      "context_length": 26136
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/docs.py_READ_DOCSTRING_6",
+      "distance": 0.919008731842041,
+      "file_path": "astropy/io/ascii/docs.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 991,
+      "context_length": 27127
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/astropy/astropy/io/fits/convenience.py_table_to_hdu_table_to_hdu.tarray.1",
+      "distance": 0.9191460609436035,
+      "file_path": "astropy/io/fits/convenience.py",
+      "start_line": 462,
+      "end_line": 512,
+      "tokens": 401,
+      "context_length": 27528
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_TableColumns.__repr___TableColumns._rename_column.10",
+      "distance": 0.9193030595779419,
+      "file_path": "astropy/table/table.py",
+      "start_line": 297,
+      "end_line": 318,
+      "tokens": 200,
+      "context_length": 27728
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._load_data.31_BinTableHDU._load_data.36.1",
+      "distance": 0.9196083545684814,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1475,
+      "end_line": 1510,
+      "tokens": 308,
+      "context_length": 28036
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_copy_61",
+      "distance": 0.920940637588501,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 3,
+      "end_line": 85,
+      "tokens": 770,
+      "context_length": 28806,
+      "file_pos": 19
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/fits/fits.py_2_FitsType.from_tree.5.1",
+      "distance": 0.9230107665061951,
+      "file_path": "astropy/io/misc/asdf/tags/fits/fits.py",
+      "start_line": 2,
+      "end_line": 35,
+      "tokens": 251,
+      "context_length": 29057
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/astropy/astropy/io/misc/pandas/connect.py__pandas_write_",
+      "distance": 0.9231275320053101,
+      "file_path": "astropy/io/misc/pandas/connect.py",
+      "start_line": 85,
+      "end_line": 118,
+      "tokens": 284,
+      "context_length": 29341
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/astropy/astropy/io/fits/connect.py_os_is_column_keyword.1.1",
+      "distance": 0.9237387180328369,
+      "file_path": "astropy/io/fits/connect.py",
+      "start_line": 4,
+      "end_line": 45,
+      "tokens": 302,
+      "context_length": 29643
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_ASCII_DEFAULT_WIDTHS_91",
+      "distance": 0.9254761934280396,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 86,
+      "end_line": 146,
+      "tokens": 757,
+      "context_length": 30400,
+      "file_pos": 21
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py__TableBaseHDU.data_8__TableBaseHDU.data_8.7.1",
+      "distance": 0.92561936378479,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 449,
+      "end_line": 506,
+      "tokens": 500,
+      "context_length": 30900
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py__TableLikeHDU._init_tbdata__TableLikeHDU._init_tbdata.14",
+      "distance": 0.9286278486251831,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 209,
+      "end_line": 230,
+      "tokens": 200,
+      "context_length": 31100
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_92_DEFAULT_ASCII_TNULL.1",
+      "distance": 0.9289445877075195,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 147,
+      "end_line": 231,
+      "tokens": 695,
+      "context_length": 31795,
+      "file_pos": 21
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_BaseOutputter_BaseOutputter._validate_and_copy.7.1",
+      "distance": 0.9294978380203247,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 1049,
+      "end_line": 1095,
+      "tokens": 364,
+      "context_length": 32159
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/astropy/astropy/table/scripts/showtable.py_argparse_showtable.8.3.1",
+      "distance": 0.9305365085601807,
+      "file_path": "astropy/table/scripts/showtable.py",
+      "start_line": 45,
+      "end_line": 93,
+      "tokens": 332,
+      "context_length": 32491
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table.to_xml_Table.to_xml.4.5.1.1",
+      "distance": 0.9341791868209839,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 3088,
+      "end_line": 3128,
+      "tokens": 359,
+      "context_length": 32850
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_W21_W21.default_args.1",
+      "distance": 0.9365499019622803,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 654,
+      "end_line": 664,
+      "tokens": 117,
+      "context_length": 32967
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/astropy/astropy/io/fits/diff.py_TableDataDiff._report_TableDataDiff._report.13",
+      "distance": 0.937908947467804,
+      "file_path": "astropy/io/fits/diff.py",
+      "start_line": 1490,
+      "end_line": 1554,
+      "tokens": 553,
+      "context_length": 33520
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/io/fits/connect.py",
+      "position": 1,
+      "tokens": 3878,
+      "context_length": 3878
+    },
+    {
+      "file_path": "astropy/io/votable/exceptions.py",
+      "position": 2,
+      "tokens": 13412,
+      "context_length": 17290
+    },
+    {
+      "file_path": "astropy/io/fits/column.py",
+      "position": 3,
+      "tokens": 22574,
+      "context_length": 39864
+    },
+    {
+      "file_path": "astropy/table/connect.py",
+      "position": 4,
+      "tokens": 1017,
+      "context_length": 40881
+    },
+    {
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "position": 5,
+      "tokens": 13429,
+      "context_length": 54310
+    },
+    {
+      "file_path": "astropy/io/fits/convenience.py",
+      "position": 6,
+      "tokens": 9892,
+      "context_length": 64202
+    },
+    {
+      "file_path": "astropy/table/table.py",
+      "position": 7,
+      "tokens": 33427,
+      "context_length": 97629
+    },
+    {
+      "file_path": "astropy/io/fits/fitsrec.py",
+      "position": 8,
+      "tokens": 12053,
+      "context_length": 109682
+    },
+    {
+      "file_path": "astropy/io/votable/tree.py",
+      "position": 9,
+      "tokens": 29394,
+      "context_length": 139076
+    },
+    {
+      "file_path": "astropy/io/ascii/ui.py",
+      "position": 10,
+      "tokens": 8063,
+      "context_length": 147139
+    },
+    {
+      "file_path": "astropy/io/ascii/core.py",
+      "position": 11,
+      "tokens": 13839,
+      "context_length": 160978
+    },
+    {
+      "file_path": "astropy/io/fits/scripts/fitsheader.py",
+      "position": 12,
+      "tokens": 3624,
+      "context_length": 164602
+    },
+    {
+      "file_path": "astropy/io/votable/connect.py",
+      "position": 13,
+      "tokens": 1470,
+      "context_length": 166072
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/connect.py",
+      "position": 14,
+      "tokens": 993,
+      "context_length": 167065
+    },
+    {
+      "file_path": "astropy/io/fits/fitstime.py",
+      "position": 15,
+      "tokens": 5450,
+      "context_length": 172515
+    },
+    {
+      "file_path": "astropy/io/ascii/docs.py",
+      "position": 16,
+      "tokens": 1804,
+      "context_length": 174319
+    },
+    {
+      "file_path": "astropy/cosmology/io/table.py",
+      "position": 17,
+      "tokens": 2810,
+      "context_length": 177129
+    },
+    {
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "position": 18,
+      "tokens": 4232,
+      "context_length": 181361
+    },
+    {
+      "file_path": "astropy/io/misc/hdf5.py",
+      "position": 19,
+      "tokens": 3282,
+      "context_length": 184643
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/fits/fits.py",
+      "position": 20,
+      "tokens": 764,
+      "context_length": 185407
+    },
+    {
+      "file_path": "astropy/io/misc/pandas/connect.py",
+      "position": 21,
+      "tokens": 942,
+      "context_length": 186349
+    },
+    {
+      "file_path": "astropy/table/scripts/showtable.py",
+      "position": 22,
+      "tokens": 1373,
+      "context_length": 187722
+    },
+    {
+      "file_path": "astropy/io/fits/diff.py",
+      "position": 23,
+      "tokens": 13089,
+      "context_length": 200811
+    }
+  ]
+}

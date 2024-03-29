@@ -86,6 +86,9 @@ class PathTree(BaseModel):
     show: bool = Field(default=False, description="Show the block.")
     tree: dict[str, 'PathTree'] = Field(default_factory=dict)
 
+    def child_tree(self, key: str) -> Optional['PathTree']:
+        return self.tree.get(key, None)
+
     def merge(self, other: 'PathTree'):
         if other.show:
             self.show = True
@@ -115,11 +118,6 @@ class PathTree(BaseModel):
             self.tree[path[0]] = PathTree(show=False)
 
         self.tree[path[0]].add_to_tree(path[1:])
-
-    def hash(self):
-        value = str(self.tree) + str(self.show)
-        return str(sha256(value.encode("utf-8", "surrogatepass")).hexdigest())
-
 
 class ReferenceScope(str, Enum):
     EXTERNAL = "external"

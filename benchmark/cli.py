@@ -16,7 +16,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 
 from benchmark.main import write_markdown, benchmark_retrieve
 from benchmark.utils import diff_details
-from moatless.retrievers.llama_index_retriever import IngestionPipelineSetup
+from moatless.retrievers.golden_retriever import GoldenRetriever, IngestionPipelineSetup
 from moatless.splitters.epic_split import CommentStrategy
 from moatless.splitters.epic_split import EpicSplitter
 
@@ -26,6 +26,12 @@ run_app = typer.Typer()
 app.add_typer(get_app, name="get")
 app.add_typer(run_app, name="run")
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger("httpcore").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.INFO)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -38,8 +44,8 @@ ingestion_pipelines = [
     #    embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     #),
     IngestionPipelineSetup(
-        name="text-embedding-3-small--epic-splitter-v4-100-750",
-        splitter=EpicSplitter(chunk_size=750, min_chunk_size=100, language="python", comment_strategy=CommentStrategy.ASSOCIATE),
+        name="epic-splitter-v4--100-750--comment-associate--text-embedding-3-small--1536",
+        splitter=EpicSplitter(min_chunk_size=100, chunk_size=750, language="python", comment_strategy=CommentStrategy.ASSOCIATE),
         embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     )
 ]
@@ -92,9 +98,14 @@ def download(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
     """Download oracle (patched files) for all rows in split"""
 
     file_name = get_filename(split, dataset_name)
-    if os.path.exists(file_name):
-        with open(file_name) as f:
+    file_path = f"data/{file_name}.json"
+    if os.path.exists(file_path):
+        print(f"File '{file_path}' already exists")
+        with open(file_path) as f:
             return json.load(f)
+
+    else:
+        print(f"File '{file_path}' does not exist. Downloading...")
 
     dataset = load_dataset(dataset_name, split=split)
     result = []
@@ -110,7 +121,7 @@ def download(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
     return result
 
 
-def get_case(id: str, split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
+def get_case(id: str, split: str='test', dataset_name='princeton-nlp/SWE-bench_Lite'):
     dataset = download(split, dataset_name)
     for row in dataset:
         if row['instance_id'] == id:
@@ -133,33 +144,46 @@ def suite(suite: str = 'retries'):
 
 
 @run_app.command()
-def dataset(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
+def dataset(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite', report_dir='benchmark/reports'):
     ds = download(split, dataset_name)
-    ds = sorted(ds, key=lambda x: x['created_at'])
+
+    print(f"Sorted and start with {ds[0]['instance_id']}")
 
     benchmark_run = f"{dataset_name.replace('/', '-')}-{split}"
 
-    if not os.path.exists(f"benchmark/reports/{benchmark_run}"):
-        os.makedirs(f"benchmark/reports/{benchmark_run}")
+    if not os.path.exists(f"{report_dir}/{benchmark_run}"):
+        os.makedirs(f"{report_dir}/{benchmark_run}")
 
-    with open(f"benchmark/reports/{benchmark_run}/summary.csv", "w") as f:
-        csv.writer(f, delimiter=";").writerow(["instance_id", "pipeline", "vectors", "tokens", "no_of_patches", "any_found_context_length", "all_found_context_length", "avg_pos", "min_pos", "max_pos", "top_file_pos", "missing_snippets", "missing_patch_files"])
+    benchmarked_instances = set()
+    if os.path.exists(f"{report_dir}/{benchmark_run}/summary.json"):
+        with open(f"{report_dir}/{benchmark_run}/summary.json") as f:
+            summary = json.load(f)
+            for row in summary:
+                benchmarked_instances.add(row['instance_id'])
 
-    for i, row in enumerate(ds):
-        print(f"{i + 1}/{len(ds)}: {row['instance_id']}")
-        run_benchmark(row, benchmark_run)
+    benchmarks = [row for row in ds if row['instance_id'] not in benchmarked_instances]
+    benchmarks.sort(key=sort_key)
 
+    for i, row in enumerate(benchmarks):
+        print(f"{i + 1}/{len(benchmarks)}: {row['instance_id']}")
+        run_benchmark(row, benchmark_run, report_dir=report_dir)
+
+def sort_key(data_row):
+    text, number = data_row["instance_id"].rsplit('-', 1)
+    return text, int(number)
 
 @run_app.command()
 def instance(
         id: str,
-        benchmark_run: str = typer.Option(default='single_run')):
+        benchmark_run: str = typer.Option(default='single_run'),
+        split: str = typer.Option(default='test'),
+        dataset_name: str = typer.Option(default='princeton-nlp/SWE-bench_Lite')):
     print(f"Run benchmark on {id}")
-    row_data = get_case(id=id)
+    row_data = get_case(id=id, split=split, dataset_name=dataset_name)
     run_benchmark(row_data, benchmark_run)
 
 
-def run_benchmark(row_data: dict, benchmark_run: str):
+def run_benchmark(row_data: dict, benchmark_run: str, report_dir='benchmark/reports'):
     repo_name = row_data['repo'].split('/')[-1]
     repo = f'git@github.com:{row_data["repo"]}.git'
     base_commit = row_data['base_commit']
@@ -172,11 +196,11 @@ def run_benchmark(row_data: dict, benchmark_run: str):
 
     instance_id = row_data['instance_id']
     print(f"Processing {instance_id}")
-    if not os.path.exists(f"benchmark/reports/{benchmark_run}/{instance_id}"):
-        os.makedirs(f"benchmark/reports/{benchmark_run}/{instance_id}")
+    if not os.path.exists(f"{report_dir}/{benchmark_run}/{instance_id}"):
+        os.makedirs(f"{report_dir}/{benchmark_run}/{instance_id}")
 
     for pipeline_setup in ingestion_pipelines:
-        benchmark_retrieve(pipeline_setup=pipeline_setup, benchmark_run=benchmark_run, path=path, repo_name=repo_name, row_data=row_data, commit=base_commit)
+        benchmark_retrieve(pipeline_setup=pipeline_setup, benchmark_run=benchmark_run, path=path, repo_name=repo_name, row_data=row_data, commit=base_commit, report_dir=report_dir)
 
 
 @app.callback()
@@ -196,4 +220,4 @@ def main(
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
     logging.getLogger().setLevel(logging.INFO)
-    instance('pydicom__pydicom-1256', benchmark_run='debug')
+    dataset(split='devin', dataset_name='princeton-nlp-SWE-bench', report_dir='reports')

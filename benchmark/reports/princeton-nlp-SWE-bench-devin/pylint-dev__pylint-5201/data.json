@@ -1,0 +1,1278 @@
+{
+  "instance_id": "pylint-dev__pylint-5201",
+  "model_patch": "diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\nindex 6e6ccd59b..23d4d7b76 100644\n--- a/pylint/lint/pylinter.py\n+++ b/pylint/lint/pylinter.py\n@@ -10,6 +10,7 @@ import sys\n import tokenize\n import traceback\n import warnings\n+import pathlib\n from io import TextIOWrapper\n from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Union\n \n@@ -1110,6 +1111,8 @@ class PyLinter(\n             if key == \"fatal\":\n                 message = str(error[\"ex\"]).replace(os.getcwd() + os.sep, \"\")\n             self.add_message(key, args=message)\n+        for descr in result:\n+            descr[\"path\"] = pathlib.Path(descr[\"path\"]).as_posix()\n         return result\n \n     def set_current_module(self, modname, filepath: Optional[str] = None):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "pylint/lint/pylinter.py"
+  ],
+  "repo": "pylint-dev/pylint",
+  "base_commit": "772b3dcc0b0770a843653783e5c93b4256e5ec6f",
+  "patch": "diff --git a/pylint/config/option.py b/pylint/config/option.py\n--- a/pylint/config/option.py\n+++ b/pylint/config/option.py\n@@ -3,7 +3,9 @@\n \n import copy\n import optparse  # pylint: disable=deprecated-module\n+import pathlib\n import re\n+from typing import List, Pattern\n \n from pylint import utils\n \n@@ -25,6 +27,19 @@ def _regexp_csv_validator(_, name, value):\n     return [_regexp_validator(_, name, val) for val in _csv_validator(_, name, value)]\n \n \n+def _regexp_paths_csv_validator(_, name: str, value: str) -> List[Pattern[str]]:\n+    patterns = []\n+    for val in _csv_validator(_, name, value):\n+        patterns.append(\n+            re.compile(\n+                str(pathlib.PureWindowsPath(val)).replace(\"\\\\\", \"\\\\\\\\\")\n+                + \"|\"\n+                + pathlib.PureWindowsPath(val).as_posix()\n+            )\n+        )\n+    return patterns\n+\n+\n def _choice_validator(choices, name, value):\n     if value not in choices:\n         msg = \"option %s: invalid value: %r, should be in %s\"\n@@ -80,6 +95,7 @@ def _py_version_validator(_, name, value):\n     \"float\": float,\n     \"regexp\": lambda pattern: re.compile(pattern or \"\"),\n     \"regexp_csv\": _regexp_csv_validator,\n+    \"regexp_paths_csv\": _regexp_paths_csv_validator,\n     \"csv\": _csv_validator,\n     \"yn\": _yn_validator,\n     \"choice\": lambda opt, name, value: _choice_validator(opt[\"choices\"], name, value),\n@@ -122,6 +138,7 @@ class Option(optparse.Option):\n     TYPES = optparse.Option.TYPES + (\n         \"regexp\",\n         \"regexp_csv\",\n+        \"regexp_paths_csv\",\n         \"csv\",\n         \"yn\",\n         \"multiple_choice\",\n@@ -132,6 +149,7 @@ class Option(optparse.Option):\n     TYPE_CHECKER = copy.copy(optparse.Option.TYPE_CHECKER)\n     TYPE_CHECKER[\"regexp\"] = _regexp_validator\n     TYPE_CHECKER[\"regexp_csv\"] = _regexp_csv_validator\n+    TYPE_CHECKER[\"regexp_paths_csv\"] = _regexp_paths_csv_validator\n     TYPE_CHECKER[\"csv\"] = _csv_validator\n     TYPE_CHECKER[\"yn\"] = _yn_validator\n     TYPE_CHECKER[\"multiple_choice\"] = _multiple_choices_validating_option\ndiff --git a/pylint/lint/expand_modules.py b/pylint/lint/expand_modules.py\n--- a/pylint/lint/expand_modules.py\n+++ b/pylint/lint/expand_modules.py\n@@ -43,7 +43,7 @@ def expand_modules(\n     files_or_modules: List[str],\n     ignore_list: List[str],\n     ignore_list_re: List[Pattern],\n-    ignore_list_paths_re: List[Pattern],\n+    ignore_list_paths_re: List[Pattern[str]],\n ) -> Tuple[List[ModuleDescriptionDict], List[ErrorDescriptionDict]]:\n     \"\"\"take a list of files/modules/packages and return the list of tuple\n     (file, module name) which have to be actually checked\ndiff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\n--- a/pylint/lint/pylinter.py\n+++ b/pylint/lint/pylinter.py\n@@ -46,7 +46,14 @@\n     MessageLocationTuple,\n     ModuleDescriptionDict,\n )\n-from pylint.utils import ASTWalker, FileState, LinterStats, ModuleStats, utils\n+from pylint.utils import (\n+    ASTWalker,\n+    FileState,\n+    LinterStats,\n+    ModuleStats,\n+    get_global_option,\n+    utils,\n+)\n from pylint.utils.pragma_parser import (\n     OPTION_PO,\n     InvalidPragmaError,\n@@ -220,12 +227,12 @@ def make_options():\n             (\n                 \"ignore-paths\",\n                 {\n-                    \"type\": \"regexp_csv\",\n+                    \"type\": \"regexp_paths_csv\",\n                     \"metavar\": \"<pattern>[,<pattern>...]\",\n-                    \"dest\": \"ignore_list_paths_re\",\n-                    \"default\": (),\n-                    \"help\": \"Add files or directories matching the regex patterns to the\"\n-                    \" ignore-list. The regex matches against paths.\",\n+                    \"default\": [],\n+                    \"help\": \"Add files or directories matching the regex patterns to the \"\n+                    \"ignore-list. The regex matches against paths and can be in \"\n+                    \"Posix or Windows format.\",\n                 },\n             ),\n             (\n@@ -1101,7 +1108,7 @@ def _expand_files(self, modules) -> List[ModuleDescriptionDict]:\n             modules,\n             self.config.black_list,\n             self.config.black_list_re,\n-            self.config.ignore_list_paths_re,\n+            self._ignore_paths,\n         )\n         for error in errors:\n             message = modname = error[\"mod\"]\n@@ -1259,6 +1266,7 @@ def open(self):\n                 self.config.extension_pkg_whitelist\n             )\n         self.stats.reset_message_count()\n+        self._ignore_paths = get_global_option(self, \"ignore-paths\")\n \n     def generate_reports(self):\n         \"\"\"close the whole package /module, it's time to make reports !\ndiff --git a/pylint/utils/utils.py b/pylint/utils/utils.py\n--- a/pylint/utils/utils.py\n+++ b/pylint/utils/utils.py\n@@ -56,16 +56,24 @@\n GLOBAL_OPTION_PATTERN = Literal[\n     \"no-docstring-rgx\", \"dummy-variables-rgx\", \"ignored-argument-names\"\n ]\n+GLOBAL_OPTION_PATTERN_LIST = Literal[\"ignore-paths\"]\n GLOBAL_OPTION_TUPLE_INT = Literal[\"py-version\"]\n GLOBAL_OPTION_NAMES = Union[\n     GLOBAL_OPTION_BOOL,\n     GLOBAL_OPTION_INT,\n     GLOBAL_OPTION_LIST,\n     GLOBAL_OPTION_PATTERN,\n+    GLOBAL_OPTION_PATTERN_LIST,\n     GLOBAL_OPTION_TUPLE_INT,\n ]\n T_GlobalOptionReturnTypes = TypeVar(\n-    \"T_GlobalOptionReturnTypes\", bool, int, List[str], Pattern[str], Tuple[int, ...]\n+    \"T_GlobalOptionReturnTypes\",\n+    bool,\n+    int,\n+    List[str],\n+    Pattern[str],\n+    List[Pattern[str]],\n+    Tuple[int, ...],\n )\n \n \n@@ -220,6 +228,15 @@ def get_global_option(\n     ...\n \n \n+@overload\n+def get_global_option(\n+    checker: \"BaseChecker\",\n+    option: GLOBAL_OPTION_PATTERN_LIST,\n+    default: Optional[List[Pattern[str]]] = None,\n+) -> List[Pattern[str]]:\n+    ...\n+\n+\n @overload\n def get_global_option(\n     checker: \"BaseChecker\",\n",
+  "test_patch": "diff --git a/tests/lint/unittest_expand_modules.py b/tests/lint/unittest_expand_modules.py\n--- a/tests/lint/unittest_expand_modules.py\n+++ b/tests/lint/unittest_expand_modules.py\n@@ -4,10 +4,14 @@\n \n import re\n from pathlib import Path\n+from typing import Dict, Tuple, Type\n \n import pytest\n \n+from pylint.checkers import BaseChecker\n from pylint.lint.expand_modules import _is_in_ignore_list_re, expand_modules\n+from pylint.testutils import CheckerTestCase, set_config\n+from pylint.utils.utils import get_global_option\n \n \n def test__is_in_ignore_list_re_match() -> None:\n@@ -21,17 +25,6 @@ def test__is_in_ignore_list_re_match() -> None:\n     assert _is_in_ignore_list_re(\"src/tests/whatever.xml\", patterns)\n \n \n-def test__is_in_ignore_list_re_nomatch() -> None:\n-    patterns = [\n-        re.compile(\".*enchilada.*\"),\n-        re.compile(\"unittest_.*\"),\n-        re.compile(\".*tests/.*\"),\n-    ]\n-    assert not _is_in_ignore_list_re(\"test_utils.py\", patterns)\n-    assert not _is_in_ignore_list_re(\"enchilad.py\", patterns)\n-    assert not _is_in_ignore_list_re(\"src/tests.py\", patterns)\n-\n-\n TEST_DIRECTORY = Path(__file__).parent.parent\n INIT_PATH = str(TEST_DIRECTORY / \"lint/__init__.py\")\n EXPAND_MODULES = str(TEST_DIRECTORY / \"lint/unittest_expand_modules.py\")\n@@ -84,27 +77,70 @@ def test__is_in_ignore_list_re_nomatch() -> None:\n }\n \n \n-@pytest.mark.parametrize(\n-    \"files_or_modules,expected\",\n-    [\n-        ([__file__], [this_file]),\n-        (\n-            [Path(__file__).parent],\n-            [\n-                init_of_package,\n-                test_pylinter,\n-                test_utils,\n-                this_file_from_init,\n-                unittest_lint,\n-            ],\n-        ),\n-    ],\n-)\n-def test_expand_modules(files_or_modules, expected):\n-    ignore_list, ignore_list_re, ignore_list_paths_re = [], [], []\n-    modules, errors = expand_modules(\n-        files_or_modules, ignore_list, ignore_list_re, ignore_list_paths_re\n+class TestExpandModules(CheckerTestCase):\n+    \"\"\"Test the expand_modules function while allowing options to be set\"\"\"\n+\n+    class Checker(BaseChecker):\n+        \"\"\"This dummy checker is needed to allow options to be set\"\"\"\n+\n+        name = \"checker\"\n+        msgs: Dict[str, Tuple[str, ...]] = {}\n+        options = ((\"An option\", {\"An option\": \"dict\"}),)\n+\n+    CHECKER_CLASS: Type = Checker\n+\n+    @pytest.mark.parametrize(\n+        \"files_or_modules,expected\",\n+        [\n+            ([__file__], [this_file]),\n+            (\n+                [str(Path(__file__).parent)],\n+                [\n+                    init_of_package,\n+                    test_pylinter,\n+                    test_utils,\n+                    this_file_from_init,\n+                    unittest_lint,\n+                ],\n+            ),\n+        ],\n+    )\n+    @set_config(ignore_paths=\"\")\n+    def test_expand_modules(self, files_or_modules, expected):\n+        \"\"\"Test expand_modules with the default value of ignore-paths\"\"\"\n+        ignore_list, ignore_list_re = [], []\n+        modules, errors = expand_modules(\n+            files_or_modules,\n+            ignore_list,\n+            ignore_list_re,\n+            get_global_option(self, \"ignore-paths\"),\n+        )\n+        modules.sort(key=lambda d: d[\"name\"])\n+        assert modules == expected\n+        assert not errors\n+\n+    @pytest.mark.parametrize(\n+        \"files_or_modules,expected\",\n+        [\n+            ([__file__], []),\n+            (\n+                [str(Path(__file__).parent)],\n+                [\n+                    init_of_package,\n+                ],\n+            ),\n+        ],\n     )\n-    modules.sort(key=lambda d: d[\"name\"])\n-    assert modules == expected\n-    assert not errors\n+    @set_config(ignore_paths=\".*/lint/.*\")\n+    def test_expand_modules_with_ignore(self, files_or_modules, expected):\n+        \"\"\"Test expand_modules with a non-default value of ignore-paths\"\"\"\n+        ignore_list, ignore_list_re = [], []\n+        modules, errors = expand_modules(\n+            files_or_modules,\n+            ignore_list,\n+            ignore_list_re,\n+            get_global_option(self.checker, \"ignore-paths\"),\n+        )\n+        modules.sort(key=lambda d: d[\"name\"])\n+        assert modules == expected\n+        assert not errors\ndiff --git a/tests/unittest_config.py b/tests/unittest_config.py\n--- a/tests/unittest_config.py\n+++ b/tests/unittest_config.py\n@@ -16,10 +16,14 @@\n \n import re\n import sre_constants\n+from typing import Dict, Tuple, Type\n \n import pytest\n \n from pylint import config\n+from pylint.checkers import BaseChecker\n+from pylint.testutils import CheckerTestCase, set_config\n+from pylint.utils.utils import get_global_option\n \n RE_PATTERN_TYPE = getattr(re, \"Pattern\", getattr(re, \"_pattern_type\", None))\n \n@@ -65,3 +69,33 @@ def test__regexp_csv_validator_invalid() -> None:\n     pattern_strings = [\"test_.*\", \"foo\\\\.bar\", \"^baz)$\"]\n     with pytest.raises(sre_constants.error):\n         config.option._regexp_csv_validator(None, None, \",\".join(pattern_strings))\n+\n+\n+class TestPyLinterOptionSetters(CheckerTestCase):\n+    \"\"\"Class to check the set_config decorator and get_global_option util\n+    for options declared in PyLinter.\"\"\"\n+\n+    class Checker(BaseChecker):\n+        name = \"checker\"\n+        msgs: Dict[str, Tuple[str, ...]] = {}\n+        options = ((\"An option\", {\"An option\": \"dict\"}),)\n+\n+    CHECKER_CLASS: Type = Checker\n+\n+    @set_config(ignore_paths=\".*/tests/.*,.*\\\\ignore\\\\.*\")\n+    def test_ignore_paths_with_value(self) -> None:\n+        \"\"\"Test ignore-paths option with value\"\"\"\n+        options = get_global_option(self.checker, \"ignore-paths\")\n+\n+        assert any(i.match(\"dir/tests/file.py\") for i in options)\n+        assert any(i.match(\"dir\\\\tests\\\\file.py\") for i in options)\n+        assert any(i.match(\"dir/ignore/file.py\") for i in options)\n+        assert any(i.match(\"dir\\\\ignore\\\\file.py\") for i in options)\n+\n+    def test_ignore_paths_with_no_value(self) -> None:\n+        \"\"\"Test ignore-paths option with no value.\n+        Compare against actual list to see if validator works.\"\"\"\n+        options = get_global_option(self.checker, \"ignore-paths\")\n+\n+        # pylint: disable-next=use-implicit-booleaness-not-comparison\n+        assert options == []\n",
+  "problem_statement": "ignore-paths: normalize path to PosixPath\n### Current problem\n\nIn a project of mine, there is an entire directory, \"dummy\", that I want to exclude running pylint in.  I've added the directory name to the \"ignore\" option and it works great when used from the command line.\r\n\r\n```toml\r\n# Files or directories to be skipped. They should be base names, not paths.\r\nignore = [\r\n  'dummy',\r\n]\r\n```\r\n\r\nHowever, when using vscode, the full path is provided.  It calls pylint like this:\r\n\r\n```\r\n~\\Documents\\<snip>\\.venv\\Scripts\\python.exe -m pylint --msg-template='{line},{column},{category},{symbol}:{msg} --reports=n --output-format=text ~\\Documents\\<snip>\\dummy\\file.py\r\n```\r\n\r\nIn this case, the ignore rule doesn't work and vscode still reports errors.  So I decided to switch to the \"ignore-paths\" option.  The following works:\r\n\r\n```toml\r\n# Add files or directories matching the regex patterns to the ignore-list. The\r\n# regex matches against paths.\r\nignore-paths = [\r\n  '.*/dummy/.*$',\r\n  '.*\\\\dummy\\\\.*$',\r\n]\r\n```\r\n\r\nHowever, I need to duplciate each path, onces for Linux (/ as path separator) and the second for Windows (\\ as path separator).  Would it be possible to normalize the paths (could use pathlib PosixPath) so that just the linux one would work on both systems?  Note also that vscode passes the full path, so starting the regex with a ^, like '^dummy/.*$', won't work.\n\n### Desired solution\n\nI'd like to be able to define the path only once in the \"ignore-paths\" settings.  Even better would be to respect the \"ignore\" setting even for a path provided with the full path (just as if it was run from the command line).\r\n\r\n```toml\r\n# Add files or directories matching the regex patterns to the ignore-list. The\r\n# regex matches against paths.\r\nignore-paths = [\r\n  '.*/dummy/.*$',\r\n]\r\n```\n\n### Additional context\n\n_No response_\n",
+  "hints_text": "Thank you for opening the issue, this seems like a sensible thing to do.",
+  "created_at": "2021-10-23T10:09:51Z",
+  "version": "2.11",
+  "FAIL_TO_PASS": "[\"tests/lint/unittest_expand_modules.py::TestExpandModules::test_expand_modules[files_or_modules0-expected0]\", \"tests/lint/unittest_expand_modules.py::TestExpandModules::test_expand_modules[files_or_modules1-expected1]\", \"tests/lint/unittest_expand_modules.py::TestExpandModules::test_expand_modules_with_ignore[files_or_modules0-expected0]\", \"tests/lint/unittest_expand_modules.py::TestExpandModules::test_expand_modules_with_ignore[files_or_modules1-expected1]\", \"tests/unittest_config.py::TestPyLinterOptionSetters::test_ignore_paths_with_no_value\", \"tests/unittest_config.py::TestPyLinterOptionSetters::test_ignore_paths_with_value\"]",
+  "PASS_TO_PASS": "[\"tests/lint/unittest_expand_modules.py::test__is_in_ignore_list_re_match\", \"tests/unittest_config.py::test__csv_validator_no_spaces\", \"tests/unittest_config.py::test__csv_validator_spaces\", \"tests/unittest_config.py::test__regexp_csv_validator_invalid\", \"tests/unittest_config.py::test__regexp_csv_validator_valid\", \"tests/unittest_config.py::test__regexp_validator_invalid\", \"tests/unittest_config.py::test__regexp_validator_valid\"]",
+  "environment_setup_commit": "2c687133e4fcdd73ae3afa2e79be2160b150bb82",
+  "patch_files": [
+    "pylint/config/option.py",
+    "pylint/lint/expand_modules.py",
+    "pylint/lint/pylinter.py",
+    "pylint/utils/utils.py"
+  ],
+  "test_patch_files": [
+    "tests/lint/unittest_expand_modules.py",
+    "tests/unittest_config.py"
+  ],
+  "patch_diff_details": {
+    "pylint/config/option.py": {
+      "diffs": [
+        {
+          "start_line_old": 6,
+          "end_line_old": 6,
+          "file_pos": 15,
+          "file_context_length": 62250,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/config/option.py_Option.13_",
+          "closest_snippet_line_distance": 158,
+          "pos": 28,
+          "context_length": 13204
+        },
+        {
+          "start_line_old": 28,
+          "end_line_old": 28,
+          "file_pos": 15,
+          "file_context_length": 62250,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/config/option.py_Option.13_",
+          "closest_snippet_line_distance": 136,
+          "pos": 28,
+          "context_length": 13204
+        },
+        {
+          "start_line_old": 83,
+          "end_line_old": 83,
+          "file_pos": 15,
+          "file_context_length": 62250,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/config/option.py_Option.13_",
+          "closest_snippet_line_distance": 81,
+          "pos": 28,
+          "context_length": 13204
+        },
+        {
+          "start_line_old": 125,
+          "end_line_old": 125,
+          "file_pos": 15,
+          "file_context_length": 62250,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/config/option.py_copy__call_validator.2.2.1.2.1",
+          "closest_snippet_line_distance": 20
+        },
+        {
+          "start_line_old": 135,
+          "end_line_old": 135,
+          "file_pos": 15,
+          "file_context_length": 62250,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/config/option.py_copy__call_validator.2.2.1.2.1",
+          "closest_snippet_line_distance": 30
+        }
+      ]
+    },
+    "pylint/lint/expand_modules.py": {
+      "diffs": [
+        {
+          "start_line_old": 46,
+          "end_line_old": 46,
+          "file_pos": 2,
+          "file_context_length": 2617,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/expand_modules.py_os__is_in_ignore_list_re.3.1",
+          "closest_snippet_line_distance": 7
+        }
+      ]
+    },
+    "pylint/lint/pylinter.py": {
+      "diffs": [
+        {
+          "start_line_old": 49,
+          "end_line_old": 49,
+          "file_pos": 9,
+          "file_context_length": 22333,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/pylinter.py_MSGS_MSGS.1",
+          "closest_snippet_line_distance": 32,
+          "pos": 24,
+          "context_length": 11216
+        },
+        {
+          "start_line_old": 223,
+          "end_line_old": 228,
+          "file_pos": 9,
+          "file_context_length": 22333,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.error_mode.7",
+          "closest_snippet_line_distance": 532
+        },
+        {
+          "start_line_old": 1104,
+          "end_line_old": 1104,
+          "file_pos": 9,
+          "file_context_length": 22333,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.error_mode.7",
+          "closest_snippet_line_distance": 321
+        },
+        {
+          "start_line_old": 1262,
+          "end_line_old": 1262,
+          "file_pos": 9,
+          "file_context_length": 22333,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.error_mode.7",
+          "closest_snippet_line_distance": 479
+        }
+      ]
+    },
+    "pylint/utils/utils.py": {
+      "diffs": [
+        {
+          "start_line_old": 59,
+          "end_line_old": 59,
+          "file_pos": 7,
+          "file_context_length": 9139,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/utils/utils.py_get_global_option_get_global_option_40.1",
+          "closest_snippet_line_distance": 132
+        },
+        {
+          "start_line_old": 223,
+          "end_line_old": 223,
+          "file_pos": 7,
+          "file_context_length": 9139,
+          "pos": 8,
+          "context_length": 3136
+        }
+      ]
+    }
+  },
+  "vectors": 829,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/main.py_sys_OPTIONS.1",
+      "distance": 1.0502557754516602,
+      "file_path": "pylint/pyreverse/main.py",
+      "start_line": 25,
+      "end_line": 194,
+      "tokens": 884,
+      "context_length": 884
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pylint/pylint/lint/expand_modules.py_os__is_in_ignore_list_re.3.1",
+      "distance": 1.0987229347229004,
+      "file_path": "pylint/lint/expand_modules.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 297,
+      "context_length": 1181,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pylint/pylint/config/__init__.py_os_load_results.2.2.2.1",
+      "distance": 1.1019835472106934,
+      "file_path": "pylint/config/__init__.py",
+      "start_line": 37,
+      "end_line": 126,
+      "tokens": 738,
+      "context_length": 1919
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pylint/pylint/lint/utils.py__patch_sys_path_",
+      "distance": 1.1438438892364502,
+      "file_path": "pylint/lint/utils.py",
+      "start_line": 106,
+      "end_line": 134,
+      "tokens": 172,
+      "context_length": 2091
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pylint/pylint/__init__.py_os_run_symilar.3",
+      "distance": 1.144063115119934,
+      "file_path": "pylint/__init__.py",
+      "start_line": 12,
+      "end_line": 46,
+      "tokens": 161,
+      "context_length": 2252
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pylint/pylint/__init__.py_modify_sys_path_",
+      "distance": 1.1448347568511963,
+      "file_path": "pylint/__init__.py",
+      "start_line": 49,
+      "end_line": 79,
+      "tokens": 328,
+      "context_length": 2580
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pylint/pylint/constants.py_platform_",
+      "distance": 1.1582293510437012,
+      "file_path": "pylint/constants.py",
+      "start_line": 3,
+      "end_line": 51,
+      "tokens": 351,
+      "context_length": 2931
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pylint/pylint/utils/utils.py_get_global_option_get_global_option_40.1",
+      "distance": 1.168898105621338,
+      "file_path": "pylint/utils/utils.py",
+      "start_line": 191,
+      "end_line": 229,
+      "tokens": 205,
+      "context_length": 3136,
+      "file_pos": 7
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pylint/pylint/testutils/constants.py_operator_",
+      "distance": 1.1689245700836182,
+      "file_path": "pylint/testutils/constants.py",
+      "start_line": 4,
+      "end_line": 31,
+      "tokens": 297,
+      "context_length": 3433
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_MSGS_MSGS.1",
+      "distance": 1.1697752475738525,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 81,
+      "end_line": 161,
+      "tokens": 690,
+      "context_length": 4123,
+      "file_pos": 9
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pylint/pylint/lint/run.py_os_UNUSED_PARAM_SENTINEL.1",
+      "distance": 1.174261450767517,
+      "file_path": "pylint/lint/run.py",
+      "start_line": 4,
+      "end_line": 52,
+      "tokens": 339,
+      "context_length": 4462
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_MSGS_DEFAULT_PREFERRED_MODULES.1",
+      "distance": 1.178849697113037,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 203,
+      "end_line": 298,
+      "tokens": 769,
+      "context_length": 5231
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker._compute_site_packages_ImportsChecker._compute_site_packages",
+      "distance": 1.185718297958374,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 445,
+      "end_line": 468,
+      "tokens": 178,
+      "context_length": 5409
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_METHODS_DEPRECATED_METHODS.1",
+      "distance": 1.185784101486206,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 122,
+      "end_line": 261,
+      "tokens": 1034,
+      "context_length": 6443
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_collections_in_for_else_branch.2.1",
+      "distance": 1.1956138610839844,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 57,
+      "end_line": 161,
+      "tokens": 653,
+      "context_length": 7096
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_sys_DEPRECATED_MODULES.1",
+      "distance": 1.1981730461120605,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 40,
+      "end_line": 72,
+      "tokens": 309,
+      "context_length": 7405
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pylint/doc/conf.py_html_theme_options_",
+      "distance": 1.2075918912887573,
+      "file_path": "doc/conf.py",
+      "start_line": 107,
+      "end_line": 243,
+      "tokens": 889,
+      "context_length": 8294
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_Option.13_",
+      "distance": 1.211753487586975,
+      "file_path": "pylint/config/option.py",
+      "start_line": 164,
+      "end_line": 180,
+      "tokens": 176,
+      "context_length": 8470,
+      "file_pos": 15
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_STDLIB_CLASSES_IGNORE_ANCESTOR_STDLIB_CLASSES_IGNORE_ANCESTOR.1",
+      "distance": 1.2120490074157715,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 107,
+      "end_line": 185,
+      "tokens": 510,
+      "context_length": 8980
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pylint/pylint/checkers/spelling.py_os_CamelCasedWord._pattern.1",
+      "distance": 1.222913384437561,
+      "file_path": "pylint/checkers/spelling.py",
+      "start_line": 31,
+      "end_line": 132,
+      "tokens": 548,
+      "context_length": 9528
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pylint/pylint/lint/__init__.py_sys_",
+      "distance": 1.2248945236206055,
+      "file_path": "pylint/lint/__init__.py",
+      "start_line": 74,
+      "end_line": 106,
+      "tokens": 170,
+      "context_length": 9698
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_re_41",
+      "distance": 1.2297946214675903,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 29,
+      "end_line": 106,
+      "tokens": 670,
+      "context_length": 10368
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py__infer_name_module__fix_dot_imports.4.1",
+      "distance": 1.2328566312789917,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 263,
+      "end_line": 308,
+      "tokens": 382,
+      "context_length": 10750
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_collections_31",
+      "distance": 1.2342556715011597,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 4,
+      "end_line": 79,
+      "tokens": 466,
+      "context_length": 11216,
+      "file_pos": 18
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_tokenize__IGNORE.1",
+      "distance": 1.2342991828918457,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 54,
+      "end_line": 119,
+      "tokens": 345,
+      "context_length": 11561
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pylint/pylint/config/find_default_config_files.py_find_default_config_files_",
+      "distance": 1.2361376285552979,
+      "file_path": "pylint/config/find_default_config_files.py",
+      "start_line": 33,
+      "end_line": 70,
+      "tokens": 354,
+      "context_length": 11915
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_ARGUMENTS_DEPRECATED_DECORATORS.1",
+      "distance": 1.2364375591278076,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 74,
+      "end_line": 119,
+      "tokens": 538,
+      "context_length": 12453
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_copy__call_validator.2.2.1.2.1",
+      "distance": 1.2404272556304932,
+      "file_path": "pylint/config/option.py",
+      "start_line": 4,
+      "end_line": 105,
+      "tokens": 751,
+      "context_length": 13204,
+      "file_pos": 20
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pylint/doc/conf.py_1_76",
+      "distance": 1.2414603233337402,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 106,
+      "tokens": 753,
+      "context_length": 13957
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_KNOWN_NAME_TYPES_DEFAULT_NAMING_STYLES.1",
+      "distance": 1.242106318473816,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 1657,
+      "end_line": 1697,
+      "tokens": 245,
+      "context_length": 14202
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pylint/pylint/config/find_default_config_files.py_configparser__cfg_has_config.3.1",
+      "distance": 1.2430627346038818,
+      "file_path": "pylint/config/find_default_config_files.py",
+      "start_line": 4,
+      "end_line": 30,
+      "tokens": 147,
+      "context_length": 14349
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_collections__if_statement_is_always_returning.2.1",
+      "distance": 1.2478512525558472,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 4,
+      "end_line": 55,
+      "tokens": 358,
+      "context_length": 14707
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker_StdlibChecker.msgs.1",
+      "distance": 1.2487685680389404,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 339,
+      "end_line": 447,
+      "tokens": 1086,
+      "context_length": 15793
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pylint/pylint/config/option_parser.py_optparse_",
+      "distance": 1.2495670318603516,
+      "file_path": "pylint/config/option_parser.py",
+      "start_line": 4,
+      "end_line": 48,
+      "tokens": 319,
+      "context_length": 16112
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pylint/examples/custom_raw.py_1_",
+      "distance": 1.249906301498413,
+      "file_path": "examples/custom_raw.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 236,
+      "context_length": 16348
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py__create_naming_options__create_naming_options.3.1",
+      "distance": 1.250044345855713,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 1700,
+      "end_line": 1729,
+      "tokens": 214,
+      "context_length": 16562
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pylint/pylint/lint/run.py_Run_Run.__init__.self._rcfile.15",
+      "distance": 1.2505519390106201,
+      "file_path": "pylint/lint/run.py",
+      "start_line": 55,
+      "end_line": 287,
+      "tokens": 1540,
+      "context_length": 18102
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_AnyStyle_TYPING_FORWARD_REF_QNAME.1",
+      "distance": 1.2522521018981934,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 171,
+      "end_line": 221,
+      "tokens": 466,
+      "context_length": 18568
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pylint/pylint/lint/run.py_Run.version_asked_",
+      "distance": 1.2527996301651,
+      "file_path": "pylint/lint/run.py",
+      "start_line": 396,
+      "end_line": 464,
+      "tokens": 553,
+      "context_length": 19121
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker_ImportsChecker.options.1",
+      "distance": 1.258392333984375,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 301,
+      "end_line": 425,
+      "tokens": 794,
+      "context_length": 19915
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/utils.py_os_VIS_MOD.1",
+      "distance": 1.2608482837677002,
+      "file_path": "pylint/pyreverse/utils.py",
+      "start_line": 22,
+      "end_line": 121,
+      "tokens": 531,
+      "context_length": 20446
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pylint/pylint/utils/__init__.py_41_",
+      "distance": 1.2622485160827637,
+      "file_path": "pylint/utils/__init__.py",
+      "start_line": 46,
+      "end_line": 93,
+      "tokens": 268,
+      "context_length": 20714
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/main.py_Run_",
+      "distance": 1.2631726264953613,
+      "file_path": "pylint/pyreverse/main.py",
+      "start_line": 197,
+      "end_line": 231,
+      "tokens": 219,
+      "context_length": 20933
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes.py_collections__ParameterSignature.1",
+      "distance": 1.265444278717041,
+      "file_path": "pylint/checkers/classes.py",
+      "start_line": 51,
+      "end_line": 106,
+      "tokens": 404,
+      "context_length": 21337
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pylint/pylint/checkers/utils.py__SPECIAL_METHODS_PARAMS_PYMETHODS.1",
+      "distance": 1.2655380964279175,
+      "file_path": "pylint/checkers/utils.py",
+      "start_line": 119,
+      "end_line": 233,
+      "tokens": 697,
+      "context_length": 22034
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pylint/pylint/lint/utils.py_get_fatal_error_message_preprocess_options.3.2.2.2.3.3",
+      "distance": 1.2662584781646729,
+      "file_path": "pylint/lint/utils.py",
+      "start_line": 63,
+      "end_line": 103,
+      "tokens": 318,
+      "context_length": 22352
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_collections_79.2.1",
+      "distance": 1.2678731679916382,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 67,
+      "end_line": 92,
+      "tokens": 146,
+      "context_length": 22498
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/dot_printer.py_os_ARROWS.1",
+      "distance": 1.268890380859375,
+      "file_path": "pylint/pyreverse/dot_printer.py",
+      "start_line": 13,
+      "end_line": 38,
+      "tokens": 246,
+      "context_length": 22744
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pylint/pylint/epylint.py_1__get_env.4.1",
+      "distance": 1.2699670791625977,
+      "file_path": "pylint/epylint.py",
+      "start_line": 1,
+      "end_line": 74,
+      "tokens": 123,
+      "context_length": 22867
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pylint/pylint/lint/utils.py_contextlib_prepare_crash_report.7.1",
+      "distance": 1.271649718284607,
+      "file_path": "pylint/lint/utils.py",
+      "start_line": 4,
+      "end_line": 60,
+      "tokens": 377,
+      "context_length": 23244
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.__init___StdlibChecker._check_shallow_copy_environ.3.1.2",
+      "distance": 1.2721803188323975,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 449,
+      "end_line": 499,
+      "tokens": 545,
+      "context_length": 23789
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_copy_STREAM_TYPES.1",
+      "distance": 1.2746858596801758,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 44,
+      "end_line": 103,
+      "tokens": 376,
+      "context_length": 24165
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pylint/pylint/lint/parallel.py_collections__worker_initialize.9",
+      "distance": 1.2758151292800903,
+      "file_path": "pylint/lint/parallel.py",
+      "start_line": 4,
+      "end_line": 46,
+      "tokens": 282,
+      "context_length": 24447
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_redefined_argument_from_local_RefactoringChecker._check_redefined_argument_from_local.5.1.1",
+      "distance": 1.280771017074585,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 612,
+      "end_line": 631,
+      "tokens": 153,
+      "context_length": 24600
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_SimilarChecker.get_map_data_SimilarChecker.reduce_map_data.10",
+      "distance": 1.2847881317138672,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 863,
+      "end_line": 879,
+      "tokens": 163,
+      "context_length": 24763
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_NamingStyle_NamingStyle.CLASS_ATTRIBUTE_RGX.1",
+      "distance": 1.2856438159942627,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 95,
+      "end_line": 106,
+      "tokens": 127,
+      "context_length": 24890
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_MSGS_MSGS.1",
+      "distance": 1.2896301746368408,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 84,
+      "end_line": 187,
+      "tokens": 1007,
+      "context_length": 25897
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/__init__.py__",
+      "distance": 1.290550708770752,
+      "file_path": "pylint/pyreverse/__init__.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 25897
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pylint/pylint/extensions/typing.py_1_UNION_NAMES.1",
+      "distance": 1.2905569076538086,
+      "file_path": "pylint/extensions/typing.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 832,
+      "context_length": 26729
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py__ignore_import_failure__make_tree_defs.4.1",
+      "distance": 1.2920280694961548,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 123,
+      "end_line": 149,
+      "tokens": 207,
+      "context_length": 26936
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_MSGS_MSGS.1",
+      "distance": 1.2962826490402222,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 381,
+      "end_line": 510,
+      "tokens": 1123,
+      "context_length": 28059
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pylint/pylint/config/option_manager_mixin.py_collections__expand_default.6.1",
+      "distance": 1.2963409423828125,
+      "file_path": "pylint/config/option_manager_mixin.py",
+      "start_line": 5,
+      "end_line": 44,
+      "tokens": 269,
+      "context_length": 28328
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_FormatChecker.remove_pylint_option_from_lines_FormatChecker.is_line_length_check_activated.3.1",
+      "distance": 1.2970467805862427,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 689,
+      "end_line": 713,
+      "tokens": 198,
+      "context_length": 28526
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.enable_fail_on_messages_PyLinter.enable_fail_on_messages.8.1.1.1.3.2",
+      "distance": 1.2975714206695557,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 724,
+      "end_line": 753,
+      "tokens": 296,
+      "context_length": 28822,
+      "file_pos": 36
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/vcg_printer.py_15_GRAPH_ATTRS.1",
+      "distance": 1.298966884613037,
+      "file_path": "pylint/pyreverse/vcg_printer.py",
+      "start_line": 23,
+      "end_line": 121,
+      "tokens": 698,
+      "context_length": 29520
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_VariablesChecker._check_imports_VariablesChecker._check_imports.7",
+      "distance": 1.2993313074111938,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 2103,
+      "end_line": 2183,
+      "tokens": 675,
+      "context_length": 30195
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_CLASSES_DEPRECATED_CLASSES.1",
+      "distance": 1.3030743598937988,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 264,
+      "end_line": 306,
+      "tokens": 200,
+      "context_length": 30395
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/recommendation_checker.py_3_RecommendationChecker.visit_call.2",
+      "distance": 1.3041253089904785,
+      "file_path": "pylint/checkers/refactoring/recommendation_checker.py",
+      "start_line": 3,
+      "end_line": 79,
+      "tokens": 697,
+      "context_length": 31092
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pylint/doc/exts/pylint_extensions.py_1_DEPRECATED_MODULES.1",
+      "distance": 1.3050600290298462,
+      "file_path": "doc/exts/pylint_extensions.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 115,
+      "context_length": 31207
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_Run_",
+      "distance": 1.305894136428833,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 898,
+      "end_line": 945,
+      "tokens": 324,
+      "context_length": 31531
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pylint/pylint/testutils/functional_test_file.py_configparser_",
+      "distance": 1.3060849905014038,
+      "file_path": "pylint/testutils/functional_test_file.py",
+      "start_line": 4,
+      "end_line": 74,
+      "tokens": 420,
+      "context_length": 31951
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pylint/pylint/testutils/__init__.py___all___",
+      "distance": 1.3075511455535889,
+      "file_path": "pylint/testutils/__init__.py",
+      "start_line": 32,
+      "end_line": 59,
+      "tokens": 216,
+      "context_length": 32167
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.add_ignored_message_PyLinter.add_ignored_message.3.2",
+      "distance": 1.3078961372375488,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 1496,
+      "end_line": 1519,
+      "tokens": 220,
+      "context_length": 32387,
+      "file_pos": 41
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pylint/pylint/graph.py_codecs_DotBackend.source.1",
+      "distance": 1.3085567951202393,
+      "file_path": "pylint/graph.py",
+      "start_line": 23,
+      "end_line": 84,
+      "tokens": 369,
+      "context_length": 32756
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pylint/pylint/config/man_help_formatter.py_optparse__ManHelpFormatter.format_option.3.1",
+      "distance": 1.3087053298950195,
+      "file_path": "pylint/config/man_help_formatter.py",
+      "start_line": 4,
+      "end_line": 37,
+      "tokens": 237,
+      "context_length": 32993
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pylint/pylint/utils/file_state.py_collections_MessageStateDict.1",
+      "distance": 1.3089584112167358,
+      "file_path": "pylint/utils/file_state.py",
+      "start_line": 4,
+      "end_line": 30,
+      "tokens": 111,
+      "context_length": 33104
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pylint/pylint/checkers/utils.py_builtins_89",
+      "distance": 1.3093481063842773,
+      "file_path": "pylint/checkers/utils.py",
+      "start_line": 57,
+      "end_line": 118,
+      "tokens": 374,
+      "context_length": 33478
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pylint/pylint/testutils/global_test_linter.py_3_",
+      "distance": 1.309476613998413,
+      "file_path": "pylint/testutils/global_test_linter.py",
+      "start_line": 5,
+      "end_line": 21,
+      "tokens": 111,
+      "context_length": 33589
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_consider_using_in_RefactoringChecker._check_consider_using_in.17",
+      "distance": 1.3108993768692017,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1166,
+      "end_line": 1207,
+      "tokens": 365,
+      "context_length": 33954
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pylint/pylint/checkers/strings.py_OTHER_NODES_get_access_path.4.1",
+      "distance": 1.3119640350341797,
+      "file_path": "pylint/checkers/strings.py",
+      "start_line": 216,
+      "end_line": 237,
+      "tokens": 129,
+      "context_length": 34083
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker._get_imported_module_ImportsChecker._get_imported_module.2.1",
+      "distance": 1.313725471496582,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 805,
+      "end_line": 828,
+      "tokens": 265,
+      "context_length": 34348
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.error_mode.7",
+      "distance": 1.3141424655914307,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 755,
+      "end_line": 783,
+      "tokens": 257,
+      "context_length": 34605,
+      "file_pos": 46
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/inspector.py_collections__astroid_wrapper.3.1",
+      "distance": 1.316199541091919,
+      "file_path": "pylint/pyreverse/inspector.py",
+      "start_line": 21,
+      "end_line": 44,
+      "tokens": 118,
+      "context_length": 34723
+    }
+  ],
+  "files": [
+    {
+      "file_path": "pylint/pyreverse/main.py",
+      "position": 1,
+      "tokens": 1531,
+      "context_length": 1531
+    },
+    {
+      "file_path": "pylint/lint/expand_modules.py",
+      "position": 2,
+      "tokens": 1086,
+      "context_length": 2617
+    },
+    {
+      "file_path": "pylint/config/__init__.py",
+      "position": 3,
+      "tokens": 1781,
+      "context_length": 4398
+    },
+    {
+      "file_path": "pylint/lint/utils.py",
+      "position": 4,
+      "tokens": 914,
+      "context_length": 5312
+    },
+    {
+      "file_path": "pylint/__init__.py",
+      "position": 5,
+      "tokens": 705,
+      "context_length": 6017
+    },
+    {
+      "file_path": "pylint/constants.py",
+      "position": 6,
+      "tokens": 392,
+      "context_length": 6409
+    },
+    {
+      "file_path": "pylint/utils/utils.py",
+      "position": 7,
+      "tokens": 2730,
+      "context_length": 9139
+    },
+    {
+      "file_path": "pylint/testutils/constants.py",
+      "position": 8,
+      "tokens": 338,
+      "context_length": 9477
+    },
+    {
+      "file_path": "pylint/lint/pylinter.py",
+      "position": 9,
+      "tokens": 12856,
+      "context_length": 22333
+    },
+    {
+      "file_path": "pylint/lint/run.py",
+      "position": 10,
+      "tokens": 3413,
+      "context_length": 25746
+    },
+    {
+      "file_path": "pylint/checkers/imports.py",
+      "position": 11,
+      "tokens": 8725,
+      "context_length": 34471
+    },
+    {
+      "file_path": "pylint/checkers/stdlib.py",
+      "position": 12,
+      "tokens": 6399,
+      "context_length": 40870
+    },
+    {
+      "file_path": "pylint/checkers/variables.py",
+      "position": 13,
+      "tokens": 18119,
+      "context_length": 58989
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 14,
+      "tokens": 1846,
+      "context_length": 60835
+    },
+    {
+      "file_path": "pylint/config/option.py",
+      "position": 15,
+      "tokens": 1415,
+      "context_length": 62250
+    },
+    {
+      "file_path": "pylint/checkers/design_analysis.py",
+      "position": 16,
+      "tokens": 5030,
+      "context_length": 67280
+    },
+    {
+      "file_path": "pylint/checkers/spelling.py",
+      "position": 17,
+      "tokens": 3800,
+      "context_length": 71080
+    },
+    {
+      "file_path": "pylint/lint/__init__.py",
+      "position": 18,
+      "tokens": 1491,
+      "context_length": 72571
+    },
+    {
+      "file_path": "pylint/checkers/format.py",
+      "position": 19,
+      "tokens": 7069,
+      "context_length": 79640
+    },
+    {
+      "file_path": "pylint/config/find_default_config_files.py",
+      "position": 20,
+      "tokens": 542,
+      "context_length": 80182
+    },
+    {
+      "file_path": "pylint/checkers/base.py",
+      "position": 21,
+      "tokens": 22348,
+      "context_length": 102530
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "position": 22,
+      "tokens": 16343,
+      "context_length": 118873
+    },
+    {
+      "file_path": "pylint/config/option_parser.py",
+      "position": 23,
+      "tokens": 361,
+      "context_length": 119234
+    },
+    {
+      "file_path": "examples/custom_raw.py",
+      "position": 24,
+      "tokens": 236,
+      "context_length": 119470
+    },
+    {
+      "file_path": "pylint/pyreverse/utils.py",
+      "position": 25,
+      "tokens": 2189,
+      "context_length": 121659
+    },
+    {
+      "file_path": "pylint/utils/__init__.py",
+      "position": 26,
+      "tokens": 1138,
+      "context_length": 122797
+    },
+    {
+      "file_path": "pylint/checkers/classes.py",
+      "position": 27,
+      "tokens": 19142,
+      "context_length": 141939
+    },
+    {
+      "file_path": "pylint/checkers/utils.py",
+      "position": 28,
+      "tokens": 12676,
+      "context_length": 154615
+    },
+    {
+      "file_path": "pylint/pyreverse/dot_printer.py",
+      "position": 29,
+      "tokens": 1422,
+      "context_length": 156037
+    },
+    {
+      "file_path": "pylint/epylint.py",
+      "position": 30,
+      "tokens": 1961,
+      "context_length": 157998
+    },
+    {
+      "file_path": "pylint/checkers/similar.py",
+      "position": 31,
+      "tokens": 8090,
+      "context_length": 166088
+    },
+    {
+      "file_path": "pylint/lint/parallel.py",
+      "position": 32,
+      "tokens": 1363,
+      "context_length": 167451
+    },
+    {
+      "file_path": "pylint/checkers/exceptions.py",
+      "position": 33,
+      "tokens": 5165,
+      "context_length": 172616
+    },
+    {
+      "file_path": "pylint/pyreverse/__init__.py",
+      "position": 34,
+      "tokens": 55,
+      "context_length": 172671
+    },
+    {
+      "file_path": "pylint/extensions/typing.py",
+      "position": 35,
+      "tokens": 2564,
+      "context_length": 175235
+    },
+    {
+      "file_path": "pylint/config/option_manager_mixin.py",
+      "position": 36,
+      "tokens": 2985,
+      "context_length": 178220
+    },
+    {
+      "file_path": "pylint/pyreverse/vcg_printer.py",
+      "position": 37,
+      "tokens": 2414,
+      "context_length": 180634
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/recommendation_checker.py",
+      "position": 38,
+      "tokens": 3386,
+      "context_length": 184020
+    },
+    {
+      "file_path": "doc/exts/pylint_extensions.py",
+      "position": 39,
+      "tokens": 942,
+      "context_length": 184962
+    },
+    {
+      "file_path": "pylint/testutils/functional_test_file.py",
+      "position": 40,
+      "tokens": 461,
+      "context_length": 185423
+    },
+    {
+      "file_path": "pylint/testutils/__init__.py",
+      "position": 41,
+      "tokens": 827,
+      "context_length": 186250
+    },
+    {
+      "file_path": "pylint/graph.py",
+      "position": 42,
+      "tokens": 1756,
+      "context_length": 188006
+    },
+    {
+      "file_path": "pylint/config/man_help_formatter.py",
+      "position": 43,
+      "tokens": 845,
+      "context_length": 188851
+    },
+    {
+      "file_path": "pylint/utils/file_state.py",
+      "position": 44,
+      "tokens": 1430,
+      "context_length": 190281
+    },
+    {
+      "file_path": "pylint/testutils/global_test_linter.py",
+      "position": 45,
+      "tokens": 152,
+      "context_length": 190433
+    },
+    {
+      "file_path": "pylint/checkers/strings.py",
+      "position": 46,
+      "tokens": 8723,
+      "context_length": 199156
+    },
+    {
+      "file_path": "pylint/pyreverse/inspector.py",
+      "position": 47,
+      "tokens": 2679,
+      "context_length": 201835
+    }
+  ]
+}

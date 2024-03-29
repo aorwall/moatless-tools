@@ -1,0 +1,536 @@
+{
+  "instance_id": "sympy__sympy-17251",
+  "model_patch": "diff --git a/sympy/functions/elementary/exponential.py b/sympy/functions/elementary/exponential.py\nindex 047e2d52ea..3ab6e96e15 100644\n--- a/sympy/functions/elementary/exponential.py\n+++ b/sympy/functions/elementary/exponential.py\n@@ -307,6 +307,25 @@ def eval(cls, arg):\n         elif isinstance(arg, MatrixBase):\n             return arg.exp()\n \n+        if arg.is_imaginary:\n+            # Reduce the argument modulo 2*pi*I\n+            coeff = (arg / (2*S.Pi*S.ImaginaryUnit)).simplify()\n+            if ask(Q.integer(coeff)):\n+                arg = (coeff % 2) * 2 * S.Pi * S.ImaginaryUnit\n+\n+        if arg.is_Mul:\n+            coeff = arg.as_coefficient(S.Pi*S.ImaginaryUnit)\n+            if coeff:\n+                if ask(Q.integer(2*coeff)):\n+                    if ask(Q.even(coeff)):\n+                        return S.One\n+                    elif ask(Q.odd(coeff)):\n+                        return S.NegativeOne\n+                    elif ask(Q.even(coeff + S.Half)):\n+                        return -S.ImaginaryUnit\n+                    elif ask(Q.odd(coeff + S.Half)):\n+                        return S.ImaginaryUnit\n+\n     @property\n     def base(self):\n         \"\"\"\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/functions/elementary/exponential.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "8ca4a683d58ac1f61cfd2e4dacf7f58b9c0fefab",
+  "patch": "diff --git a/sympy/functions/elementary/exponential.py b/sympy/functions/elementary/exponential.py\n--- a/sympy/functions/elementary/exponential.py\n+++ b/sympy/functions/elementary/exponential.py\n@@ -250,18 +250,23 @@ def eval(cls, arg):\n         elif isinstance(arg, SetExpr):\n             return arg._eval_func(cls)\n         elif arg.is_Mul:\n-            if arg.is_number or arg.is_Symbol:\n-                coeff = arg.coeff(S.Pi*S.ImaginaryUnit)\n-                if coeff:\n-                    if ask(Q.integer(2*coeff)):\n-                        if ask(Q.even(coeff)):\n-                            return S.One\n-                        elif ask(Q.odd(coeff)):\n-                            return S.NegativeOne\n-                        elif ask(Q.even(coeff + S.Half)):\n-                            return -S.ImaginaryUnit\n-                        elif ask(Q.odd(coeff + S.Half)):\n-                            return S.ImaginaryUnit\n+            coeff = arg.as_coefficient(S.Pi*S.ImaginaryUnit)\n+            if coeff:\n+                if (2*coeff).is_integer:\n+                    if coeff.is_even:\n+                        return S.One\n+                    elif coeff.is_odd:\n+                        return S.NegativeOne\n+                    elif (coeff + S.Half).is_even:\n+                        return -S.ImaginaryUnit\n+                    elif (coeff + S.Half).is_odd:\n+                        return S.ImaginaryUnit\n+                elif coeff.is_Rational:\n+                    ncoeff = coeff % 2 # restrict to [0, 2pi)\n+                    if ncoeff > 1: # restrict to (-pi, pi]\n+                        ncoeff -= 2\n+                    if ncoeff != coeff:\n+                        return cls(ncoeff*S.Pi*S.ImaginaryUnit)\n \n             # Warning: code in risch.py will be very sensitive to changes\n             # in this (see DifferentialExtension).\n@@ -292,16 +297,21 @@ def eval(cls, arg):\n         elif arg.is_Add:\n             out = []\n             add = []\n+            argchanged = False\n             for a in arg.args:\n                 if a is S.One:\n                     add.append(a)\n                     continue\n                 newa = cls(a)\n                 if isinstance(newa, cls):\n-                    add.append(a)\n+                    if newa.args[0] != a:\n+                        add.append(newa.args[0])\n+                        argchanged = True\n+                    else:\n+                        add.append(a)\n                 else:\n                     out.append(newa)\n-            if out:\n+            if out or argchanged:\n                 return Mul(*out)*cls(Add(*add), evaluate=False)\n \n         elif isinstance(arg, MatrixBase):\ndiff --git a/sympy/physics/matrices.py b/sympy/physics/matrices.py\n--- a/sympy/physics/matrices.py\n+++ b/sympy/physics/matrices.py\n@@ -171,8 +171,8 @@ def mdft(n):\n     >>> mdft(3)\n     Matrix([\n     [sqrt(3)/3,                sqrt(3)/3,                sqrt(3)/3],\n-    [sqrt(3)/3, sqrt(3)*exp(-2*I*pi/3)/3, sqrt(3)*exp(-4*I*pi/3)/3],\n-    [sqrt(3)/3, sqrt(3)*exp(-4*I*pi/3)/3, sqrt(3)*exp(-8*I*pi/3)/3]])\n+    [sqrt(3)/3, sqrt(3)*exp(-2*I*pi/3)/3,  sqrt(3)*exp(2*I*pi/3)/3],\n+    [sqrt(3)/3,  sqrt(3)*exp(2*I*pi/3)/3, sqrt(3)*exp(-2*I*pi/3)/3]])\n     \"\"\"\n     mat = [[None for x in range(n)] for y in range(n)]\n     base = exp(-2*pi*I/n)\n",
+  "test_patch": "diff --git a/sympy/functions/elementary/tests/test_exponential.py b/sympy/functions/elementary/tests/test_exponential.py\n--- a/sympy/functions/elementary/tests/test_exponential.py\n+++ b/sympy/functions/elementary/tests/test_exponential.py\n@@ -48,6 +48,25 @@ def test_exp_values():\n     assert exp(oo, evaluate=False).is_finite is False\n \n \n+def test_exp_period():\n+    assert exp(9*I*pi/4) == exp(I*pi/4)\n+    assert exp(46*I*pi/18) == exp(5*I*pi/9)\n+    assert exp(25*I*pi/7) == exp(-3*I*pi/7)\n+    assert exp(-19*I*pi/3) == exp(-I*pi/3)\n+    assert exp(37*I*pi/8) - exp(-11*I*pi/8) == 0\n+    assert exp(-5*I*pi/3) / exp(11*I*pi/5) * exp(148*I*pi/15) == 1\n+\n+    assert exp(2 - 17*I*pi/5) == exp(2 + 3*I*pi/5)\n+    assert exp(log(3) + 29*I*pi/9) == 3 * exp(-7*I*pi/9)\n+\n+    n = Symbol('n', integer=True)\n+    e = Symbol('e', even=True)\n+    assert exp(e*I*pi) == 1\n+    assert exp((e + 1)*I*pi) == -1\n+    assert exp((1 + 4*n)*I*pi/2) == I\n+    assert exp((-1 + 4*n)*I*pi/2) == -I\n+\n+\n def test_exp_log():\n     x = Symbol(\"x\", real=True)\n     assert log(exp(x)) == x\n",
+  "problem_statement": "exp doesn't simplify based on its periodicity\nIn current master, `exp` doesn't use its periodicity to automatically reduce its argument, not even for purely imaginary arguments:\r\n```\r\n>>> exp(9*I*pi/4)\r\n 9\u22c5\u2148\u22c5\u03c0\r\n \u2500\u2500\u2500\u2500\u2500\r\n   4\r\n\u212f\r\n>>> simplify(exp(9*I*pi/4))\r\n 9\u22c5\u2148\u22c5\u03c0\r\n \u2500\u2500\u2500\u2500\u2500\r\n   4\r\n\u212f\r\n>>> a = exp(9*I*pi/4) - exp(I*pi/4); a\r\n   \u2148\u22c5\u03c0    9\u22c5\u2148\u22c5\u03c0\r\n   \u2500\u2500\u2500    \u2500\u2500\u2500\u2500\u2500\r\n    4       4\r\n- \u212f    + \u212f\r\n>>> simplify(a)\r\n            9\u22c5\u2148\u22c5\u03c0\r\n            \u2500\u2500\u2500\u2500\u2500\r\n  4 ____      4\r\n- \u2572\u2571 -1  + \u212f\r\n>>> expand_complex(a)\r\n0\r\n```\n",
+  "hints_text": "",
+  "created_at": "2019-07-24T14:49:45Z",
+  "version": "1.5",
+  "FAIL_TO_PASS": "[\"test_exp_period\"]",
+  "PASS_TO_PASS": "[\"test_as_numer_denom\", \"test_exp_AccumBounds\", \"test_exp_MatrixSymbol\", \"test_exp__as_base_exp\", \"test_exp_assumptions\", \"test_exp_conjugate\", \"test_exp_expand\", \"test_exp_expand_NC\", \"test_exp_fdiff\", \"test_exp_infinity\", \"test_exp_leading_term\", \"test_exp_log\", \"test_exp_rewrite\", \"test_exp_subs\", \"test_exp_taylor_term\", \"test_exp_values\", \"test_issue_5673\", \"test_issue_8866\", \"test_lambertw\", \"test_log_AccumBounds\", \"test_log_apply_evalf\", \"test_log_assumptions\", \"test_log_base\", \"test_log_expand\", \"test_log_expand_complex\", \"test_log_fdiff\", \"test_log_hashing\", \"test_log_product\", \"test_log_sign\", \"test_log_simplify\", \"test_log_symbolic\", \"test_log_taylor_term\", \"test_log_values\", \"test_polar\"]",
+  "environment_setup_commit": "70381f282f2d9d039da860e391fe51649df2779d",
+  "patch_files": [
+    "sympy/functions/elementary/exponential.py",
+    "sympy/physics/matrices.py"
+  ],
+  "test_patch_files": [
+    "sympy/functions/elementary/tests/test_exponential.py"
+  ],
+  "patch_diff_details": {
+    "sympy/functions/elementary/exponential.py": {
+      "diffs": [
+        {
+          "start_line_old": 253,
+          "end_line_old": 264,
+          "file_pos": 2,
+          "file_context_length": 16317,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp_polar._eval_evalf_exp_polar.as_base_exp.2.2.1",
+          "closest_snippet_line_distance": 80,
+          "pos": 11,
+          "context_length": 4137
+        },
+        {
+          "start_line_old": 295,
+          "end_line_old": 298,
+          "file_pos": 2,
+          "file_context_length": 16317,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp_polar._eval_evalf_exp_polar.as_base_exp.2.2.1",
+          "closest_snippet_line_distance": 114,
+          "pos": 11,
+          "context_length": 4137
+        }
+      ]
+    },
+    "sympy/physics/matrices.py": {
+      "diffs": [
+        {
+          "start_line_old": 174,
+          "end_line_old": 175
+        }
+      ]
+    }
+  },
+  "vectors": 8175,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_periodic_argument_periodic_argument.1",
+      "distance": 0.8045865297317505,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 871,
+      "end_line": 896,
+      "tokens": 228,
+      "context_length": 228
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp_polar_exp_polar._eval_Abs.2",
+      "distance": 0.8304755687713623,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 118,
+      "end_line": 155,
+      "tokens": 317,
+      "context_length": 545,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp_polar._eval_evalf_exp_polar.as_base_exp.2.2.1",
+      "distance": 0.8316411972045898,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 157,
+      "end_line": 184,
+      "tokens": 243,
+      "context_length": 788,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_besselsimp_besselsimp.z0.1",
+      "distance": 0.8676468729972839,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1104,
+      "end_line": 1168,
+      "tokens": 688,
+      "context_length": 1476
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_exptrigsimp.newexpr_7_exptrigsimp.13.1",
+      "distance": 0.8739911913871765,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 591,
+      "end_line": 603,
+      "tokens": 134,
+      "context_length": 1610
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_exptrigsimp_exptrigsimp.newexpr.1",
+      "distance": 0.874864935874939,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 511,
+      "end_line": 537,
+      "tokens": 217,
+      "context_length": 1827
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_nsimplify.exprval_nsimplify.nsimplify_real.3.3.mpmath.mp.dps.1",
+      "distance": 0.8813294172286987,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1336,
+      "end_line": 1369,
+      "tokens": 347,
+      "context_length": 2174
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_besselsimp.expander_besselsimp.23.1",
+      "distance": 0.8844339847564697,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1170,
+      "end_line": 1189,
+      "tokens": 194,
+      "context_length": 2368
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.extract_branch_factor_Expr.extract_branch_factor.19.1",
+      "distance": 0.8937493562698364,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2453,
+      "end_line": 2524,
+      "tokens": 689,
+      "context_length": 3057
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_exptrigsimp.f_exptrigsimp.f.12.1",
+      "distance": 0.8987354040145874,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 539,
+      "end_line": 590,
+      "tokens": 492,
+      "context_length": 3549
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp.eval_exp.eval.6.8.1.1",
+      "distance": 0.9018523693084717,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 226,
+      "end_line": 308,
+      "tokens": 588,
+      "context_length": 4137,
+      "file_pos": 5
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_periodic_argument.eval_periodic_argument._eval_evalf.4.1",
+      "distance": 0.9155869483947754,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 920,
+      "end_line": 956,
+      "tokens": 390,
+      "context_length": 4527
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_nsimplify.21_nsimplify.26.1",
+      "distance": 0.9180147647857666,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1370,
+      "end_line": 1385,
+      "tokens": 153,
+      "context_length": 4680
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp._eval_is_extended_real_exp._eval_is_extended_positive.1.2.2.1",
+      "distance": 0.9235110282897949,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 382,
+      "end_line": 405,
+      "tokens": 223,
+      "context_length": 4903,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_52_59",
+      "distance": 0.9397320747375488,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 69,
+      "end_line": 82,
+      "tokens": 240,
+      "context_length": 5143
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp.as_real_imag_exp.as_real_imag.6.1",
+      "distance": 0.9414255619049072,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 334,
+      "end_line": 365,
+      "tokens": 262,
+      "context_length": 5405,
+      "file_pos": 6
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py__unpolarify__unpolarify.5.1",
+      "distance": 0.9467378854751587,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 1131,
+      "end_line": 1160,
+      "tokens": 324,
+      "context_length": 5729
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_principal_branch.eval_principal_branch._eval_evalf.5.1",
+      "distance": 0.9502915143966675,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 992,
+      "end_line": 1050,
+      "tokens": 528,
+      "context_length": 6257
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_simplify_simplify.1",
+      "distance": 0.9510335326194763,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 380,
+      "end_line": 516,
+      "tokens": 1420,
+      "context_length": 7677
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float._eval_power_Float._eval_power.3.4.3.2.1",
+      "distance": 0.9607462882995605,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1349,
+      "end_line": 1379,
+      "tokens": 333,
+      "context_length": 8010
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py_radsimp.handle_radsimp.handle.4",
+      "distance": 0.967262327671051,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 792,
+      "end_line": 893,
+      "tokens": 995,
+      "context_length": 9005
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_simplify.44_simplify.59.1",
+      "distance": 0.9702830910682678,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 618,
+      "end_line": 658,
+      "tokens": 363,
+      "context_length": 9368
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/simplify/powsimp.py_powdenest_powdenest.1",
+      "distance": 0.9706084132194519,
+      "file_path": "sympy/simplify/powsimp.py",
+      "start_line": 485,
+      "end_line": 572,
+      "tokens": 857,
+      "context_length": 10225
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.52_add_formulae.x_62.1",
+      "distance": 0.9717658758163452,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 234,
+      "end_line": 265,
+      "tokens": 507,
+      "context_length": 10732
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_28_polar_lift.4",
+      "distance": 0.9720777273178101,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 792,
+      "end_line": 827,
+      "tokens": 219,
+      "context_length": 10951
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.35_add_formulae.51",
+      "distance": 0.9727514982223511,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 198,
+      "end_line": 233,
+      "tokens": 686,
+      "context_length": 11637
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_nsimplify_nsimplify.15.4",
+      "distance": 0.9735729694366455,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1252,
+      "end_line": 1334,
+      "tokens": 780,
+      "context_length": 12417
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/functions/special/error_functions.py_expint._eval_rewrite_as_Ei_expint._eval_rewrite_as_Ei.2.3.1.1",
+      "distance": 0.9788619875907898,
+      "file_path": "sympy/functions/special/error_functions.py",
+      "start_line": 1221,
+      "end_line": 1232,
+      "tokens": 172,
+      "context_length": 12589
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp._eval_nseries_exp._eval_nseries.3",
+      "distance": 0.9793000817298889,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 407,
+      "end_line": 425,
+      "tokens": 223,
+      "context_length": 12812,
+      "file_pos": 10
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_expand_complex_expand_complex.2.1",
+      "distance": 0.9794203042984009,
+      "file_path": "sympy/core/function.py",
+      "start_line": 2780,
+      "end_line": 2800,
+      "tokens": 166,
+      "context_length": 12978
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp._taylor_exp._eval_rewrite_as_Pow.1.2.1.1",
+      "distance": 0.985988974571228,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 427,
+      "end_line": 474,
+      "tokens": 493,
+      "context_length": 13471,
+      "file_pos": 11
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py_radsimp.7_radsimp.12.1",
+      "distance": 0.9871851801872253,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 895,
+      "end_line": 917,
+      "tokens": 278,
+      "context_length": 13749
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp._eval_subs_exp._eval_subs.2.6.1",
+      "distance": 0.9876989722251892,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 367,
+      "end_line": 380,
+      "tokens": 182,
+      "context_length": 13931,
+      "file_pos": 11
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_1_mpmath",
+      "distance": 0.9891970157623291,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 396,
+      "context_length": 14327
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py___trigsimp.6___trigsimp.8.1",
+      "distance": 0.9910011291503906,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 985,
+      "end_line": 1065,
+      "tokens": 724,
+      "context_length": 15051
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py_radsimp_radsimp.1",
+      "distance": 0.9915255308151245,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 672,
+      "end_line": 744,
+      "tokens": 753,
+      "context_length": 15804
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_simplify.done_simplify.43",
+      "distance": 0.9951119422912598,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 517,
+      "end_line": 617,
+      "tokens": 836,
+      "context_length": 16640
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_periodic_argument._getunbranched_periodic_argument._getunbranched.4.1",
+      "distance": 0.996826708316803,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 898,
+      "end_line": 918,
+      "tokens": 174,
+      "context_length": 16814
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_periodicity.orig_f_periodicity.25.1",
+      "distance": 0.9968492388725281,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 440,
+      "end_line": 545,
+      "tokens": 788,
+      "context_length": 17602
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "position": 1,
+      "tokens": 9241,
+      "context_length": 9241
+    },
+    {
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "position": 2,
+      "tokens": 7076,
+      "context_length": 16317
+    },
+    {
+      "file_path": "sympy/simplify/simplify.py",
+      "position": 3,
+      "tokens": 16223,
+      "context_length": 32540
+    },
+    {
+      "file_path": "sympy/simplify/trigsimp.py",
+      "position": 4,
+      "tokens": 12228,
+      "context_length": 44768
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 5,
+      "tokens": 32342,
+      "context_length": 77110
+    },
+    {
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "position": 6,
+      "tokens": 24767,
+      "context_length": 101877
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 7,
+      "tokens": 30097,
+      "context_length": 131974
+    },
+    {
+      "file_path": "sympy/simplify/radsimp.py",
+      "position": 8,
+      "tokens": 9639,
+      "context_length": 141613
+    },
+    {
+      "file_path": "sympy/simplify/powsimp.py",
+      "position": 9,
+      "tokens": 6653,
+      "context_length": 148266
+    },
+    {
+      "file_path": "sympy/functions/special/error_functions.py",
+      "position": 10,
+      "tokens": 19504,
+      "context_length": 167770
+    },
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 11,
+      "tokens": 26769,
+      "context_length": 194539
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 12,
+      "tokens": 12019,
+      "context_length": 206558
+    }
+  ]
+}

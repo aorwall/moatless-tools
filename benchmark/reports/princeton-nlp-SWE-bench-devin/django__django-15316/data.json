@@ -1,0 +1,1651 @@
+{
+  "instance_id": "django__django-15316",
+  "model_patch": "diff --git a/django/contrib/admindocs/views.py b/django/contrib/admindocs/views.py\nindex ffe4e13fa4..99a59cd917 100644\n--- a/django/contrib/admindocs/views.py\n+++ b/django/contrib/admindocs/views.py\n@@ -1,4 +1,5 @@\n import inspect\n+import re\n from importlib import import_module\n from inspect import cleandoc\n from pathlib import Path\n@@ -410,6 +411,7 @@ def simplify_regex(pattern):\n     example, turn \"^(?P<sport_slug>\\w+)/athletes/(?P<athlete_slug>\\w+)/$\"\n     into \"/<sport_slug>/athletes/<athlete_slug>/\".\n     \"\"\"\n+    pattern = re.sub(r'\\(\\?:[^\\)]+\\)', lambda m: m.group(0), pattern)\n     pattern = replace_named_groups(pattern)\n     pattern = replace_unnamed_groups(pattern)\n     pattern = replace_metacharacters(pattern)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/contrib/admindocs/views.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "fdfa97fb166ef5065aa2b229f19cb4ce303084e5",
+  "patch": "diff --git a/django/contrib/admindocs/utils.py b/django/contrib/admindocs/utils.py\n--- a/django/contrib/admindocs/utils.py\n+++ b/django/contrib/admindocs/utils.py\n@@ -137,9 +137,10 @@ def default_reference_role(name, rawtext, text, lineno, inliner, options=None, c\n     for name, urlbase in ROLES.items():\n         create_reference_role(name, urlbase)\n \n-# Match the beginning of a named or unnamed group.\n+# Match the beginning of a named, unnamed, or non-capturing groups.\n named_group_matcher = _lazy_re_compile(r'\\(\\?P(<\\w+>)')\n unnamed_group_matcher = _lazy_re_compile(r'\\(')\n+non_capturing_group_matcher = _lazy_re_compile(r'\\(\\?\\:')\n \n \n def replace_metacharacters(pattern):\n@@ -210,3 +211,18 @@ def replace_unnamed_groups(pattern):\n         final_pattern += pattern[:start] + '<var>'\n         prev_end = end\n     return final_pattern + pattern[prev_end:]\n+\n+\n+def remove_non_capturing_groups(pattern):\n+    r\"\"\"\n+    Find non-capturing groups in the given `pattern` and remove them, e.g.\n+    1. (?P<a>\\w+)/b/(?:\\w+)c(?:\\w+) => (?P<a>\\\\w+)/b/c\n+    2. ^(?:\\w+(?:\\w+))a => ^a\n+    3. ^a(?:\\w+)/b(?:\\w+) => ^a/b\n+    \"\"\"\n+    group_start_end_indices = _find_groups(pattern, non_capturing_group_matcher)\n+    final_pattern, prev_end = '', None\n+    for start, end, _ in group_start_end_indices:\n+        final_pattern += pattern[prev_end:start]\n+        prev_end = end\n+    return final_pattern + pattern[prev_end:]\ndiff --git a/django/contrib/admindocs/views.py b/django/contrib/admindocs/views.py\n--- a/django/contrib/admindocs/views.py\n+++ b/django/contrib/admindocs/views.py\n@@ -8,7 +8,8 @@\n from django.contrib.admin.views.decorators import staff_member_required\n from django.contrib.admindocs import utils\n from django.contrib.admindocs.utils import (\n-    replace_metacharacters, replace_named_groups, replace_unnamed_groups,\n+    remove_non_capturing_groups, replace_metacharacters, replace_named_groups,\n+    replace_unnamed_groups,\n )\n from django.core.exceptions import ImproperlyConfigured, ViewDoesNotExist\n from django.db import models\n@@ -410,6 +411,7 @@ def simplify_regex(pattern):\n     example, turn \"^(?P<sport_slug>\\w+)/athletes/(?P<athlete_slug>\\w+)/$\"\n     into \"/<sport_slug>/athletes/<athlete_slug>/\".\n     \"\"\"\n+    pattern = remove_non_capturing_groups(pattern)\n     pattern = replace_named_groups(pattern)\n     pattern = replace_unnamed_groups(pattern)\n     pattern = replace_metacharacters(pattern)\n",
+  "test_patch": "diff --git a/tests/admin_docs/test_views.py b/tests/admin_docs/test_views.py\n--- a/tests/admin_docs/test_views.py\n+++ b/tests/admin_docs/test_views.py\n@@ -397,6 +397,13 @@ def test_simplify_regex(self):\n             (r'^(?P<a>(x|y))/b/(?P<c>\\w+)', '/<a>/b/<c>'),\n             (r'^(?P<a>(x|y))/b/(?P<c>\\w+)ab', '/<a>/b/<c>ab'),\n             (r'^(?P<a>(x|y)(\\(|\\)))/b/(?P<c>\\w+)ab', '/<a>/b/<c>ab'),\n+            # Non-capturing groups.\n+            (r'^a(?:\\w+)b', '/ab'),\n+            (r'^a(?:(x|y))', '/a'),\n+            (r'^(?:\\w+(?:\\w+))a', '/a'),\n+            (r'^a(?:\\w+)/b(?:\\w+)', '/a/b'),\n+            (r'(?P<a>\\w+)/b/(?:\\w+)c(?:\\w+)', '/<a>/b/c'),\n+            (r'(?P<a>\\w+)/b/(\\w+)/(?:\\w+)c(?:\\w+)', '/<a>/b/<var>/c'),\n             # Single and repeated metacharacters.\n             (r'^a', '/a'),\n             (r'^^a', '/a'),\n",
+  "problem_statement": "simplify_regex() doesn't handle non-capturing groups\nDescription\n\t \n\t\t(last modified by Mariusz Felisiak)\n\t \nWhile using Django REST Framework's Schema generator, I found out they're using simplify_regex(); however, current version has a few shortcomings, namely non-capturing groups are broken.\nsimplify_regex() doesn't handle non-capturing groups\nDescription\n\t \n\t\t(last modified by Mariusz Felisiak)\n\t \nWhile using Django REST Framework's Schema generator, I found out they're using simplify_regex(); however, current version has a few shortcomings, namely non-capturing groups are broken.\n",
+  "hints_text": "I left comments for improvement on the PR. Please uncheck \"Patch needs improvement\" after updating.\nThis PR is no longer related to this issue.\nI have opened a \u200bpull request that allows simplify_regex() to handle non-capturing groups and additional tests for them in test_simplify_regex().\nI've submitted a patch here \u200bhttps://github.com/django/django/pull/15256.\nYou need to uncheck \"Patch needs improvement\" so the ticket appears in the review queue. Please don't use mass @ mentions on the PR to request a review.\nReplying to Tim Graham: You need to uncheck \"Patch needs improvement\" so the ticket appears in the review queue. Please don't use mass @ mentions on the PR to request a review. Sorry, Felisiak never came so I have to ask someone else lol\nReplying to Mariusz Felisiak: Okay I updated that PR to only include feature, I'll create new PR for code refactor :thumbsup:.\nIn 827bc070: Refs #28135 -- Refactored out _find_groups()/_get_group_start_end() hooks in admindocs.\nI left comments for improvement on the PR. Please uncheck \"Patch needs improvement\" after updating.\nThis PR is no longer related to this issue.\nI have opened a \u200bpull request that allows simplify_regex() to handle non-capturing groups and additional tests for them in test_simplify_regex().\nI've submitted a patch here \u200bhttps://github.com/django/django/pull/15256.\nYou need to uncheck \"Patch needs improvement\" so the ticket appears in the review queue. Please don't use mass @ mentions on the PR to request a review.\nReplying to Tim Graham: You need to uncheck \"Patch needs improvement\" so the ticket appears in the review queue. Please don't use mass @ mentions on the PR to request a review. Sorry, Felisiak never came so I have to ask someone else lol\nReplying to Mariusz Felisiak: Okay I updated that PR to only include feature, I'll create new PR for code refactor :thumbsup:.\nIn 827bc070: Refs #28135 -- Refactored out _find_groups()/_get_group_start_end() hooks in admindocs.",
+  "created_at": "2022-01-14T04:36:43Z",
+  "version": "4.1",
+  "FAIL_TO_PASS": "[\"test_simplify_regex (admin_docs.test_views.AdminDocViewFunctionsTests)\", \"test_template_detail_path_traversal (admin_docs.test_views.AdminDocViewDefaultEngineOnly)\"]",
+  "PASS_TO_PASS": "[\"A model with ``related_name`` of `+` shouldn't show backward\", \"Index view should correctly resolve view patterns when ROOT_URLCONF is\", \"Methods that begin with strings defined in\", \"Methods that take arguments should also displayed.\", \"Methods with arguments should have their arguments displayed.\", \"Methods with keyword arguments should have their arguments displayed.\", \"Methods with multiple arguments should have all their arguments\", \"Model cached properties are displayed as fields.\", \"Model properties are displayed as fields.\", \"The ``description`` field should render correctly for each field type.\", \"Views that are methods are listed correctly.\", \"Views that are methods can be displayed.\", \"Without the sites framework, should not access SITE_ID or Site\", \"test_app_not_found (admin_docs.test_views.TestModelDetailView)\", \"test_bookmarklets (admin_docs.test_views.AdminDocViewTests)\", \"test_bookmarklets (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_builtin_fields (admin_docs.test_views.TestFieldType)\", \"test_custom_fields (admin_docs.test_views.TestFieldType)\", \"test_field_name (admin_docs.test_views.TestFieldType)\", \"test_index (admin_docs.test_views.AdminDocViewTests)\", \"test_index (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_method_data_types (admin_docs.test_views.TestModelDetailView)\", \"test_missing_docutils (admin_docs.test_views.AdminDocViewTests)\", \"test_missing_docutils (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_model_detail_title (admin_docs.test_views.TestModelDetailView)\", \"test_model_docstring_renders_correctly (admin_docs.test_views.TestModelDetailView)\", \"test_model_index (admin_docs.test_views.AdminDocViewTests)\", \"test_model_index (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_model_not_found (admin_docs.test_views.TestModelDetailView)\", \"test_model_with_many_to_one (admin_docs.test_views.TestModelDetailView)\", \"test_namespaced_view_detail (admin_docs.test_views.AdminDocViewTests)\", \"test_namespaced_view_detail (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_template_detail (admin_docs.test_views.AdminDocViewTests)\", \"test_template_detail (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_templatefilter_index (admin_docs.test_views.AdminDocViewTests)\", \"test_templatefilter_index (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_templatetag_index (admin_docs.test_views.AdminDocViewTests)\", \"test_templatetag_index (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_view_detail (admin_docs.test_views.AdminDocViewTests)\", \"test_view_detail (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_view_detail_illegal_import (admin_docs.test_views.AdminDocViewTests)\", \"test_view_detail_illegal_import (admin_docs.test_views.AdminDocViewWithMultipleEngines)\", \"test_view_index (admin_docs.test_views.AdminDocViewTests)\", \"test_view_index (admin_docs.test_views.AdminDocViewWithMultipleEngines)\"]",
+  "environment_setup_commit": "647480166bfe7532e8c471fef0146e3a17e6c0c9",
+  "patch_files": [
+    "django/contrib/admindocs/utils.py",
+    "django/contrib/admindocs/views.py"
+  ],
+  "test_patch_files": [
+    "tests/admin_docs/test_views.py"
+  ],
+  "patch_diff_details": {
+    "django/contrib/admindocs/utils.py": {
+      "diffs": [
+        {
+          "start_line_old": 140,
+          "end_line_old": 140,
+          "file_pos": 10,
+          "file_context_length": 37449,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/admindocs/utils.py_replace_named_groups_replace_named_groups.4.1",
+          "closest_snippet_line_distance": 41,
+          "pos": 42,
+          "context_length": 16282
+        },
+        {
+          "start_line_old": 213,
+          "end_line_old": 213,
+          "file_pos": 10,
+          "file_context_length": 37449,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/admindocs/utils.py__get_group_start_end__find_groups.2.1.prev_end.1",
+          "closest_snippet_line_distance": 35,
+          "pos": 18,
+          "context_length": 5174
+        }
+      ]
+    },
+    "django/contrib/admindocs/views.py": {
+      "diffs": [
+        {
+          "start_line_old": 11,
+          "end_line_old": 11,
+          "file_pos": 1,
+          "file_context_length": 3329,
+          "closest_snippet_id": "/tmp/repos/django/django/contrib/admindocs/views.py_simplify_regex_",
+          "closest_snippet_line_distance": 396
+        },
+        {
+          "start_line_old": 413,
+          "end_line_old": 413,
+          "file_pos": 1,
+          "file_context_length": 3329,
+          "pos": 1,
+          "context_length": 111
+        }
+      ]
+    }
+  },
+  "vectors": 3613,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_simplify_regex_",
+      "distance": 0.8846251368522644,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 407,
+      "end_line": 419,
+      "tokens": 111,
+      "context_length": 111,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_RegexSerializer_RegexSerializer.serialize.9.1",
+      "distance": 0.9218437075614929,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 235,
+      "end_line": 246,
+      "tokens": 133,
+      "context_length": 244
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_normalize.14_normalize.15.1",
+      "distance": 0.960797905921936,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 78,
+      "end_line": 190,
+      "tokens": 962,
+      "context_length": 1206
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_1_NonCapture.1",
+      "distance": 0.9956991672515869,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 250,
+      "context_length": 1456
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_normalize_normalize.13.2.1.1",
+      "distance": 1.008788824081421,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 41,
+      "end_line": 76,
+      "tokens": 375,
+      "context_length": 1831
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_flatten_result_",
+      "distance": 1.0477782487869263,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 286,
+      "end_line": 352,
+      "tokens": 484,
+      "context_length": 2315
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Regex_IRegex.lookup_name.1",
+      "distance": 1.055433750152588,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 543,
+      "end_line": 560,
+      "tokens": 134,
+      "context_length": 2449
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/gis/geometry.py_re_",
+      "distance": 1.0644292831420898,
+      "file_path": "django/contrib/gis/geometry.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 215,
+      "context_length": 2664
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_RegexPattern.check__PATH_PARAMETER_COMPONENT_RE.1",
+      "distance": 1.0674647092819214,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 185,
+      "end_line": 219,
+      "tokens": 265,
+      "context_length": 2929
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/core/validators.py_RegexValidator_RegexValidator.__eq__.1.1",
+      "distance": 1.0879414081573486,
+      "file_path": "django/core/validators.py",
+      "start_line": 17,
+      "end_line": 59,
+      "tokens": 336,
+      "context_length": 3265
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_RegexPattern_RegexPattern.match.3.1",
+      "distance": 1.1012117862701416,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 159,
+      "end_line": 183,
+      "tokens": 203,
+      "context_length": 3468
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/forms/fields.py_RegexField_EmailField.__init__.1",
+      "distance": 1.11203134059906,
+      "file_path": "django/forms/fields.py",
+      "start_line": 513,
+      "end_line": 542,
+      "tokens": 207,
+      "context_length": 3675
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/utils/jslex.py_Lexer_Lexer.__init__.self.state.1",
+      "distance": 1.1168489456176758,
+      "file_path": "django/utils/jslex.py",
+      "start_line": 30,
+      "end_line": 47,
+      "tokens": 126,
+      "context_length": 3801
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/admindocs/utils.py__get_group_start_end__find_groups.2.1.prev_end.1",
+      "distance": 1.1253421306610107,
+      "file_path": "django/contrib/admindocs/utils.py",
+      "start_line": 154,
+      "end_line": 178,
+      "tokens": 272,
+      "context_length": 4073,
+      "file_pos": 10
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/utils/http.py_base64_RFC3986_SUBDELIMS.1",
+      "distance": 1.133068323135376,
+      "file_path": "django/utils/http.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 481,
+      "context_length": 4554
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_next_char_walk_to_end.3.1.3.2",
+      "distance": 1.1341956853866577,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 193,
+      "end_line": 232,
+      "tokens": 274,
+      "context_length": 4828
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/migrations/utils.py_datetime_get_migration_name_timestamp.1.1",
+      "distance": 1.1575448513031006,
+      "file_path": "django/db/migrations/utils.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 121,
+      "context_length": 4949
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/admindocs/utils.py_replace_unnamed_groups_",
+      "distance": 1.161580204963684,
+      "file_path": "django/contrib/admindocs/utils.py",
+      "start_line": 198,
+      "end_line": 213,
+      "tokens": 225,
+      "context_length": 5174,
+      "file_pos": 12
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/utils/xmlutils.py_1_",
+      "distance": 1.1697611808776855,
+      "file_path": "django/utils/xmlutils.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 247,
+      "context_length": 5421
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.7.1",
+      "distance": 1.1700295209884644,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 64,
+      "end_line": 127,
+      "tokens": 640,
+      "context_length": 6061
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/template/base.py_44_filter_re.1",
+      "distance": 1.176926612854004,
+      "file_path": "django/template/base.py",
+      "start_line": 602,
+      "end_line": 637,
+      "tokens": 361,
+      "context_length": 6422
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_DeconstructableSerializer_DeconstructableSerializer.serialize.1.1",
+      "distance": 1.1778693199157715,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 78,
+      "end_line": 105,
+      "tokens": 233,
+      "context_length": 6655
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/admindocs/utils.py_replace_named_groups_replace_named_groups.4.1",
+      "distance": 1.17952299118042,
+      "file_path": "django/contrib/admindocs/utils.py",
+      "start_line": 181,
+      "end_line": 195,
+      "tokens": 207,
+      "context_length": 6862,
+      "file_pos": 15
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/utils/jslex.py_JsLexer.states_JsLexer.__init__.1",
+      "distance": 1.1798126697540283,
+      "file_path": "django/utils/jslex.py",
+      "start_line": 146,
+      "end_line": 182,
+      "tokens": 321,
+      "context_length": 7183
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper_DatabaseWrapper.pattern_esc.1",
+      "distance": 1.1813968420028687,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 49,
+      "end_line": 123,
+      "tokens": 775,
+      "context_length": 7958
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/core/validators.py_URLValidator_URLValidator.__init__.2.self.schemes.1",
+      "distance": 1.1817641258239746,
+      "file_path": "django/core/validators.py",
+      "start_line": 62,
+      "end_line": 101,
+      "tokens": 605,
+      "context_length": 8563
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/template/smartif.py_IfParser_",
+      "distance": 1.1860315799713135,
+      "file_path": "django/template/smartif.py",
+      "start_line": 150,
+      "end_line": 209,
+      "tokens": 423,
+      "context_length": 8986
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/utils/jslex.py_JsLexer_JsLexer.both_after.1",
+      "distance": 1.1865235567092896,
+      "file_path": "django/utils/jslex.py",
+      "start_line": 76,
+      "end_line": 144,
+      "tokens": 763,
+      "context_length": 9749
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/core/validators.py_validate_email_validate_unicode_slug.1",
+      "distance": 1.1876779794692993,
+      "file_path": "django/core/validators.py",
+      "start_line": 231,
+      "end_line": 246,
+      "tokens": 135,
+      "context_length": 9884
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_Serializer_Serializer.unregister.1",
+      "distance": 1.187747836112976,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 295,
+      "end_line": 328,
+      "tokens": 288,
+      "context_length": 10172
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/urls/resolvers.py__route_to_regex__route_to_regex.7.1",
+      "distance": 1.1909277439117432,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 222,
+      "end_line": 265,
+      "tokens": 379,
+      "context_length": 10551
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/views/i18n.py_js_catalog_template_js_catalog_template.1",
+      "distance": 1.1977148056030273,
+      "file_path": "django/views/i18n.py",
+      "start_line": 79,
+      "end_line": 182,
+      "tokens": 702,
+      "context_length": 11253
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/conf/locale/nl/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.1992075443267822,
+      "file_path": "django/conf/locale/nl/formats.py",
+      "start_line": 32,
+      "end_line": 67,
+      "tokens": 1371,
+      "context_length": 12624
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_LocaleRegexDescriptor_LocaleRegexDescriptor.__get__.10.1",
+      "distance": 1.2015684843063354,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 103,
+      "end_line": 123,
+      "tokens": 182,
+      "context_length": 12806
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_SequenceSerializer_TupleSerializer._format.3.1",
+      "distance": 1.2035152912139893,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 249,
+      "end_line": 270,
+      "tokens": 166,
+      "context_length": 12972
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/conf/locale/sr/formats.py_DATE_FORMAT_",
+      "distance": 1.2063815593719482,
+      "file_path": "django/conf/locale/sr/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 726,
+      "context_length": 13698
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/conf/locale/sl/formats.py_DATE_FORMAT_",
+      "distance": 1.2072477340698242,
+      "file_path": "django/conf/locale/sl/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 708,
+      "context_length": 14406
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/conf/locale/sr_Latn/formats.py_DATE_FORMAT_",
+      "distance": 1.2107360363006592,
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 726,
+      "context_length": 15132
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/core/validators.py_integer_validator_EmailValidator.__init__.3.self.domain_allowlist.1",
+      "distance": 1.2111238241195679,
+      "file_path": "django/core/validators.py",
+      "start_line": 150,
+      "end_line": 185,
+      "tokens": 390,
+      "context_length": 15522
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.add_constraint_",
+      "distance": 1.212664246559143,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 429,
+      "end_line": 453,
+      "tokens": 162,
+      "context_length": 15684
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/core/serializers/xml_serializer.py_15_DefusedExpatParser.reset.parser.ExternalEntityRefHandler.1",
+      "distance": 1.2131760120391846,
+      "file_path": "django/core/serializers/xml_serializer.py",
+      "start_line": 349,
+      "end_line": 383,
+      "tokens": 327,
+      "context_length": 16011
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/contrib/admindocs/utils.py_default_reference_role_replace_metacharacters.2.1",
+      "distance": 1.213852047920227,
+      "file_path": "django/contrib/admindocs/utils.py",
+      "start_line": 118,
+      "end_line": 151,
+      "tokens": 271,
+      "context_length": 16282,
+      "file_pos": 24
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/contrib/postgres/serializers.py__",
+      "distance": 1.2166855335235596,
+      "file_path": "django/contrib/postgres/serializers.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 16282
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_urlize_force_escape.2.1",
+      "distance": 1.2170734405517578,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 358,
+      "end_line": 442,
+      "tokens": 499,
+      "context_length": 16781
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/utils/dateparse.py_1_postgres_interval_re.1",
+      "distance": 1.2173593044281006,
+      "file_path": "django/utils/dateparse.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 771,
+      "context_length": 17552
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_RoutePattern_RoutePattern.match.3.1",
+      "distance": 1.2186617851257324,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 268,
+      "end_line": 290,
+      "tokens": 173,
+      "context_length": 17725
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/core/validators.py_URLValidator.__call___URLValidator.__call__.13.1",
+      "distance": 1.2201957702636719,
+      "file_path": "django/core/validators.py",
+      "start_line": 103,
+      "end_line": 147,
+      "tokens": 470,
+      "context_length": 18195
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_builtins_DecimalSerializer.serialize.1.1",
+      "distance": 1.2218413352966309,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 436,
+      "context_length": 18631
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper_DatabaseWrapper.pattern_esc.1",
+      "distance": 1.2220094203948975,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 98,
+      "end_line": 167,
+      "tokens": 717,
+      "context_length": 19348
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/conf/locale/id/formats.py_DATE_FORMAT_",
+      "distance": 1.2246493101119995,
+      "file_path": "django/conf/locale/id/formats.py",
+      "start_line": 5,
+      "end_line": 47,
+      "tokens": 670,
+      "context_length": 20018
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/template/base.py_1_logger.1",
+      "distance": 1.2246661186218262,
+      "file_path": "django/template/base.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 758,
+      "context_length": 20776
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/conf/locale/mk/formats.py_DATE_FORMAT_",
+      "distance": 1.224859356880188,
+      "file_path": "django/conf/locale/mk/formats.py",
+      "start_line": 5,
+      "end_line": 39,
+      "tokens": 594,
+      "context_length": 21370
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.cleanse_special_types_SafeExceptionReporterFilter.cleanse_special_types.3.1",
+      "distance": 1.2254564762115479,
+      "file_path": "django/views/debug.py",
+      "start_line": 199,
+      "end_line": 211,
+      "tokens": 143,
+      "context_length": 21513
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/conf/locale/lv/formats.py_DATE_FORMAT_",
+      "distance": 1.225762128829956,
+      "file_path": "django/conf/locale/lv/formats.py",
+      "start_line": 5,
+      "end_line": 45,
+      "tokens": 700,
+      "context_length": 22213
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/utils/html.py_MLStripper__strip_once.5.1",
+      "distance": 1.2257716655731201,
+      "file_path": "django/utils/html.py",
+      "start_line": 139,
+      "end_line": 165,
+      "tokens": 149,
+      "context_length": 22362
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/conf/locale/uz/formats.py_DATE_FORMAT_",
+      "distance": 1.2268004417419434,
+      "file_path": "django/conf/locale/uz/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 418,
+      "context_length": 22780
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/docs/_ext/djangodocs.py_DjangoHTMLTranslator_DjangoHTMLTranslator.visit_section.5",
+      "distance": 1.227586030960083,
+      "file_path": "docs/_ext/djangodocs.py",
+      "start_line": 109,
+      "end_line": 176,
+      "tokens": 572,
+      "context_length": 23352
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/conf/locale/hr/formats.py_DATE_FORMAT_",
+      "distance": 1.2277171611785889,
+      "file_path": "django/conf/locale/hr/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 742,
+      "context_length": 24094
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/conf/locale/ru/formats.py_DATE_FORMAT_",
+      "distance": 1.2307493686676025,
+      "file_path": "django/conf/locale/ru/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 367,
+      "context_length": 24461
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_FORMAT_QMARK_REGEX_",
+      "distance": 1.2309362888336182,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 321,
+      "end_line": 342,
+      "tokens": 183,
+      "context_length": 24644
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_IterableSerializer_IterableSerializer.serialize.7.1",
+      "distance": 1.2312740087509155,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 184,
+      "end_line": 195,
+      "tokens": 117,
+      "context_length": 24761
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_Formatter_Formatter.format.3.1",
+      "distance": 1.2320406436920166,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 31,
+      "end_line": 44,
+      "tokens": 121,
+      "context_length": 24882
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.232343077659607,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 619,
+      "context_length": 25501
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/conf/locale/sv/formats.py_DATE_FORMAT_",
+      "distance": 1.233306884765625,
+      "file_path": "django/conf/locale/sv/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 481,
+      "context_length": 25982
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/conf/locale/cs/formats.py_DATE_FORMAT_",
+      "distance": 1.2338521480560303,
+      "file_path": "django/conf/locale/cs/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 600,
+      "context_length": 26582
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/conf/locale/ka/formats.py_DATE_FORMAT_",
+      "distance": 1.2346197366714478,
+      "file_path": "django/conf/locale/ka/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 773,
+      "context_length": 27355
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_DatabaseSchemaEditor.quote_value_DatabaseSchemaEditor._column_default_sql.2.1",
+      "distance": 1.2352919578552246,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 52,
+      "end_line": 94,
+      "tokens": 388,
+      "context_length": 27743
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/contrib/postgres/constraints.py_ExclusionConstraint.create_sql_ExclusionConstraint.check_supported.2.1",
+      "distance": 1.2359585762023926,
+      "file_path": "django/contrib/postgres/constraints.py",
+      "start_line": 122,
+      "end_line": 155,
+      "tokens": 250,
+      "context_length": 27993
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Contains_Range.get_rhs_op.1.1",
+      "distance": 1.2363884449005127,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 485,
+      "end_line": 522,
+      "tokens": 195,
+      "context_length": 28188
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/conf/locale/it/formats.py_DATE_FORMAT_",
+      "distance": 1.2365535497665405,
+      "file_path": "django/conf/locale/it/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 764,
+      "context_length": 28952
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/conf/locale/ml/formats.py_DATE_FORMAT_",
+      "distance": 1.2365922927856445,
+      "file_path": "django/conf/locale/ml/formats.py",
+      "start_line": 5,
+      "end_line": 38,
+      "tokens": 610,
+      "context_length": 29562
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/conf/locale/pt/formats.py_DATE_FORMAT_",
+      "distance": 1.236924171447754,
+      "file_path": "django/conf/locale/pt/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 577,
+      "context_length": 30139
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.can_clone_databases_BaseDatabaseFeatures.229",
+      "distance": 1.2369589805603027,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 218,
+      "end_line": 322,
+      "tokens": 888,
+      "context_length": 31027
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/conf/locale/pt_BR/formats.py_DATE_FORMAT_",
+      "distance": 1.2373509407043457,
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "start_line": 5,
+      "end_line": 32,
+      "tokens": 459,
+      "context_length": 31486
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.4.1",
+      "distance": 1.2389929294586182,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 54,
+      "end_line": 87,
+      "tokens": 342,
+      "context_length": 31828
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/core/validators.py_ipaddress_EMPTY_VALUES.1",
+      "distance": 1.2394521236419678,
+      "file_path": "django/core/validators.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 111,
+      "context_length": 31939
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hant/formats.py_DATE_FORMAT_",
+      "distance": 1.2396150827407837,
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 32574
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_linebreaksbr_striptags.2.1",
+      "distance": 1.2401444911956787,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 457,
+      "end_line": 492,
+      "tokens": 233,
+      "context_length": 32807
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.validate_unique_BaseModelFormSet.validate_unique.all_unique_checks.11.1",
+      "distance": 1.240962028503418,
+      "file_path": "django/forms/models.py",
+      "start_line": 686,
+      "end_line": 763,
+      "tokens": 750,
+      "context_length": 33557
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/conf/locale/cy/formats.py_DATE_FORMAT_",
+      "distance": 1.2409764528274536,
+      "file_path": "django/conf/locale/cy/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 529,
+      "context_length": 34086
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hans/formats.py_DATE_FORMAT_",
+      "distance": 1.2413201332092285,
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 34721
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.regex_lookup_DatabaseOperations.regex_lookup.3.4.1",
+      "distance": 1.2417080402374268,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 357,
+      "end_line": 366,
+      "tokens": 143,
+      "context_length": 34864
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.collapse_group_by_SQLCompiler.ordering_parts.collapse_group_by.5.4.1",
+      "distance": 1.2419315576553345,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 161,
+      "end_line": 209,
+      "tokens": 523,
+      "context_length": 35387
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/conf/locale/lt/formats.py_DATE_FORMAT_",
+      "distance": 1.2420437335968018,
+      "file_path": "django/conf/locale/lt/formats.py",
+      "start_line": 5,
+      "end_line": 44,
+      "tokens": 676,
+      "context_length": 36063
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.quote_value_DatabaseSchemaEditor.quote_value.4.6.6.1",
+      "distance": 1.2420612573623657,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 40,
+      "end_line": 66,
+      "tokens": 243,
+      "context_length": 36306
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/urls/resolvers.py_ResolverMatch_ResolverMatch.__reduce_ex__.1",
+      "distance": 1.2424843311309814,
+      "file_path": "django/urls/resolvers.py",
+      "start_line": 33,
+      "end_line": 78,
+      "tokens": 426,
+      "context_length": 36732
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/conf/locale/el/formats.py_DATE_FORMAT_",
+      "distance": 1.2433490753173828,
+      "file_path": "django/conf/locale/el/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 455,
+      "context_length": 37187
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._check_sql_BaseDatabaseSchemaEditor._delete_constraint_sql.1.1",
+      "distance": 1.2446229457855225,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1310,
+      "end_line": 1332,
+      "tokens": 173,
+      "context_length": 37360
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/conf/locale/uk/formats.py_DATE_FORMAT_",
+      "distance": 1.244666576385498,
+      "file_path": "django/conf/locale/uk/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 425,
+      "context_length": 37785
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_group_by_SQLCompiler.ordering_parts.get_group_by.45.1",
+      "distance": 1.2448606491088867,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 74,
+      "end_line": 159,
+      "tokens": 890,
+      "context_length": 38675
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_1_DatabaseSchemaEditor.sql_delete_check.2.1",
+      "distance": 1.2453800439834595,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 428,
+      "context_length": 39103
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/conf/locale/nn/formats.py_DATE_FORMAT_",
+      "distance": 1.2458879947662354,
+      "file_path": "django/conf/locale/nn/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 593,
+      "context_length": 39696
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_TypeSerializer_UUIDSerializer.serialize.1.1",
+      "distance": 1.2463009357452393,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 273,
+      "end_line": 292,
+      "tokens": 162,
+      "context_length": 39858
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._delete_unique_sql_BaseDatabaseSchemaEditor._delete_unique_sql.3.1",
+      "distance": 1.2467197179794312,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1289,
+      "end_line": 1308,
+      "tokens": 163,
+      "context_length": 40021
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/conf/locale/fr/formats.py_DATE_FORMAT_",
+      "distance": 1.2468814849853516,
+      "file_path": "django/conf/locale/fr/formats.py",
+      "start_line": 5,
+      "end_line": 32,
+      "tokens": 448,
+      "context_length": 40469
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/utils/translation/template.py_warnings_constant_re.1",
+      "distance": 1.2470219135284424,
+      "file_path": "django/utils/translation/template.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 381,
+      "context_length": 40850
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/conf/locale/nb/formats.py_DATE_FORMAT_",
+      "distance": 1.2478125095367432,
+      "file_path": "django/conf/locale/nb/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 593,
+      "context_length": 41443
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._remake_table.28_DatabaseSchemaEditor._remake_table.67.restore_pk_field.primary_key.1",
+      "distance": 1.2482900619506836,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 228,
+      "end_line": 310,
+      "tokens": 731,
+      "context_length": 42174
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/conf/locale/sk/formats.py_DATE_FORMAT_",
+      "distance": 1.249579668045044,
+      "file_path": "django/conf/locale/sk/formats.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 330,
+      "context_length": 42504
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/conf/locale/az/formats.py_DATE_FORMAT_",
+      "distance": 1.2500691413879395,
+      "file_path": "django/conf/locale/az/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 364,
+      "context_length": 42868
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/contrib/postgres/constraints.py_ExclusionConstraint_ExclusionConstraint._get_condition_sql.4.1",
+      "distance": 1.250126838684082,
+      "file_path": "django/contrib/postgres/constraints.py",
+      "start_line": 20,
+      "end_line": 102,
+      "tokens": 691,
+      "context_length": 43559
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/utils/html.py_Urlizer.is_email_simple_avoid_wrapping.2.1",
+      "distance": 1.251063346862793,
+      "file_path": "django/utils/html.py",
+      "start_line": 356,
+      "end_line": 386,
+      "tokens": 227,
+      "context_length": 43786
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._unique_sql_BaseDatabaseSchemaEditor._unique_sql.4.1",
+      "distance": 1.2511558532714844,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1213,
+      "end_line": 1244,
+      "tokens": 233,
+      "context_length": 44019
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/urls/__init__.py_translate_url_",
+      "distance": 1.251908779144287,
+      "file_path": "django/urls/__init__.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 239,
+      "context_length": 44258
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_FunctoolsPartialSerializer_FunctoolsPartialSerializer.serialize.2",
+      "distance": 1.2529901266098022,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 165,
+      "end_line": 181,
+      "tokens": 151,
+      "context_length": 44409
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_cleansed_multivaluedict_SafeExceptionReporterFilter.get_cleansed_multivaluedict.4.1",
+      "distance": 1.2530547380447388,
+      "file_path": "django/views/debug.py",
+      "start_line": 160,
+      "end_line": 172,
+      "tokens": 148,
+      "context_length": 44557
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/contrib/postgres/expressions.py__",
+      "distance": 1.2540489435195923,
+      "file_path": "django/contrib/postgres/expressions.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 44557
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper_DatabaseWrapper.pattern_esc.1",
+      "distance": 1.254525065422058,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 65,
+      "end_line": 131,
+      "tokens": 689,
+      "context_length": 45246
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Col_Col.get_db_converters.2.1",
+      "distance": 1.2545573711395264,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 847,
+      "end_line": 881,
+      "tokens": 292,
+      "context_length": 45538
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_linebreaks_filter_linebreaks_filter.3.1",
+      "distance": 1.2547855377197266,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 445,
+      "end_line": 454,
+      "tokens": 111,
+      "context_length": 45649
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/db/models/options.py_bisect_DEFAULT_NAMES.1",
+      "distance": 1.255216121673584,
+      "file_path": "django/db/models/options.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 300,
+      "context_length": 45949
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/base/features.py_re_",
+      "distance": 1.2552745342254639,
+      "file_path": "django/contrib/gis/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 821,
+      "context_length": 46770
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_functools_RECURSIVE_RELATIONSHIP_CONSTANT.1",
+      "distance": 1.2552824020385742,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 246,
+      "context_length": 47016
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 1,
+      "tokens": 3329,
+      "context_length": 3329
+    },
+    {
+      "file_path": "django/db/migrations/serializer.py",
+      "position": 2,
+      "tokens": 2679,
+      "context_length": 6008
+    },
+    {
+      "file_path": "django/utils/regex_helper.py",
+      "position": 3,
+      "tokens": 2641,
+      "context_length": 8649
+    },
+    {
+      "file_path": "django/db/models/lookups.py",
+      "position": 4,
+      "tokens": 5264,
+      "context_length": 13913
+    },
+    {
+      "file_path": "django/contrib/gis/geometry.py",
+      "position": 5,
+      "tokens": 215,
+      "context_length": 14128
+    },
+    {
+      "file_path": "django/urls/resolvers.py",
+      "position": 6,
+      "tokens": 5835,
+      "context_length": 19963
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 7,
+      "tokens": 4543,
+      "context_length": 24506
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 8,
+      "tokens": 9421,
+      "context_length": 33927
+    },
+    {
+      "file_path": "django/utils/jslex.py",
+      "position": 9,
+      "tokens": 1785,
+      "context_length": 35712
+    },
+    {
+      "file_path": "django/contrib/admindocs/utils.py",
+      "position": 10,
+      "tokens": 1737,
+      "context_length": 37449
+    },
+    {
+      "file_path": "django/utils/http.py",
+      "position": 11,
+      "tokens": 3259,
+      "context_length": 40708
+    },
+    {
+      "file_path": "django/db/migrations/utils.py",
+      "position": 12,
+      "tokens": 843,
+      "context_length": 41551
+    },
+    {
+      "file_path": "django/utils/xmlutils.py",
+      "position": 13,
+      "tokens": 247,
+      "context_length": 41798
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 14,
+      "tokens": 2185,
+      "context_length": 43983
+    },
+    {
+      "file_path": "django/template/base.py",
+      "position": 15,
+      "tokens": 8195,
+      "context_length": 52178
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "position": 16,
+      "tokens": 3046,
+      "context_length": 55224
+    },
+    {
+      "file_path": "django/template/smartif.py",
+      "position": 17,
+      "tokens": 1526,
+      "context_length": 56750
+    },
+    {
+      "file_path": "django/views/i18n.py",
+      "position": 18,
+      "tokens": 2461,
+      "context_length": 59211
+    },
+    {
+      "file_path": "django/conf/locale/nl/formats.py",
+      "position": 19,
+      "tokens": 1883,
+      "context_length": 61094
+    },
+    {
+      "file_path": "django/conf/locale/sr/formats.py",
+      "position": 20,
+      "tokens": 771,
+      "context_length": 61865
+    },
+    {
+      "file_path": "django/conf/locale/sl/formats.py",
+      "position": 21,
+      "tokens": 753,
+      "context_length": 62618
+    },
+    {
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "position": 22,
+      "tokens": 771,
+      "context_length": 63389
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "position": 23,
+      "tokens": 4246,
+      "context_length": 67635
+    },
+    {
+      "file_path": "django/core/serializers/xml_serializer.py",
+      "position": 24,
+      "tokens": 3512,
+      "context_length": 71147
+    },
+    {
+      "file_path": "django/contrib/postgres/serializers.py",
+      "position": 25,
+      "tokens": 101,
+      "context_length": 71248
+    },
+    {
+      "file_path": "django/template/defaultfilters.py",
+      "position": 26,
+      "tokens": 6441,
+      "context_length": 77689
+    },
+    {
+      "file_path": "django/utils/dateparse.py",
+      "position": 27,
+      "tokens": 1568,
+      "context_length": 79257
+    },
+    {
+      "file_path": "django/db/backends/mysql/base.py",
+      "position": 28,
+      "tokens": 3450,
+      "context_length": 82707
+    },
+    {
+      "file_path": "django/conf/locale/id/formats.py",
+      "position": 29,
+      "tokens": 715,
+      "context_length": 83422
+    },
+    {
+      "file_path": "django/conf/locale/mk/formats.py",
+      "position": 30,
+      "tokens": 639,
+      "context_length": 84061
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 31,
+      "tokens": 4703,
+      "context_length": 88764
+    },
+    {
+      "file_path": "django/conf/locale/lv/formats.py",
+      "position": 32,
+      "tokens": 745,
+      "context_length": 89509
+    },
+    {
+      "file_path": "django/utils/html.py",
+      "position": 33,
+      "tokens": 3247,
+      "context_length": 92756
+    },
+    {
+      "file_path": "django/conf/locale/uz/formats.py",
+      "position": 34,
+      "tokens": 463,
+      "context_length": 93219
+    },
+    {
+      "file_path": "docs/_ext/djangodocs.py",
+      "position": 35,
+      "tokens": 3209,
+      "context_length": 96428
+    },
+    {
+      "file_path": "django/conf/locale/hr/formats.py",
+      "position": 36,
+      "tokens": 787,
+      "context_length": 97215
+    },
+    {
+      "file_path": "django/conf/locale/ru/formats.py",
+      "position": 37,
+      "tokens": 412,
+      "context_length": 97627
+    },
+    {
+      "file_path": "django/utils/dateformat.py",
+      "position": 38,
+      "tokens": 2594,
+      "context_length": 100221
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 39,
+      "tokens": 619,
+      "context_length": 100840
+    },
+    {
+      "file_path": "django/conf/locale/sv/formats.py",
+      "position": 40,
+      "tokens": 526,
+      "context_length": 101366
+    },
+    {
+      "file_path": "django/conf/locale/cs/formats.py",
+      "position": 41,
+      "tokens": 645,
+      "context_length": 102011
+    },
+    {
+      "file_path": "django/conf/locale/ka/formats.py",
+      "position": 42,
+      "tokens": 818,
+      "context_length": 102829
+    },
+    {
+      "file_path": "django/db/backends/mysql/schema.py",
+      "position": 43,
+      "tokens": 1574,
+      "context_length": 104403
+    },
+    {
+      "file_path": "django/contrib/postgres/constraints.py",
+      "position": 44,
+      "tokens": 1610,
+      "context_length": 106013
+    },
+    {
+      "file_path": "django/conf/locale/it/formats.py",
+      "position": 45,
+      "tokens": 809,
+      "context_length": 106822
+    },
+    {
+      "file_path": "django/conf/locale/ml/formats.py",
+      "position": 46,
+      "tokens": 655,
+      "context_length": 107477
+    },
+    {
+      "file_path": "django/conf/locale/pt/formats.py",
+      "position": 47,
+      "tokens": 622,
+      "context_length": 108099
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 48,
+      "tokens": 2978,
+      "context_length": 111077
+    },
+    {
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "position": 49,
+      "tokens": 504,
+      "context_length": 111581
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "position": 50,
+      "tokens": 1073,
+      "context_length": 112654
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "position": 51,
+      "tokens": 680,
+      "context_length": 113334
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 52,
+      "tokens": 11918,
+      "context_length": 125252
+    },
+    {
+      "file_path": "django/conf/locale/cy/formats.py",
+      "position": 53,
+      "tokens": 574,
+      "context_length": 125826
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "position": 54,
+      "tokens": 680,
+      "context_length": 126506
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 55,
+      "tokens": 3840,
+      "context_length": 130346
+    },
+    {
+      "file_path": "django/db/models/sql/compiler.py",
+      "position": 56,
+      "tokens": 14866,
+      "context_length": 145212
+    },
+    {
+      "file_path": "django/conf/locale/lt/formats.py",
+      "position": 57,
+      "tokens": 721,
+      "context_length": 145933
+    },
+    {
+      "file_path": "django/conf/locale/el/formats.py",
+      "position": 58,
+      "tokens": 500,
+      "context_length": 146433
+    },
+    {
+      "file_path": "django/db/backends/base/schema.py",
+      "position": 59,
+      "tokens": 12882,
+      "context_length": 159315
+    },
+    {
+      "file_path": "django/conf/locale/uk/formats.py",
+      "position": 60,
+      "tokens": 470,
+      "context_length": 159785
+    },
+    {
+      "file_path": "django/conf/locale/nn/formats.py",
+      "position": 61,
+      "tokens": 638,
+      "context_length": 160423
+    },
+    {
+      "file_path": "django/conf/locale/fr/formats.py",
+      "position": 62,
+      "tokens": 493,
+      "context_length": 160916
+    },
+    {
+      "file_path": "django/utils/translation/template.py",
+      "position": 63,
+      "tokens": 1954,
+      "context_length": 162870
+    },
+    {
+      "file_path": "django/conf/locale/nb/formats.py",
+      "position": 64,
+      "tokens": 638,
+      "context_length": 163508
+    },
+    {
+      "file_path": "django/conf/locale/sk/formats.py",
+      "position": 65,
+      "tokens": 375,
+      "context_length": 163883
+    },
+    {
+      "file_path": "django/conf/locale/az/formats.py",
+      "position": 66,
+      "tokens": 409,
+      "context_length": 164292
+    },
+    {
+      "file_path": "django/urls/__init__.py",
+      "position": 67,
+      "tokens": 239,
+      "context_length": 164531
+    },
+    {
+      "file_path": "django/contrib/postgres/expressions.py",
+      "position": 68,
+      "tokens": 88,
+      "context_length": 164619
+    },
+    {
+      "file_path": "django/db/backends/postgresql/base.py",
+      "position": 69,
+      "tokens": 2924,
+      "context_length": 167543
+    },
+    {
+      "file_path": "django/db/models/expressions.py",
+      "position": 70,
+      "tokens": 11415,
+      "context_length": 178958
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 71,
+      "tokens": 7362,
+      "context_length": 186320
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/base/features.py",
+      "position": 72,
+      "tokens": 822,
+      "context_length": 187142
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 73,
+      "tokens": 14159,
+      "context_length": 201301
+    }
+  ]
+}

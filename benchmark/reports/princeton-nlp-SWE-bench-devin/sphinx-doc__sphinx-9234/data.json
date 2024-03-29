@@ -1,0 +1,1541 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9234",
+  "model_patch": "diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py\nindex 722b1e69a..cb91f96f0 100644\n--- a/sphinx/builders/linkcheck.py\n+++ b/sphinx/builders/linkcheck.py\n@@ -499,6 +499,14 @@ class HyperlinkAvailabilityCheckWorker(Thread):\n                 # history contains any redirects, get last\n                 if response.history:\n                     code = response.history[-1].status_code\n+                    final_url = response.url\n+                    allowed = False\n+                    for source_pattern, target_pattern in self.config.linkcheck_allowed_redirects.items():\n+                        if re.match(source_pattern, uri) and re.match(target_pattern, final_url):\n+                            allowed = True\n+                            break\n+                    if not allowed:\n+                        return 'broken', 'Redirected to an unknown location', 0\n                     return 'redirected', new_url, code\n                 else:\n                     return 'redirected', new_url, 0\n@@ -682,6 +690,11 @@ def setup(app: Sphinx) -> Dict[str, Any]:\n     # commonly used for dynamic pages\n     app.add_config_value('linkcheck_anchors_ignore', [\"^!\"], None)\n     app.add_config_value('linkcheck_rate_limit_timeout', 300.0, None)\n+    # Add a new configuration option 'linkcheck_allowed_redirects' to specify allowed redirects.\n+    # This option should be a dictionary mapping a pattern of the source URI to a pattern of the canonical URI.\n+    # The default value is an empty dictionary, which means no redirects are allowed by default.\n+    # Users can populate this dictionary in their Sphinx configuration to allow specific redirects.\n+    app.add_config_value('linkcheck_allowed_redirects', {}, None)\n \n     app.add_event('linkcheck-process-uri')\n     app.connect('linkcheck-process-uri', rewrite_github_anchor)\ndiff --git a/tox.ini b/tox.ini\nindex a363e187f..3b8bc12d0 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -27,7 +27,7 @@ setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils,ignore::DeprecationWarning:pip._vendor.packaging.version\n     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes\n commands=\n-    python -X dev -m pytest --durations 25 {posargs}\n+    python -X dev -m pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sphinx/builders/linkcheck.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "f0fef96906d80d89e290a780767a92ba85977733",
+  "patch": "diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py\n--- a/sphinx/builders/linkcheck.py\n+++ b/sphinx/builders/linkcheck.py\n@@ -272,8 +272,12 @@ def process_result(self, result: CheckResult) -> None:\n             except KeyError:\n                 text, color = ('with unknown code', purple)\n             linkstat['text'] = text\n-            logger.info(color('redirect  ') + result.uri +\n-                        color(' - ' + text + ' to ' + result.message))\n+            if self.config.linkcheck_allowed_redirects:\n+                logger.warning('redirect  ' + result.uri + ' - ' + text + ' to ' +\n+                               result.message, location=(filename, result.lineno))\n+            else:\n+                logger.info(color('redirect  ') + result.uri +\n+                            color(' - ' + text + ' to ' + result.message))\n             self.write_entry('redirected ' + text, result.docname, filename,\n                              result.lineno, result.uri + ' to ' + result.message)\n         else:\n@@ -496,13 +500,23 @@ def check_uri() -> Tuple[str, str, int]:\n                 new_url = response.url\n                 if anchor:\n                     new_url += '#' + anchor\n-                # history contains any redirects, get last\n-                if response.history:\n+\n+                if allowed_redirect(req_url, new_url):\n+                    return 'working', '', 0\n+                elif response.history:\n+                    # history contains any redirects, get last\n                     code = response.history[-1].status_code\n                     return 'redirected', new_url, code\n                 else:\n                     return 'redirected', new_url, 0\n \n+        def allowed_redirect(url: str, new_url: str) -> bool:\n+            for from_url, to_url in self.config.linkcheck_allowed_redirects.items():\n+                if from_url.match(url) and to_url.match(new_url):\n+                    return True\n+\n+            return False\n+\n         def check(docname: str) -> Tuple[str, str, int]:\n             # check for various conditions without bothering the network\n             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'tel:')):\n@@ -667,11 +681,25 @@ def rewrite_github_anchor(app: Sphinx, uri: str) -> Optional[str]:\n     return None\n \n \n+def compile_linkcheck_allowed_redirects(app: Sphinx, config: Config) -> None:\n+    \"\"\"Compile patterns in linkcheck_allowed_redirects to the regexp objects.\"\"\"\n+    for url, pattern in list(app.config.linkcheck_allowed_redirects.items()):\n+        try:\n+            app.config.linkcheck_allowed_redirects[re.compile(url)] = re.compile(pattern)\n+        except re.error as exc:\n+            logger.warning(__('Failed to compile regex in linkcheck_allowed_redirects: %r %s'),\n+                           exc.pattern, exc.msg)\n+        finally:\n+            # Remove the original regexp-string\n+            app.config.linkcheck_allowed_redirects.pop(url)\n+\n+\n def setup(app: Sphinx) -> Dict[str, Any]:\n     app.add_builder(CheckExternalLinksBuilder)\n     app.add_post_transform(HyperlinkCollector)\n \n     app.add_config_value('linkcheck_ignore', [], None)\n+    app.add_config_value('linkcheck_allowed_redirects', {}, None)\n     app.add_config_value('linkcheck_auth', [], None)\n     app.add_config_value('linkcheck_request_headers', {}, None)\n     app.add_config_value('linkcheck_retries', 1, None)\n@@ -684,6 +712,8 @@ def setup(app: Sphinx) -> Dict[str, Any]:\n     app.add_config_value('linkcheck_rate_limit_timeout', 300.0, None)\n \n     app.add_event('linkcheck-process-uri')\n+\n+    app.connect('config-inited', compile_linkcheck_allowed_redirects, priority=800)\n     app.connect('linkcheck-process-uri', rewrite_github_anchor)\n \n     return {\n",
+  "test_patch": "diff --git a/tests/roots/test-linkcheck-localserver-warn-redirects/conf.py b/tests/roots/test-linkcheck-localserver-warn-redirects/conf.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/roots/test-linkcheck-localserver-warn-redirects/conf.py\n@@ -0,0 +1 @@\n+exclude_patterns = ['_build']\ndiff --git a/tests/roots/test-linkcheck-localserver-warn-redirects/index.rst b/tests/roots/test-linkcheck-localserver-warn-redirects/index.rst\nnew file mode 100644\n--- /dev/null\n+++ b/tests/roots/test-linkcheck-localserver-warn-redirects/index.rst\n@@ -0,0 +1,2 @@\n+`local server1 <http://localhost:7777/path1>`_\n+`local server2 <http://localhost:7777/path2>`_\ndiff --git a/tests/test_build_linkcheck.py b/tests/test_build_linkcheck.py\n--- a/tests/test_build_linkcheck.py\n+++ b/tests/test_build_linkcheck.py\n@@ -23,6 +23,7 @@\n import requests\n \n from sphinx.builders.linkcheck import HyperlinkAvailabilityCheckWorker, RateLimit\n+from sphinx.testing.util import strip_escseq\n from sphinx.util.console import strip_colors\n \n from .utils import CERT_FILE, http_server, https_server\n@@ -254,7 +255,7 @@ def log_date_time_string(self):\n \n \n @pytest.mark.sphinx('linkcheck', testroot='linkcheck-localserver', freshenv=True)\n-def test_follows_redirects_on_HEAD(app, capsys):\n+def test_follows_redirects_on_HEAD(app, capsys, warning):\n     with http_server(make_redirect_handler(support_head=True)):\n         app.build()\n     stdout, stderr = capsys.readouterr()\n@@ -269,10 +270,11 @@ def test_follows_redirects_on_HEAD(app, capsys):\n         127.0.0.1 - - [] \"HEAD /?redirected=1 HTTP/1.1\" 204 -\n         \"\"\"\n     )\n+    assert warning.getvalue() == ''\n \n \n @pytest.mark.sphinx('linkcheck', testroot='linkcheck-localserver', freshenv=True)\n-def test_follows_redirects_on_GET(app, capsys):\n+def test_follows_redirects_on_GET(app, capsys, warning):\n     with http_server(make_redirect_handler(support_head=False)):\n         app.build()\n     stdout, stderr = capsys.readouterr()\n@@ -288,6 +290,28 @@ def test_follows_redirects_on_GET(app, capsys):\n         127.0.0.1 - - [] \"GET /?redirected=1 HTTP/1.1\" 204 -\n         \"\"\"\n     )\n+    assert warning.getvalue() == ''\n+\n+\n+@pytest.mark.sphinx('linkcheck', testroot='linkcheck-localserver-warn-redirects',\n+                    freshenv=True, confoverrides={\n+                        'linkcheck_allowed_redirects': {'http://localhost:7777/.*1': '.*'}\n+                    })\n+def test_linkcheck_allowed_redirects(app, warning):\n+    with http_server(make_redirect_handler(support_head=False)):\n+        app.build()\n+\n+    with open(app.outdir / 'output.json') as fp:\n+        records = [json.loads(l) for l in fp.readlines()]\n+\n+    assert len(records) == 2\n+    result = {r[\"uri\"]: r[\"status\"] for r in records}\n+    assert result[\"http://localhost:7777/path1\"] == \"working\"\n+    assert result[\"http://localhost:7777/path2\"] == \"redirected\"\n+\n+    assert (\"index.rst.rst:1: WARNING: redirect  http://localhost:7777/path2 - with Found to \"\n+            \"http://localhost:7777/?redirected=1\\n\" in strip_escseq(warning.getvalue()))\n+    assert len(warning.getvalue().splitlines()) == 1\n \n \n class OKHandler(http.server.BaseHTTPRequestHandler):\n",
+  "problem_statement": "Link checker should be able to prohibit unknown redirects\n**Is your feature request related to a problem? Please describe.**\r\nA lot of links become stale or move. Good websites will provide redirects to the correct new location or return an HTTP error code. Bad websites will redirect to an unrelated page or the root of the website.\r\n\r\nPreventing all redirects does not allow links to URLs like https://www.sphinx-doc.org/ which redirects to https://www.sphinx-doc.org/en/master/. It needs to be possible to allow these redirects but disallow others.\r\n\r\n**Describe the solution you'd like**\r\nIt should be possible to prohibit unknown redirects by listing all of the allowed redirects as pairs of URLs.\r\n\r\n**Describe alternatives you've considered**\r\nPost-process `linkcheck/output.txt` by removing filenames and line numbers then sorting it and comparing it with known good output.\r\n\r\n**Additional context**\r\nA link to https://blogs.windows.com/buildingapps/2016/12/02/symlinks-windows-10/ (which used to work) now redirects to https://blogs.windows.com/windowsdeveloper/. Linkcheck allows this but the original link is not valid and needs to be updated to the article's new URL of https://blogs.windows.com/windowsdeveloper/2016/12/02/symlinks-windows-10/.\r\n\r\nLinkcheck should be able to report an error for this redirect.\r\n\n",
+  "hints_text": "If one can tell in advance where they are redirected, might as well use the direct link in the docs and skip the redirect.\r\nPerhaps a step forward would be a new setting to treat redirects as errors?\nI provided a reason why I want to be able to link to a redirect, unless you think the base URL of sphinx itself should not be linkable?\nI misread the issue originally, I was hoping all redirects could be replaced by the final version of the URL, but that\u2019s not true.\r\nIn the provided example, sphinx-doc.org could redirect to a different language based on your language preferences. Replacing the link with the final version would force users to visit the English version of the page.\r\n\r\nWhat do you think of a mapping in the config: `{\"original_URL\": final_url}`, perhaps named `linkcheck_validate_redirects`?\r\nThe behavior upon redirect would be:\r\n- original URL present in the mapping, verify the final URL matches the value from `linkcheck_validate_redirects`,\r\n- original URL not present, mark link as broken.\nFor the sphinx-doc.org case I would not expect to specify the exact final URL because I don't care where it redirects to when I link to `/`. (It may decide that CI in another country should get a different language by default.)\r\n\r\nIf `final_url` could be `None` to allow any final URL, that would appear to work but I'd really want it to redirect within the same domain. If https://www.sphinx-doc.org/ redirects to https://this-domain-is-for-sale.example.com/sphinx-doc.org then the link is broken.\r\n\r\nSo `final_url` could be `None`, a string or a regex.\r\n\r\n```\r\n{\"https://www.sphinx-doc.org/\": None}\r\n```\r\n\r\n```\r\n{\"https://www.sphinx-doc.org/\": \"https://www\\.sphinx-doc\\.org/en/master/\"}\r\n```\r\n\r\n```\r\nimport re\r\n{\"https://www.sphinx-doc.org/\": re.compile(r\"^https://www\\.sphinx-doc\\.org/.*$\")}\r\n```\r\n\r\nOf course, when you start allowing regex in the `final_url`you might want to allow regex in the `original_url` and group references:\r\n\r\n```\r\nimport re\r\n{re.compile(\"^https://sphinx-doc.org/(.*)$\"): re.compile(r\"^https://(www\\.)?sphinx-doc\\.org/\\1$\")}\r\n```\r\n\r\nThere may be multiple conflicting mappings, if any one of them matches then the link is ok.\nThis is something I have just come across myself, and such a setting would be helpful to ignore the fact that a redirect happened - in other words, set the state as \"working\" instead of \"redirected\" as long as the target page is available.\r\n\r\nAnother example of a case where this would be helpful is wanting to ignore redirects in the case of documentation versions, e.g. `.../en/stable/` \u2192 `.../en/3.2/`. In this case it is preferable to always link to the latest/stable version via a URL rewrite.\r\n\r\nI could see a configuration along the following lines (very much what @nomis has specified above):\r\n\r\n```python\r\n# Check that the link is \"working\" but don't flag as \"redirected\" unless the target doesn't match.\r\nlinkcheck_redirects_ignore = {\r\n    r'^https://([^/?#]+)/$': r'^https://\\1/(?:home|index)\\.html?$',\r\n    r'^https://(nodejs\\.org)/$', r'^https://\\1/[-a-z]+/$',\r\n    r'^https://(pip\\.pypa\\.io)/$', r'^https://\\1/[-a-z]+/stable/$',\r\n    r'^https://(www\\.sphinx-doc\\.org)/$', r'^https://\\1/[-a-z]+/master/$',\r\n    r'^https://(pytest\\.org)/$', r'^https://docs\\.\\1/[-a-z]+/\\d+\\.\\d+\\.x/$',\r\n    r'^https://github.com/([^/?#]+)/([^/?#])+/blob/(.*)$': r'https://github.com/\\1/\\2/tree/\\3$',\r\n    r'^https://([^/?#\\.]+)\\.readthedocs\\.io/$': r'^https://\\1\\.readthedocs\\.io/[-a-z]+/(?:master|latest|stable)/$',\r\n    r'^https://dev\\.mysql\\.com/doc/refman/': r'^https://dev\\.mysql\\.com/doc/refman/\\d+\\.\\d+/',\r\n    r'^https://docs\\.djangoproject\\.com/': r'^https://docs\\.djangoproject\\.com/[-a-z]+/\\d+\\.\\d+/',\r\n    r'^https://docs\\.djangoproject\\.com/([-a-z]+)/stable/': r'^https://docs\\.djangoproject\\.com/\\1/\\d+\\.\\d+/',\r\n}\r\n```",
+  "created_at": "2021-05-15T17:28:42Z",
+  "version": "4.1",
+  "FAIL_TO_PASS": "[\"tests/test_build_linkcheck.py::test_linkcheck_allowed_redirects\"]",
+  "PASS_TO_PASS": "[\"tests/test_build_linkcheck.py::test_TooManyRedirects_on_HEAD\", \"tests/test_build_linkcheck.py::test_auth_header_no_match\", \"tests/test_build_linkcheck.py::test_auth_header_uses_first_match\", \"tests/test_build_linkcheck.py::test_connect_to_selfsigned_fails\", \"tests/test_build_linkcheck.py::test_connect_to_selfsigned_nonexistent_cert_file\", \"tests/test_build_linkcheck.py::test_connect_to_selfsigned_with_requests_env_var\", \"tests/test_build_linkcheck.py::test_connect_to_selfsigned_with_tls_cacerts\", \"tests/test_build_linkcheck.py::test_connect_to_selfsigned_with_tls_verify_false\", \"tests/test_build_linkcheck.py::test_defaults_json\", \"tests/test_build_linkcheck.py::test_follows_redirects_on_GET\", \"tests/test_build_linkcheck.py::test_follows_redirects_on_HEAD\", \"tests/test_build_linkcheck.py::test_get_after_head_raises_connection_error\", \"tests/test_build_linkcheck.py::test_invalid_ssl\", \"tests/test_build_linkcheck.py::test_limit_rate_bails_out_after_waiting_max_time\", \"tests/test_build_linkcheck.py::test_limit_rate_clips_wait_time_to_max_time\", \"tests/test_build_linkcheck.py::test_limit_rate_default_sleep\", \"tests/test_build_linkcheck.py::test_limit_rate_doubles_previous_wait_time\", \"tests/test_build_linkcheck.py::test_limit_rate_user_max_delay\", \"tests/test_build_linkcheck.py::test_linkcheck_request_headers\", \"tests/test_build_linkcheck.py::test_linkcheck_request_headers_default\", \"tests/test_build_linkcheck.py::test_linkcheck_request_headers_no_slash\", \"tests/test_build_linkcheck.py::test_raises_for_invalid_status\", \"tests/test_build_linkcheck.py::test_too_many_requests_retry_after_HTTP_date\", \"tests/test_build_linkcheck.py::test_too_many_requests_retry_after_int_delay\", \"tests/test_build_linkcheck.py::test_too_many_requests_retry_after_without_header\", \"tests/test_build_linkcheck.py::test_too_many_requests_user_timeout\"]",
+  "environment_setup_commit": "9a2c3c4a1559e37e95fdee88c128bb116642c897",
+  "patch_files": [
+    "sphinx/builders/linkcheck.py"
+  ],
+  "test_patch_files": [
+    "tests/roots/test-linkcheck-localserver-warn-redirects/conf.py",
+    "tests/roots/test-linkcheck-localserver-warn-redirects/index.rst",
+    "tests/test_build_linkcheck.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/builders/linkcheck.py": {
+      "diffs": [
+        {
+          "start_line_old": 275,
+          "end_line_old": 276,
+          "file_pos": 1,
+          "file_context_length": 5637,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityChecker.check_HyperlinkAvailabilityChecker.is_ignored_uri.1.1",
+          "closest_snippet_line_distance": 62,
+          "pos": 4,
+          "context_length": 1808
+        },
+        {
+          "start_line_old": 499,
+          "end_line_old": 500,
+          "file_pos": 1,
+          "file_context_length": 5637,
+          "pos": 1,
+          "context_length": 744
+        },
+        {
+          "start_line_old": 670,
+          "end_line_old": 670,
+          "file_pos": 1,
+          "file_context_length": 5637,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run_HyperlinkAvailabilityCheckWorker.run.get_request_headers.4.1",
+          "closest_snippet_line_distance": 259,
+          "pos": 14,
+          "context_length": 4954
+        },
+        {
+          "start_line_old": 687,
+          "end_line_old": 687,
+          "file_pos": 1,
+          "file_context_length": 5637,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run_HyperlinkAvailabilityCheckWorker.run.get_request_headers.4.1",
+          "closest_snippet_line_distance": 276,
+          "pos": 14,
+          "context_length": 4954
+        }
+      ]
+    }
+  },
+  "vectors": 1520,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run.check_uri_HyperlinkAvailabilityCheckWorker.run.check_uri.2.11.2.4.3.1.1",
+      "distance": 0.9296938180923462,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 413,
+      "end_line": 504,
+      "tokens": 744,
+      "context_length": 744,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run.check_HyperlinkAvailabilityCheckWorker.run.check.2.9.1",
+      "distance": 0.9656304121017456,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 506,
+      "end_line": 541,
+      "tokens": 358,
+      "context_length": 1102,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityChecker.check_HyperlinkAvailabilityChecker.is_ignored_uri.1.1",
+      "distance": 0.9727784395217896,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 337,
+      "end_line": 357,
+      "tokens": 175,
+      "context_length": 1277,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_CheckExternalLinksBuilder.process_result_CheckExternalLinksBuilder.process_result.7.6.1",
+      "distance": 0.9743863940238953,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 231,
+      "end_line": 280,
+      "tokens": 531,
+      "context_length": 1808,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkCollector_HyperlinkCollector.run.6.2.5.1",
+      "distance": 1.0383484363555908,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 619,
+      "end_line": 652,
+      "tokens": 275,
+      "context_length": 2083,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_CheckExternalLinksBuilder_CheckExternalLinksBuilder.init.self._rqueue.1",
+      "distance": 1.0418283939361572,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 114,
+      "end_line": 132,
+      "tokens": 170,
+      "context_length": 2253,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run.6_HyperlinkAvailabilityCheckWorker.run.6.9",
+      "distance": 1.0463814735412598,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 543,
+      "end_line": 578,
+      "tokens": 331,
+      "context_length": 2584,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityChecker_HyperlinkAvailabilityChecker.shutdown_threads.2.1",
+      "distance": 1.070837140083313,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 303,
+      "end_line": 335,
+      "tokens": 278,
+      "context_length": 2862,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.limit_rate_HyperlinkAvailabilityCheckWorker.limit_rate.7.1",
+      "distance": 1.0750200748443604,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 580,
+      "end_line": 616,
+      "tokens": 308,
+      "context_length": 3170,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_CheckExternalLinksBuilder.anchors_ignore_CheckExternalLinksBuilder.wqueue.2.1",
+      "distance": 1.088949203491211,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 134,
+      "end_line": 229,
+      "tokens": 727,
+      "context_length": 3897,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_CheckExternalLinksBuilder.write_entry_CheckExternalLinksBuilder.finish.4.self.app.statuscode.1",
+      "distance": 1.0906256437301636,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 282,
+      "end_line": 300,
+      "tokens": 203,
+      "context_length": 4100,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker.run_HyperlinkAvailabilityCheckWorker.run.get_request_headers.4.1",
+      "distance": 1.0928281545639038,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 393,
+      "end_line": 411,
+      "tokens": 142,
+      "context_length": 4242,
+      "file_pos": 1
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/ext/linkcode.py_2_",
+      "distance": 1.1494319438934326,
+      "file_path": "sphinx/ext/linkcode.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 467,
+      "context_length": 4709
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_setup_",
+      "distance": 1.1557984352111816,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 670,
+      "end_line": 694,
+      "tokens": 245,
+      "context_length": 4954,
+      "file_pos": 2
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_HyperlinkAvailabilityCheckWorker_HyperlinkAvailabilityCheckWorker.__init__.self.config.9",
+      "distance": 1.1638524532318115,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 360,
+      "end_line": 391,
+      "tokens": 286,
+      "context_length": 5240,
+      "file_pos": 2
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_rewrite_github_anchor_rewrite_github_anchor.4.1",
+      "distance": 1.187432885169983,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 655,
+      "end_line": 667,
+      "tokens": 117,
+      "context_length": 5357,
+      "file_pos": 2
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_json_AnchorCheckParser.handle_starttag.1.1.2",
+      "distance": 1.2064588069915771,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 11,
+      "end_line": 93,
+      "tokens": 662,
+      "context_length": 6019,
+      "file_pos": 2
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/util/requests.py_sys_ignore_insecure_warning.1.2",
+      "distance": 1.2432591915130615,
+      "file_path": "sphinx/util/requests.py",
+      "start_line": 11,
+      "end_line": 67,
+      "tokens": 415,
+      "context_length": 6434
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/ext/extlinks.py_warnings_",
+      "distance": 1.2513625621795654,
+      "file_path": "sphinx/ext/extlinks.py",
+      "start_line": 28,
+      "end_line": 89,
+      "tokens": 615,
+      "context_length": 7049
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_warn_missing_reference_",
+      "distance": 1.2589138746261597,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 1113,
+      "end_line": 1138,
+      "tokens": 209,
+      "context_length": 7258
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/builders/linkcheck.py_check_anchor_check_anchor.7.1",
+      "distance": 1.2837387323379517,
+      "file_path": "sphinx/builders/linkcheck.py",
+      "start_line": 96,
+      "end_line": 111,
+      "tokens": 156,
+      "context_length": 7414,
+      "file_pos": 5
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/post_transforms/__init__.py_ReferencesResolver.warn_missing_reference_ReferencesResolver.find_pending_xref_condition.1.3.1.1",
+      "distance": 1.2927687168121338,
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "start_line": 171,
+      "end_line": 218,
+      "tokens": 489,
+      "context_length": 7903
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_encode_uri_old_status_iterator.3.1",
+      "distance": 1.3285062313079834,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 458,
+      "end_line": 494,
+      "tokens": 306,
+      "context_length": 8209
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_migrate_html_add_permalinks_sphinx.builders.singlehtml",
+      "distance": 1.3440920114517212,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 1270,
+      "end_line": 1291,
+      "tokens": 198,
+      "context_length": 8407
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/references.py_2_",
+      "distance": 1.3631892204284668,
+      "file_path": "sphinx/transforms/references.py",
+      "start_line": 11,
+      "end_line": 54,
+      "tokens": 266,
+      "context_length": 8673
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/utils/checks.py_sphinx_has_header_",
+      "distance": 1.3775787353515625,
+      "file_path": "utils/checks.py",
+      "start_line": 33,
+      "end_line": 109,
+      "tokens": 545,
+      "context_length": 9218
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_functools_path_stabilize.3.1",
+      "distance": 1.3793472051620483,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 11,
+      "end_line": 64,
+      "tokens": 446,
+      "context_length": 9664
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.collect_rellinks_TexinfoTranslator.collect_rellinks.10.3.2",
+      "distance": 1.3817113637924194,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 318,
+      "end_line": 344,
+      "tokens": 259,
+      "context_length": 9923
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/ext/todo.py_TodoListProcessor.create_todo_reference_TodoListProcessor.resolve_reference.6",
+      "distance": 1.3870302438735962,
+      "file_path": "sphinx/ext/todo.py",
+      "start_line": 157,
+      "end_line": 194,
+      "tokens": 340,
+      "context_length": 10263
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.add_permalink_ref_HTMLTranslator.generate_targets_for_listing.2.2",
+      "distance": 1.3899681568145752,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 342,
+      "end_line": 360,
+      "tokens": 233,
+      "context_length": 10496
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_re_token_re.1",
+      "distance": 1.3900558948516846,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 11,
+      "end_line": 46,
+      "tokens": 311,
+      "context_length": 10807
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/builders/_epub_base.py_EpubBuilder.fix_ids_EpubBuilder.fix_ids.5.1",
+      "distance": 1.3901348114013672,
+      "file_path": "sphinx/builders/_epub_base.py",
+      "start_line": 265,
+      "end_line": 296,
+      "tokens": 281,
+      "context_length": 11088
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/transforms.py_ShowUrlsTransform.expand_show_urls_ShowUrlsTransform.expand_show_urls.3.2.2.3.5.textnode.2",
+      "distance": 1.392979383468628,
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "start_line": 79,
+      "end_line": 100,
+      "tokens": 214,
+      "context_length": 11302
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_re_int_or_nothing.2.1",
+      "distance": 1.3930587768554688,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 9,
+      "end_line": 38,
+      "tokens": 229,
+      "context_length": 11531
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/ext/intersphinx.py_missing_reference_missing_reference.15.1",
+      "distance": 1.3969786167144775,
+      "file_path": "sphinx/ext/intersphinx.py",
+      "start_line": 261,
+      "end_line": 340,
+      "tokens": 864,
+      "context_length": 12395
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_StandardDomain.__init___StandardDomain.note_hyperlink_target.4.1",
+      "distance": 1.3987667560577393,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 630,
+      "end_line": 660,
+      "tokens": 324,
+      "context_length": 12719
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyCurrentModule_PyCurrentModule.run.3.1",
+      "distance": 1.4005858898162842,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 971,
+      "end_line": 989,
+      "tokens": 140,
+      "context_length": 12859
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyXRefRole_PyXRefRole.process_link.7.1",
+      "distance": 1.403900384902954,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 992,
+      "end_line": 1012,
+      "tokens": 248,
+      "context_length": 13107
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/sphinx/util/osutil.py_contextlib_canon_path.2.1",
+      "distance": 1.4040406942367554,
+      "file_path": "sphinx/util/osutil.py",
+      "start_line": 11,
+      "end_line": 45,
+      "tokens": 214,
+      "context_length": 13321
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_UnicodeDecodeErrorHandler_UnicodeDecodeErrorHandler.__call__.6.1",
+      "distance": 1.4044016599655151,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 272,
+      "end_line": 289,
+      "tokens": 207,
+      "context_length": 13528
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/sphinx/domains/javascript.py_JSXRefRole_JSXRefRole.process_link.2",
+      "distance": 1.4072966575622559,
+      "file_path": "sphinx/domains/javascript.py",
+      "start_line": 300,
+      "end_line": 317,
+      "tokens": 196,
+      "context_length": 13724
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_OptionXRefRole_split_term_classifiers.parts.2.1",
+      "distance": 1.408408522605896,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 279,
+      "end_line": 289,
+      "tokens": 130,
+      "context_length": 13854
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/utils/doclinter.py_os_",
+      "distance": 1.4096873998641968,
+      "file_path": "utils/doclinter.py",
+      "start_line": 11,
+      "end_line": 86,
+      "tokens": 519,
+      "context_length": 14373
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sphinx/sphinx/builders/_epub_base.py_EpubBuilder.add_visible_links_EpubBuilder.add_visible_links.make_footnote.8.1",
+      "distance": 1.4102956056594849,
+      "file_path": "sphinx/builders/_epub_base.py",
+      "start_line": 298,
+      "end_line": 316,
+      "tokens": 205,
+      "context_length": 14578
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_sys_logger.1",
+      "distance": 1.411820888519287,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 9,
+      "end_line": 30,
+      "tokens": 148,
+      "context_length": 14726
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sphinx/sphinx/directives/patches.py_os_logger.1",
+      "distance": 1.41279935836792,
+      "file_path": "sphinx/directives/patches.py",
+      "start_line": 9,
+      "end_line": 34,
+      "tokens": 192,
+      "context_length": 14918
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_float_literal_suffix_re_NoOldIdError.2",
+      "distance": 1.4129561185836792,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 63,
+      "end_line": 87,
+      "tokens": 230,
+      "context_length": 15148
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_StandaloneHTMLBuilder.post_process_images_StandaloneHTMLBuilder.post_process_images.3.1.6",
+      "distance": 1.4168291091918945,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 848,
+      "end_line": 875,
+      "tokens": 246,
+      "context_length": 15394
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/post_transforms/__init__.py_ReferencesResolver_ReferencesResolver.run.1.10",
+      "distance": 1.418049931526184,
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "start_line": 62,
+      "end_line": 120,
+      "tokens": 489,
+      "context_length": 15883
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/transforms.py_ShowUrlsTransform.get_docname_for_node_ShowUrlsTransform.create_footnote.reference.11.1",
+      "distance": 1.4225399494171143,
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "start_line": 102,
+      "end_line": 127,
+      "tokens": 277,
+      "context_length": 16160
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_SeeAlso_TabularColumns.run.4.1",
+      "distance": 1.4227981567382812,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 191,
+      "end_line": 212,
+      "tokens": 138,
+      "context_length": 16298
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py_IGNORED_NODES_is_translatable.8.1",
+      "distance": 1.4248404502868652,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 179,
+      "end_line": 236,
+      "tokens": 491,
+      "context_length": 16789
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sphinx/sphinx/testing/comparer.py_difflib_PathComparer.__eq__.2.1",
+      "distance": 1.4261257648468018,
+      "file_path": "sphinx/testing/comparer.py",
+      "start_line": 10,
+      "end_line": 48,
+      "tokens": 267,
+      "context_length": 17056
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/__init__.py_UnreferencedFootnotesDetector_UnreferencedFootnotesDetector.apply.2.1.1",
+      "distance": 1.4277901649475098,
+      "file_path": "sphinx/transforms/__init__.py",
+      "start_line": 251,
+      "end_line": 271,
+      "tokens": 192,
+      "context_length": 17248
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/i18n.py_Locale.apply.14.1_Locale.apply.14.61",
+      "distance": 1.4286251068115234,
+      "file_path": "sphinx/transforms/i18n.py",
+      "start_line": 227,
+      "end_line": 386,
+      "tokens": 1673,
+      "context_length": 18921
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sphinx/sphinx/config.py_check_confval_types_check_confval_types.2.4.4.6.5.2",
+      "distance": 1.4286810159683228,
+      "file_path": "sphinx/config.py",
+      "start_line": 407,
+      "end_line": 459,
+      "tokens": 474,
+      "context_length": 19395
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_validate_html_static_path_validate_html_static_path.2.2.3.2",
+      "distance": 1.4294222593307495,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 1230,
+      "end_line": 1240,
+      "tokens": 147,
+      "context_length": 19542
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/compact_bullet_list.py_2_RefOnlyListChecker.invisible_visit.2",
+      "distance": 1.4302699565887451,
+      "file_path": "sphinx/transforms/compact_bullet_list.py",
+      "start_line": 11,
+      "end_line": 52,
+      "tokens": 287,
+      "context_length": 19829
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sphinx/sphinx/testing/util.py_functools_assert_startswith.1.1",
+      "distance": 1.4318751096725464,
+      "file_path": "sphinx/testing/util.py",
+      "start_line": 10,
+      "end_line": 45,
+      "tokens": 270,
+      "context_length": 20099
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sphinx/sphinx/util/osutil.py_FileAvoidWrite.__enter___",
+      "distance": 1.435333251953125,
+      "file_path": "sphinx/util/osutil.py",
+      "start_line": 214,
+      "end_line": 235,
+      "tokens": 149,
+      "context_length": 20248
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_Target_Target.make_old_id.2.1",
+      "distance": 1.4368934631347656,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 125,
+      "end_line": 176,
+      "tokens": 457,
+      "context_length": 20705
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sphinx/sphinx/testing/comparer.py_PathComparer.ldiff_",
+      "distance": 1.438513994216919,
+      "file_path": "sphinx/testing/comparer.py",
+      "start_line": 69,
+      "end_line": 104,
+      "tokens": 282,
+      "context_length": 20987
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_StandardDomain._resolve_numref_xref_StandardDomain._resolve_numref_xref.9.1",
+      "distance": 1.4390959739685059,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 852,
+      "end_line": 913,
+      "tokens": 553,
+      "context_length": 21540
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_StandardDomain._resolve_keyword_xref_StandardDomain._resolve_keyword_xref.2",
+      "distance": 1.4411499500274658,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 915,
+      "end_line": 923,
+      "tokens": 122,
+      "context_length": 21662
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sphinx/sphinx/config.py_check_primary_domain_check_root_doc.3.1",
+      "distance": 1.4417450428009033,
+      "file_path": "sphinx/config.py",
+      "start_line": 462,
+      "end_line": 481,
+      "tokens": 223,
+      "context_length": 21885
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sphinx/sphinx/util/smartypants.py_re_langquotes.1",
+      "distance": 1.4476392269134521,
+      "file_path": "sphinx/util/smartypants.py",
+      "start_line": 28,
+      "end_line": 127,
+      "tokens": 1450,
+      "context_length": 23335
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sphinx/sphinx/io.py_codecs_logger.1",
+      "distance": 1.4501312971115112,
+      "file_path": "sphinx/io.py",
+      "start_line": 10,
+      "end_line": 39,
+      "tokens": 234,
+      "context_length": 23569
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sphinx/sphinx/application.py_Sphinx.is_parallel_allowed_Sphinx.is_parallel_allowed.4.1",
+      "distance": 1.4505951404571533,
+      "file_path": "sphinx/application.py",
+      "start_line": 1218,
+      "end_line": 1251,
+      "tokens": 315,
+      "context_length": 23884
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_TocTree.parse_content_TocTree.parse_content.11.1",
+      "distance": 1.45061194896698,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 86,
+      "end_line": 154,
+      "tokens": 646,
+      "context_length": 24530
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sphinx/sphinx/cmd/quickstart.py_argparse_choice",
+      "distance": 1.4519668817520142,
+      "file_path": "sphinx/cmd/quickstart.py",
+      "start_line": 11,
+      "end_line": 119,
+      "tokens": 756,
+      "context_length": 25286
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sphinx/sphinx/ext/viewcode.py_env_purge_doc_ViewcodeAnchorTransform.remove_viewcode_anchors.1.1",
+      "distance": 1.4521564245224,
+      "file_path": "sphinx/ext/viewcode.py",
+      "start_line": 160,
+      "end_line": 195,
+      "tokens": 287,
+      "context_length": 25573
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_number_reference_HTML5Translator.depart_seealso.1",
+      "distance": 1.452243447303772,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 238,
+      "end_line": 259,
+      "tokens": 208,
+      "context_length": 25781
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/post_transforms/__init__.py_ReferencesResolver.resolve_anyref_ReferencesResolver.resolve_anyref.19.1",
+      "distance": 1.4535741806030273,
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "start_line": 122,
+      "end_line": 169,
+      "tokens": 573,
+      "context_length": 26354
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtins_ModuleEntry.deprecated",
+      "distance": 1.454298496246338,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 518,
+      "context_length": 26872
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sphinx/sphinx/util/pycompat.py_warnings_convert_with_2to3.7.1",
+      "distance": 1.4546241760253906,
+      "file_path": "sphinx/util/pycompat.py",
+      "start_line": 11,
+      "end_line": 46,
+      "tokens": 328,
+      "context_length": 27200
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sphinx/sphinx/util/requests.py__get_tls_cacert__get_tls_cacert.4.3.3.1",
+      "distance": 1.4552311897277832,
+      "file_path": "sphinx/util/requests.py",
+      "start_line": 70,
+      "end_line": 89,
+      "tokens": 150,
+      "context_length": 27350
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sphinx/sphinx/ext/graphviz.py_posixpath_GraphvizError.category.1",
+      "distance": 1.457118034362793,
+      "file_path": "sphinx/ext/graphviz.py",
+      "start_line": 12,
+      "end_line": 44,
+      "tokens": 243,
+      "context_length": 27593
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/sphinx/sphinx/builders/_epub_base.py_EpubBuilder.add_visible_links.5_EpubBuilder.add_visible_links.7.2.2.5.9",
+      "distance": 1.4573900699615479,
+      "file_path": "sphinx/builders/_epub_base.py",
+      "start_line": 339,
+      "end_line": 364,
+      "tokens": 301,
+      "context_length": 27894
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralInclude.run_",
+      "distance": 1.458260416984558,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 407,
+      "end_line": 470,
+      "tokens": 642,
+      "context_length": 28536
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_html_return_codes_re.1",
+      "distance": 1.4586915969848633,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 11,
+      "end_line": 62,
+      "tokens": 432,
+      "context_length": 28968
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/__init__.py_re_default_substitutions.1",
+      "distance": 1.4590296745300293,
+      "file_path": "sphinx/transforms/__init__.py",
+      "start_line": 11,
+      "end_line": 44,
+      "tokens": 231,
+      "context_length": 29199
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralInclude_LiteralInclude.option_spec.1",
+      "distance": 1.4594733715057373,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 372,
+      "end_line": 405,
+      "tokens": 288,
+      "context_length": 29487
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_validate_math_renderer_validate_html_extra_path.2.2.3.2",
+      "distance": 1.4604737758636475,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 1205,
+      "end_line": 1227,
+      "tokens": 242,
+      "context_length": 29729
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/sphinx/sphinx/ext/intersphinx.py__get_safe_url__get_safe_url.3.2.3.1",
+      "distance": 1.460785150527954,
+      "file_path": "sphinx/ext/intersphinx.py",
+      "start_line": 127,
+      "end_line": 149,
+      "tokens": 174,
+      "context_length": 29903
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_validate_html_logo_UNSET.1",
+      "distance": 1.4615669250488281,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 1243,
+      "end_line": 1267,
+      "tokens": 198,
+      "context_length": 30101
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.add_permalink_ref_HTML5Translator.76",
+      "distance": 1.4620743989944458,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 313,
+      "end_line": 366,
+      "tokens": 484,
+      "context_length": 30585
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/sphinx/sphinx/domains/rst.py_ReSTDirectiveOption.add_target_and_index_ReSTDirectiveOption.add_target_and_index.12.4.3",
+      "distance": 1.4625141620635986,
+      "file_path": "sphinx/domains/rst.py",
+      "start_line": 140,
+      "end_line": 171,
+      "tokens": 356,
+      "context_length": 30941
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/sphinx/sphinx/registry.py_traceback_EXTENSION_BLACKLIST.1",
+      "distance": 1.4634050130844116,
+      "file_path": "sphinx/registry.py",
+      "start_line": 11,
+      "end_line": 51,
+      "tokens": 314,
+      "context_length": 31255
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/sphinx/sphinx/environment/__init__.py_BuildEnvironment.check_consistency_",
+      "distance": 1.4651771783828735,
+      "file_path": "sphinx/environment/__init__.py",
+      "start_line": 619,
+      "end_line": 639,
+      "tokens": 178,
+      "context_length": 31433
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/sphinx/sphinx/parsers.py_warnings_13.1",
+      "distance": 1.4653277397155762,
+      "file_path": "sphinx/parsers.py",
+      "start_line": 11,
+      "end_line": 26,
+      "tokens": 113,
+      "context_length": 31546
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/sphinx/sphinx/util/requests.py_head_",
+      "distance": 1.4653983116149902,
+      "file_path": "sphinx/util/requests.py",
+      "start_line": 119,
+      "end_line": 133,
+      "tokens": 127,
+      "context_length": 31673
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_note_HTML5Translator.145",
+      "distance": 1.4656318426132202,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 653,
+      "end_line": 739,
+      "tokens": 686,
+      "context_length": 32359
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_download_reference_HTML5Translator.102",
+      "distance": 1.4656684398651123,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 517,
+      "end_line": 546,
+      "tokens": 253,
+      "context_length": 32612
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/transforms.py_ShowUrlsTransform_ShowUrlsTransform.run.1.3.settings.id_prefix.1",
+      "distance": 1.4663589000701904,
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "start_line": 52,
+      "end_line": 77,
+      "tokens": 165,
+      "context_length": 32777
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/sphinx/sphinx/util/osutil.py_ensuredir_cd.2.3.1",
+      "distance": 1.466477632522583,
+      "file_path": "sphinx/util/osutil.py",
+      "start_line": 71,
+      "end_line": 171,
+      "tokens": 718,
+      "context_length": 33495
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/transforms.py_ShowUrlsTransform.renumber_footnotes_ShowUrlsTransform.renumber_footnotes.4.2.10.1.2",
+      "distance": 1.4667364358901978,
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "start_line": 129,
+      "end_line": 153,
+      "tokens": 211,
+      "context_length": 33706
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_float_literal_re.1",
+      "distance": 1.4668645858764648,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 62,
+      "tokens": 749,
+      "context_length": 34455
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_StandardDomain._resolve_ref_xref_StandardDomain._resolve_ref_xref.3.1",
+      "distance": 1.4670838117599487,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 834,
+      "end_line": 850,
+      "tokens": 189,
+      "context_length": 34644
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/compact_bullet_list.py_RefOnlyBulletListTransform_",
+      "distance": 1.4677915573120117,
+      "file_path": "sphinx/transforms/compact_bullet_list.py",
+      "start_line": 55,
+      "end_line": 95,
+      "tokens": 270,
+      "context_length": 34914
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_42_PyXrefMixin.make_xref.result.6.1",
+      "distance": 1.4683380126953125,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 283,
+      "end_line": 317,
+      "tokens": 382,
+      "context_length": 35296
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html5.py_HTML5Translator.visit_reference_HTML5Translator.visit_reference.8.1",
+      "distance": 1.4710075855255127,
+      "file_path": "sphinx/writers/html5.py",
+      "start_line": 210,
+      "end_line": 236,
+      "tokens": 319,
+      "context_length": 35615
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/sphinx/doc/conf.py_extlinks_parse_event.8.1",
+      "distance": 1.4731452465057373,
+      "file_path": "doc/conf.py",
+      "start_line": 83,
+      "end_line": 138,
+      "tokens": 476,
+      "context_length": 36091
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/sphinx/sphinx/builders/html/__init__.py_StandaloneHTMLBuilder.get_outdated_docs_StandaloneHTMLBuilder.get_outdated_docs.3.4.3.2",
+      "distance": 1.4744280576705933,
+      "file_path": "sphinx/builders/html/__init__.py",
+      "start_line": 362,
+      "end_line": 406,
+      "tokens": 347,
+      "context_length": 36438
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/sphinx/sphinx/directives/__init__.py_re_optional_int.2.2.3.1",
+      "distance": 1.4748443365097046,
+      "file_path": "sphinx/directives/__init__.py",
+      "start_line": 11,
+      "end_line": 47,
+      "tokens": 253,
+      "context_length": 36691
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/sphinx/sphinx/writers/texinfo.py_TexinfoTranslator.visit_reference_TexinfoTranslator.visit_reference.3.8",
+      "distance": 1.4751617908477783,
+      "file_path": "sphinx/writers/texinfo.py",
+      "start_line": 685,
+      "end_line": 746,
+      "tokens": 606,
+      "context_length": 37297
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/sphinx/sphinx/writers/html.py_HTMLTranslator.visit_number_reference_HTMLTranslator.depart_seealso.1",
+      "distance": 1.475600004196167,
+      "file_path": "sphinx/writers/html.py",
+      "start_line": 267,
+      "end_line": 289,
+      "tokens": 214,
+      "context_length": 37511
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/sphinx/sphinx/domains/changeset.py_VersionChange_VersionChange.run.15.1",
+      "distance": 1.4756555557250977,
+      "file_path": "sphinx/domains/changeset.py",
+      "start_line": 49,
+      "end_line": 107,
+      "tokens": 516,
+      "context_length": 38027
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/__init__.py_SortIds_ApplySourceWorkaround.apply.1.2.1",
+      "distance": 1.4776889085769653,
+      "file_path": "sphinx/transforms/__init__.py",
+      "start_line": 182,
+      "end_line": 212,
+      "tokens": 229,
+      "context_length": 38256
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/sphinx/sphinx/writers/text.py_TextTranslator.visit_attention_TextTranslator.depart_download_reference.1",
+      "distance": 1.4784042835235596,
+      "file_path": "sphinx/writers/text.py",
+      "start_line": 946,
+      "end_line": 1059,
+      "tokens": 873,
+      "context_length": 39129
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/sphinx/sphinx/ext/apidoc.py_is_skipped_package_is_skipped_module.2.4.1.1",
+      "distance": 1.478707194328308,
+      "file_path": "sphinx/ext/apidoc.py",
+      "start_line": 172,
+      "end_line": 200,
+      "tokens": 249,
+      "context_length": 39378
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/sphinx/sphinx/ext/githubpages.py_os_",
+      "distance": 1.4790117740631104,
+      "file_path": "sphinx/ext/githubpages.py",
+      "start_line": 11,
+      "end_line": 37,
+      "tokens": 227,
+      "context_length": 39605
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/sphinx/sphinx/builders/singlehtml.py_SingleFileHTMLBuilder.fix_refuris_SingleFileHTMLBuilder.fix_refuris.fname.2.6.1",
+      "distance": 1.4790688753128052,
+      "file_path": "sphinx/builders/singlehtml.py",
+      "start_line": 54,
+      "end_line": 66,
+      "tokens": 141,
+      "context_length": 39746
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtin_resolver_builtin_resolver.4.1",
+      "distance": 1.4793317317962646,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 1374,
+      "end_line": 1396,
+      "tokens": 211,
+      "context_length": 39957
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/sphinx/sphinx/util/logging.py_LogCollector_is_suppressed_warning.5.1",
+      "distance": 1.4793767929077148,
+      "file_path": "sphinx/util/logging.py",
+      "start_line": 331,
+      "end_line": 371,
+      "tokens": 241,
+      "context_length": 40198
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/builders/linkcheck.py",
+      "position": 1,
+      "tokens": 5637,
+      "context_length": 5637
+    },
+    {
+      "file_path": "sphinx/ext/linkcode.py",
+      "position": 2,
+      "tokens": 523,
+      "context_length": 6160
+    },
+    {
+      "file_path": "sphinx/util/requests.py",
+      "position": 3,
+      "tokens": 948,
+      "context_length": 7108
+    },
+    {
+      "file_path": "sphinx/ext/extlinks.py",
+      "position": 4,
+      "tokens": 869,
+      "context_length": 7977
+    },
+    {
+      "file_path": "sphinx/domains/std.py",
+      "position": 5,
+      "tokens": 10297,
+      "context_length": 18274
+    },
+    {
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "position": 6,
+      "tokens": 2452,
+      "context_length": 20726
+    },
+    {
+      "file_path": "sphinx/util/__init__.py",
+      "position": 7,
+      "tokens": 4881,
+      "context_length": 25607
+    },
+    {
+      "file_path": "sphinx/builders/html/__init__.py",
+      "position": 8,
+      "tokens": 12261,
+      "context_length": 37868
+    },
+    {
+      "file_path": "sphinx/transforms/references.py",
+      "position": 9,
+      "tokens": 318,
+      "context_length": 38186
+    },
+    {
+      "file_path": "utils/checks.py",
+      "position": 10,
+      "tokens": 906,
+      "context_length": 39092
+    },
+    {
+      "file_path": "sphinx/writers/texinfo.py",
+      "position": 11,
+      "tokens": 12314,
+      "context_length": 51406
+    },
+    {
+      "file_path": "sphinx/ext/todo.py",
+      "position": 12,
+      "tokens": 1840,
+      "context_length": 53246
+    },
+    {
+      "file_path": "sphinx/writers/html.py",
+      "position": 13,
+      "tokens": 7548,
+      "context_length": 60794
+    },
+    {
+      "file_path": "sphinx/builders/_epub_base.py",
+      "position": 14,
+      "tokens": 6309,
+      "context_length": 67103
+    },
+    {
+      "file_path": "sphinx/builders/latex/transforms.py",
+      "position": 15,
+      "tokens": 4319,
+      "context_length": 71422
+    },
+    {
+      "file_path": "sphinx/directives/other.py",
+      "position": 16,
+      "tokens": 3127,
+      "context_length": 74549
+    },
+    {
+      "file_path": "sphinx/ext/intersphinx.py",
+      "position": 17,
+      "tokens": 3680,
+      "context_length": 78229
+    },
+    {
+      "file_path": "sphinx/domains/python.py",
+      "position": 18,
+      "tokens": 12045,
+      "context_length": 90274
+    },
+    {
+      "file_path": "sphinx/util/osutil.py",
+      "position": 19,
+      "tokens": 1634,
+      "context_length": 91908
+    },
+    {
+      "file_path": "sphinx/domains/javascript.py",
+      "position": 20,
+      "tokens": 4064,
+      "context_length": 95972
+    },
+    {
+      "file_path": "utils/doclinter.py",
+      "position": 21,
+      "tokens": 571,
+      "context_length": 96543
+    },
+    {
+      "file_path": "sphinx/directives/code.py",
+      "position": 22,
+      "tokens": 3851,
+      "context_length": 100394
+    },
+    {
+      "file_path": "sphinx/directives/patches.py",
+      "position": 23,
+      "tokens": 1844,
+      "context_length": 102238
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 24,
+      "tokens": 3457,
+      "context_length": 105695
+    },
+    {
+      "file_path": "sphinx/util/nodes.py",
+      "position": 25,
+      "tokens": 5485,
+      "context_length": 111180
+    },
+    {
+      "file_path": "sphinx/testing/comparer.py",
+      "position": 26,
+      "tokens": 713,
+      "context_length": 111893
+    },
+    {
+      "file_path": "sphinx/transforms/__init__.py",
+      "position": 27,
+      "tokens": 3171,
+      "context_length": 115064
+    },
+    {
+      "file_path": "sphinx/transforms/i18n.py",
+      "position": 28,
+      "tokens": 4598,
+      "context_length": 119662
+    },
+    {
+      "file_path": "sphinx/config.py",
+      "position": 29,
+      "tokens": 4456,
+      "context_length": 124118
+    },
+    {
+      "file_path": "sphinx/transforms/compact_bullet_list.py",
+      "position": 30,
+      "tokens": 615,
+      "context_length": 124733
+    },
+    {
+      "file_path": "sphinx/testing/util.py",
+      "position": 31,
+      "tokens": 1732,
+      "context_length": 126465
+    },
+    {
+      "file_path": "sphinx/util/smartypants.py",
+      "position": 32,
+      "tokens": 4147,
+      "context_length": 130612
+    },
+    {
+      "file_path": "sphinx/io.py",
+      "position": 33,
+      "tokens": 1405,
+      "context_length": 132017
+    },
+    {
+      "file_path": "sphinx/application.py",
+      "position": 34,
+      "tokens": 11614,
+      "context_length": 143631
+    },
+    {
+      "file_path": "sphinx/cmd/quickstart.py",
+      "position": 35,
+      "tokens": 5569,
+      "context_length": 149200
+    },
+    {
+      "file_path": "sphinx/ext/viewcode.py",
+      "position": 36,
+      "tokens": 3095,
+      "context_length": 152295
+    },
+    {
+      "file_path": "sphinx/writers/html5.py",
+      "position": 37,
+      "tokens": 7080,
+      "context_length": 159375
+    },
+    {
+      "file_path": "sphinx/util/pycompat.py",
+      "position": 38,
+      "tokens": 493,
+      "context_length": 159868
+    },
+    {
+      "file_path": "sphinx/ext/graphviz.py",
+      "position": 39,
+      "tokens": 3736,
+      "context_length": 163604
+    },
+    {
+      "file_path": "sphinx/domains/rst.py",
+      "position": 40,
+      "tokens": 2479,
+      "context_length": 166083
+    },
+    {
+      "file_path": "sphinx/registry.py",
+      "position": 41,
+      "tokens": 4640,
+      "context_length": 170723
+    },
+    {
+      "file_path": "sphinx/environment/__init__.py",
+      "position": 42,
+      "tokens": 5497,
+      "context_length": 176220
+    },
+    {
+      "file_path": "sphinx/parsers.py",
+      "position": 43,
+      "tokens": 846,
+      "context_length": 177066
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 44,
+      "tokens": 1464,
+      "context_length": 178530
+    },
+    {
+      "file_path": "sphinx/directives/__init__.py",
+      "position": 45,
+      "tokens": 2252,
+      "context_length": 180782
+    },
+    {
+      "file_path": "sphinx/domains/changeset.py",
+      "position": 46,
+      "tokens": 1254,
+      "context_length": 182036
+    },
+    {
+      "file_path": "sphinx/writers/text.py",
+      "position": 47,
+      "tokens": 9001,
+      "context_length": 191037
+    },
+    {
+      "file_path": "sphinx/ext/apidoc.py",
+      "position": 48,
+      "tokens": 4230,
+      "context_length": 195267
+    },
+    {
+      "file_path": "sphinx/ext/githubpages.py",
+      "position": 49,
+      "tokens": 287,
+      "context_length": 195554
+    },
+    {
+      "file_path": "sphinx/builders/singlehtml.py",
+      "position": 50,
+      "tokens": 1796,
+      "context_length": 197350
+    },
+    {
+      "file_path": "sphinx/util/logging.py",
+      "position": 51,
+      "tokens": 3792,
+      "context_length": 201142
+    }
+  ]
+}

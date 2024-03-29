@@ -1,0 +1,712 @@
+{
+  "instance_id": "matplotlib__matplotlib-21490",
+  "model_patch": "diff --git a/lib/matplotlib/lines.py b/lib/matplotlib/lines.py\nindex f1efd125a4..378517f278 100644\n--- a/lib/matplotlib/lines.py\n+++ b/lib/matplotlib/lines.py\n@@ -402,8 +402,8 @@ class Line2D(Artist):\n                 not isinstance(self._picker, bool)):\n             self.pickradius = self._picker\n \n-        self._xorig = np.asarray([])\n-        self._yorig = np.asarray([])\n+        self._xorig = np.array(xdata, copy=True)\n+        self._yorig = np.array(ydata, copy=True)\n         self._invalidx = True\n         self._invalidy = True\n         self._x = None\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/lines.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "b09aad279b5dcfc49dcf43e0b064eee664ddaf68",
+  "patch": "diff --git a/examples/units/basic_units.py b/examples/units/basic_units.py\n--- a/examples/units/basic_units.py\n+++ b/examples/units/basic_units.py\n@@ -132,6 +132,9 @@ def __init__(self, value, unit):\n         self.unit = unit\n         self.proxy_target = self.value\n \n+    def __copy__(self):\n+        return TaggedValue(self.value, self.unit)\n+\n     def __getattribute__(self, name):\n         if name.startswith('__'):\n             return object.__getattribute__(self, name)\ndiff --git a/lib/matplotlib/lines.py b/lib/matplotlib/lines.py\n--- a/lib/matplotlib/lines.py\n+++ b/lib/matplotlib/lines.py\n@@ -2,6 +2,8 @@\n 2D lines with support for a variety of line styles, markers, colors, etc.\n \"\"\"\n \n+import copy\n+\n from numbers import Integral, Number, Real\n import logging\n \n@@ -1230,7 +1232,7 @@ def set_xdata(self, x):\n         ----------\n         x : 1D array\n         \"\"\"\n-        self._xorig = x\n+        self._xorig = copy.copy(x)\n         self._invalidx = True\n         self.stale = True\n \n@@ -1242,7 +1244,7 @@ def set_ydata(self, y):\n         ----------\n         y : 1D array\n         \"\"\"\n-        self._yorig = y\n+        self._yorig = copy.copy(y)\n         self._invalidy = True\n         self.stale = True\n \n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_lines.py b/lib/matplotlib/tests/test_lines.py\n--- a/lib/matplotlib/tests/test_lines.py\n+++ b/lib/matplotlib/tests/test_lines.py\n@@ -332,3 +332,14 @@ def test_picking():\n     found, indices = l2.contains(mouse_event)\n     assert found\n     assert_array_equal(indices['ind'], [0])\n+\n+\n+@check_figures_equal()\n+def test_input_copy(fig_test, fig_ref):\n+\n+    t = np.arange(0, 6, 2)\n+    l, = fig_test.add_subplot().plot(t, t, \".-\")\n+    t[:] = range(3)\n+    # Trigger cache invalidation\n+    l.set_drawstyle(\"steps\")\n+    fig_ref.add_subplot().plot([0, 2, 4], [0, 2, 4], \".-\", drawstyle=\"steps\")\ndiff --git a/lib/matplotlib/tests/test_units.py b/lib/matplotlib/tests/test_units.py\n--- a/lib/matplotlib/tests/test_units.py\n+++ b/lib/matplotlib/tests/test_units.py\n@@ -26,6 +26,9 @@ def to(self, new_units):\n         else:\n             return Quantity(self.magnitude, self.units)\n \n+    def __copy__(self):\n+        return Quantity(self.magnitude, self.units)\n+\n     def __getattr__(self, attr):\n         return getattr(self.magnitude, attr)\n \n",
+  "problem_statement": "[Bug]: Line2D should copy its inputs\n### Bug summary\n\nCurrently, Line2D doesn't copy its inputs if they are already arrays.  Most of the time, in-place modifications to the input arrays do *not* affect the draw line, because there is a cache that doesn't get invalidated, but in some circumstances, it *is* possible for these modifications to affect the drawn line.\r\n\r\nInstead, Line2D should just copy its inputs.  This was rejected in #736 on a memory-saving argument, but note that AxesImage (which would typically have much bigger (2D) inputs than Line2D (which has 1D inputs)) does a copy, which if anything is much worse memory-wise.\n\n### Code for reproduction\n\n```python\nfrom pylab import *\r\nt = arange(0, 6, 2)\r\nl, = plot(t, t, \".-\")\r\nsavefig(\"/tmp/1.png\")\r\nt[:] = range(3)  # in place change\r\nsavefig(\"/tmp/2.png\")  # no effect\r\nl.set_drawstyle(\"steps\")  # ... unless we trigger a cache invalidation\r\nsavefig(\"/tmp/3.png\")  # in fact, only the x array got updated, not the y\n```\n\n\n### Actual outcome\n\n(1)\r\n![1](https://user-images.githubusercontent.com/1322974/134257080-5f1afea6-59b0-429b-9ab4-bb4187942139.png)\r\n(2) (same as (1))\r\n![2](https://user-images.githubusercontent.com/1322974/134257087-a2dc2907-819e-4e50-8028-946677fff811.png)\r\n(3) (different, but only x got updated, not y)\r\n![3](https://user-images.githubusercontent.com/1322974/134257088-854fcbd6-407b-434e-b9cb-5583a8be3d77.png)\r\n\n\n### Expected outcome\n\nModifying `t` a posteriori should not affect the Line2D.  Compare e.g. with AxesImage:\r\n```python\r\nim = arange(9).reshape(3, 3)\r\nimshow(im)\r\nsavefig(\"/tmp/4.png\")\r\nim[:, :] = im[::-1, ::-1]\r\nsavefig(\"/tmp/5.png\")\r\n```\r\nBoth images are identical.\n\n### Operating system\n\nlinux\n\n### Matplotlib Version\n\n3.5b1\n\n### Matplotlib Backend\n\nmplcairo\n\n### Python version\n\n39\n\n### Jupyter version\n\n_No response_\n\n### Other libraries\n\n_No response_\n\n### Installation\n\nsource\n\n### Conda channel\n\n_No response_\n",
+  "hints_text": "I agree, for most practical purposes, the memory consumption should be negligable.\r\n\r\nIf one wanted to be on the safe side, one could add a flag, but I tend to think that's not neccesary.\nSeems like a well defined what-to-do (with a lot of examples at other places in the code) -- adding it as a good first issue/hacktoberfest-accepted\nHi \ud83d\ude4b\u200d\u2642\ufe0f I would like to see if I can solve the problem.\r\nJust to make sure that I understood the expected outcome in the example. Should the **y** be ending in 2, right?",
+  "created_at": "2021-10-28T22:36:00Z",
+  "version": "3.4",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_lines.py::test_input_copy[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_input_copy[png]\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_lines.py::test_drawstyle_variants[png]\", \"lib/matplotlib/tests/test_lines.py::test_invisible_Line_rendering\", \"lib/matplotlib/tests/test_lines.py::test_line_colors\", \"lib/matplotlib/tests/test_lines.py::test_line_dashes[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_line_dashes[png]\", \"lib/matplotlib/tests/test_lines.py::test_linestyle_variants\", \"lib/matplotlib/tests/test_lines.py::test_lw_scaling[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_lw_scaling[png]\", \"lib/matplotlib/tests/test_lines.py::test_marker_as_markerstyle\", \"lib/matplotlib/tests/test_lines.py::test_marker_fill_styles[png]\", \"lib/matplotlib/tests/test_lines.py::test_markerfacecolor_fillstyle\", \"lib/matplotlib/tests/test_lines.py::test_markevery[png-axes]\", \"lib/matplotlib/tests/test_lines.py::test_markevery[png-figure]\", \"lib/matplotlib/tests/test_lines.py::test_markevery_figure_line_unsupported_relsize\", \"lib/matplotlib/tests/test_lines.py::test_nan_is_sorted\", \"lib/matplotlib/tests/test_lines.py::test_no_subslice_with_transform[png]\", \"lib/matplotlib/tests/test_lines.py::test_odd_dashes[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_odd_dashes[png]\", \"lib/matplotlib/tests/test_lines.py::test_picking\", \"lib/matplotlib/tests/test_lines.py::test_segment_hits\", \"lib/matplotlib/tests/test_lines.py::test_set_drawstyle\", \"lib/matplotlib/tests/test_lines.py::test_set_line_coll_dash\", \"lib/matplotlib/tests/test_lines.py::test_set_line_coll_dash_image[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_set_line_coll_dash_image[png]\", \"lib/matplotlib/tests/test_lines.py::test_step_markers[pdf]\", \"lib/matplotlib/tests/test_lines.py::test_step_markers[png]\", \"lib/matplotlib/tests/test_lines.py::test_valid_colors\", \"lib/matplotlib/tests/test_lines.py::test_valid_drawstyles\", \"lib/matplotlib/tests/test_lines.py::test_valid_linestyles\", \"lib/matplotlib/tests/test_units.py::test_empty_arrays\", \"lib/matplotlib/tests/test_units.py::test_empty_default_limits\", \"lib/matplotlib/tests/test_units.py::test_empty_set_limits_with_units\", \"lib/matplotlib/tests/test_units.py::test_errorbar_mixed_units\", \"lib/matplotlib/tests/test_units.py::test_jpl_bar_units[png]\", \"lib/matplotlib/tests/test_units.py::test_jpl_barh_units[png]\", \"lib/matplotlib/tests/test_units.py::test_numpy_facade[png]\", \"lib/matplotlib/tests/test_units.py::test_plot_masked_units[png]\", \"lib/matplotlib/tests/test_units.py::test_scatter_element0_masked\", \"lib/matplotlib/tests/test_units.py::test_shared_axis_categorical\", \"lib/matplotlib/tests/test_units.py::test_shared_axis_datetime\", \"lib/matplotlib/tests/test_units.py::test_shared_axis_quantity\", \"lib/matplotlib/tests/test_units.py::test_subclass[png]\"]",
+  "environment_setup_commit": "f93c0a3dcb82feed0262d758626c90d4002685f3",
+  "patch_files": [
+    "examples/units/basic_units.py",
+    "lib/matplotlib/lines.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_lines.py",
+    "lib/matplotlib/tests/test_units.py"
+  ],
+  "patch_diff_details": {
+    "examples/units/basic_units.py": {
+      "diffs": [
+        {
+          "start_line_old": 135,
+          "end_line_old": 135
+        }
+      ]
+    },
+    "lib/matplotlib/lines.py": {
+      "diffs": [
+        {
+          "start_line_old": 5,
+          "end_line_old": 5,
+          "file_pos": 1,
+          "file_context_length": 11984,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D._transform_path_Line2D._transform_path.self._transformed_path.1",
+          "closest_snippet_line_distance": 690
+        },
+        {
+          "start_line_old": 1233,
+          "end_line_old": 1233,
+          "file_pos": 1,
+          "file_context_length": 11984,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D._transform_path_Line2D._transform_path.self._transformed_path.1",
+          "closest_snippet_line_distance": 525
+        },
+        {
+          "start_line_old": 1245,
+          "end_line_old": 1245,
+          "file_pos": 1,
+          "file_context_length": 11984,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D._transform_path_Line2D._transform_path.self._transformed_path.1",
+          "closest_snippet_line_distance": 537
+        }
+      ]
+    }
+  },
+  "vectors": 3882,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.recache_Line2D.recache.self._invalidy.1",
+      "distance": 0.8327896595001221,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 652,
+      "end_line": 693,
+      "tokens": 513,
+      "context_length": 513,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.draw_Line2D.draw.2.self.stale.1",
+      "distance": 0.8596837520599365,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 727,
+      "end_line": 860,
+      "tokens": 1291,
+      "context_length": 1804,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py__AxLine.get_transform__AxLine.draw.3",
+      "distance": 0.8847535848617554,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 1412,
+      "end_line": 1455,
+      "tokens": 454,
+      "context_length": 2258,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.__str___Line2D.__str__.1.4.1.1",
+      "distance": 0.9621202945709229,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 263,
+      "end_line": 274,
+      "tokens": 265,
+      "context_length": 2523,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.update_from_Line2D.update_from.self._drawstyle.1",
+      "distance": 0.97093665599823,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 1270,
+      "end_line": 1292,
+      "tokens": 366,
+      "context_length": 2889,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D._get_transformed_path_Line2D._is_sorted.3.1",
+      "distance": 0.9847985506057739,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 710,
+      "end_line": 725,
+      "tokens": 236,
+      "context_length": 3125,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/examples/shapes_and_collections/line_collection.py_1_",
+      "distance": 0.98652583360672,
+      "file_path": "examples/shapes_and_collections/line_collection.py",
+      "start_line": 1,
+      "end_line": 100,
+      "tokens": 856,
+      "context_length": 3981
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.get_markeredgewidth_Line2D.set_color.self.stale.1",
+      "distance": 0.9921965003013611,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 924,
+      "end_line": 1035,
+      "tokens": 769,
+      "context_length": 4750,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.__init___Line2D.__init__.76",
+      "distance": 0.9928523302078247,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 276,
+      "end_line": 417,
+      "tokens": 1198,
+      "context_length": 5948,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axislines.py_1_GridlinesCollection",
+      "distance": 1.0005979537963867,
+      "file_path": "lib/mpl_toolkits/axisartist/axislines.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 443,
+      "context_length": 6391
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axis_artist.py_Ticks.draw_Ticks.draw.10",
+      "distance": 1.0160537958145142,
+      "file_path": "lib/mpl_toolkits/axisartist/axis_artist.py",
+      "start_line": 175,
+      "end_line": 199,
+      "tokens": 198,
+      "context_length": 6589
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.get_antialiased_Line2D.get_marker.2.1",
+      "distance": 1.0239989757537842,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 862,
+      "end_line": 904,
+      "tokens": 317,
+      "context_length": 6906,
+      "file_pos": 4
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/tutorials/toolkits/axisartist.py_1_",
+      "distance": 1.025416612625122,
+      "file_path": "tutorials/toolkits/axisartist.py",
+      "start_line": 1,
+      "end_line": 564,
+      "tokens": 4724,
+      "context_length": 11630
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_base.py__process_plot_var_args._plot_args.8__AxesBase",
+      "distance": 1.0264440774917603,
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "start_line": 486,
+      "end_line": 4737,
+      "tokens": 535,
+      "context_length": 12165
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axislines.py_GridHelperBase_GridHelperBase.get_gridlines.2.1",
+      "distance": 1.0268452167510986,
+      "file_path": "lib/mpl_toolkits/axisartist/axislines.py",
+      "start_line": 315,
+      "end_line": 348,
+      "tokens": 278,
+      "context_length": 12443
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes.axvspan_Axes.plot",
+      "distance": 1.0271496772766113,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 940,
+      "end_line": 1631,
+      "tokens": 3911,
+      "context_length": 16354
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/tutorials/introductory/pyplot.py_t_f.1.1",
+      "distance": 1.0296344757080078,
+      "file_path": "tutorials/introductory/pyplot.py",
+      "start_line": 88,
+      "end_line": 247,
+      "tokens": 1519,
+      "context_length": 17873
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py__AxLine__AxLine.__init__.self._xy2.1",
+      "distance": 1.031113624572754,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 1394,
+      "end_line": 1410,
+      "tokens": 146,
+      "context_length": 18019,
+      "file_pos": 8
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/text_labels_and_annotations/line_with_text.py_8_",
+      "distance": 1.0369782447814941,
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "start_line": 51,
+      "end_line": 87,
+      "tokens": 260,
+      "context_length": 18279
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D.contains_Line2D.contains.22.1",
+      "distance": 1.051426887512207,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 419,
+      "end_line": 487,
+      "tokens": 678,
+      "context_length": 18957,
+      "file_pos": 9
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/axline.py_1_",
+      "distance": 1.053478717803955,
+      "file_path": "examples/pyplots/axline.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 490,
+      "context_length": 19447
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/image_antialiasing.py_41_",
+      "distance": 1.0548338890075684,
+      "file_path": "examples/images_contours_and_fields/image_antialiasing.py",
+      "start_line": 70,
+      "end_line": 121,
+      "tokens": 537,
+      "context_length": 19984
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D_Line2D.validJoin.1.1",
+      "distance": 1.0552334785461426,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 198,
+      "end_line": 261,
+      "tokens": 497,
+      "context_length": 20481,
+      "file_pos": 11
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/lines.py_Line2D._transform_path_Line2D._transform_path.self._transformed_path.1",
+      "distance": 1.0573723316192627,
+      "file_path": "lib/matplotlib/lines.py",
+      "start_line": 695,
+      "end_line": 708,
+      "tokens": 254,
+      "context_length": 20735,
+      "file_pos": 11
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/examples/shapes_and_collections/artist_reference.py_line_",
+      "distance": 1.059483528137207,
+      "file_path": "examples/shapes_and_collections/artist_reference.py",
+      "start_line": 90,
+      "end_line": 130,
+      "tokens": 319,
+      "context_length": 21054
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axis_artist.py_AxislineStyle_Ticks._tickvert_path.1",
+      "distance": 1.0600879192352295,
+      "file_path": "lib/mpl_toolkits/axisartist/axis_artist.py",
+      "start_line": 89,
+      "end_line": 173,
+      "tokens": 650,
+      "context_length": 21704
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/shared_axis_demo.py_1_",
+      "distance": 1.060349702835083,
+      "file_path": "examples/subplots_axes_and_figures/shared_axis_demo.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 490,
+      "context_length": 22194
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/axislines.py_Axes.get_children_Subplot.1",
+      "distance": 1.0610109567642212,
+      "file_path": "lib/mpl_toolkits/axisartist/axislines.py",
+      "start_line": 550,
+      "end_line": 580,
+      "tokens": 198,
+      "context_length": 22392
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axisartist/clip_path.py_np_clip.7.1",
+      "distance": 1.0621607303619385,
+      "file_path": "lib/mpl_toolkits/axisartist/clip_path.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 682,
+      "context_length": 23074
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/image.py__ImageBase._make_image.17__ImageBase._make_image.17.2.a_min.87.output.1",
+      "distance": 1.0700068473815918,
+      "file_path": "lib/matplotlib/image.py",
+      "start_line": 395,
+      "end_line": 527,
+      "tokens": 1709,
+      "context_length": 24783
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes._fill_between_x_or_y.1_Axes.pcolor",
+      "distance": 1.0708584785461426,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 5026,
+      "end_line": 5834,
+      "tokens": 5873,
+      "context_length": 30656
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/examples/misc/demo_agg_filter.py_drop_shadow_line_drop_shadow_line.3",
+      "distance": 1.0724217891693115,
+      "file_path": "examples/misc/demo_agg_filter.py",
+      "start_line": 198,
+      "end_line": 231,
+      "tokens": 308,
+      "context_length": 30964
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/examples/misc/rasterization_demo.py_1_32",
+      "distance": 1.0750775337219238,
+      "file_path": "examples/misc/rasterization_demo.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 753,
+      "context_length": 31717
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/broken_axis.py_1_",
+      "distance": 1.075283408164978,
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 525,
+      "context_length": 32242
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/tutorials/advanced/blitting.py_1_26",
+      "distance": 1.0781128406524658,
+      "file_path": "tutorials/advanced/blitting.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 695,
+      "context_length": 32937
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/examples/misc/tickedstroke_demo.py_1_cg1.1",
+      "distance": 1.078482747077942,
+      "file_path": "examples/misc/tickedstroke_demo.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 755,
+      "context_length": 33692
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/mplot3d/axis3d.py_Axis.draw.86_Axis.20",
+      "distance": 1.0790749788284302,
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "start_line": 419,
+      "end_line": 452,
+      "tokens": 373,
+      "context_length": 34065
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes.stem.2_Axes.boxplot",
+      "distance": 1.0820863246917725,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 2842,
+      "end_line": 3778,
+      "tokens": 6351,
+      "context_length": 40416
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/examples/pyplots/fig_x.py_1_",
+      "distance": 1.0822911262512207,
+      "file_path": "examples/pyplots/fig_x.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 139,
+      "context_length": 40555
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/examples/misc/zorder_demo.py_1_",
+      "distance": 1.0826600790023804,
+      "file_path": "examples/misc/zorder_demo.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 714,
+      "context_length": 41269
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/legend_handler.py_HandlerLine2DCompound_HandlerLine2DCompound.create_artists.17.1",
+      "distance": 1.0843708515167236,
+      "file_path": "lib/matplotlib/legend_handler.py",
+      "start_line": 211,
+      "end_line": 245,
+      "tokens": 323,
+      "context_length": 41592
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/tutorials/advanced/transforms_tutorial.py_fig_200",
+      "distance": 1.0848027467727661,
+      "file_path": "tutorials/advanced/transforms_tutorial.py",
+      "start_line": 233,
+      "end_line": 330,
+      "tokens": 1003,
+      "context_length": 42595
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/examples/misc/pythonic_matplotlib.py_1_",
+      "distance": 1.0857648849487305,
+      "file_path": "examples/misc/pythonic_matplotlib.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 596,
+      "context_length": 43191
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/examples/widgets/annotated_cursor.py_6_",
+      "distance": 1.0864171981811523,
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "start_line": 286,
+      "end_line": 343,
+      "tokens": 471,
+      "context_length": 43662
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/tutorials/advanced/blitting.py_27_27.2",
+      "distance": 1.0870063304901123,
+      "file_path": "tutorials/advanced/blitting.py",
+      "start_line": 89,
+      "end_line": 101,
+      "tokens": 157,
+      "context_length": 43819
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axis.py_Tick._apply_params_Tick._get_text2_transform.1",
+      "distance": 1.0893498659133911,
+      "file_path": "lib/matplotlib/axis.py",
+      "start_line": 349,
+      "end_line": 404,
+      "tokens": 600,
+      "context_length": 44419
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/lines.py",
+      "position": 1,
+      "tokens": 11984,
+      "context_length": 11984
+    },
+    {
+      "file_path": "examples/shapes_and_collections/line_collection.py",
+      "position": 2,
+      "tokens": 856,
+      "context_length": 12840
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/axislines.py",
+      "position": 3,
+      "tokens": 4440,
+      "context_length": 17280
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/axis_artist.py",
+      "position": 4,
+      "tokens": 8058,
+      "context_length": 25338
+    },
+    {
+      "file_path": "tutorials/toolkits/axisartist.py",
+      "position": 5,
+      "tokens": 4724,
+      "context_length": 30062
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_base.py",
+      "position": 6,
+      "tokens": 39711,
+      "context_length": 69773
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "position": 7,
+      "tokens": 72805,
+      "context_length": 142578
+    },
+    {
+      "file_path": "tutorials/introductory/pyplot.py",
+      "position": 8,
+      "tokens": 4403,
+      "context_length": 146981
+    },
+    {
+      "file_path": "examples/text_labels_and_annotations/line_with_text.py",
+      "position": 9,
+      "tokens": 592,
+      "context_length": 147573
+    },
+    {
+      "file_path": "examples/pyplots/axline.py",
+      "position": 10,
+      "tokens": 490,
+      "context_length": 148063
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/image_antialiasing.py",
+      "position": 11,
+      "tokens": 1295,
+      "context_length": 149358
+    },
+    {
+      "file_path": "examples/shapes_and_collections/artist_reference.py",
+      "position": 12,
+      "tokens": 1159,
+      "context_length": 150517
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/shared_axis_demo.py",
+      "position": 13,
+      "tokens": 490,
+      "context_length": 151007
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axisartist/clip_path.py",
+      "position": 14,
+      "tokens": 1232,
+      "context_length": 152239
+    },
+    {
+      "file_path": "lib/matplotlib/image.py",
+      "position": 15,
+      "tokens": 16705,
+      "context_length": 168944
+    },
+    {
+      "file_path": "examples/misc/demo_agg_filter.py",
+      "position": 16,
+      "tokens": 2450,
+      "context_length": 171394
+    },
+    {
+      "file_path": "examples/misc/rasterization_demo.py",
+      "position": 17,
+      "tokens": 930,
+      "context_length": 172324
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/broken_axis.py",
+      "position": 18,
+      "tokens": 525,
+      "context_length": 172849
+    },
+    {
+      "file_path": "tutorials/advanced/blitting.py",
+      "position": 19,
+      "tokens": 1762,
+      "context_length": 174611
+    },
+    {
+      "file_path": "examples/misc/tickedstroke_demo.py",
+      "position": 20,
+      "tokens": 896,
+      "context_length": 175507
+    },
+    {
+      "file_path": "lib/mpl_toolkits/mplot3d/axis3d.py",
+      "position": 21,
+      "tokens": 5202,
+      "context_length": 180709
+    },
+    {
+      "file_path": "examples/pyplots/fig_x.py",
+      "position": 22,
+      "tokens": 139,
+      "context_length": 180848
+    },
+    {
+      "file_path": "examples/misc/zorder_demo.py",
+      "position": 23,
+      "tokens": 714,
+      "context_length": 181562
+    },
+    {
+      "file_path": "lib/matplotlib/legend_handler.py",
+      "position": 24,
+      "tokens": 6538,
+      "context_length": 188100
+    },
+    {
+      "file_path": "tutorials/advanced/transforms_tutorial.py",
+      "position": 25,
+      "tokens": 6101,
+      "context_length": 194201
+    },
+    {
+      "file_path": "examples/misc/pythonic_matplotlib.py",
+      "position": 26,
+      "tokens": 596,
+      "context_length": 194797
+    },
+    {
+      "file_path": "examples/widgets/annotated_cursor.py",
+      "position": 27,
+      "tokens": 2848,
+      "context_length": 197645
+    },
+    {
+      "file_path": "lib/matplotlib/axis.py",
+      "position": 28,
+      "tokens": 20215,
+      "context_length": 217860
+    }
+  ]
+}

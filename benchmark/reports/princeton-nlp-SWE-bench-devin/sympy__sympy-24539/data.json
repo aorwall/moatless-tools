@@ -1,0 +1,829 @@
+{
+  "instance_id": "sympy__sympy-24539",
+  "model_patch": "diff --git a/sympy/polys/rings.py b/sympy/polys/rings.py\nindex 12bd2fc920..4f81743552 100644\n--- a/sympy/polys/rings.py\n+++ b/sympy/polys/rings.py\n@@ -616,8 +616,9 @@ def set_ring(self, new_ring):\n             return new_ring.from_dict(self, self.ring.domain)\n \n     def as_expr(self, *symbols):\n-        if symbols and len(symbols) != self.ring.ngens:\n-            raise ValueError(\"not enough symbols, expected %s got %s\" % (self.ring.ngens, len(symbols)))\n+        if symbols:\n+            if len(symbols) != self.ring.ngens:\n+                raise ValueError(\"not enough symbols, expected %s got %s\" % (self.ring.ngens, len(symbols)))\n         else:\n             symbols = self.ring.symbols\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "sympy/polys/rings.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "193e3825645d93c73e31cdceb6d742cc6919624d",
+  "patch": "diff --git a/sympy/polys/rings.py b/sympy/polys/rings.py\n--- a/sympy/polys/rings.py\n+++ b/sympy/polys/rings.py\n@@ -616,10 +616,13 @@ def set_ring(self, new_ring):\n             return new_ring.from_dict(self, self.ring.domain)\n \n     def as_expr(self, *symbols):\n-        if symbols and len(symbols) != self.ring.ngens:\n-            raise ValueError(\"not enough symbols, expected %s got %s\" % (self.ring.ngens, len(symbols)))\n-        else:\n+        if not symbols:\n             symbols = self.ring.symbols\n+        elif len(symbols) != self.ring.ngens:\n+            raise ValueError(\n+                \"Wrong number of symbols, expected %s got %s\" %\n+                (self.ring.ngens, len(symbols))\n+            )\n \n         return expr_from_dict(self.as_expr_dict(), *symbols)\n \n",
+  "test_patch": "diff --git a/sympy/polys/tests/test_rings.py b/sympy/polys/tests/test_rings.py\n--- a/sympy/polys/tests/test_rings.py\n+++ b/sympy/polys/tests/test_rings.py\n@@ -259,11 +259,11 @@ def test_PolyElement_as_expr():\n     assert f != g\n     assert f.as_expr() == g\n \n-    X, Y, Z = symbols(\"x,y,z\")\n-    g = 3*X**2*Y - X*Y*Z + 7*Z**3 + 1\n+    U, V, W = symbols(\"u,v,w\")\n+    g = 3*U**2*V - U*V*W + 7*W**3 + 1\n \n     assert f != g\n-    assert f.as_expr(X, Y, Z) == g\n+    assert f.as_expr(U, V, W) == g\n \n     raises(ValueError, lambda: f.as_expr(X))\n \n",
+  "problem_statement": "`PolyElement.as_expr()` not accepting symbols\nThe method `PolyElement.as_expr()`\r\n\r\nhttps://github.com/sympy/sympy/blob/193e3825645d93c73e31cdceb6d742cc6919624d/sympy/polys/rings.py#L618-L624\r\n\r\nis supposed to let you set the symbols you want to use, but, as it stands, either you pass the wrong number of symbols, and get an error message, or you pass the right number of symbols, and it ignores them, using `self.ring.symbols` instead:\r\n\r\n```python\r\n>>> from sympy import ring, ZZ, symbols\r\n>>> R, x, y, z = ring(\"x,y,z\", ZZ)\r\n>>> f = 3*x**2*y - x*y*z + 7*z**3 + 1\r\n>>> U, V, W = symbols(\"u,v,w\")\r\n>>> f.as_expr(U, V, W)\r\n3*x**2*y - x*y*z + 7*z**3 + 1\r\n```\n",
+  "hints_text": "",
+  "created_at": "2023-01-17T17:26:42Z",
+  "version": "1.12",
+  "FAIL_TO_PASS": "[\"test_PolyElement_as_expr\"]",
+  "PASS_TO_PASS": "[\"test_PolyElement_LC\", \"test_PolyElement_LM\", \"test_PolyElement_LT\", \"test_PolyElement___add__\", \"test_PolyElement___call__\", \"test_PolyElement___eq__\", \"test_PolyElement___hash__\", \"test_PolyElement___mul__\", \"test_PolyElement___pow__\", \"test_PolyElement___sub__\", \"test_PolyElement___truediv__\", \"test_PolyElement__lt_le_gt_ge__\", \"test_PolyElement__str__\", \"test_PolyElement_cancel\", \"test_PolyElement_clear_denoms\", \"test_PolyElement_coeff\", \"test_PolyElement_coeffs\", \"test_PolyElement_cofactors\", \"test_PolyElement_compose\", \"test_PolyElement_copy\", \"test_PolyElement_decompose\", \"test_PolyElement_deflate\", \"test_PolyElement_degree\", \"test_PolyElement_degrees\", \"test_PolyElement_diff\", \"test_PolyElement_discriminant\", \"test_PolyElement_div\", \"test_PolyElement_drop\", \"test_PolyElement_evaluate\", \"test_PolyElement_factor_list\", \"test_PolyElement_from_expr\", \"test_PolyElement_gcd\", \"test_PolyElement_gcdex\", \"test_PolyElement_gff_list\", \"test_PolyElement_is_\", \"test_PolyElement_l1_norm\", \"test_PolyElement_leading_monom\", \"test_PolyElement_leading_term\", \"test_PolyElement_max_norm\", \"test_PolyElement_monoms\", \"test_PolyElement_pdiv\", \"test_PolyElement_rem\", \"test_PolyElement_resultant\", \"test_PolyElement_shift\", \"test_PolyElement_sqf_list\", \"test_PolyElement_sqf_norm\", \"test_PolyElement_sturm\", \"test_PolyElement_subresultants\", \"test_PolyElement_subs\", \"test_PolyElement_tail_degree\", \"test_PolyElement_tail_degrees\", \"test_PolyElement_terms\", \"test_PolyRing___eq__\", \"test_PolyRing___getitem__\", \"test_PolyRing___hash__\", \"test_PolyRing___init__\", \"test_PolyRing_add\", \"test_PolyRing_drop\", \"test_PolyRing_is_\", \"test_PolyRing_mul\", \"test_PolyRing_ring_new\", \"test_sring\"]",
+  "environment_setup_commit": "c6cb7c5602fa48034ab1bd43c2347a7e8488f12e",
+  "patch_files": [
+    "sympy/polys/rings.py"
+  ],
+  "test_patch_files": [
+    "sympy/polys/tests/test_rings.py"
+  ],
+  "patch_diff_details": {
+    "sympy/polys/rings.py": {
+      "diffs": [
+        {
+          "start_line_old": 619,
+          "end_line_old": 621,
+          "file_pos": 1,
+          "file_context_length": 17629,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.quo_ground_PolyElement.quo_ground.5.1",
+          "closest_snippet_line_distance": 1365,
+          "pos": 7,
+          "context_length": 1824
+        }
+      ]
+    }
+  },
+  "vectors": 9749,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.str_PolyElement.str.11.1",
+      "distance": 0.6965842247009277,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 787,
+      "end_line": 833,
+      "tokens": 419,
+      "context_length": 419,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.evaluate_PolyElement.evaluate.6.4.3.1",
+      "distance": 0.7580621242523193,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2291,
+      "end_line": 2333,
+      "tokens": 280,
+      "context_length": 699,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.compose_PolyElement.compose.7.1",
+      "distance": 0.7621408700942993,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2374,
+      "end_line": 2404,
+      "tokens": 247,
+      "context_length": 946,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py__parse_symbols__ring_cache.1",
+      "distance": 0.7849775552749634,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 181,
+      "end_line": 194,
+      "tokens": 121,
+      "context_length": 1067,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.subs_PolyElement.subs.6.4.3.1",
+      "distance": 0.7987897396087646,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2335,
+      "end_line": 2372,
+      "tokens": 244,
+      "context_length": 1311,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.quo_ground_PolyElement.quo_ground.5.1",
+      "distance": 0.8098781108856201,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1984,
+      "end_line": 1998,
+      "tokens": 139,
+      "context_length": 1450,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.set_ring_PolyElement.strip_zero.2.1.1",
+      "distance": 0.8158543705940247,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 609,
+      "end_line": 651,
+      "tokens": 374,
+      "context_length": 1824,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyRing._rebuild_expr_PolyRing.from_expr.2.3.1.1",
+      "distance": 0.8215099573135376,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 370,
+      "end_line": 401,
+      "tokens": 277,
+      "context_length": 2101,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement._gcd_monom_PolyElement._gcd_monom.12.1",
+      "distance": 0.830929160118103,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2150,
+      "end_line": 2164,
+      "tokens": 230,
+      "context_length": 2331,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement._term_div_PolyElement._term_div.6.1",
+      "distance": 0.8318073153495789,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1362,
+      "end_line": 1393,
+      "tokens": 296,
+      "context_length": 2627,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.sort_key_PolyElement._drop.3.2.3.1",
+      "distance": 0.8345332741737366,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 706,
+      "end_line": 733,
+      "tokens": 231,
+      "context_length": 2858,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.rem_PolyElement.exquo.2.2.1",
+      "distance": 0.8350329399108887,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1471,
+      "end_line": 1525,
+      "tokens": 391,
+      "context_length": 3249,
+      "file_pos": 1
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement._pow_generic_PolyElement._pow_multinomial.8.1",
+      "distance": 0.8391178846359253,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1198,
+      "end_line": 1241,
+      "tokens": 305,
+      "context_length": 3554,
+      "file_pos": 1
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.is_generator_PolyElement.__pos__.1.1",
+      "distance": 0.8402961492538452,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 835,
+      "end_line": 914,
+      "tokens": 515,
+      "context_length": 4069,
+      "file_pos": 1
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.deflate_PolyElement.deflate.10.1",
+      "distance": 0.8432855010032654,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2060,
+      "end_line": 2091,
+      "tokens": 199,
+      "context_length": 4268,
+      "file_pos": 1
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement._gcd_PolyElement._gcd_QQ.13.1",
+      "distance": 0.8447264432907104,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2166,
+      "end_line": 2198,
+      "tokens": 274,
+      "context_length": 4542,
+      "file_pos": 1
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.129_",
+      "distance": 0.8460018634796143,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2406,
+      "end_line": 2468,
+      "tokens": 448,
+      "context_length": 4990,
+      "file_pos": 1
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.inflate_PolyElement.gcd.1.1",
+      "distance": 0.8553285598754883,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2093,
+      "end_line": 2119,
+      "tokens": 180,
+      "context_length": 5170,
+      "file_pos": 1
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__f_2__f_2.2.1",
+      "distance": 0.8685879707336426,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 308,
+      "end_line": 310,
+      "tokens": 128,
+      "context_length": 5298
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.drop_to_ground_PolyElement.to_dict.1.1",
+      "distance": 0.8695739507675171,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 764,
+      "end_line": 785,
+      "tokens": 188,
+      "context_length": 5486,
+      "file_pos": 2
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyRing.ring_new_PolyRing.ring_new.1.6.1.1",
+      "distance": 0.8746302127838135,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 329,
+      "end_line": 349,
+      "tokens": 155,
+      "context_length": 5641,
+      "file_pos": 2
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.__truediv___PolyElement.66",
+      "distance": 0.875342607498169,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1329,
+      "end_line": 1360,
+      "tokens": 267,
+      "context_length": 5908,
+      "file_pos": 2
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.cofactors_PolyElement._gcd_zero.2.2.1.1",
+      "distance": 0.876187801361084,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2121,
+      "end_line": 2148,
+      "tokens": 265,
+      "context_length": 6173,
+      "file_pos": 2
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.drop_PolyElement._drop_to_ground.5.1",
+      "distance": 0.8790388107299805,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 735,
+      "end_line": 762,
+      "tokens": 193,
+      "context_length": 6366,
+      "file_pos": 2
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__f_3__f_3.2.1",
+      "distance": 0.8817014694213867,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 312,
+      "end_line": 314,
+      "tokens": 127,
+      "context_length": 6493
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__f_1__f_1.2.1",
+      "distance": 0.8823082447052002,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 304,
+      "end_line": 306,
+      "tokens": 174,
+      "context_length": 6667
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/polys/solvers.py_sympy_eqs_to_ring_sympy_eqs_to_ring.3.1",
+      "distance": 0.8844225406646729,
+      "file_path": "sympy/polys/solvers.py",
+      "start_line": 132,
+      "end_line": 184,
+      "tokens": 438,
+      "context_length": 7105
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.quo_term_PolyElement.l1_norm.1.1",
+      "distance": 0.8941918611526489,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2000,
+      "end_line": 2058,
+      "tokens": 384,
+      "context_length": 7489,
+      "file_pos": 3
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.LT_PolyElement.leading_term.5.1",
+      "distance": 0.8968499898910522,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1761,
+      "end_line": 1787,
+      "tokens": 197,
+      "context_length": 7686,
+      "file_pos": 3
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__f_4__f_4.2.1",
+      "distance": 0.8982454538345337,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 316,
+      "end_line": 318,
+      "tokens": 379,
+      "context_length": 8065
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__f_5__f_6.2.1",
+      "distance": 0.9009759426116943,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 320,
+      "end_line": 326,
+      "tokens": 243,
+      "context_length": 8308
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.__divmod___PolyElement.__divmod__.3.3.1.1",
+      "distance": 0.9073973894119263,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1279,
+      "end_line": 1299,
+      "tokens": 190,
+      "context_length": 8498,
+      "file_pos": 3
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Symbol.__xnew_cached__Symbol.as_set.1.1",
+      "distance": 0.9109638929367065,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 323,
+      "end_line": 385,
+      "tokens": 535,
+      "context_length": 9033
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_xring_xring.3.1",
+      "distance": 0.9112488627433777,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 66,
+      "end_line": 95,
+      "tokens": 245,
+      "context_length": 9278,
+      "file_pos": 4
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.__rdivmod___PolyElement.__rmod__.1.1",
+      "distance": 0.9124242067337036,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1301,
+      "end_line": 1327,
+      "tokens": 211,
+      "context_length": 9489,
+      "file_pos": 4
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Symbol.__xnew___Symbol.__xnew__.2.19.1",
+      "distance": 0.9174440503120422,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 298,
+      "end_line": 321,
+      "tokens": 300,
+      "context_length": 9789
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__w_1__w_1.2.1",
+      "distance": 0.9197800755500793,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 328,
+      "end_line": 330,
+      "tokens": 423,
+      "context_length": 10212
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py_25__f_0.2.1",
+      "distance": 0.9201741218566895,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 296,
+      "end_line": 302,
+      "tokens": 117,
+      "context_length": 10329
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_ring_ring.3.1",
+      "distance": 0.9227526187896729,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 35,
+      "end_line": 64,
+      "tokens": 239,
+      "context_length": 10568,
+      "file_pos": 4
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.leading_expv_PolyElement._get_coeff.1.1",
+      "distance": 0.9328526258468628,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1664,
+      "end_line": 1685,
+      "tokens": 174,
+      "context_length": 10742,
+      "file_pos": 4
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.canonical_unit_PolyElement.__call__.1.2.1",
+      "distance": 0.9414005279541016,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 2256,
+      "end_line": 2289,
+      "tokens": 288,
+      "context_length": 11030,
+      "file_pos": 4
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.square_PolyElement.square.13.1",
+      "distance": 0.944896936416626,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1243,
+      "end_line": 1277,
+      "tokens": 278,
+      "context_length": 11308,
+      "file_pos": 4
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_sring_sring.11.2.1.1",
+      "distance": 0.9459605813026428,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 128,
+      "end_line": 179,
+      "tokens": 401,
+      "context_length": 11709,
+      "file_pos": 4
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_vring_vring.4.1",
+      "distance": 0.9466263055801392,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 97,
+      "end_line": 126,
+      "tokens": 247,
+      "context_length": 11956,
+      "file_pos": 4
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py__w_2_",
+      "distance": 0.9468022584915161,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 332,
+      "end_line": 341,
+      "tokens": 244,
+      "context_length": 12200
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/polys/__init__.py___all_____all__.1",
+      "distance": 0.94819176197052,
+      "file_path": "sympy/polys/__init__.py",
+      "start_line": 3,
+      "end_line": 66,
+      "tokens": 856,
+      "context_length": 13056
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_AtomicExpr._eval_is_polynomial_AtomicExpr.expr_free_symbols.2.1",
+      "distance": 0.952520489692688,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 3981,
+      "end_line": 4005,
+      "tokens": 208,
+      "context_length": 13264
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/polys/ring_series.py__rs_series__rs_series.args.5.9.1",
+      "distance": 0.9540759325027466,
+      "file_path": "sympy/polys/ring_series.py",
+      "start_line": 1874,
+      "end_line": 1957,
+      "tokens": 817,
+      "context_length": 14081
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/polys/fields.py_FracElement.__call___",
+      "distance": 0.9614846706390381,
+      "file_path": "sympy/polys/fields.py",
+      "start_line": 603,
+      "end_line": 632,
+      "tokens": 306,
+      "context_length": 14387
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement.__eq___PolyElement.__eq__.2.4.1.1",
+      "distance": 0.9624156355857849,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 653,
+      "end_line": 677,
+      "tokens": 212,
+      "context_length": 14599,
+      "file_pos": 8
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyRing.__call___PolyRing.from_list.1.1",
+      "distance": 0.963479220867157,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 351,
+      "end_line": 368,
+      "tokens": 132,
+      "context_length": 14731,
+      "file_pos": 8
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__float___Expr._from_mpmath.1.3.1",
+      "distance": 0.9644503593444824,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 342,
+      "end_line": 406,
+      "tokens": 560,
+      "context_length": 15291
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_1_26",
+      "distance": 0.9665664434432983,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 325,
+      "context_length": 15616,
+      "file_pos": 8
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Symbol._merge_Symbol.__new__.3.1",
+      "distance": 0.9687117338180542,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 274,
+      "end_line": 296,
+      "tokens": 199,
+      "context_length": 15815
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/polys/rings.py_PolyElement_PolyElement.__hash__._hash.3.1",
+      "distance": 0.9716331362724304,
+      "file_path": "sympy/polys/rings.py",
+      "start_line": 556,
+      "end_line": 579,
+      "tokens": 198,
+      "context_length": 16013,
+      "file_pos": 8
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_symbols_symbols.1",
+      "distance": 0.9730966091156006,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 586,
+      "end_line": 701,
+      "tokens": 1078,
+      "context_length": 17091
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/hyperbolic.py_1__rewrite_hyperbolics_as_exp.1.1",
+      "distance": 0.9739982485771179,
+      "file_path": "sympy/functions/elementary/hyperbolic.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 257,
+      "context_length": 17348
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_1__sympifyit.deco.3.1",
+      "distance": 0.975141704082489,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 282,
+      "context_length": 17630
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_1_20",
+      "distance": 0.979485034942627,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 152,
+      "context_length": 17782
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__int___Expr.__int__.Dummy",
+      "distance": 0.9801698327064514,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 305,
+      "end_line": 340,
+      "tokens": 504,
+      "context_length": 18286
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.expr_free_symbols_Expr.expr_free_symbols.3.1",
+      "distance": 0.9835721254348755,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2427,
+      "end_line": 2456,
+      "tokens": 237,
+      "context_length": 18523
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py_1_18",
+      "distance": 0.9879118800163269,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 189,
+      "context_length": 18712
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/solvers/bivariate.py__filtered_gens__filtered_gens.7.1",
+      "distance": 0.9879574775695801,
+      "file_path": "sympy/solvers/bivariate.py",
+      "start_line": 19,
+      "end_line": 44,
+      "tokens": 235,
+      "context_length": 18947
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/polys/polytools.py__polifyit_Poly",
+      "distance": 0.9903245568275452,
+      "file_path": "sympy/polys/polytools.py",
+      "start_line": 67,
+      "end_line": 4263,
+      "tokens": 226,
+      "context_length": 19173
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_symbols.result_symbols.3.19.2.1",
+      "distance": 0.9974222183227539,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 702,
+      "end_line": 796,
+      "tokens": 741,
+      "context_length": 19914
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Subs.__new___Subs.__new__.19.1",
+      "distance": 0.9995666742324829,
+      "file_path": "sympy/core/function.py",
+      "start_line": 2164,
+      "end_line": 2224,
+      "tokens": 558,
+      "context_length": 20472
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/polys/rings.py",
+      "position": 1,
+      "tokens": 17629,
+      "context_length": 17629
+    },
+    {
+      "file_path": "sympy/polys/specialpolys.py",
+      "position": 2,
+      "tokens": 4456,
+      "context_length": 22085
+    },
+    {
+      "file_path": "sympy/polys/solvers.py",
+      "position": 3,
+      "tokens": 3513,
+      "context_length": 25598
+    },
+    {
+      "file_path": "sympy/core/symbol.py",
+      "position": 4,
+      "tokens": 7147,
+      "context_length": 32745
+    },
+    {
+      "file_path": "sympy/polys/__init__.py",
+      "position": 5,
+      "tokens": 1605,
+      "context_length": 34350
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 6,
+      "tokens": 34700,
+      "context_length": 69050
+    },
+    {
+      "file_path": "sympy/polys/ring_series.py",
+      "position": 7,
+      "tokens": 18166,
+      "context_length": 87216
+    },
+    {
+      "file_path": "sympy/polys/fields.py",
+      "position": 8,
+      "tokens": 5092,
+      "context_length": 92308
+    },
+    {
+      "file_path": "sympy/functions/elementary/hyperbolic.py",
+      "position": 9,
+      "tokens": 18402,
+      "context_length": 110710
+    },
+    {
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "position": 10,
+      "tokens": 6604,
+      "context_length": 117314
+    },
+    {
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "position": 11,
+      "tokens": 5001,
+      "context_length": 122315
+    },
+    {
+      "file_path": "sympy/solvers/bivariate.py",
+      "position": 12,
+      "tokens": 5267,
+      "context_length": 127582
+    },
+    {
+      "file_path": "sympy/polys/polytools.py",
+      "position": 13,
+      "tokens": 52752,
+      "context_length": 180334
+    },
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 14,
+      "tokens": 28379,
+      "context_length": 208713
+    }
+  ]
+}

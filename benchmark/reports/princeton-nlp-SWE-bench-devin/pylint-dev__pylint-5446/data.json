@@ -1,0 +1,1404 @@
+{
+  "instance_id": "pylint-dev__pylint-5446",
+  "model_patch": "diff --git a/pylint/checkers/similar.py b/pylint/checkers/similar.py\nindex 113b086bc..3ba0ab0fd 100644\n--- a/pylint/checkers/similar.py\n+++ b/pylint/checkers/similar.py\n@@ -542,14 +542,6 @@ class Similar:\n             for lineset2 in self.linesets[idx + 1 :]:\n                 yield from self._find_common(lineset, lineset2)\n \n-    def get_map_data(self):\n-        \"\"\"Returns the data we can use for a map/reduce process.\n-\n-        In this case we are returning this instance's Linesets, that is all file\n-        information that will later be used for vectorisation.\n-        \"\"\"\n-        return self.linesets\n-\n     def combine_mapreduce_data(self, linesets_collection):\n         \"\"\"Reduces and recombines data into a format that we can report on.\n \n@@ -574,19 +566,24 @@ def stripped_lines(\n     :param ignore_signatures: if true, any line that is part of a function signature is removed from the result\n     :return: the collection of line/line number/line type tuples\n     \"\"\"\n+    tree = None\n+    signature_lines = set()\n+    line_begins_import = {}\n+    current_line_is_import = False\n     if ignore_imports or ignore_signatures:\n         tree = astroid.parse(\"\".join(lines))\n     if ignore_imports:\n-        node_is_import_by_lineno = (\n-            (node.lineno, isinstance(node, (nodes.Import, nodes.ImportFrom)))\n-            for node in tree.body\n-        )\n-        line_begins_import = {\n-            lineno: all(is_import for _, is_import in node_is_import_group)\n-            for lineno, node_is_import_group in groupby(\n-                node_is_import_by_lineno, key=lambda x: x[0]\n+        if tree is not None:\n+            node_is_import_by_lineno = (\n+                (node.lineno, isinstance(node, (nodes.Import, nodes.ImportFrom)))\n+                for node in tree.body\n             )\n-        }\n+            line_begins_import = {\n+                lineno: all(is_import for _, is_import in node_is_import_group)\n+                for lineno, node_is_import_group in groupby(\n+                    node_is_import_by_lineno, key=lambda x: x[0]\n+                )\n+            }\n         current_line_is_import = False\n     if ignore_signatures:\n \n@@ -607,18 +604,19 @@ def stripped_lines(\n \n             return functions\n \n-        functions = _get_functions([], tree)\n-        signature_lines = set(\n-            chain(\n-                *(\n-                    range(\n-                        func.lineno,\n-                        func.body[0].lineno if func.body else func.tolineno + 1,\n+        if tree is not None:\n+            functions = _get_functions([], tree)\n+            signature_lines = set(\n+                chain(\n+                    *(\n+                        range(\n+                            func.lineno,\n+                            func.body[0].lineno if func.body else func.tolineno + 1,\n+                        )\n+                        for func in functions\n                     )\n-                    for func in functions\n                 )\n             )\n-        )\n \n     strippedlines = []\n     docstring = None\n@@ -821,7 +819,8 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):\n     def open(self):\n         \"\"\"Init the checkers: reset linesets and statistics information.\"\"\"\n         self.linesets = []\n-        self.linter.stats.reset_duplicated_lines()\n+        if self.linter is not None:\n+            self.linter.stats.reset_duplicated_lines()\n \n     def process_module(self, node: nodes.Module) -> None:\n         \"\"\"Process a module.\n@@ -830,7 +829,7 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):\n \n         stream must implement the readlines method\n         \"\"\"\n-        if self.linter.current_name is None:\n+        if self.linter is not None and self.linter.current_name is None:\n             warnings.warn(\n                 (\n                     \"In pylint 3.0 the current_name attribute of the linter object should be a string. \"\n@@ -839,32 +838,52 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):\n                 DeprecationWarning,\n             )\n         with node.stream() as stream:\n+            # Check if this module should be skipped for the duplicate-code check\n+            if not self.should_analyze_file(node.file):\n+                return\n             self.append_stream(self.linter.current_name, stream, node.file_encoding)  # type: ignore[arg-type]\n \n+    def should_analyze_file(self, file_path: str) -> bool:\n+        \"\"\"Check if the file should be analyzed for duplicate code.\n+\n+        This checks for a disable comment for the duplicate-code check in the file.\n+\n+        :param file_path: The path to the file to check\n+        :returns: True if the file should be analyzed, False otherwise\n+        \"\"\"\n+        with open(file_path, 'r', encoding='utf-8') as file:\n+            for line in file:\n+                if 'pylint: disable=duplicate-code' in line:\n+                    return False\n+        return True\n+\n+    def get_map_data(self):\n+        map_data = []\n+        for lineset in self.linesets:\n+            map_data.extend(lineset.stripped_lines)\n+        return map_data\n+\n     def close(self):\n         \"\"\"Compute and display similarities on closing (i.e. end of parsing).\"\"\"\n         total = sum(len(lineset) for lineset in self.linesets)\n         duplicated = 0\n-        stats = self.linter.stats\n-        for num, couples in self._compute_sims():\n-            msg = []\n-            lineset = start_line = end_line = None\n-            for lineset, start_line, end_line in couples:\n-                msg.append(f\"=={lineset.name}:[{start_line}:{end_line}]\")\n-            msg.sort()\n-\n-            if lineset:\n-                for line in lineset.real_lines[start_line:end_line]:\n-                    msg.append(line.rstrip())\n-\n-            self.add_message(\"R0801\", args=(len(couples), \"\\n\".join(msg)))\n-            duplicated += num * (len(couples) - 1)\n-        stats.nb_duplicated_lines += int(duplicated)\n-        stats.percent_duplicated_lines += float(total and duplicated * 100.0 / total)\n-\n-    def get_map_data(self):\n-        \"\"\"Passthru override.\"\"\"\n-        return Similar.get_map_data(self)\n+        if self.linter is not None:\n+            stats = self.linter.stats\n+            for num, couples in self._compute_sims():\n+                msg = []\n+                lineset = start_line = end_line = None\n+                for lineset, start_line, end_line in couples:\n+                    msg.append(f\"=={lineset.name}:[{start_line}:{end_line}]\")\n+                msg.sort()\n+\n+                if lineset:\n+                    for line in lineset.real_lines[start_line:end_line]:\n+                        msg.append(line.rstrip())\n+\n+                self.add_message(\"R0801\", args=(len(couples), \"\\n\".join(msg)))\n+                duplicated += num * (len(couples) - 1)\n+            stats.nb_duplicated_lines += int(duplicated)\n+            stats.percent_duplicated_lines += float(total and duplicated * 100.0 / total)\n \n     def reduce_map_data(self, linter, data):\n         \"\"\"Reduces and recombines data into a format that we can report on.\n@@ -903,14 +922,14 @@ def Run(argv=None):\n         argv = sys.argv[1:]\n \n     s_opts = \"hdi\"\n-    l_opts = (\n+    l_opts = [\n         \"help\",\n         \"duplicates=\",\n         \"ignore-comments\",\n         \"ignore-imports\",\n         \"ignore-docstrings\",\n         \"ignore-signatures\",\n-    )\n+    ]\n     min_lines = DEFAULT_MIN_SIMILARITY_LINE\n     ignore_comments = False\n     ignore_docstrings = False\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "pylint/checkers/similar.py"
+  ],
+  "repo": "pylint-dev/pylint",
+  "base_commit": "a1df7685a4e6a05b519ea011f16a2f0d49d08032",
+  "patch": "diff --git a/pylint/checkers/similar.py b/pylint/checkers/similar.py\n--- a/pylint/checkers/similar.py\n+++ b/pylint/checkers/similar.py\n@@ -381,10 +381,19 @@ def append_stream(\n         else:\n             readlines = stream.readlines  # type: ignore[assignment] # hint parameter is incorrectly typed as non-optional\n         try:\n+            active_lines: List[str] = []\n+            if hasattr(self, \"linter\"):\n+                # Remove those lines that should be ignored because of disables\n+                for index, line in enumerate(readlines()):\n+                    if self.linter._is_one_message_enabled(\"R0801\", index + 1):  # type: ignore[attr-defined]\n+                        active_lines.append(line)\n+            else:\n+                active_lines = readlines()\n+\n             self.linesets.append(\n                 LineSet(\n                     streamid,\n-                    readlines(),\n+                    active_lines,\n                     self.ignore_comments,\n                     self.ignore_docstrings,\n                     self.ignore_imports,\n",
+  "test_patch": "diff --git a/tests/regrtest_data/duplicate_data_raw_strings/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_all/__init__.py\nsimilarity index 100%\nrename from tests/regrtest_data/duplicate_data_raw_strings/__init__.py\nrename to tests/regrtest_data/duplicate_code/raw_strings_all/__init__.py\ndiff --git a/tests/regrtest_data/duplicate_data_raw_strings/first.py b/tests/regrtest_data/duplicate_code/raw_strings_all/first.py\nsimilarity index 100%\nrename from tests/regrtest_data/duplicate_data_raw_strings/first.py\nrename to tests/regrtest_data/duplicate_code/raw_strings_all/first.py\ndiff --git a/tests/regrtest_data/duplicate_data_raw_strings/second.py b/tests/regrtest_data/duplicate_code/raw_strings_all/second.py\nsimilarity index 100%\nrename from tests/regrtest_data/duplicate_data_raw_strings/second.py\nrename to tests/regrtest_data/duplicate_code/raw_strings_all/second.py\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_all/third.py b/tests/regrtest_data/duplicate_code/raw_strings_all/third.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_all/third.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/first.py\n@@ -0,0 +1,12 @@\n+# pylint: disable=duplicate-code\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file/third.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/third.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file/third.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/first.py\n@@ -0,0 +1,12 @@\n+# pylint: disable=duplicate-code\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/second.py\n@@ -0,0 +1,12 @@\n+# pylint: disable=duplicate-code\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/third.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/third.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/third.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/first.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1  # pylint: disable=duplicate-code\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/first.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1  # pylint: disable=duplicate-code\n+    yyyy = 2  # pylint: disable=duplicate-code\n+    zzzz = 3  # pylint: disable=duplicate-code\n+    wwww = 4  # pylint: disable=duplicate-code\n+    vvvv = xxxx + yyyy + zzzz + wwww  # pylint: disable=duplicate-code\n+    return vvvv  # pylint: disable=duplicate-code\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/first.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv  # pylint: disable=duplicate-code\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/first.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3  # pylint: disable=duplicate-code\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/first.py\n@@ -0,0 +1,12 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    # pylint: disable=duplicate-code\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/second.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/third.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/third.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope/third.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/first.py\n@@ -0,0 +1,12 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    # pylint: disable=duplicate-code\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/second.py\n@@ -0,0 +1,12 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    # pylint: disable=duplicate-code\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/third.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/third.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/third.py\n@@ -0,0 +1,11 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/__init__.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/__init__.py\nnew file mode 100644\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/first.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/first.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/first.py\n@@ -0,0 +1,21 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    # pylint: disable=duplicate-code\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\n+\n+\n+def look_busy_two():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/second.py b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/second.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/second.py\n@@ -0,0 +1,20 @@\n+r\"\"\"A raw docstring.\n+\"\"\"\n+\n+\n+def look_busy():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\n+\n+\n+def look_busy_two():\n+    xxxx = 1\n+    yyyy = 2\n+    zzzz = 3\n+    wwww = 4\n+    vvvv = xxxx + yyyy + zzzz + wwww\n+    return vvvv\ndiff --git a/tests/test_self.py b/tests/test_self.py\n--- a/tests/test_self.py\n+++ b/tests/test_self.py\n@@ -1121,14 +1121,6 @@ def test_jobs_score(self) -> None:\n         expected = \"Your code has been rated at 7.50/10\"\n         self._test_output([path, \"--jobs=2\", \"-ry\"], expected_output=expected)\n \n-    def test_duplicate_code_raw_strings(self) -> None:\n-        path = join(HERE, \"regrtest_data\", \"duplicate_data_raw_strings\")\n-        expected_output = \"Similar lines in 2 files\"\n-        self._test_output(\n-            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n-            expected_output=expected_output,\n-        )\n-\n     def test_regression_parallel_mode_without_filepath(self) -> None:\n         # Test that parallel mode properly passes filepath\n         # https://github.com/PyCQA/pylint/issues/3564\ndiff --git a/tests/test_similar.py b/tests/test_similar.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/test_similar.py\n@@ -0,0 +1,141 @@\n+# Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html\n+# For details: https://github.com/PyCQA/pylint/blob/main/LICENSE\n+\n+\n+import contextlib\n+import os\n+import re\n+import sys\n+import warnings\n+from io import StringIO\n+from os.path import abspath, dirname, join\n+from typing import Iterator, List, TextIO\n+\n+import pytest\n+\n+from pylint.lint import Run\n+\n+HERE = abspath(dirname(__file__))\n+DATA = join(HERE, \"regrtest_data\", \"duplicate_code\")\n+CLEAN_PATH = re.escape(dirname(dirname(__file__)) + os.path.sep)\n+\n+\n+@contextlib.contextmanager\n+def _patch_streams(out: TextIO) -> Iterator:\n+    sys.stderr = sys.stdout = out\n+    try:\n+        yield\n+    finally:\n+        sys.stderr = sys.__stderr__\n+        sys.stdout = sys.__stdout__\n+\n+\n+class TestSimilarCodeChecker:\n+    def _runtest(self, args: List[str], code: int) -> None:\n+        \"\"\"Runs the tests and sees if output code is as expected.\"\"\"\n+        out = StringIO()\n+        pylint_code = self._run_pylint(args, out=out)\n+        output = out.getvalue()\n+        msg = f\"expected output status {code}, got {pylint_code}\"\n+        if output is not None:\n+            msg = f\"{msg}. Below pylint output: \\n{output}\"\n+        assert pylint_code == code, msg\n+\n+    @staticmethod\n+    def _run_pylint(args: List[str], out: TextIO) -> int:\n+        \"\"\"Runs pylint with a patched output.\"\"\"\n+        args = args + [\"--persistent=no\"]\n+        with _patch_streams(out):\n+            with pytest.raises(SystemExit) as cm:\n+                with warnings.catch_warnings():\n+                    warnings.simplefilter(\"ignore\")\n+                    Run(args)\n+            return cm.value.code\n+\n+    @staticmethod\n+    def _clean_paths(output: str) -> str:\n+        \"\"\"Normalize path to the tests directory.\"\"\"\n+        output = re.sub(CLEAN_PATH, \"\", output, flags=re.MULTILINE)\n+        return output.replace(\"\\\\\", \"/\")\n+\n+    def _test_output(self, args: List[str], expected_output: str) -> None:\n+        \"\"\"Tests if the output of a pylint run is as expected.\"\"\"\n+        out = StringIO()\n+        self._run_pylint(args, out=out)\n+        actual_output = self._clean_paths(out.getvalue())\n+        expected_output = self._clean_paths(expected_output)\n+        assert expected_output.strip() in actual_output.strip()\n+\n+    def test_duplicate_code_raw_strings_all(self) -> None:\n+        \"\"\"Test similar lines in 3 similar files.\"\"\"\n+        path = join(DATA, \"raw_strings_all\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n+\n+    def test_duplicate_code_raw_strings_disable_file(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at the file level in a single file.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_file\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n+\n+    def test_duplicate_code_raw_strings_disable_file_double(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at the file level in two files.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_file_double\")\n+        self._runtest([path, \"--disable=all\", \"--enable=duplicate-code\"], code=0)\n+\n+    def test_duplicate_code_raw_strings_disable_line_two(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at a line at the begin of a piece of similar code.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_line_begin\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n+\n+    def test_duplicate_code_raw_strings_disable_line_disable_all(self) -> None:\n+        \"\"\"Tests disabling duplicate-code with all similar lines disabled per line.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_line_disable_all\")\n+        self._runtest([path, \"--disable=all\", \"--enable=duplicate-code\"], code=0)\n+\n+    def test_duplicate_code_raw_strings_disable_line_midle(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at a line in the middle of a piece of similar code.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_line_middle\")\n+        self._runtest([path, \"--disable=all\", \"--enable=duplicate-code\"], code=0)\n+\n+    def test_duplicate_code_raw_strings_disable_line_end(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at a line at the end of a piece of similar code.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_line_end\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n+\n+    def test_duplicate_code_raw_strings_disable_scope(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at an inner scope level.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_scope\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n+\n+    def test_duplicate_code_raw_strings_disable_scope_double(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at an inner scope level in two files.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_scope_double\")\n+        self._runtest([path, \"--disable=all\", \"--enable=duplicate-code\"], code=0)\n+\n+    def test_duplicate_code_raw_strings_disable_scope_function(self) -> None:\n+        \"\"\"Tests disabling duplicate-code at an inner scope level with another scope with similarity.\"\"\"\n+        path = join(DATA, \"raw_strings_disable_scope_second_function\")\n+        expected_output = \"Similar lines in 2 files\"\n+        self._test_output(\n+            [path, \"--disable=all\", \"--enable=duplicate-code\"],\n+            expected_output=expected_output,\n+        )\n",
+  "problem_statement": "The duplicate-code (R0801) can't be disabled\nOriginally reported by: **Anonymous**\n\n---\n\nIt's seems like it's not possible to disable the duplicate code check on portions of a file. Looking at the source, I can see why as it's not a trivial thing to do (if you want to maintain the same scope semantics as other #pylint:enable/disable comments. This would be nice to have though (or I guess I could just cleanup my duplicate code).\n\n---\n- Bitbucket: https://bitbucket.org/logilab/pylint/issue/214\n\n",
+  "hints_text": "_Original comment by_ **Radek Hol\u00fd (BitBucket: [PyDeq](http://bitbucket.org/PyDeq), GitHub: @PyDeq?)**:\n\n---\n\nPylint marks even import blocks as duplicates. In my case, it is:\n\n```\n#!python\nimport contextlib\nimport io\nimport itertools\nimport os\nimport subprocess\nimport tempfile\n\n```\n\nI doubt it is possible to clean up/refactor the code to prevent this, thus it would be nice if it would ignore imports or if it would be possible to use the disable comment.\n\n_Original comment by_ **Buck Evan (BitBucket: [bukzor](http://bitbucket.org/bukzor), GitHub: @bukzor?)**:\n\n---\n\nI've run into this today.\n\nMy project has several setup.py files, which of course look quite similar, but can't really share code.\nI tried to `# pylint:disable=duplicate-code` just the line in question (`setup()`), but it did nothing.\n\nI'll have to turn the checker off entirely I think.\n\nany news on this issue ?\n\nNo one is currently working on this. This would be nice to have fixed, but unfortunately I didn't have time to look into it. A pull request would be appreciated though and would definitely move it forward.\n\n@gaspaio \nFYI I have created a fix in the following PR https://github.com/PyCQA/pylint/pull/1055\nCould you check if It work for you?\n\nIs this related to duplicate-except? it cannot be disabled either. \r\n\r\nsorry, Seems it is able to be disabled.\n@PCManticore as you mentioned, there is probably no good way to fix this issue for this version; What about fixing this in a \"[bad way](https://github.com/PyCQA/pylint/pull/1055)\" for this version, and later on in the planned version 3 you can [utilize a better engineered two-phase design](https://github.com/PyCQA/pylint/pull/1014#issuecomment-233185403) ?\r\n\r\nWhile sailing, sometimes the only way to fix your ship is ugly patching, and it's better than not fixing.\r\nA functioning tool is absolutely better than a \"perfectly engineered\" tool.\n> A functioning tool is absolutely better than a \"perfectly engineered\" tool.\r\n\r\nIt's better because it exists, unlike perfect engineering :D\nIs this issue resolved? I'm using pylint 2.1.1 and cannot seem to disable the warning with comments in the files which are printed in the warning.\nHi @levsa \r\nI have created a custom patch that you can use locally from:\r\n - https://github.com/PyCQA/pylint/pull/1055#issuecomment-384382126\r\n\r\nWe are using it 2.5 years ago and it is working fine.\r\n\r\nThe main issue is that the `state_lines` are not propagated for the methods used.\r\nThis patch just propagates them correctly.\r\n\nYou can use:\r\n```bash\r\nwget -q https://raw.githubusercontent.com/Vauxoo/pylint-conf/master/conf/pylint_pr1055.patch -O pylint_pr1055.patch\r\npatch -f -p0 $(python -c \"from __future__ import print_function; from pylint.checkers import similar; print(similar.__file__.rstrip('c'))\") -i pylint_pr1055.patch\r\n```\n@moylop260 Your fix doesn't work. Even if I have `# pylint: disable=duplicate-code` in each file with duplicate code, I still get errors.\nYou have duplicated comments too.\r\nCheck answer https://github.com/PyCQA/pylint/pull/1055#issuecomment-470572805\nStill have this issue on pylint = \"==2.3.1\"\nThe issue still there for latest python 2 pylint version 1.9.4\r\n\r\n`# pylint: disable=duplicate-code` does not work, while # pylint: disable=all` can disable the dup check.\nAlso have this issue with `pylint==2.3.1`\r\n\r\nEven if i add the the pragma in every file with duplicate code like @filips123, i still get the files with the pragma reported ....\r\n\r\nAny progress on this? I don't want to `# pylint: disable=all` for all affected files ...\nI am using pylint 2.4.0 for python 3 and I can see that `disable=duplicate-code` is working.\nI'm using pylint 2.4.4 and `# pylint: disable=duplicate-code` is not working for me.\nAlso on `2.4.4`\nAnd on 2.4.2\nanother confirmation of this issue on 2.4.4\nNot working for me `# pylint: disable=duplicate-code` at 2.4.4 version python 3.8\nAlso **not** woking at 2.4.4 with python 3.7.4 and `# pylint: disable=R0801` or `# pylint: disable=duplicate-code`\nAlso doesn't work. pylint 2.4.4, astroid 2.3.3, Python 3.8.2\nI found a solution to partially solve this.\r\n\r\nhttps://github.com/PyCQA/pylint/pull/1055#issuecomment-477253153\r\n\r\nUse pylintrc. Try changing the `min-similarity-lines` in the similarities section of your pylintrc config file.\r\n\r\n```INI\r\n[SIMILARITIES]\r\n\r\n# Minimum lines number of a similarity.\r\nmin-similarity-lines=4\r\n\r\n# Ignore comments when computing similarities.\r\nignore-comments=yes\r\n\r\n# Ignore docstrings when computing similarities.\r\nignore-docstrings=yes\r\n\r\n# Ignore imports when computing similarities.\r\nignore-imports=no\r\n```\r\n\r\n\n+1\nHappened to me on a overloaded method declaration, which is obviously identical as its parent class, and in my case its sister class, so pylint reports \"Similar lines in 3 files\" with the `def` and its 4 arguments (spanning on 6 lines, I have one argument per line due to type anotations).\r\n\r\nIt think this could be mitigated by whitelisting import statements and method declaration.\nJust been bitten by this issue today.\r\n\r\n> pylint 2.6.0\r\nastroid 2.4.2\r\nPython 3.9.1 (default, Jan 20 2021, 00:00:00) \r\n\r\nIncreasing `min-similarity-lines` is not actually a solution, as it will turn off duplicate code evaluation.\nIn my particular case I had two separate classes with similar inputs in the `def __init__`\r\n\r\nAs a workaround and what worked for me was to include the following in our pyproject.toml (which is the SIMILARITIES section if you use pylinr.rc):\r\n```\r\n[tool.pylint.SIMULARITIES]\r\nignore-comments = \"no\"\r\n```\r\n\r\nDoing this then allows pylint to not disregard the comments on lines. From there we added the `# pylint: disable=duplicate-code` to the end of one of the lines which now made this \"unique\" (although you could in practice use any comment text)\r\n\r\nThis is a better temporary workaround than the `min-similarity-lines` option as that:\r\n* misses other instance where you'd want that check\r\n* also doesnt return with a valid exit code even though rating is 10.00/10\nit is possible now with file pylint.rc with disable key and value duplicate-code, this issue can be closed and solve in my opnion #214\n> it is possible now with file pylint.rc with disable key and value duplicate-code, this issue can be closed and solve in my opnion #214\r\n\r\nThe main issue is not being able to use `# pylint: disable=duplicate-code` to exclude particular blocks of code. Disabling `duplicate-code` all together is not an acceptable solution. \nSince the issue was opened we added multiple option to ignore import, ignore docstrings and ignore signatures, so there is less and less reasons to want to disable it. But the problem still exists.\nSo any idea how to exclude particular blocks of code from the duplicated code checks without disabling the whole feature?\n> So any idea how to exclude particular blocks of code from the duplicated code checks without disabling the whole feature?\r\n\r\nRight now there isn't, this require a change in pylint.\nany news about this? It looks like many people have been bitten by this and it's marked as high prio\r\nthanks",
+  "created_at": "2021-11-30T16:56:42Z",
+  "version": "2.13",
+  "FAIL_TO_PASS": "[\"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_file_double\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_line_disable_all\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_line_midle\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_scope_double\"]",
+  "PASS_TO_PASS": "[\"tests/test_self.py::TestRunTC::test_abbreviations_are_not_supported\", \"tests/test_self.py::TestRunTC::test_all\", \"tests/test_self.py::TestRunTC::test_allow_import_of_files_found_in_modules_during_parallel_check\", \"tests/test_self.py::TestRunTC::test_bom_marker\", \"tests/test_self.py::TestRunTC::test_can_list_directories_without_dunder_init\", \"tests/test_self.py::TestRunTC::test_confidence_levels\", \"tests/test_self.py::TestRunTC::test_do_not_import_files_from_local_directory\", \"tests/test_self.py::TestRunTC::test_do_not_import_files_from_local_directory_with_pythonpath\", \"tests/test_self.py::TestRunTC::test_enable_all_extensions\", \"tests/test_self.py::TestRunTC::test_enable_all_works\", \"tests/test_self.py::TestRunTC::test_error_help_message_option\", \"tests/test_self.py::TestRunTC::test_error_missing_arguments\", \"tests/test_self.py::TestRunTC::test_error_mode_shows_no_score\", \"tests/test_self.py::TestRunTC::test_evaluation_score_shown_by_default\", \"tests/test_self.py::TestRunTC::test_exit_zero\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-C-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-C0115-fail_under_plus7_5.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-C0116-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-broad-except-fail_under_minus10.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-broad-except-fail_under_plus7_5.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-fake1,C,fake2-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-missing-function-docstring-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[-10-missing-function-docstring-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[-11-broad-except-fail_under_minus10.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[-11-missing-function-docstring-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[-5-broad-except-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[-5-missing-function-docstring-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[-9-broad-except-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[-9-missing-function-docstring-fail_under_minus10.py-22]\", \"tests/test_self.py::TestRunTC::test_fail_on[6-broad-except-fail_under_plus7_5.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[6-missing-function-docstring-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[7.5-broad-except-fail_under_plus7_5.py-0]\", \"tests/test_self.py::TestRunTC::test_fail_on[7.5-missing-function-docstring-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[7.6-broad-except-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on[7.6-missing-function-docstring-fail_under_plus7_5.py-16]\", \"tests/test_self.py::TestRunTC::test_fail_on_edge_case[opts0-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_edge_case[opts1-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_edge_case[opts2-16]\", \"tests/test_self.py::TestRunTC::test_fail_on_edge_case[opts3-16]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args0-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args1-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args2-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args3-6]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args4-6]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args5-22]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args6-22]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args7-6]\", \"tests/test_self.py::TestRunTC::test_fail_on_exit_code[args8-22]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args0-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args1-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args2-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args3-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args4-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args5-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args6-0]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args7-1]\", \"tests/test_self.py::TestRunTC::test_fail_on_info_only_exit_code[args8-1]\", \"tests/test_self.py::TestRunTC::test_fail_under\", \"tests/test_self.py::TestRunTC::test_generate_config_disable_symbolic_names\", \"tests/test_self.py::TestRunTC::test_generate_config_option\", \"tests/test_self.py::TestRunTC::test_generate_config_option_order\", \"tests/test_self.py::TestRunTC::test_generate_rcfile_no_obsolete_methods\", \"tests/test_self.py::TestRunTC::test_getdefaultencoding_crashes_with_lc_ctype_utf8\", \"tests/test_self.py::TestRunTC::test_help_message_option\", \"tests/test_self.py::TestRunTC::test_import_itself_not_accounted_for_relative_imports\", \"tests/test_self.py::TestRunTC::test_import_plugin_from_local_directory_if_pythonpath_cwd\", \"tests/test_self.py::TestRunTC::test_information_category_disabled_by_default\", \"tests/test_self.py::TestRunTC::test_jobs_score\", \"tests/test_self.py::TestRunTC::test_json_report_does_not_escape_quotes\", \"tests/test_self.py::TestRunTC::test_json_report_when_file_has_syntax_error\", \"tests/test_self.py::TestRunTC::test_json_report_when_file_is_missing\", \"tests/test_self.py::TestRunTC::test_load_text_repoter_if_not_provided\", \"tests/test_self.py::TestRunTC::test_modify_sys_path\", \"tests/test_self.py::TestRunTC::test_no_crash_with_formatting_regex_defaults\", \"tests/test_self.py::TestRunTC::test_no_ext_file\", \"tests/test_self.py::TestRunTC::test_no_out_encoding\", \"tests/test_self.py::TestRunTC::test_nonexistent_config_file\", \"tests/test_self.py::TestRunTC::test_one_module_fatal_error\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_custom_reporter\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_output_format_option[colorized-tests/regrtest_data/unused_variable.py:4:4:\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_output_format_option[json-\\\"message\\\":\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_output_format_option[msvs-tests/regrtest_data/unused_variable.py(4):\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_output_format_option[parseable-tests/regrtest_data/unused_variable.py:4:\", \"tests/test_self.py::TestRunTC::test_output_file_can_be_combined_with_output_format_option[text-tests/regrtest_data/unused_variable.py:4:4:\", \"tests/test_self.py::TestRunTC::test_output_file_invalid_path_exits_with_code_32\", \"tests/test_self.py::TestRunTC::test_output_file_specified_in_rcfile\", \"tests/test_self.py::TestRunTC::test_output_file_valid_path\", \"tests/test_self.py::TestRunTC::test_parallel_execution\", \"tests/test_self.py::TestRunTC::test_parallel_execution_missing_arguments\", \"tests/test_self.py::TestRunTC::test_parseable_file_path\", \"tests/test_self.py::TestRunTC::test_pkginfo\", \"tests/test_self.py::TestRunTC::test_pylintrc_comments_in_values\", \"tests/test_self.py::TestRunTC::test_pylintrc_plugin_duplicate_options\", \"tests/test_self.py::TestRunTC::test_recursive\", \"tests/test_self.py::TestRunTC::test_recursive_current_dir\", \"tests/test_self.py::TestRunTC::test_regex_paths_csv_validator\", \"tests/test_self.py::TestRunTC::test_regression_parallel_mode_without_filepath\", \"tests/test_self.py::TestRunTC::test_regression_recursive\", \"tests/test_self.py::TestRunTC::test_regression_recursive_current_dir\", \"tests/test_self.py::TestRunTC::test_reject_empty_indent_strings\", \"tests/test_self.py::TestRunTC::test_relative_imports[False]\", \"tests/test_self.py::TestRunTC::test_relative_imports[True]\", \"tests/test_self.py::TestRunTC::test_stdin[/n/fs/p-swe-bench/temp/pylint/tmpr6zb6auz/pylint-dev__pylint__2.13/tests/mymodule.py-mymodule-/n/fs/p-swe-bench/temp/pylint/tmpr6zb6auz/pylint-dev__pylint__2.13/tests/mymodule.py]\", \"tests/test_self.py::TestRunTC::test_stdin[mymodule.py-mymodule-mymodule.py]\", \"tests/test_self.py::TestRunTC::test_stdin_missing_modulename\", \"tests/test_self.py::TestRunTC::test_stdin_syntaxerror\", \"tests/test_self.py::TestRunTC::test_version\", \"tests/test_self.py::TestRunTC::test_w0704_ignored\", \"tests/test_self.py::TestRunTC::test_wrong_import_position_when_others_disabled\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_all\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_file\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_line_end\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_line_two\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_scope\", \"tests/test_similar.py::TestSimilarCodeChecker::test_duplicate_code_raw_strings_disable_scope_function\"]",
+  "environment_setup_commit": "3b2fbaec045697d53bdd4435e59dbfc2b286df4b",
+  "patch_files": [
+    "pylint/checkers/similar.py"
+  ],
+  "test_patch_files": [
+    "tests/regrtest_data/duplicate_code/raw_strings_all/third.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file/third.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_file_double/third.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_begin/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_disable_all/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_end/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_line_middle/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope/third.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/second.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope_double/third.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/first.py",
+    "tests/regrtest_data/duplicate_code/raw_strings_disable_scope_second_function/second.py",
+    "tests/test_self.py",
+    "tests/test_similar.py"
+  ],
+  "patch_diff_details": {
+    "pylint/checkers/similar.py": {
+      "diffs": [
+        {
+          "start_line_old": 384,
+          "end_line_old": 384,
+          "file_pos": 5,
+          "file_context_length": 31487,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/checkers/similar.py_copy_STREAM_TYPES.1",
+          "closest_snippet_line_distance": 276
+        }
+      ]
+    }
+  },
+  "vectors": 935,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.disable_next_",
+      "distance": 0.9537609815597534,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 1791,
+      "end_line": 1822,
+      "tokens": 246,
+      "context_length": 246
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pylint/pylint/constants.py_DELETED_MESSAGES_",
+      "distance": 0.9540250301361084,
+      "file_path": "pylint/constants.py",
+      "start_line": 87,
+      "end_line": 179,
+      "tokens": 1201,
+      "context_length": 1447
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pylint/pylint/extensions/empty_comment.py_CommentChecker_",
+      "distance": 0.9810487031936646,
+      "file_path": "pylint/extensions/empty_comment.py",
+      "start_line": 37,
+      "end_line": 64,
+      "tokens": 182,
+      "context_length": 1629
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker_StdlibChecker.msgs.1",
+      "distance": 0.9867858290672302,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 348,
+      "end_line": 464,
+      "tokens": 1195,
+      "context_length": 2824
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.error_mode.7",
+      "distance": 1.0121756792068481,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 807,
+      "end_line": 835,
+      "tokens": 258,
+      "context_length": 3082
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_80_SimilarChecker.__init__.2",
+      "distance": 1.027158260345459,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 729,
+      "end_line": 802,
+      "tokens": 481,
+      "context_length": 3563,
+      "file_pos": 5
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_STDLIB_CLASSES_IGNORE_ANCESTOR_STDLIB_CLASSES_IGNORE_ANCESTOR.1",
+      "distance": 1.048749566078186,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 114,
+      "end_line": 192,
+      "tokens": 510,
+      "context_length": 4073
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker_BadBuiltinChecker.options.1",
+      "distance": 1.0549288988113403,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 31,
+      "end_line": 57,
+      "tokens": 177,
+      "context_length": 4250
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_MSGS_MSGS.1",
+      "distance": 1.0570459365844727,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 97,
+      "end_line": 187,
+      "tokens": 788,
+      "context_length": 5038
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.list_messages_enabled_PyLinter.30",
+      "distance": 1.0659393072128296,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 837,
+      "end_line": 858,
+      "tokens": 212,
+      "context_length": 5250
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_ARGUMENTS_DEPRECATED_DECORATORS.1",
+      "distance": 1.0703233480453491,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 83,
+      "end_line": 128,
+      "tokens": 538,
+      "context_length": 5788
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_MSGS_report_similarities.4",
+      "distance": 1.0813424587249756,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 707,
+      "end_line": 726,
+      "tokens": 162,
+      "context_length": 5950,
+      "file_pos": 7
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_Commonality_Similar.__init__.self.linesets.1",
+      "distance": 1.0826985836029053,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 345,
+      "end_line": 371,
+      "tokens": 202,
+      "context_length": 6152,
+      "file_pos": 7
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_3_ImplicitBooleanessChecker.options.1",
+      "distance": 1.0833474397659302,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 3,
+      "end_line": 76,
+      "tokens": 516,
+      "context_length": 6668
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_dict_cond_",
+      "distance": 1.08564031124115,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 127,
+      "end_line": 155,
+      "tokens": 253,
+      "context_length": 6921
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicErrorChecker_BasicErrorChecker.msgs.1",
+      "distance": 1.0860438346862793,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 464,
+      "end_line": 572,
+      "tokens": 952,
+      "context_length": 7873
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker_ClassChecker._ignore_mixin.1.1",
+      "distance": 1.090592861175537,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 692,
+      "end_line": 787,
+      "tokens": 631,
+      "context_length": 8504
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker.visit_call_",
+      "distance": 1.0911799669265747,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 59,
+      "end_line": 74,
+      "tokens": 170,
+      "context_length": 8674
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker_TypeChecker.options.1",
+      "distance": 1.0932648181915283,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 783,
+      "end_line": 933,
+      "tokens": 1094,
+      "context_length": 9768
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pylint/pylint/checkers/misc.py_EncodingChecker_EncodingChecker.open.self._fixme_pattern.1",
+      "distance": 1.095459222793579,
+      "file_path": "pylint/checkers/misc.py",
+      "start_line": 77,
+      "end_line": 128,
+      "tokens": 314,
+      "context_length": 10082
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_FormatChecker.remove_pylint_option_from_lines_FormatChecker.is_line_length_check_activated.3.1",
+      "distance": 1.0971487760543823,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 694,
+      "end_line": 714,
+      "tokens": 192,
+      "context_length": 10274
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pylint/pylint/checkers/ellipsis_checker.py_EllipsisChecker.visit_const_",
+      "distance": 1.100193738937378,
+      "file_path": "pylint/checkers/ellipsis_checker.py",
+      "start_line": 28,
+      "end_line": 53,
+      "tokens": 230,
+      "context_length": 10504
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pylint/pylint/checkers/misc.py_EncodingChecker.process_tokens_",
+      "distance": 1.102638602256775,
+      "file_path": "pylint/checkers/misc.py",
+      "start_line": 155,
+      "end_line": 204,
+      "tokens": 346,
+      "context_length": 10850
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pylint/pylint/checkers/misc.py_re_ByIdManagedMessagesChecker._get_by_id_managed_msgs.1.1",
+      "distance": 1.1028552055358887,
+      "file_path": "pylint/checkers/misc.py",
+      "start_line": 30,
+      "end_line": 64,
+      "tokens": 223,
+      "context_length": 11073
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicChecker_BasicChecker.msgs.1",
+      "distance": 1.1043795347213745,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 941,
+      "end_line": 1083,
+      "tokens": 1328,
+      "context_length": 12401
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.__init___StdlibChecker._check_shallow_copy_environ.3.1.2",
+      "distance": 1.1045901775360107,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 466,
+      "end_line": 514,
+      "tokens": 518,
+      "context_length": 12919
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparison_placement.py_MisplacedComparisonConstantChecker.visit_compare_",
+      "distance": 1.1055009365081787,
+      "file_path": "pylint/extensions/comparison_placement.py",
+      "start_line": 56,
+      "end_line": 71,
+      "tokens": 155,
+      "context_length": 13074
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_METHODS_DEPRECATED_METHODS.1",
+      "distance": 1.1095054149627686,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 131,
+      "end_line": 270,
+      "tokens": 1034,
+      "context_length": 14108
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pylint/pylint/constants.py_platform_DELETED_MSGID_PREFIXES.1",
+      "distance": 1.1128625869750977,
+      "file_path": "pylint/constants.py",
+      "start_line": 3,
+      "end_line": 85,
+      "tokens": 625,
+      "context_length": 14733
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_redefined_argument_from_local_RefactoringChecker._check_redefined_argument_from_local.5.1.1",
+      "distance": 1.1199023723602295,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 606,
+      "end_line": 625,
+      "tokens": 153,
+      "context_length": 14886
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_useless_super_delegation_ClassChecker._check_useless_super_delegation.25.1",
+      "distance": 1.1199355125427246,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 1173,
+      "end_line": 1278,
+      "tokens": 760,
+      "context_length": 15646
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.leave_classdef_RefactoringChecker.visit_raise.1",
+      "distance": 1.1230673789978027,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 900,
+      "end_line": 910,
+      "tokens": 118,
+      "context_length": 15764
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_CLASSES_DEPRECATED_CLASSES.1",
+      "distance": 1.123694658279419,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 273,
+      "end_line": 315,
+      "tokens": 200,
+      "context_length": 15964
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pylint/pylint/extensions/empty_comment.py_1_is_line_commented.5.1",
+      "distance": 1.1246590614318848,
+      "file_path": "pylint/extensions/empty_comment.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 127,
+      "context_length": 16091
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_unused_private_functions_ClassChecker._check_unused_private_functions.1.4.4.7",
+      "distance": 1.125511646270752,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 881,
+      "end_line": 929,
+      "tokens": 360,
+      "context_length": 16451
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_collections__if_statement_is_always_returning.1.1",
+      "distance": 1.1265760660171509,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 4,
+      "end_line": 53,
+      "tokens": 359,
+      "context_length": 16810
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.leave_functiondef_RefactoringChecker.leave_functiondef.2",
+      "distance": 1.128354549407959,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 878,
+      "end_line": 898,
+      "tokens": 203,
+      "context_length": 17013
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.options_RefactoringChecker._is_bool_const.1.1",
+      "distance": 1.1285874843597412,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 434,
+      "end_line": 486,
+      "tokens": 386,
+      "context_length": 17399
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pylint/pylint/checkers/classes/class_checker.py_ClassChecker._check_consistent_mro_ClassChecker._check_consistent_mro.2.4.2",
+      "distance": 1.1288574934005737,
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "start_line": 816,
+      "end_line": 826,
+      "tokens": 117,
+      "context_length": 17516
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_MSGS_MSGS.1",
+      "distance": 1.128907561302185,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 413,
+      "end_line": 546,
+      "tokens": 1186,
+      "context_length": 18702
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicChecker._check_unreachable_BasicChecker._check_unreachable.3.2",
+      "distance": 1.1289210319519043,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 1478,
+      "end_line": 1492,
+      "tokens": 139,
+      "context_length": 18841
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.58_PyLinter._get_message_state_scope.5.1",
+      "distance": 1.1308016777038574,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 1427,
+      "end_line": 1445,
+      "tokens": 220,
+      "context_length": 19061
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_check_ModifiedIterationChecker._modified_iterating_check.3.1",
+      "distance": 1.1317813396453857,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 70,
+      "end_line": 86,
+      "tokens": 155,
+      "context_length": 19216
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_MisdesignChecker.visit_asyncfunctiondef_MisdesignChecker.leave_functiondef.8.1",
+      "distance": 1.1318635940551758,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 562,
+      "end_line": 596,
+      "tokens": 254,
+      "context_length": 19470
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pylint/pylint/checkers/spelling.py_CODE_FLANKED_IN_BACKTICK_REGEX__strip_code_flanked_in_backticks.3.1",
+      "distance": 1.1352579593658447,
+      "file_path": "pylint/checkers/spelling.py",
+      "start_line": 187,
+      "end_line": 202,
+      "tokens": 151,
+      "context_length": 19621
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.visit_unaryop_StdlibChecker.visit_functiondef.1.1",
+      "distance": 1.135685920715332,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 569,
+      "end_line": 590,
+      "tokens": 218,
+      "context_length": 19839
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pylint/pylint/checkers/unicode.py_UnicodeChecker_UnicodeChecker._is_unicode.1.1",
+      "distance": 1.1359363794326782,
+      "file_path": "pylint/checkers/unicode.py",
+      "start_line": 297,
+      "end_line": 380,
+      "tokens": 703,
+      "context_length": 20542
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.leave_module_RefactoringChecker.visit_while.1",
+      "distance": 1.1376762390136719,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 591,
+      "end_line": 604,
+      "tokens": 128,
+      "context_length": 20670
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pylint/pylint/extensions/overlapping_exceptions.py_4_",
+      "distance": 1.1380062103271484,
+      "file_path": "pylint/extensions/overlapping_exceptions.py",
+      "start_line": 6,
+      "end_line": 90,
+      "tokens": 608,
+      "context_length": 21278
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicErrorChecker.visit_classdef_BasicErrorChecker._too_many_starred_for_tuple.3.1",
+      "distance": 1.1403498649597168,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 574,
+      "end_line": 585,
+      "tokens": 120,
+      "context_length": 21398
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pylint/pylint/extensions/broad_try_clause.py_11_",
+      "distance": 1.1406396627426147,
+      "file_path": "pylint/extensions/broad_try_clause.py",
+      "start_line": 13,
+      "end_line": 80,
+      "tokens": 446,
+      "context_length": 21844
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pylint/pylint/utils/file_state.py_FileState.iter_spurious_suppression_messages_",
+      "distance": 1.1413192749023438,
+      "file_path": "pylint/utils/file_state.py",
+      "start_line": 150,
+      "end_line": 179,
+      "tokens": 247,
+      "context_length": 22091
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_boolop_RefactoringChecker._is_simple_assignment.1.1",
+      "distance": 1.141669511795044,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1351,
+      "end_line": 1371,
+      "tokens": 168,
+      "context_length": 22259
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pylint/pylint/extensions/comparetozero.py_CompareToZeroChecker.visit_compare_",
+      "distance": 1.144327163696289,
+      "file_path": "pylint/extensions/comparetozero.py",
+      "start_line": 54,
+      "end_line": 85,
+      "tokens": 310,
+      "context_length": 22569
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_SimilarChecker.get_map_data_SimilarChecker.reduce_map_data.10",
+      "distance": 1.146858811378479,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 865,
+      "end_line": 882,
+      "tokens": 164,
+      "context_length": 22733,
+      "file_pos": 24
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_FormatChecker.process_tokens.14_FormatChecker.process_tokens.17.1",
+      "distance": 1.1494834423065186,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 545,
+      "end_line": 565,
+      "tokens": 212,
+      "context_length": 22945
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_superfluous_else_RefactoringChecker._check_superfluous_else.3.3",
+      "distance": 1.1513711214065552,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 659,
+      "end_line": 674,
+      "tokens": 176,
+      "context_length": 23121
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pylint/pylint/checkers/utils.py_is_postponed_evaluation_enabled_is_class_subscriptable_pep585_with_postponed_evaluation_enabled.2.1",
+      "distance": 1.1525866985321045,
+      "file_path": "pylint/checkers/utils.py",
+      "start_line": 1390,
+      "end_line": 1406,
+      "tokens": 139,
+      "context_length": 23260
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pylint/pylint/checkers/spelling.py_SpellingChecker_SpellingChecker.options.1",
+      "distance": 1.1540040969848633,
+      "file_path": "pylint/checkers/spelling.py",
+      "start_line": 205,
+      "end_line": 290,
+      "tokens": 629,
+      "context_length": 23889
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._modified_iterating_list_cond_ModifiedIterationChecker._modified_iterating_list_cond.4.1",
+      "distance": 1.1545448303222656,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 114,
+      "end_line": 125,
+      "tokens": 120,
+      "context_length": 24009
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_MisdesignChecker_MisdesignChecker.__init__.self._stmts.1",
+      "distance": 1.1552248001098633,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 293,
+      "end_line": 428,
+      "tokens": 813,
+      "context_length": 24822
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_re_46",
+      "distance": 1.155521035194397,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 33,
+      "end_line": 113,
+      "tokens": 689,
+      "context_length": 25511
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pylint/pylint/extensions/docparams.py_DocstringParameterChecker.msgs_DocstringParameterChecker.msgs.1",
+      "distance": 1.1563581228256226,
+      "file_path": "pylint/extensions/docparams.py",
+      "start_line": 69,
+      "end_line": 153,
+      "tokens": 701,
+      "context_length": 26212
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_PassChecker_PassChecker.visit_pass.1.1",
+      "distance": 1.1580184698104858,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 2245,
+      "end_line": 2262,
+      "tokens": 138,
+      "context_length": 26350
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicChecker.visit_dict_BasicChecker.leave_tryfinally.2",
+      "distance": 1.1597468852996826,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 1455,
+      "end_line": 1476,
+      "tokens": 177,
+      "context_length": 26527
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_consider_using_in_RefactoringChecker._check_consider_using_in.17",
+      "distance": 1.1598446369171143,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1180,
+      "end_line": 1221,
+      "tokens": 365,
+      "context_length": 26892
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_ComparisonChecker_ComparisonChecker.msgs.1",
+      "distance": 1.1599369049072266,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 2287,
+      "end_line": 2337,
+      "tokens": 464,
+      "context_length": 27356
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pylint/pylint/lint/parallel.py__worker_check_single_file__worker_check_single_file.9.1",
+      "distance": 1.163530945777893,
+      "file_path": "pylint/lint/parallel.py",
+      "start_line": 71,
+      "end_line": 106,
+      "tokens": 288,
+      "context_length": 27644
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_unnecessary_dict_index_lookup_",
+      "distance": 1.1636409759521484,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1854,
+      "end_line": 1956,
+      "tokens": 868,
+      "context_length": 28512
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_if_RefactoringChecker.visit_if.8",
+      "distance": 1.1641252040863037,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 751,
+      "end_line": 768,
+      "tokens": 169,
+      "context_length": 28681
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pylint/pylint/checkers/unicode.py_UnicodeChecker._check_codec_UnicodeChecker._check_codec.2.3",
+      "distance": 1.165433645248413,
+      "file_path": "pylint/checkers/unicode.py",
+      "start_line": 459,
+      "end_line": 474,
+      "tokens": 137,
+      "context_length": 28818
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_chained_comparison.uses_RefactoringChecker._check_chained_comparison.6.4.2",
+      "distance": 1.1656702756881714,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1259,
+      "end_line": 1272,
+      "tokens": 158,
+      "context_length": 28976
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_env_function_StdlibChecker._check_env_function.7.1",
+      "distance": 1.1660609245300293,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 720,
+      "end_line": 757,
+      "tokens": 273,
+      "context_length": 29249
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py__emit_no_member.17__emit_no_member.23.1",
+      "distance": 1.1660943031311035,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 558,
+      "end_line": 579,
+      "tokens": 214,
+      "context_length": 29463
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_IterableChecker._check_iterable_",
+      "distance": 1.166166067123413,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 2043,
+      "end_line": 2122,
+      "tokens": 733,
+      "context_length": 30196
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pylint/pylint/testutils/functional/lint_module_output_update.py_LintModuleOutputUpdate._check_output_text_",
+      "distance": 1.1662269830703735,
+      "file_path": "pylint/testutils/functional/lint_module_output_update.py",
+      "start_line": 38,
+      "end_line": 55,
+      "tokens": 170,
+      "context_length": 30366
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_ComparisonChecker._check_singleton_comparison_ComparisonChecker._check_singleton_comparison.9",
+      "distance": 1.1664366722106934,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 2339,
+      "end_line": 2395,
+      "tokens": 459,
+      "context_length": 30825
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_sys_DEPRECATED_MODULES.1",
+      "distance": 1.1679235696792603,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 40,
+      "end_line": 81,
+      "tokens": 429,
+      "context_length": 31254
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_ImplicitBooleanessChecker.visit_call_ImplicitBooleanessChecker.visit_call.4.15.1",
+      "distance": 1.1684386730194092,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 78,
+      "end_line": 117,
+      "tokens": 395,
+      "context_length": 31649
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._has_exit_in_scope_RefactoringChecker._check_quit_exit_call.1.local_scope.3",
+      "distance": 1.1684714555740356,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1016,
+      "end_line": 1032,
+      "tokens": 162,
+      "context_length": 31811
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pylint/pylint/checkers/similar.py_copy_STREAM_TYPES.1",
+      "distance": 1.16920804977417,
+      "file_path": "pylint/checkers/similar.py",
+      "start_line": 44,
+      "end_line": 108,
+      "tokens": 398,
+      "context_length": 32209,
+      "file_pos": 28
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_for_RefactoringChecker.visit_excepthandler.1.1",
+      "distance": 1.1692450046539307,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 627,
+      "end_line": 642,
+      "tokens": 160,
+      "context_length": 32369
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_call_RefactoringChecker.visit_call.7",
+      "distance": 1.1693997383117676,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 996,
+      "end_line": 1014,
+      "tokens": 177,
+      "context_length": 32546
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pylint/pylint/extensions/code_style.py_CodeStyleChecker._check_ignore_assignment_expr_suggestion_",
+      "distance": 1.1694998741149902,
+      "file_path": "pylint/extensions/code_style.py",
+      "start_line": 275,
+      "end_line": 310,
+      "tokens": 283,
+      "context_length": 32829
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_consider_using_comprehension_constructor_RefactoringChecker._check_consider_using_comprehension_constructor.1.1.8.2",
+      "distance": 1.1709940433502197,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 933,
+      "end_line": 965,
+      "tokens": 302,
+      "context_length": 33131
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pylint/pylint/checkers/unicode.py_codecs_BIDI_UNICODE.1",
+      "distance": 1.1722681522369385,
+      "file_path": "pylint/checkers/unicode.py",
+      "start_line": 13,
+      "end_line": 51,
+      "tokens": 412,
+      "context_length": 33543
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_redundant_assert_StdlibChecker._check_datetime.3.1",
+      "distance": 1.1725797653198242,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 625,
+      "end_line": 650,
+      "tokens": 195,
+      "context_length": 33738
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pylint/pylint/checkers/modified_iterating_checker.py_ModifiedIterationChecker._is_node_expr_that_calls_attribute_name_ModifiedIterationChecker._is_node_assigns_subscript_name.1.1",
+      "distance": 1.1730966567993164,
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "start_line": 88,
+      "end_line": 112,
+      "tokens": 206,
+      "context_length": 33944
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_ComparisonChecker.visit_compare_ComparisonChecker.visit_compare.11.1",
+      "distance": 1.174323558807373,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 2500,
+      "end_line": 2529,
+      "tokens": 257,
+      "context_length": 34201
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicErrorChecker.visit_functiondef_BasicErrorChecker.visit_functiondef.12.1.1.1",
+      "distance": 1.1745636463165283,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 618,
+      "end_line": 662,
+      "tokens": 406,
+      "context_length": 34607
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/not_checker.py_astroid_NotChecker.skipped_classnames.1",
+      "distance": 1.174775242805481,
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "start_line": 5,
+      "end_line": 42,
+      "tokens": 292,
+      "context_length": 34899
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/not_checker.py_NotChecker.visit_unaryop_",
+      "distance": 1.1752588748931885,
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "start_line": 44,
+      "end_line": 84,
+      "tokens": 317,
+      "context_length": 35216
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pylint/pylint/message/message_id_store.py_MessageIdStore._raise_duplicate_symbol_MessageIdStore._raise_duplicate_msgid.5",
+      "distance": 1.1757049560546875,
+      "file_path": "pylint/message/message_id_store.py",
+      "start_line": 86,
+      "end_line": 105,
+      "tokens": 235,
+      "context_length": 35451
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/__init__.py__",
+      "distance": 1.1759064197540283,
+      "file_path": "pylint/pyreverse/__init__.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 35451
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_NamesConsumer._check_loop_finishes_via_except_NamesConsumer._check_loop_finishes_via_except.10.1",
+      "distance": 1.1764496564865112,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 794,
+      "end_line": 864,
+      "tokens": 548,
+      "context_length": 35999
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_consider_using_generator_RefactoringChecker._check_consider_using_generator.checked_call.2.3.inside_comp.3.2.1",
+      "distance": 1.1767560243606567,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 967,
+      "end_line": 994,
+      "tokens": 266,
+      "context_length": 36265
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pylint/pylint/checkers/ellipsis_checker.py_1_EllipsisChecker.msgs.1",
+      "distance": 1.1773831844329834,
+      "file_path": "pylint/checkers/ellipsis_checker.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 175,
+      "context_length": 36440
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicErrorChecker.visit_return_BasicErrorChecker.visit_unaryop.2.1",
+      "distance": 1.179945468902588,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 721,
+      "end_line": 758,
+      "tokens": 380,
+      "context_length": 36820
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker._is_ignored_function_TypeChecker._is_list_sort_method.1.1",
+      "distance": 1.1800498962402344,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 1193,
+      "end_line": 1210,
+      "tokens": 135,
+      "context_length": 36955
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_unnecessary_comprehension_RefactoringChecker._check_unnecessary_comprehension.3.6",
+      "distance": 1.1802407503128052,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1556,
+      "end_line": 1635,
+      "tokens": 589,
+      "context_length": 37544
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/pylint/pylint/extensions/redefined_variable_type.py_MultipleTypesChecker._check_and_add_messages_",
+      "distance": 1.1806488037109375,
+      "file_path": "pylint/extensions/redefined_variable_type.py",
+      "start_line": 65,
+      "end_line": 119,
+      "tokens": 452,
+      "context_length": 37996
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_12_21",
+      "distance": 1.1810390949249268,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 14,
+      "end_line": 28,
+      "tokens": 107,
+      "context_length": 38103
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/pylint/pylint/extensions/empty_comment.py_comment_part_of_string_comment_part_of_string.3.1",
+      "distance": 1.1821906566619873,
+      "file_path": "pylint/extensions/empty_comment.py",
+      "start_line": 23,
+      "end_line": 34,
+      "tokens": 111,
+      "context_length": 38214
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter._register_by_id_managed_msg_PyLinter.disable.3",
+      "distance": 1.1824253797531128,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 1760,
+      "end_line": 1789,
+      "tokens": 272,
+      "context_length": 38486
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker._check_superfluous_else_return_RefactoringChecker._type_and_name_are_equal.3.1",
+      "distance": 1.1829729080200195,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 676,
+      "end_line": 703,
+      "tokens": 283,
+      "context_length": 38769
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_collections_85.2.1",
+      "distance": 1.1830285787582397,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 72,
+      "end_line": 100,
+      "tokens": 167,
+      "context_length": 38936
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/pylint/pylint/extensions/_check_docs_utils.py_GoogleDocstring.has_returns_GoogleDocstring.exceptions.4.1",
+      "distance": 1.1831977367401123,
+      "file_path": "pylint/extensions/_check_docs_utils.py",
+      "start_line": 557,
+      "end_line": 652,
+      "tokens": 512,
+      "context_length": 39448
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/pylint/pylint/checkers/base.py_BasicErrorChecker._check_redefinition_BasicErrorChecker._check_redefinition.6.3.10",
+      "distance": 1.183335542678833,
+      "file_path": "pylint/checkers/base.py",
+      "start_line": 864,
+      "end_line": 938,
+      "tokens": 585,
+      "context_length": 40033
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/refactoring_checker.py_RefactoringChecker.visit_return_RefactoringChecker.visit_return.7",
+      "distance": 1.1835808753967285,
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "start_line": 1398,
+      "end_line": 1427,
+      "tokens": 259,
+      "context_length": 40292
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker.open_TypeChecker.visit_asyncfunctiondef.1",
+      "distance": 1.18364417552948,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 935,
+      "end_line": 965,
+      "tokens": 358,
+      "context_length": 40650
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.check_single_file_PyLinter.check_single_file_item.2.1",
+      "distance": 1.184365153312683,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 1083,
+      "end_line": 1099,
+      "tokens": 189,
+      "context_length": 40839
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_ImportsChecker_ImportsChecker.options.1",
+      "distance": 1.1844183206558228,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 304,
+      "end_line": 428,
+      "tokens": 794,
+      "context_length": 41633
+    }
+  ],
+  "files": [
+    {
+      "file_path": "pylint/lint/pylinter.py",
+      "position": 1,
+      "tokens": 14023,
+      "context_length": 14023
+    },
+    {
+      "file_path": "pylint/constants.py",
+      "position": 2,
+      "tokens": 1867,
+      "context_length": 15890
+    },
+    {
+      "file_path": "pylint/extensions/empty_comment.py",
+      "position": 3,
+      "tokens": 422,
+      "context_length": 16312
+    },
+    {
+      "file_path": "pylint/checkers/stdlib.py",
+      "position": 4,
+      "tokens": 6984,
+      "context_length": 23296
+    },
+    {
+      "file_path": "pylint/checkers/similar.py",
+      "position": 5,
+      "tokens": 8191,
+      "context_length": 31487
+    },
+    {
+      "file_path": "pylint/checkers/design_analysis.py",
+      "position": 6,
+      "tokens": 5306,
+      "context_length": 36793
+    },
+    {
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "position": 7,
+      "tokens": 691,
+      "context_length": 37484
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "position": 8,
+      "tokens": 1784,
+      "context_length": 39268
+    },
+    {
+      "file_path": "pylint/checkers/modified_iterating_checker.py",
+      "position": 9,
+      "tokens": 1269,
+      "context_length": 40537
+    },
+    {
+      "file_path": "pylint/checkers/base.py",
+      "position": 10,
+      "tokens": 22173,
+      "context_length": 62710
+    },
+    {
+      "file_path": "pylint/checkers/classes/class_checker.py",
+      "position": 11,
+      "tokens": 17221,
+      "context_length": 79931
+    },
+    {
+      "file_path": "pylint/checkers/typecheck.py",
+      "position": 12,
+      "tokens": 17507,
+      "context_length": 97438
+    },
+    {
+      "file_path": "pylint/checkers/misc.py",
+      "position": 13,
+      "tokens": 1756,
+      "context_length": 99194
+    },
+    {
+      "file_path": "pylint/checkers/format.py",
+      "position": 14,
+      "tokens": 7152,
+      "context_length": 106346
+    },
+    {
+      "file_path": "pylint/checkers/ellipsis_checker.py",
+      "position": 15,
+      "tokens": 398,
+      "context_length": 106744
+    },
+    {
+      "file_path": "pylint/extensions/comparison_placement.py",
+      "position": 16,
+      "tokens": 550,
+      "context_length": 107294
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/refactoring_checker.py",
+      "position": 17,
+      "tokens": 16592,
+      "context_length": 123886
+    },
+    {
+      "file_path": "pylint/checkers/variables.py",
+      "position": 18,
+      "tokens": 23269,
+      "context_length": 147155
+    },
+    {
+      "file_path": "pylint/checkers/spelling.py",
+      "position": 19,
+      "tokens": 3875,
+      "context_length": 151030
+    },
+    {
+      "file_path": "pylint/checkers/unicode.py",
+      "position": 20,
+      "tokens": 4310,
+      "context_length": 155340
+    },
+    {
+      "file_path": "pylint/extensions/overlapping_exceptions.py",
+      "position": 21,
+      "tokens": 655,
+      "context_length": 155995
+    },
+    {
+      "file_path": "pylint/extensions/broad_try_clause.py",
+      "position": 22,
+      "tokens": 669,
+      "context_length": 156664
+    },
+    {
+      "file_path": "pylint/utils/file_state.py",
+      "position": 23,
+      "tokens": 1456,
+      "context_length": 158120
+    },
+    {
+      "file_path": "pylint/extensions/comparetozero.py",
+      "position": 24,
+      "tokens": 766,
+      "context_length": 158886
+    },
+    {
+      "file_path": "pylint/checkers/utils.py",
+      "position": 25,
+      "tokens": 13687,
+      "context_length": 172573
+    },
+    {
+      "file_path": "pylint/extensions/docparams.py",
+      "position": 26,
+      "tokens": 5408,
+      "context_length": 177981
+    },
+    {
+      "file_path": "pylint/lint/parallel.py",
+      "position": 27,
+      "tokens": 1478,
+      "context_length": 179459
+    },
+    {
+      "file_path": "pylint/testutils/functional/lint_module_output_update.py",
+      "position": 28,
+      "tokens": 444,
+      "context_length": 179903
+    },
+    {
+      "file_path": "pylint/extensions/code_style.py",
+      "position": 29,
+      "tokens": 2509,
+      "context_length": 182412
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/not_checker.py",
+      "position": 30,
+      "tokens": 642,
+      "context_length": 183054
+    },
+    {
+      "file_path": "pylint/message/message_id_store.py",
+      "position": 31,
+      "tokens": 1306,
+      "context_length": 184360
+    },
+    {
+      "file_path": "pylint/pyreverse/__init__.py",
+      "position": 32,
+      "tokens": 54,
+      "context_length": 184414
+    },
+    {
+      "file_path": "pylint/extensions/redefined_variable_type.py",
+      "position": 33,
+      "tokens": 1057,
+      "context_length": 185471
+    },
+    {
+      "file_path": "pylint/extensions/_check_docs_utils.py",
+      "position": 34,
+      "tokens": 5779,
+      "context_length": 191250
+    },
+    {
+      "file_path": "pylint/checkers/imports.py",
+      "position": 35,
+      "tokens": 8738,
+      "context_length": 199988
+    }
+  ]
+}

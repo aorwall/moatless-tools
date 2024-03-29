@@ -1,0 +1,726 @@
+{
+  "instance_id": "astropy__astropy-13838",
+  "model_patch": "diff --git a/astropy/table/pprint.py b/astropy/table/pprint.py\nindex 671b589ca3..8e16cbefa1 100644\n--- a/astropy/table/pprint.py\n+++ b/astropy/table/pprint.py\n@@ -478,9 +478,15 @@ class TableFormatter:\n                 if trivial_multidims:\n                     return format_func(col_format, col[(idx,) + multidim0])\n                 else:\n-                    left = format_func(col_format, col[(idx,) + multidim0])\n-                    right = format_func(col_format, col[(idx,) + multidim1])\n-                    return f'{left} .. {right}'\n+                    # Check if the array is non-empty before attempting to format\n+                    if np.any(np.array(multidims) == 0):\n+                        # Handle 0-length array case, perhaps by returning a placeholder\n+                        return '<empty array>'\n+                    else:\n+                        # Existing logic for non-empty arrays\n+                        left = format_func(col_format, col[(idx,) + multidim0])\n+                        right = format_func(col_format, col[(idx,) + multidim1])\n+                        return f'{left} .. {right}'\n             else:\n                 return format_func(col_format, col[idx])\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/table/pprint.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "a6c712375ed38d422812e013566a34f928677acd",
+  "patch": "diff --git a/astropy/table/pprint.py b/astropy/table/pprint.py\n--- a/astropy/table/pprint.py\n+++ b/astropy/table/pprint.py\n@@ -392,7 +392,8 @@ def _pformat_col_iter(self, col, max_lines, show_name, show_unit, outs,\n         if multidims:\n             multidim0 = tuple(0 for n in multidims)\n             multidim1 = tuple(n - 1 for n in multidims)\n-            trivial_multidims = np.prod(multidims) == 1\n+            multidims_all_ones = np.prod(multidims) == 1\n+            multidims_has_zero = 0 in multidims\n \n         i_dashes = None\n         i_centers = []  # Line indexes where content should be centered\n@@ -475,8 +476,11 @@ def format_col_str(idx):\n                 # Prevents columns like Column(data=[[(1,)],[(2,)]], name='a')\n                 # with shape (n,1,...,1) from being printed as if there was\n                 # more than one element in a row\n-                if trivial_multidims:\n+                if multidims_all_ones:\n                     return format_func(col_format, col[(idx,) + multidim0])\n+                elif multidims_has_zero:\n+                    # Any zero dimension means there is no data to print\n+                    return \"\"\n                 else:\n                     left = format_func(col_format, col[(idx,) + multidim0])\n                     right = format_func(col_format, col[(idx,) + multidim1])\n",
+  "test_patch": "diff --git a/astropy/table/tests/test_pprint.py b/astropy/table/tests/test_pprint.py\n--- a/astropy/table/tests/test_pprint.py\n+++ b/astropy/table/tests/test_pprint.py\n@@ -972,3 +972,18 @@ def test_embedded_newline_tab():\n         r'   a b \\n c \\t \\n d',\n         r'   x            y\\n']\n     assert t.pformat_all() == exp\n+\n+\n+def test_multidims_with_zero_dim():\n+    \"\"\"Test of fix for #13836 when a zero-dim column is present\"\"\"\n+    t = Table()\n+    t[\"a\"] = [\"a\", \"b\"]\n+    t[\"b\"] = np.ones(shape=(2, 0, 1), dtype=np.float64)\n+    exp = [\n+        \" a        b      \",\n+        \"str1 float64[0,1]\",\n+        \"---- ------------\",\n+        \"   a             \",\n+        \"   b             \",\n+    ]\n+    assert t.pformat_all(show_dtype=True) == exp\n",
+  "problem_statement": "Printing tables doesn't work correctly with 0-length array cells\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check out our contributing guidelines,\r\nhttps://github.com/astropy/astropy/blob/main/CONTRIBUTING.md .\r\nPlease be sure to check out our code of conduct,\r\nhttps://github.com/astropy/astropy/blob/main/CODE_OF_CONDUCT.md . -->\r\n\r\n<!-- Please have a search on our GitHub repository to see if a similar\r\nissue has already been posted.\r\nIf a similar issue is closed, have a quick look to see if you are satisfied\r\nby the resolution.\r\nIf not please go ahead and open an issue! -->\r\n\r\n<!-- Please check that the development version still produces the same bug.\r\nYou can install development version with\r\npip install git+https://github.com/astropy/astropy\r\ncommand. -->\r\n\r\n### Description\r\n\r\nI have data in form of a list of dictionaries.\r\nEach dictionary contains some items with an integer value and some of these items set the length for 1 or more array values.\r\n\r\nI am creating a Table using the `rows` attribute and feeding to it the list of dictionaries.\r\n\r\nAs long as I create a table until the first event with data in the array fields the table gets printed correctly.\r\nIf I fill the table only with events with null array data (but the rest of the fields have something to show) I get an IndexError.\r\n\r\n### Expected behavior\r\n<!-- What did you expect to happen. -->\r\n\r\nThe table should print fine also when there are only \"bad\" events\r\n\r\n### Actual behavior\r\n<!-- What actually happened. -->\r\n<!-- Was the output confusing or poorly described? -->\r\n\r\nI get the following error Traceback\r\n\r\n```\r\n---------------------------------------------------------------------------\r\nIndexError                                Traceback (most recent call last)\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/IPython/core/formatters.py:707, in PlainTextFormatter.__call__(self, obj)\r\n    700 stream = StringIO()\r\n    701 printer = pretty.RepresentationPrinter(stream, self.verbose,\r\n    702     self.max_width, self.newline,\r\n    703     max_seq_length=self.max_seq_length,\r\n    704     singleton_pprinters=self.singleton_printers,\r\n    705     type_pprinters=self.type_printers,\r\n    706     deferred_pprinters=self.deferred_printers)\r\n--> 707 printer.pretty(obj)\r\n    708 printer.flush()\r\n    709 return stream.getvalue()\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/IPython/lib/pretty.py:410, in RepresentationPrinter.pretty(self, obj)\r\n    407                         return meth(obj, self, cycle)\r\n    408                 if cls is not object \\\r\n    409                         and callable(cls.__dict__.get('__repr__')):\r\n--> 410                     return _repr_pprint(obj, self, cycle)\r\n    412     return _default_pprint(obj, self, cycle)\r\n    413 finally:\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/IPython/lib/pretty.py:778, in _repr_pprint(obj, p, cycle)\r\n    776 \"\"\"A pprint that just redirects to the normal repr function.\"\"\"\r\n    777 # Find newlines and replace them with p.break_()\r\n--> 778 output = repr(obj)\r\n    779 lines = output.splitlines()\r\n    780 with p.group():\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/table.py:1534, in Table.__repr__(self)\r\n   1533 def __repr__(self):\r\n-> 1534     return self._base_repr_(html=False, max_width=None)\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/table.py:1516, in Table._base_repr_(self, html, descr_vals, max_width, tableid, show_dtype, max_lines, tableclass)\r\n   1513 if tableid is None:\r\n   1514     tableid = f'table{id(self)}'\r\n-> 1516 data_lines, outs = self.formatter._pformat_table(\r\n   1517     self, tableid=tableid, html=html, max_width=max_width,\r\n   1518     show_name=True, show_unit=None, show_dtype=show_dtype,\r\n   1519     max_lines=max_lines, tableclass=tableclass)\r\n   1521 out = descr + '\\n'.join(data_lines)\r\n   1523 return out\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:589, in TableFormatter._pformat_table(self, table, max_lines, max_width, show_name, show_unit, show_dtype, html, tableid, tableclass, align)\r\n    586 if col.info.name not in pprint_include_names:\r\n    587     continue\r\n--> 589 lines, outs = self._pformat_col(col, max_lines, show_name=show_name,\r\n    590                                 show_unit=show_unit, show_dtype=show_dtype,\r\n    591                                 align=align_)\r\n    592 if outs['show_length']:\r\n    593     lines = lines[:-1]\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:276, in TableFormatter._pformat_col(self, col, max_lines, show_name, show_unit, show_dtype, show_length, html, align)\r\n    268 col_strs_iter = self._pformat_col_iter(col, max_lines, show_name=show_name,\r\n    269                                        show_unit=show_unit,\r\n    270                                        show_dtype=show_dtype,\r\n    271                                        show_length=show_length,\r\n    272                                        outs=outs)\r\n    274 # Replace tab and newline with text representations so they display nicely.\r\n    275 # Newline in particular is a problem in a multicolumn table.\r\n--> 276 col_strs = [val.replace('\\t', '\\\\t').replace('\\n', '\\\\n') for val in col_strs_iter]\r\n    277 if len(col_strs) > 0:\r\n    278     col_width = max(len(x) for x in col_strs)\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:276, in <listcomp>(.0)\r\n    268 col_strs_iter = self._pformat_col_iter(col, max_lines, show_name=show_name,\r\n    269                                        show_unit=show_unit,\r\n    270                                        show_dtype=show_dtype,\r\n    271                                        show_length=show_length,\r\n    272                                        outs=outs)\r\n    274 # Replace tab and newline with text representations so they display nicely.\r\n    275 # Newline in particular is a problem in a multicolumn table.\r\n--> 276 col_strs = [val.replace('\\t', '\\\\t').replace('\\n', '\\\\n') for val in col_strs_iter]\r\n    277 if len(col_strs) > 0:\r\n    278     col_width = max(len(x) for x in col_strs)\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:493, in TableFormatter._pformat_col_iter(self, col, max_lines, show_name, show_unit, outs, show_dtype, show_length)\r\n    491 else:\r\n    492     try:\r\n--> 493         yield format_col_str(idx)\r\n    494     except ValueError:\r\n    495         raise ValueError(\r\n    496             'Unable to parse format string \"{}\" for entry \"{}\" '\r\n    497             'in column \"{}\"'.format(col_format, col[idx],\r\n    498                                     col.info.name))\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:481, in TableFormatter._pformat_col_iter.<locals>.format_col_str(idx)\r\n    479     return format_func(col_format, col[(idx,) + multidim0])\r\n    480 else:\r\n--> 481     left = format_func(col_format, col[(idx,) + multidim0])\r\n    482     right = format_func(col_format, col[(idx,) + multidim1])\r\n    483     return f'{left} .. {right}'\r\n\r\nFile astropy/table/_column_mixins.pyx:74, in astropy.table._column_mixins._ColumnGetitemShim.__getitem__()\r\n\r\nFile astropy/table/_column_mixins.pyx:57, in astropy.table._column_mixins.base_getitem()\r\n\r\nFile astropy/table/_column_mixins.pyx:69, in astropy.table._column_mixins.column_getitem()\r\n\r\nIndexError: index 0 is out of bounds for axis 1 with size 0\r\n---------------------------------------------------------------------------\r\nIndexError                                Traceback (most recent call last)\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/IPython/core/formatters.py:343, in BaseFormatter.__call__(self, obj)\r\n    341     method = get_real_method(obj, self.print_method)\r\n    342     if method is not None:\r\n--> 343         return method()\r\n    344     return None\r\n    345 else:\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/table.py:1526, in Table._repr_html_(self)\r\n   1525 def _repr_html_(self):\r\n-> 1526     out = self._base_repr_(html=True, max_width=-1,\r\n   1527                            tableclass=conf.default_notebook_table_class)\r\n   1528     # Wrap <table> in <div>. This follows the pattern in pandas and allows\r\n   1529     # table to be scrollable horizontally in VS Code notebook display.\r\n   1530     out = f'<div>{out}</div>'\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/table.py:1516, in Table._base_repr_(self, html, descr_vals, max_width, tableid, show_dtype, max_lines, tableclass)\r\n   1513 if tableid is None:\r\n   1514     tableid = f'table{id(self)}'\r\n-> 1516 data_lines, outs = self.formatter._pformat_table(\r\n   1517     self, tableid=tableid, html=html, max_width=max_width,\r\n   1518     show_name=True, show_unit=None, show_dtype=show_dtype,\r\n   1519     max_lines=max_lines, tableclass=tableclass)\r\n   1521 out = descr + '\\n'.join(data_lines)\r\n   1523 return out\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:589, in TableFormatter._pformat_table(self, table, max_lines, max_width, show_name, show_unit, show_dtype, html, tableid, tableclass, align)\r\n    586 if col.info.name not in pprint_include_names:\r\n    587     continue\r\n--> 589 lines, outs = self._pformat_col(col, max_lines, show_name=show_name,\r\n    590                                 show_unit=show_unit, show_dtype=show_dtype,\r\n    591                                 align=align_)\r\n    592 if outs['show_length']:\r\n    593     lines = lines[:-1]\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:276, in TableFormatter._pformat_col(self, col, max_lines, show_name, show_unit, show_dtype, show_length, html, align)\r\n    268 col_strs_iter = self._pformat_col_iter(col, max_lines, show_name=show_name,\r\n    269                                        show_unit=show_unit,\r\n    270                                        show_dtype=show_dtype,\r\n    271                                        show_length=show_length,\r\n    272                                        outs=outs)\r\n    274 # Replace tab and newline with text representations so they display nicely.\r\n    275 # Newline in particular is a problem in a multicolumn table.\r\n--> 276 col_strs = [val.replace('\\t', '\\\\t').replace('\\n', '\\\\n') for val in col_strs_iter]\r\n    277 if len(col_strs) > 0:\r\n    278     col_width = max(len(x) for x in col_strs)\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:276, in <listcomp>(.0)\r\n    268 col_strs_iter = self._pformat_col_iter(col, max_lines, show_name=show_name,\r\n    269                                        show_unit=show_unit,\r\n    270                                        show_dtype=show_dtype,\r\n    271                                        show_length=show_length,\r\n    272                                        outs=outs)\r\n    274 # Replace tab and newline with text representations so they display nicely.\r\n    275 # Newline in particular is a problem in a multicolumn table.\r\n--> 276 col_strs = [val.replace('\\t', '\\\\t').replace('\\n', '\\\\n') for val in col_strs_iter]\r\n    277 if len(col_strs) > 0:\r\n    278     col_width = max(len(x) for x in col_strs)\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:493, in TableFormatter._pformat_col_iter(self, col, max_lines, show_name, show_unit, outs, show_dtype, show_length)\r\n    491 else:\r\n    492     try:\r\n--> 493         yield format_col_str(idx)\r\n    494     except ValueError:\r\n    495         raise ValueError(\r\n    496             'Unable to parse format string \"{}\" for entry \"{}\" '\r\n    497             'in column \"{}\"'.format(col_format, col[idx],\r\n    498                                     col.info.name))\r\n\r\nFile ~/Applications/mambaforge/envs/swgo/lib/python3.9/site-packages/astropy/table/pprint.py:481, in TableFormatter._pformat_col_iter.<locals>.format_col_str(idx)\r\n    479     return format_func(col_format, col[(idx,) + multidim0])\r\n    480 else:\r\n--> 481     left = format_func(col_format, col[(idx,) + multidim0])\r\n    482     right = format_func(col_format, col[(idx,) + multidim1])\r\n    483     return f'{left} .. {right}'\r\n\r\nFile astropy/table/_column_mixins.pyx:74, in astropy.table._column_mixins._ColumnGetitemShim.__getitem__()\r\n\r\nFile astropy/table/_column_mixins.pyx:57, in astropy.table._column_mixins.base_getitem()\r\n\r\nFile astropy/table/_column_mixins.pyx:69, in astropy.table._column_mixins.column_getitem()\r\n\r\nIndexError: index 0 is out of bounds for axis 1 with size 0\r\n\r\n```\r\n\r\n### Steps to Reproduce\r\n<!-- Ideally a code example could be provided so we can run it ourselves. -->\r\n<!-- If you are pasting code, use triple backticks (```) around\r\nyour code snippet. -->\r\n<!-- If necessary, sanitize your screen output to be pasted so you do not\r\nreveal secrets like tokens and passwords. -->\r\n\r\nThis is an example dataset: field \"B\" set the length of field \"C\", so the first 2 events have an empty array in \"C\"\r\n```\r\nevents = [{\"A\":0,\"B\":0, \"C\":np.array([], dtype=np.uint64)},\r\n          {\"A\":1,\"B\":0, \"C\":np.array([], dtype=np.uint64)},\r\n          {\"A\":2,\"B\":2, \"C\":np.array([0,1], dtype=np.uint64)}]\r\n```\r\nShowing just the first event prints the column names as a column,\r\n<img width=\"196\" alt=\"image\" src=\"https://user-images.githubusercontent.com/17836610/195900814-50554a2b-8479-418c-b643-1c70018f5c0d.png\">\r\n\r\nPrinting the first 2 throws the Traceback above\r\n`QTable(rows=events[:2])`\r\n\r\nPlotting all 3 events works\r\n\r\n<img width=\"177\" alt=\"image\" src=\"https://user-images.githubusercontent.com/17836610/195901501-ba13445c-880e-4797-8619-d564c5e82de3.png\">\r\n\r\n\r\n\r\n### System Details\r\n<!-- Even if you do not think this is necessary, it is useful information for the maintainers.\r\nPlease run the following snippet and paste the output below:\r\nimport platform; print(platform.platform())\r\nimport sys; print(\"Python\", sys.version)\r\nimport numpy; print(\"Numpy\", numpy.__version__)\r\nimport erfa; print(\"pyerfa\", erfa.__version__)\r\nimport astropy; print(\"astropy\", astropy.__version__)\r\nimport scipy; print(\"Scipy\", scipy.__version__)\r\nimport matplotlib; print(\"Matplotlib\", matplotlib.__version__)\r\n-->\r\nmacOS-11.7-x86_64-i386-64bit\r\nPython 3.9.13 | packaged by conda-forge | (main, May 27 2022, 17:00:52) \r\n[Clang 13.0.1 ]\r\nNumpy 1.23.3\r\npyerfa 2.0.0.1\r\nastropy 5.1\r\nScipy 1.9.1\r\nMatplotlib 3.6.0\n",
+  "hints_text": "The root cause of this is that astropy delegates to numpy to convert a list of values into a numpy array. Notice the differences in output `dtype` here:\r\n```\r\nIn [25]: np.array([[], []])\r\nOut[25]: array([], shape=(2, 0), dtype=float64)\r\n\r\nIn [26]: np.array([[], [], [1, 2]])\r\nOut[26]: array([list([]), list([]), list([1, 2])], dtype=object)\r\n```\r\nIn your example you are expecting an `object` array of Python `lists` in both cases, but making this happen is not entirely practical since we rely on numpy for fast and general conversion of inputs.\r\n\r\nThe fact that a `Column` with a shape of `(2,0)` fails to print is indeed a bug, but for your use case it is likely not the real problem. In your examples if you ask for the `.info` attribute you will see this reflected.\r\n\r\nAs a workaround, a reliable way to get a true object array is something like:\r\n```\r\nt = Table()\r\ncol = [[], []]\r\nt[\"c\"] = np.empty(len(col), dtype=object)\r\nt[\"c\"][:] = [[], []]\r\nprint(t)\r\n c \r\n---\r\n []\r\n []\r\n```\r\n",
+  "created_at": "2022-10-15T11:03:12Z",
+  "version": "5.0",
+  "FAIL_TO_PASS": "[\"astropy/table/tests/test_pprint.py::test_multidims_with_zero_dim\"]",
+  "PASS_TO_PASS": "[\"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[value1-pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[value1-pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[value2-pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[value2-pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[z-pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_add_remove[z-pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_basic[pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_basic[pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_copy\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_output\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_output_globs\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_remove[pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_remove[pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_rename[pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_rename[pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_serialization\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_setting[value1-pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_setting[value1-pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_setting[z-pprint_exclude_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_setting[z-pprint_include_names]\", \"astropy/table/tests/test_pprint.py::TestColumnsShowHide::test_slice\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_alignment[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_alignment[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_callable[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_callable[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_multiD[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_multiD[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_not_str[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_not_str[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_wrong_number_args[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_func_wrong_number_args[True]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_with_threshold[False]\", \"astropy/table/tests/test_pprint.py::TestFormat::test_column_format_with_threshold[True]\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_callable\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_func\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_func_multiD\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_func_with_special_masked\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_func_wrong_number_args\", \"astropy/table/tests/test_pprint.py::TestFormatWithMaskedElements::test_column_format_with_threshold_masked_table\", \"astropy/table/tests/test_pprint.py::TestMultiD::test_fake_multidim[False]\", \"astropy/table/tests/test_pprint.py::TestMultiD::test_fake_multidim[True]\", \"astropy/table/tests/test_pprint.py::TestMultiD::test_multidim[False]\", \"astropy/table/tests/test_pprint.py::TestMultiD::test_multidim[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip1[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip1[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip2[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip2[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip3[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip3[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip4[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_clip4[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_empty_table[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_empty_table[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format0[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format0[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format1[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format1[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format2[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format2[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format3[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format3[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format4[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_format4[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_noclip[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_noclip[True]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_pformat_all[False]\", \"astropy/table/tests/test_pprint.py::TestPprint::test_pformat_all[True]\", \"astropy/table/tests/test_pprint.py::test_align\", \"astropy/table/tests/test_pprint.py::test_auto_format_func\", \"astropy/table/tests/test_pprint.py::test_decode_replace\", \"astropy/table/tests/test_pprint.py::test_embedded_newline_tab\", \"astropy/table/tests/test_pprint.py::test_html\", \"astropy/table/tests/test_pprint.py::test_html_escaping\", \"astropy/table/tests/test_pprint.py::test_pprint_nameless_col\", \"astropy/table/tests/test_pprint.py::test_pprint_npfloat32\", \"astropy/table/tests/test_pprint.py::test_pprint_py3_bytes\", \"astropy/table/tests/test_pprint.py::test_pprint_structured\", \"astropy/table/tests/test_pprint.py::test_pprint_structured_with_format\"]",
+  "environment_setup_commit": "cdf311e0714e611d48b0a31eb1f0e2cbffab7f23",
+  "patch_files": [
+    "astropy/table/pprint.py"
+  ],
+  "test_patch_files": [
+    "astropy/table/tests/test_pprint.py"
+  ],
+  "patch_diff_details": {
+    "astropy/table/pprint.py": {
+      "diffs": [
+        {
+          "start_line_old": 395,
+          "end_line_old": 395,
+          "file_pos": 1,
+          "file_context_length": 6312,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._more_tabcol_TableFormatter._more_tabcol.showlines.1",
+          "closest_snippet_line_distance": 260
+        },
+        {
+          "start_line_old": 478,
+          "end_line_old": 478,
+          "file_pos": 1,
+          "file_context_length": 6312,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._more_tabcol.23_",
+          "closest_snippet_line_distance": 232,
+          "pos": 3,
+          "context_length": 1338
+        }
+      ]
+    }
+  },
+  "vectors": 4544,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._more_tabcol.23_",
+      "distance": 0.8233552575111389,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 710,
+      "end_line": 772,
+      "tokens": 507,
+      "context_length": 507,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_itertools___doctest_requires__.1",
+      "distance": 0.8588104844093323,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2,
+      "end_line": 74,
+      "tokens": 638,
+      "context_length": 1145
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._pformat_col_iter.format_col_str_TableFormatter._pformat_col_iter.format_col_str.1.5.1.1",
+      "distance": 0.8909968137741089,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 473,
+      "end_line": 485,
+      "tokens": 193,
+      "context_length": 1338,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._parse_tabledata_Table._parse_tabledata.invalid.26.1",
+      "distance": 0.9032483100891113,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2557,
+      "end_line": 2671,
+      "tokens": 915,
+      "context_length": 2253
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._pformat_col_iter.50_TableFormatter._pformat_col_iter.55",
+      "distance": 0.9050338268280029,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 487,
+      "end_line": 503,
+      "tokens": 160,
+      "context_length": 2413,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._pformat_col_iter.41_TableFormatter._pformat_col_iter.48.5.indices.1",
+      "distance": 0.9065144062042236,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 452,
+      "end_line": 471,
+      "tokens": 256,
+      "context_length": 2669,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._pformat_col.10_TableFormatter._pformat_col.12.1",
+      "distance": 0.916132390499115,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 280,
+      "end_line": 345,
+      "tokens": 715,
+      "context_length": 3384,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_ASCII_DEFAULT_WIDTHS_91",
+      "distance": 0.9226921200752258,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 76,
+      "end_line": 126,
+      "tokens": 753,
+      "context_length": 4137
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/examples/template/example-template.py_plt_",
+      "distance": 0.9229146242141724,
+      "file_path": "examples/template/example-template.py",
+      "start_line": 24,
+      "end_line": 101,
+      "tokens": 553,
+      "context_length": 4690
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/constants/constant.py_ConstantMeta.__new___ConstantMeta.__new__",
+      "distance": 0.9245465993881226,
+      "file_path": "astropy/constants/constant.py",
+      "start_line": 33,
+      "end_line": 74,
+      "tokens": 379,
+      "context_length": 5069
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.from_pandas.9_Table.info.1",
+      "distance": 0.9289841055870056,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3857,
+      "end_line": 3905,
+      "tokens": 495,
+      "context_length": 5564
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/qdp.py_QDP_QDP.1",
+      "distance": 0.9319369792938232,
+      "file_path": "astropy/io/ascii/qdp.py",
+      "start_line": 519,
+      "end_line": 609,
+      "tokens": 1053,
+      "context_length": 6617
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._pformat_table.outwidth_TableFormatter._pformat_table.28.1",
+      "distance": 0.9369603395462036,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 604,
+      "end_line": 653,
+      "tokens": 467,
+      "context_length": 7084,
+      "file_pos": 7
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/examples/io/fits-tables.py_6_",
+      "distance": 0.9380369782447815,
+      "file_path": "examples/io/fits-tables.py",
+      "start_line": 27,
+      "end_line": 64,
+      "tokens": 196,
+      "context_length": 7280
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/table/jsviewer.py_conf_DEFAULT_CSS_NB.1",
+      "distance": 0.9454748034477234,
+      "file_path": "astropy/table/jsviewer.py",
+      "start_line": 30,
+      "end_line": 105,
+      "tokens": 623,
+      "context_length": 7903
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py__guess.15__guess.26.3.2.5.7",
+      "distance": 0.9460651874542236,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 489,
+      "end_line": 561,
+      "tokens": 771,
+      "context_length": 8674
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/table/table.py__pprint_docs_descr.4.1",
+      "distance": 0.9505293965339661,
+      "file_path": "astropy/table/table.py",
+      "start_line": 76,
+      "end_line": 173,
+      "tokens": 713,
+      "context_length": 9387
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table._base_repr__Table._base_repr_.7.1",
+      "distance": 0.9516770243644714,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1501,
+      "end_line": 1527,
+      "tokens": 232,
+      "context_length": 9619
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/table/__init__.py__config___all__.1",
+      "distance": 0.9551680088043213,
+      "file_path": "astropy/table/__init__.py",
+      "start_line": 3,
+      "end_line": 15,
+      "tokens": 188,
+      "context_length": 9807
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/table/table_helpers.py_string_TimingTables.__init__.self.bool_mask.1",
+      "distance": 0.9570223093032837,
+      "file_path": "astropy/table/table_helpers.py",
+      "start_line": 9,
+      "end_line": 55,
+      "tokens": 421,
+      "context_length": 10228
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/table/scripts/showtable.py_argparse_showtable.8.3.1",
+      "distance": 0.9572080373764038,
+      "file_path": "astropy/table/scripts/showtable.py",
+      "start_line": 45,
+      "end_line": 89,
+      "tokens": 326,
+      "context_length": 10554
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table.parse_Table.parse.15.2.3.4.1",
+      "distance": 0.9593992233276367,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2403,
+      "end_line": 2500,
+      "tokens": 782,
+      "context_length": 11336
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/table/__init__.py_conf_",
+      "distance": 0.9597368240356445,
+      "file_path": "astropy/table/__init__.py",
+      "start_line": 48,
+      "end_line": 81,
+      "tokens": 324,
+      "context_length": 11660
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_TableHDU._get_tbdata_TableHDU._get_tbdata.16.1",
+      "distance": 0.9597511291503906,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 752,
+      "end_line": 782,
+      "tokens": 312,
+      "context_length": 11972
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_copy_61",
+      "distance": 0.9620656967163086,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 3,
+      "end_line": 75,
+      "tokens": 758,
+      "context_length": 12730
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py_collections__GUESS.1",
+      "distance": 0.9637637138366699,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 12,
+      "end_line": 37,
+      "tokens": 157,
+      "context_length": 12887
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._parse_binary_Table._parse_binary.12.1",
+      "distance": 0.9678508639335632,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2727,
+      "end_line": 2790,
+      "tokens": 494,
+      "context_length": 13381
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/table/scripts/showtable.py_main_",
+      "distance": 0.978069543838501,
+      "file_path": "astropy/table/scripts/showtable.py",
+      "start_line": 92,
+      "end_line": 161,
+      "tokens": 691,
+      "context_length": 14072
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table.parse.16_Table.parse.19.1",
+      "distance": 0.978256344795227,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2502,
+      "end_line": 2555,
+      "tokens": 493,
+      "context_length": 14565
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_Table._write_tabledata_Table._write_tabledata.3.2.5.8.5",
+      "distance": 0.9819389581680298,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 2875,
+      "end_line": 2922,
+      "tokens": 403,
+      "context_length": 14968
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/table/row.py_Row.meta_",
+      "distance": 0.9859039187431335,
+      "file_path": "astropy/table/row.py",
+      "start_line": 142,
+      "end_line": 187,
+      "tokens": 306,
+      "context_length": 15274
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.__getitem___Table.__getitem__.1.7.1",
+      "distance": 0.988577663898468,
+      "file_path": "astropy/table/table.py",
+      "start_line": 1876,
+      "end_line": 1904,
+      "tokens": 342,
+      "context_length": 15616
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_base64__resize.5.1",
+      "distance": 0.9934675097465515,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 5,
+      "end_line": 66,
+      "tokens": 526,
+      "context_length": 16142
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._tdump_file_format_BinTableHDU._tdump_file_format.1",
+      "distance": 0.99430251121521,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1000,
+      "end_line": 1051,
+      "tokens": 676,
+      "context_length": 16818
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.__len___Table.__len__.5.2.4.1",
+      "distance": 0.9967520236968994,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2036,
+      "end_line": 2049,
+      "tokens": 144,
+      "context_length": 16962
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/table/pprint.py_TableFormatter._more_tabcol_TableFormatter._more_tabcol.showlines.1",
+      "distance": 0.9995340704917908,
+      "file_path": "astropy/table/pprint.py",
+      "start_line": 655,
+      "end_line": 709,
+      "tokens": 460,
+      "context_length": 17422,
+      "file_pos": 15
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._writedata_by_row_BinTableHDU._writedata_by_row.5.1.5.5",
+      "distance": 1.0053470134735107,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 974,
+      "end_line": 998,
+      "tokens": 241,
+      "context_length": 17663
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/io/fits/diff.py_TableDataDiff._report_TableDataDiff._report.13",
+      "distance": 1.0063660144805908,
+      "file_path": "astropy/io/fits/diff.py",
+      "start_line": 1399,
+      "end_line": 1450,
+      "tokens": 534,
+      "context_length": 18197
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.insert_row.10_Table._replace_cols.self.columns.1",
+      "distance": 1.008946418762207,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3041,
+      "end_line": 3090,
+      "tokens": 451,
+      "context_length": 18648
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.add_columns.2_Table.add_columns.5.1",
+      "distance": 1.0092146396636963,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2307,
+      "end_line": 2323,
+      "tokens": 178,
+      "context_length": 18826
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/table/pandas.py_6_",
+      "distance": 1.0096510648727417,
+      "file_path": "astropy/table/pandas.py",
+      "start_line": 10,
+      "end_line": 32,
+      "tokens": 126,
+      "context_length": 18952
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._dump_data.8_BinTableHDU._dump_data.9.1",
+      "distance": 1.0106327533721924,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1237,
+      "end_line": 1277,
+      "tokens": 366,
+      "context_length": 19318
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/__init__.py_connect_",
+      "distance": 1.0113167762756348,
+      "file_path": "astropy/io/ascii/__init__.py",
+      "start_line": 7,
+      "end_line": 28,
+      "tokens": 279,
+      "context_length": 19597
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.add_column.2_Table.add_column.18.move_names.2.1",
+      "distance": 1.011705756187439,
+      "file_path": "astropy/table/table.py",
+      "start_line": 2167,
+      "end_line": 2220,
+      "tokens": 558,
+      "context_length": 20155
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_E13_E13.default_args.1",
+      "distance": 1.0121759176254272,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 1309,
+      "end_line": 1348,
+      "tokens": 436,
+      "context_length": 20591
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_Table.to_pandas.tbl_Table.to_pandas.14.1",
+      "distance": 1.0141347646713257,
+      "file_path": "astropy/table/table.py",
+      "start_line": 3714,
+      "end_line": 3768,
+      "tokens": 506,
+      "context_length": 21097
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/table/table.py_TableColumns.__repr___TableColumns._rename_column.10",
+      "distance": 1.0153746604919434,
+      "file_path": "astropy/table/table.py",
+      "start_line": 274,
+      "end_line": 295,
+      "tokens": 200,
+      "context_length": 21297
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/table/column.py_itertools__comparison_functions.1",
+      "distance": 1.017370343208313,
+      "file_path": "astropy/table/column.py",
+      "start_line": 3,
+      "end_line": 53,
+      "tokens": 388,
+      "context_length": 21685
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/cds.py_Cds_Cds.1",
+      "distance": 1.0178444385528564,
+      "file_path": "astropy/io/ascii/cds.py",
+      "start_line": 194,
+      "end_line": 298,
+      "tokens": 1129,
+      "context_length": 22814
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/wcs/docstrings.py_datfix_extrema.1",
+      "distance": 1.0180199146270752,
+      "file_path": "astropy/wcs/docstrings.py",
+      "start_line": 938,
+      "end_line": 1043,
+      "tokens": 728,
+      "context_length": 23542
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/latex.py_Latex_Latex.1",
+      "distance": 1.0186853408813477,
+      "file_path": "astropy/io/ascii/latex.py",
+      "start_line": 197,
+      "end_line": 303,
+      "tokens": 1029,
+      "context_length": 24571
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitsrec.py_FITS_record.__len___FITS_record._get_index.3.1",
+      "distance": 1.0196678638458252,
+      "file_path": "astropy/io/fits/fitsrec.py",
+      "start_line": 93,
+      "end_line": 137,
+      "tokens": 262,
+      "context_length": 24833
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/table/pprint.py",
+      "position": 1,
+      "tokens": 6312,
+      "context_length": 6312
+    },
+    {
+      "file_path": "astropy/table/table.py",
+      "position": 2,
+      "tokens": 32840,
+      "context_length": 39152
+    },
+    {
+      "file_path": "astropy/io/votable/tree.py",
+      "position": 3,
+      "tokens": 28974,
+      "context_length": 68126
+    },
+    {
+      "file_path": "astropy/io/fits/column.py",
+      "position": 4,
+      "tokens": 22337,
+      "context_length": 90463
+    },
+    {
+      "file_path": "examples/template/example-template.py",
+      "position": 5,
+      "tokens": 681,
+      "context_length": 91144
+    },
+    {
+      "file_path": "astropy/constants/constant.py",
+      "position": 6,
+      "tokens": 1911,
+      "context_length": 93055
+    },
+    {
+      "file_path": "astropy/io/ascii/qdp.py",
+      "position": 7,
+      "tokens": 5047,
+      "context_length": 98102
+    },
+    {
+      "file_path": "examples/io/fits-tables.py",
+      "position": 8,
+      "tokens": 380,
+      "context_length": 98482
+    },
+    {
+      "file_path": "astropy/table/jsviewer.py",
+      "position": 9,
+      "tokens": 1610,
+      "context_length": 100092
+    },
+    {
+      "file_path": "astropy/io/ascii/ui.py",
+      "position": 10,
+      "tokens": 7866,
+      "context_length": 107958
+    },
+    {
+      "file_path": "astropy/table/__init__.py",
+      "position": 11,
+      "tokens": 827,
+      "context_length": 108785
+    },
+    {
+      "file_path": "astropy/table/table_helpers.py",
+      "position": 12,
+      "tokens": 1555,
+      "context_length": 110340
+    },
+    {
+      "file_path": "astropy/table/scripts/showtable.py",
+      "position": 13,
+      "tokens": 1319,
+      "context_length": 111659
+    },
+    {
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "position": 14,
+      "tokens": 13102,
+      "context_length": 124761
+    },
+    {
+      "file_path": "astropy/table/row.py",
+      "position": 15,
+      "tokens": 1385,
+      "context_length": 126146
+    },
+    {
+      "file_path": "astropy/io/fits/diff.py",
+      "position": 16,
+      "tokens": 12907,
+      "context_length": 139053
+    },
+    {
+      "file_path": "astropy/table/pandas.py",
+      "position": 17,
+      "tokens": 813,
+      "context_length": 139866
+    },
+    {
+      "file_path": "astropy/io/ascii/__init__.py",
+      "position": 18,
+      "tokens": 315,
+      "context_length": 140181
+    },
+    {
+      "file_path": "astropy/io/votable/exceptions.py",
+      "position": 19,
+      "tokens": 13324,
+      "context_length": 153505
+    },
+    {
+      "file_path": "astropy/table/column.py",
+      "position": 20,
+      "tokens": 14654,
+      "context_length": 168159
+    },
+    {
+      "file_path": "astropy/io/ascii/cds.py",
+      "position": 21,
+      "tokens": 3079,
+      "context_length": 171238
+    },
+    {
+      "file_path": "astropy/wcs/docstrings.py",
+      "position": 22,
+      "tokens": 21453,
+      "context_length": 192691
+    },
+    {
+      "file_path": "astropy/io/ascii/latex.py",
+      "position": 23,
+      "tokens": 3986,
+      "context_length": 196677
+    },
+    {
+      "file_path": "astropy/io/fits/fitsrec.py",
+      "position": 24,
+      "tokens": 11842,
+      "context_length": 208519
+    }
+  ]
+}

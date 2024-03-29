@@ -1,0 +1,2870 @@
+{
+  "instance_id": "django__django-11239",
+  "model_patch": "diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgresql/client.py\nindex cf4df76882..3601df8280 100644\n--- a/django/db/backends/postgresql/client.py\n+++ b/django/db/backends/postgresql/client.py\n@@ -17,6 +17,10 @@ class DatabaseClient(BaseDatabaseClient):\n         dbname = conn_params.get('database', '')\n         user = conn_params.get('user', '')\n         passwd = conn_params.get('password', '')\n+        sslmode = conn_params.get('sslmode', '')\n+        sslrootcert = conn_params.get('sslrootcert', '')\n+        sslcert = conn_params.get('sslcert', '')\n+        sslkey = conn_params.get('sslkey', '')\n \n         if user:\n             args += ['-U', user]\n@@ -24,6 +28,14 @@ class DatabaseClient(BaseDatabaseClient):\n             args += ['-h', host]\n         if port:\n             args += ['-p', str(port)]\n+        if sslmode:\n+            args += ['--set=sslmode=' + sslmode]\n+        if sslrootcert:\n+            args += ['--set=sslrootcert=' + sslrootcert]\n+        if sslcert:\n+            args += ['--set=sslcert=' + sslcert]\n+        if sslkey:\n+            args += ['--set=sslkey=' + sslkey]\n         args += [dbname]\n \n         sigint_handler = signal.getsignal(signal.SIGINT)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/db/backends/postgresql/client.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "d87bd29c4f8dfcdf3f4a4eb8340e6770a2416fe3",
+  "patch": "diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgresql/client.py\n--- a/django/db/backends/postgresql/client.py\n+++ b/django/db/backends/postgresql/client.py\n@@ -17,6 +17,10 @@ def runshell_db(cls, conn_params):\n         dbname = conn_params.get('database', '')\n         user = conn_params.get('user', '')\n         passwd = conn_params.get('password', '')\n+        sslmode = conn_params.get('sslmode', '')\n+        sslrootcert = conn_params.get('sslrootcert', '')\n+        sslcert = conn_params.get('sslcert', '')\n+        sslkey = conn_params.get('sslkey', '')\n \n         if user:\n             args += ['-U', user]\n@@ -30,6 +34,14 @@ def runshell_db(cls, conn_params):\n         subprocess_env = os.environ.copy()\n         if passwd:\n             subprocess_env['PGPASSWORD'] = str(passwd)\n+        if sslmode:\n+            subprocess_env['PGSSLMODE'] = str(sslmode)\n+        if sslrootcert:\n+            subprocess_env['PGSSLROOTCERT'] = str(sslrootcert)\n+        if sslcert:\n+            subprocess_env['PGSSLCERT'] = str(sslcert)\n+        if sslkey:\n+            subprocess_env['PGSSLKEY'] = str(sslkey)\n         try:\n             # Allow SIGINT to pass to psql to abort queries.\n             signal.signal(signal.SIGINT, signal.SIG_IGN)\n",
+  "test_patch": "diff --git a/tests/dbshell/test_postgresql.py b/tests/dbshell/test_postgresql.py\n--- a/tests/dbshell/test_postgresql.py\n+++ b/tests/dbshell/test_postgresql.py\n@@ -14,15 +14,16 @@ def _run_it(self, dbinfo):\n         That function invokes the runshell command, while mocking\n         subprocess.run(). It returns a 2-tuple with:\n         - The command line list\n-        - The the value of the PGPASSWORD environment variable, or None.\n+        - The dictionary of PG* environment variables, or {}.\n         \"\"\"\n         def _mock_subprocess_run(*args, env=os.environ, **kwargs):\n             self.subprocess_args = list(*args)\n-            self.pgpassword = env.get('PGPASSWORD')\n+            # PostgreSQL environment variables.\n+            self.pg_env = {key: env[key] for key in env if key.startswith('PG')}\n             return subprocess.CompletedProcess(self.subprocess_args, 0)\n         with mock.patch('subprocess.run', new=_mock_subprocess_run):\n             DatabaseClient.runshell_db(dbinfo)\n-        return self.subprocess_args, self.pgpassword\n+        return self.subprocess_args, self.pg_env\n \n     def test_basic(self):\n         self.assertEqual(\n@@ -34,7 +35,7 @@ def test_basic(self):\n                 'port': '444',\n             }), (\n                 ['psql', '-U', 'someuser', '-h', 'somehost', '-p', '444', 'dbname'],\n-                'somepassword',\n+                {'PGPASSWORD': 'somepassword'},\n             )\n         )\n \n@@ -47,7 +48,29 @@ def test_nopass(self):\n                 'port': '444',\n             }), (\n                 ['psql', '-U', 'someuser', '-h', 'somehost', '-p', '444', 'dbname'],\n-                None,\n+                {},\n+            )\n+        )\n+\n+    def test_ssl_certificate(self):\n+        self.assertEqual(\n+            self._run_it({\n+                'database': 'dbname',\n+                'user': 'someuser',\n+                'host': 'somehost',\n+                'port': '444',\n+                'sslmode': 'verify-ca',\n+                'sslrootcert': 'root.crt',\n+                'sslcert': 'client.crt',\n+                'sslkey': 'client.key',\n+            }), (\n+                ['psql', '-U', 'someuser', '-h', 'somehost', '-p', '444', 'dbname'],\n+                {\n+                    'PGSSLCERT': 'client.crt',\n+                    'PGSSLKEY': 'client.key',\n+                    'PGSSLMODE': 'verify-ca',\n+                    'PGSSLROOTCERT': 'root.crt',\n+                },\n             )\n         )\n \n@@ -61,7 +84,7 @@ def test_column(self):\n                 'port': '444',\n             }), (\n                 ['psql', '-U', 'some:user', '-h', '::1', '-p', '444', 'dbname'],\n-                'some:password',\n+                {'PGPASSWORD': 'some:password'},\n             )\n         )\n \n@@ -77,7 +100,7 @@ def test_accent(self):\n                 'port': '444',\n             }), (\n                 ['psql', '-U', username, '-h', 'somehost', '-p', '444', 'dbname'],\n-                password,\n+                {'PGPASSWORD': password},\n             )\n         )\n \n",
+  "problem_statement": "Add support for postgresql client certificates and key to dbshell.\nDescription\n\t\nThis bug is very similar to the #28322\nA common security procedure for DB access is to require mutual TLS for the DB connection.\nThis involves specifying a server certificate, client certificate, and client key when connecting.\nDjango already supports this configuration, it looks like this:\nDATABASES = {\n\t'default': {\n\t\t'ENGINE': 'django.db.backends.postgresql',\n\t\t'NAME': os.environ.get('POSTGRES_DB_NAME'),\n\t\t'USER': os.environ.get('POSTGRES_DB_USER'),\n\t\t'HOST': 'postgres',\n\t\t'PORT': '5432',\n\t\t'SCHEMA': os.environ.get('POSTGRES_DB_SCHEMA'),\n\t\t'OPTIONS': {\n\t\t\t 'sslmode': 'verify-ca',\n\t\t\t 'sslrootcert': os.environ.get('POSTGRES_CLI_SSL_CA', 'ca.crt'),\n\t\t\t 'sslcert': os.environ.get('POSTGRES_CLI_SSL_CRT', 'client_cert_chain.crt'),\n\t\t\t 'sslkey': os.environ.get('POSTGRES_CLI_SSL_KEY', 'client_key.key')\n\t\t}\n\t}\n}\nHowever the dbshell command does not support the client cert params.\nShould be a trivial fix to add in support for the other 'ssl' parameters required here.\n",
+  "hints_text": "",
+  "created_at": "2019-04-16T09:44:54Z",
+  "version": "3.0",
+  "FAIL_TO_PASS": "[\"test_ssl_certificate (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)\"]",
+  "PASS_TO_PASS": "[\"SIGINT is ignored in Python and passed to psql to abort quries.\", \"test_accent (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)\", \"test_basic (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)\", \"test_column (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)\", \"test_nopass (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)\"]",
+  "environment_setup_commit": "419a78300f7cd27611196e1e464d50fd0385ff27",
+  "patch_files": [
+    "django/db/backends/postgresql/client.py"
+  ],
+  "test_patch_files": [
+    "tests/dbshell/test_postgresql.py"
+  ],
+  "patch_diff_details": {
+    "django/db/backends/postgresql/client.py": {
+      "diffs": [
+        {
+          "start_line_old": 20,
+          "end_line_old": 20,
+          "file_pos": 1,
+          "file_context_length": 269,
+          "pos": 1,
+          "context_length": 269
+        },
+        {
+          "start_line_old": 33,
+          "end_line_old": 33,
+          "file_pos": 1,
+          "file_context_length": 269,
+          "pos": 1,
+          "context_length": 269
+        }
+      ]
+    }
+  },
+  "vectors": 3372,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/client.py_os_",
+      "distance": 0.7453417778015137,
+      "file_path": "django/db/backends/postgresql/client.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 269,
+      "context_length": 269,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/backends/mysql/client.py_subprocess_",
+      "distance": 0.8979610204696655,
+      "file_path": "django/db/backends/mysql/client.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 422,
+      "context_length": 691
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_1_37",
+      "distance": 0.9133580327033997,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 469,
+      "context_length": 1160
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/core/management/commands/dbshell.py_1_",
+      "distance": 0.9357914924621582,
+      "file_path": "django/core/management/commands/dbshell.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 231,
+      "context_length": 1391
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/features.py_operator_",
+      "distance": 1.018838882446289,
+      "file_path": "django/db/backends/postgresql/features.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 571,
+      "context_length": 1962
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/contrib/postgres/apps.py_PostgresConfig_",
+      "distance": 1.021859884262085,
+      "file_path": "django/contrib/postgres/apps.py",
+      "start_line": 40,
+      "end_line": 67,
+      "tokens": 249,
+      "context_length": 2211
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper_DatabaseWrapper.client_class.1",
+      "distance": 1.0325863361358643,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 61,
+      "end_line": 137,
+      "tokens": 778,
+      "context_length": 2989
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/utils.py__",
+      "distance": 1.0329036712646484,
+      "file_path": "django/db/backends/postgresql/utils.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 2989
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper._nodb_connection_",
+      "distance": 1.0345699787139893,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 258,
+      "end_line": 284,
+      "tokens": 217,
+      "context_length": 3206
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/creation.py_sys_DatabaseCreation._database_exists.2.1",
+      "distance": 1.035567283630371,
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 238,
+      "context_length": 3444
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper.creation_class_DatabaseWrapper.get_connection_params.11.1",
+      "distance": 1.058221459388733,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 138,
+      "end_line": 175,
+      "tokens": 330,
+      "context_length": 3774
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_psycopg2_DatabaseSchemaEditor._field_indexes_sql.4.1",
+      "distance": 1.0616178512573242,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 376,
+      "context_length": 4150
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper.ensure_timezone_DatabaseWrapper.is_usable.1.4.1.1",
+      "distance": 1.070529818534851,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 197,
+      "end_line": 256,
+      "tokens": 444,
+      "context_length": 4594
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/creation.py_DatabaseCreation._execute_create_test_db_DatabaseCreation._execute_create_test_db.1.3.1.3.3",
+      "distance": 1.0709474086761475,
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "start_line": 36,
+      "end_line": 51,
+      "tokens": 174,
+      "context_length": 4768
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/contrib/postgres/functions.py__",
+      "distance": 1.0741204023361206,
+      "file_path": "django/contrib/postgres/functions.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 4768
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/postgres/__init__.py__",
+      "distance": 1.075934886932373,
+      "file_path": "django/contrib/postgres/__init__.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 4768
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/backends/mysql/creation.py_subprocess_DatabaseCreation._execute_create_test_db.1.2.1.3.1",
+      "distance": 1.091123342514038,
+      "file_path": "django/db/backends/mysql/creation.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 219,
+      "context_length": 4987
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.no_limit_value_DatabaseOperations.sql_flush.1.5.1.1",
+      "distance": 1.0976496934890747,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 98,
+      "end_line": 133,
+      "tokens": 267,
+      "context_length": 5254
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_Command.python_Command.python.9",
+      "distance": 1.1110708713531494,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 42,
+      "end_line": 81,
+      "tokens": 401,
+      "context_length": 5655
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/utils.py_pkgutil_NotSupportedError.1",
+      "distance": 1.1114780902862549,
+      "file_path": "django/db/utils.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 150,
+      "context_length": 5805
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.prep_for_iexact_query_",
+      "distance": 1.1115994453430176,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 201,
+      "end_line": 285,
+      "tokens": 700,
+      "context_length": 6505
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_1_W018.1",
+      "distance": 1.1135685443878174,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 752,
+      "context_length": 7257
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_1_BaseDatabaseFeatures.83",
+      "distance": 1.114675521850586,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 900,
+      "context_length": 8157
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_Command.handle_",
+      "distance": 1.1168938875198364,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 83,
+      "end_line": 103,
+      "tokens": 162,
+      "context_length": 8319
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.155_BaseDatabaseFeatures.supports_explaining_query_execution.2.1",
+      "distance": 1.1222217082977295,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 219,
+      "end_line": 294,
+      "tokens": 587,
+      "context_length": 8906
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/base.py_1_",
+      "distance": 1.122804880142212,
+      "file_path": "django/contrib/gis/db/backends/postgis/base.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 197,
+      "context_length": 9103
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/backends/base/client.py__",
+      "distance": 1.1287684440612793,
+      "file_path": "django/db/backends/base/client.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 9103
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/creation.py_DatabaseCreation._clone_test_db_",
+      "distance": 1.1304049491882324,
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "start_line": 53,
+      "end_line": 78,
+      "tokens": 248,
+      "context_length": 9351
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_1_DatabaseOperations.unification_cast_sql.3.1",
+      "distance": 1.1315815448760986,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 243,
+      "context_length": 9594
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/client.py__",
+      "distance": 1.136962652206421,
+      "file_path": "django/db/backends/sqlite3/client.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 9594
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/backends/oracle/features.py_1_",
+      "distance": 1.1379635334014893,
+      "file_path": "django/db/backends/oracle/features.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 494,
+      "context_length": 10088
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_operator_DatabaseFeatures.needs_explain_extended.2.1",
+      "distance": 1.138211727142334,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 843,
+      "context_length": 10931
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.84_BaseDatabaseFeatures.can_clone_databases.1",
+      "distance": 1.1410982608795166,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 116,
+      "end_line": 217,
+      "tokens": 854,
+      "context_length": 11785
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.get_new_connection_DatabaseWrapper.get_new_connection.42",
+      "distance": 1.1449064016342163,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 194,
+      "end_line": 236,
+      "tokens": 793,
+      "context_length": 12578
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/contrib/postgres/apps.py_1_RANGE_TYPES.1",
+      "distance": 1.145599126815796,
+      "file_path": "django/contrib/postgres/apps.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 129,
+      "context_length": 12707
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/__init__.py__",
+      "distance": 1.145911693572998,
+      "file_path": "django/contrib/postgres/fields/__init__.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 12707
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_1_",
+      "distance": 1.1486058235168457,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 457,
+      "context_length": 13164
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_W019_check_secret_key.2.1",
+      "distance": 1.1499723196029663,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 88,
+      "end_line": 190,
+      "tokens": 747,
+      "context_length": 13911
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/utils.py__",
+      "distance": 1.151313304901123,
+      "file_path": "django/contrib/postgres/fields/utils.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 13911
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_copy_DatabaseSchemaEditor.__exit__.3",
+      "distance": 1.1520745754241943,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 309,
+      "context_length": 14220
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.supports_transactions_",
+      "distance": 1.1535186767578125,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 296,
+      "end_line": 309,
+      "tokens": 124,
+      "context_length": 14344
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_1_server_version_re.1",
+      "distance": 1.1535580158233643,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 437,
+      "context_length": 14781
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper.get_new_connection_DatabaseWrapper.get_new_connection.9.1",
+      "distance": 1.1542261838912964,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 177,
+      "end_line": 195,
+      "tokens": 186,
+      "context_length": 14967
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/backends/oracle/client.py__",
+      "distance": 1.159682035446167,
+      "file_path": "django/db/backends/oracle/client.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 0,
+      "context_length": 14967
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/contrib/postgres/operations.py_BtreeGinExtension_",
+      "distance": 1.1612720489501953,
+      "file_path": "django/contrib/postgres/operations.py",
+      "start_line": 38,
+      "end_line": 78,
+      "tokens": 162,
+      "context_length": 15129
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_os_Command.bpython.2",
+      "distance": 1.1633762121200562,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 268,
+      "context_length": 15397
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/core/management/commands/inspectdb.py_Command.normalize_col_name_Command.normalize_col_name.16.1",
+      "distance": 1.1666574478149414,
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "start_line": 172,
+      "end_line": 226,
+      "tokens": 478,
+      "context_length": 15875
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_14_DatabaseValidation",
+      "distance": 1.169089436531067,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 37,
+      "end_line": 59,
+      "tokens": 235,
+      "context_length": 16110
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.check_settings_BaseDatabaseWrapper.rollback.self.run_on_commit.1",
+      "distance": 1.1697049140930176,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 202,
+      "end_line": 275,
+      "tokens": 519,
+      "context_length": 16629
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_1_PostgresIndex.get_with_params.1.1",
+      "distance": 1.1731343269348145,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 264,
+      "context_length": 16893
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_Command.handle_",
+      "distance": 1.1733442544937134,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 32,
+      "end_line": 67,
+      "tokens": 347,
+      "context_length": 17240
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/postgres/aggregates/__init__.py__",
+      "distance": 1.1739444732666016,
+      "file_path": "django/contrib/postgres/aggregates/__init__.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 17240
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor._alter_field_",
+      "distance": 1.178202509880066,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 118,
+      "end_line": 150,
+      "tokens": 417,
+      "context_length": 17657
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/__init__.py__",
+      "distance": 1.179079294204712,
+      "file_path": "django/contrib/postgres/forms/__init__.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 17657
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/schema.py_1_PostGISSchemaEditor._field_should_be_indexed.2.1",
+      "distance": 1.1802396774291992,
+      "file_path": "django/contrib/gis/db/backends/postgis/schema.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 196,
+      "context_length": 17853
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_1_DatabaseValidation._check_sql_mode.4.1",
+      "distance": 1.180795431137085,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 248,
+      "context_length": 18101
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._create_test_db_DatabaseCreation._create_test_db.6.1",
+      "distance": 1.1826804876327515,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 30,
+      "end_line": 100,
+      "tokens": 722,
+      "context_length": 18823
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_FORMAT_QMARK_REGEX__sqlite_datetime_parse.5.1",
+      "distance": 1.1840630769729614,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 378,
+      "end_line": 412,
+      "tokens": 289,
+      "context_length": 19112
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/postgres/operations.py_1_CreateExtension.describe.1.1",
+      "distance": 1.1871100664138794,
+      "file_path": "django/contrib/postgres/operations.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 282,
+      "context_length": 19394
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/core/checks/security/base.py_check_debug_",
+      "distance": 1.1871922016143799,
+      "file_path": "django/core/checks/security/base.py",
+      "start_line": 193,
+      "end_line": 211,
+      "tokens": 127,
+      "context_length": 19521
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/utils.py_ConnectionHandler.prepare_test_settings_ConnectionHandler.close_all.1.2",
+      "distance": 1.1887110471725464,
+      "file_path": "django/db/utils.py",
+      "start_line": 181,
+      "end_line": 224,
+      "tokens": 295,
+      "context_length": 19816
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_copy_NO_DB_ALIAS.1",
+      "distance": 1.1916513442993164,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 128,
+      "context_length": 19944
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_1_43",
+      "distance": 1.1940553188323975,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 513,
+      "context_length": 20457
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/__init__.py_1_router.1",
+      "distance": 1.195133924484253,
+      "file_path": "django/db/__init__.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 141,
+      "context_length": 20598
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_1_DatabaseSchemaEditor.skip_default.1.1",
+      "distance": 1.1953895092010498,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 421,
+      "context_length": 21019
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/core/management/commands/inspectdb.py_keyword_Command.handle.1.2.1",
+      "distance": 1.1957519054412842,
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 272,
+      "context_length": 21291
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._handle_objects_preventing_db_destruction_DatabaseCreation._handle_objects_preventing_db_destruction.3",
+      "distance": 1.1969923973083496,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 130,
+      "end_line": 165,
+      "tokens": 399,
+      "context_length": 21690
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/models/functions/mixins.py_sys_FixDecimalInputMixin.as_postgresql.output_field.4.1",
+      "distance": 1.1988201141357422,
+      "file_path": "django/db/models/functions/mixins.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 161,
+      "context_length": 21851
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/postgres/signals.py_register_type_handlers_",
+      "distance": 1.2013094425201416,
+      "file_path": "django/contrib/postgres/signals.py",
+      "start_line": 37,
+      "end_line": 65,
+      "tokens": 257,
+      "context_length": 22108
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_BaseDatabaseOperations.explain_query_prefix_",
+      "distance": 1.2020196914672852,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 654,
+      "end_line": 674,
+      "tokens": 187,
+      "context_length": 22295
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_BrinIndex_BrinIndex.get_with_params.4.1",
+      "distance": 1.2025530338287354,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 39,
+      "end_line": 67,
+      "tokens": 311,
+      "context_length": 22606
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.sequence_reset_sql_DatabaseOperations.sequence_reset_sql.5.1",
+      "distance": 1.2027678489685059,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 157,
+      "end_line": 199,
+      "tokens": 454,
+      "context_length": 23060
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._create_test_user_DatabaseCreation._create_test_user.10.4.1",
+      "distance": 1.2036287784576416,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 220,
+      "end_line": 251,
+      "tokens": 390,
+      "context_length": 23450
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command_Command._run_checks.3.1",
+      "distance": 1.2042241096496582,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 21,
+      "end_line": 65,
+      "tokens": 369,
+      "context_length": 23819
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._get_test_db_params_DatabaseCreation._get_test_db_params.1.1",
+      "distance": 1.2047531604766846,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 300,
+      "end_line": 315,
+      "tokens": 193,
+      "context_length": 24012
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor_BaseDatabaseSchemaEditor.39",
+      "distance": 1.204869270324707,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 40,
+      "end_line": 115,
+      "tokens": 790,
+      "context_length": 24802
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/features.py__",
+      "distance": 1.2050962448120117,
+      "file_path": "django/contrib/gis/db/backends/postgis/features.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 24802
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/base.py_1_DatabaseWrapper.__init__.self.lib_spatialite_paths.2",
+      "distance": 1.2067842483520508,
+      "file_path": "django/contrib/gis/db/backends/spatialite/base.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 331,
+      "context_length": 25133
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/backends/base/creation.py_BaseDatabaseCreation.sql_table_creation_suffix_",
+      "distance": 1.2076667547225952,
+      "file_path": "django/db/backends/base/creation.py",
+      "start_line": 278,
+      "end_line": 297,
+      "tokens": 121,
+      "context_length": 25254
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/introspection.py_DatabaseIntrospection.data_types_reverse.get_constraints.10_",
+      "distance": 1.2085535526275635,
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "start_line": 218,
+      "end_line": 234,
+      "tokens": 179,
+      "context_length": 25433
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/core/management/commands/check.py_1_Command.add_arguments.5",
+      "distance": 1.2086119651794434,
+      "file_path": "django/core/management/commands/check.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 226,
+      "context_length": 25659
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/changepassword.py_Command.handle_",
+      "distance": 1.2089728116989136,
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "start_line": 34,
+      "end_line": 76,
+      "tokens": 337,
+      "context_length": 25996
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._execute_test_db_creation_DatabaseCreation._execute_test_db_creation.5",
+      "distance": 1.2098901271820068,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 187,
+      "end_line": 218,
+      "tokens": 319,
+      "context_length": 26315
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/postgres/serializers.py__",
+      "distance": 1.2102384567260742,
+      "file_path": "django/contrib/postgres/serializers.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 26315
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/db/backends/dummy/base.py_1_DatabaseIntrospection.get_key_columns.1",
+      "distance": 1.2103055715560913,
+      "file_path": "django/db/backends/dummy/base.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 270,
+      "context_length": 26585
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/introspection.py_DatabaseIntrospection.data_types_reverse.get_key_columns_DatabaseIntrospection.data_types_reverse.get_key_columns.2.1",
+      "distance": 1.2113888263702393,
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "start_line": 129,
+      "end_line": 143,
+      "tokens": 196,
+      "context_length": 26781
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/jsonb.py_json_",
+      "distance": 1.211405634880066,
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 344,
+      "context_length": 27125
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.78_BaseDatabaseWrapper.temporary_connection.3.2.1.1",
+      "distance": 1.2118403911590576,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 550,
+      "end_line": 597,
+      "tokens": 300,
+      "context_length": 27425
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/jsonb.py_11_KeyTransform.as_sql.7.1",
+      "distance": 1.2119486331939697,
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "start_line": 86,
+      "end_line": 117,
+      "tokens": 273,
+      "context_length": 27698
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_db_table_DatabaseSchemaEditor.alter_db_table.1.5.1",
+      "distance": 1.2125093936920166,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 85,
+      "end_line": 98,
+      "tokens": 181,
+      "context_length": 27879
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/core/checks/database.py__",
+      "distance": 1.2130706310272217,
+      "file_path": "django/core/checks/database.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 27879
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_uuid_DatabaseOperations.explain_prefix.1",
+      "distance": 1.2138464450836182,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 236,
+      "context_length": 28115
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/core/management/commands/check.py_Command.handle_",
+      "distance": 1.2139776945114136,
+      "file_path": "django/core/management/commands/check.py",
+      "start_line": 36,
+      "end_line": 66,
+      "tokens": 214,
+      "context_length": 28329
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/db/__init__.py_7_",
+      "distance": 1.2151339054107666,
+      "file_path": "django/db/__init__.py",
+      "start_line": 40,
+      "end_line": 62,
+      "tokens": 118,
+      "context_length": 28447
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/models/functions/text.py_MySQLSHA2Mixin_PostgreSQLSHAMixin.as_postgresql.1.1",
+      "distance": 1.215167760848999,
+      "file_path": "django/db/models/functions/text.py",
+      "start_line": 24,
+      "end_line": 55,
+      "tokens": 217,
+      "context_length": 28664
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.check_constraints_DatabaseWrapper.is_in_memory_db.1.1",
+      "distance": 1.216653823852539,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 291,
+      "end_line": 375,
+      "tokens": 829,
+      "context_length": 29493
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/gis/utils/srs.py_1_",
+      "distance": 1.2172272205352783,
+      "file_path": "django/contrib/gis/utils/srs.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 691,
+      "context_length": 30184
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_BTreeIndex_BTreeIndex.get_with_params.3.1",
+      "distance": 1.218171238899231,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 70,
+      "end_line": 87,
+      "tokens": 133,
+      "context_length": 30317
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper_DatabaseWrapper.pattern_esc.1",
+      "distance": 1.2186681032180786,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 78,
+      "end_line": 147,
+      "tokens": 710,
+      "context_length": 31027
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/core/management/sql.py_emit_post_migrate_signal_",
+      "distance": 1.2209198474884033,
+      "file_path": "django/core/management/sql.py",
+      "start_line": 38,
+      "end_line": 53,
+      "tokens": 116,
+      "context_length": 31143
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.get_connection_params_DatabaseWrapper.get_connection_params.12.1",
+      "distance": 1.2214784622192383,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 166,
+      "end_line": 192,
+      "tokens": 270,
+      "context_length": 31413
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/core/checks/security/csrf.py_1_",
+      "distance": 1.2217661142349243,
+      "file_path": "django/core/checks/security/csrf.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 299,
+      "context_length": 31712
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/postgres/lookups.py_1_",
+      "distance": 1.2220619916915894,
+      "file_path": "django/contrib/postgres/lookups.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 469,
+      "context_length": 32181
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_AUTH_USER_MODEL_",
+      "distance": 1.2231981754302979,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 499,
+      "end_line": 638,
+      "tokens": 853,
+      "context_length": 33034
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor._alter_column_type_sql_DatabaseSchemaEditor._alter_column_type_sql.3.5.1.1",
+      "distance": 1.2232576608657837,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 59,
+      "end_line": 116,
+      "tokens": 372,
+      "context_length": 33406
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.73_BaseDatabaseWrapper.validate_thread_sharing.2.1",
+      "distance": 1.2238271236419678,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 517,
+      "end_line": 548,
+      "tokens": 227,
+      "context_length": 33633
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.lookup_cast_DatabaseOperations.lookup_cast.6.1",
+      "distance": 1.2239576578140259,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 79,
+      "end_line": 96,
+      "tokens": 202,
+      "context_length": 33835
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.sequence_reset_by_name_sql_DatabaseOperations.tablespace_sql.1.2.1.1",
+      "distance": 1.226318597793579,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 135,
+      "end_line": 155,
+      "tokens": 221,
+      "context_length": 34056
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.pattern_ops_DatabaseWrapper.ops_class.1",
+      "distance": 1.2263225317001343,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 148,
+      "end_line": 164,
+      "tokens": 189,
+      "context_length": 34245
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_sys_DatabaseCreation._maindb_connection.7.1",
+      "distance": 1.226776361465454,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 226,
+      "context_length": 34471
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/mixins.py_1_",
+      "distance": 1.2268892526626587,
+      "file_path": "django/contrib/postgres/fields/mixins.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 179,
+      "context_length": 34650
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.quote_value_DatabaseSchemaEditor.quote_value.4.6.6.1",
+      "distance": 1.2272239923477173,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 38,
+      "end_line": 64,
+      "tokens": 243,
+      "context_length": 34893
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher_BCryptSHA256PasswordHasher.salt.2.1",
+      "distance": 1.227592945098877,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 388,
+      "end_line": 404,
+      "tokens": 127,
+      "context_length": 35020
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_DatabaseWrapper._standard_operators_DatabaseWrapper.__init__.self.features.can_return_columns_from_insert.1",
+      "distance": 1.2276639938354492,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 143,
+      "end_line": 205,
+      "tokens": 780,
+      "context_length": 35800
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._execute_test_db_destruction_DatabaseCreation._execute_statements.1.3.2.2",
+      "distance": 1.2278120517730713,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 253,
+      "end_line": 281,
+      "tokens": 277,
+      "context_length": 36077
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/db/backends/signals.py__",
+      "distance": 1.2280470132827759,
+      "file_path": "django/db/backends/signals.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 36077
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/core/management/commands/createcachetable.py_Command.handle_Command.handle.4.3.1.2.1",
+      "distance": 1.2289363145828247,
+      "file_path": "django/core/management/commands/createcachetable.py",
+      "start_line": 32,
+      "end_line": 44,
+      "tokens": 121,
+      "context_length": 36198
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.date_trunc_sql_DatabaseOperations.fetch_returned_insert_ids.2.1",
+      "distance": 1.2295782566070557,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 39,
+      "end_line": 77,
+      "tokens": 446,
+      "context_length": 36644
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_BIDI_127",
+      "distance": 1.229620337486267,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 145,
+      "end_line": 263,
+      "tokens": 876,
+      "context_length": 37520
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/changepassword.py_getpass_Command.add_arguments.2",
+      "distance": 1.2305516004562378,
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 206,
+      "context_length": 37726
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol._base_set_DatabaseCache.pickle_protocol._base_set.6.12.7.1.1",
+      "distance": 1.2310527563095093,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 112,
+      "end_line": 197,
+      "tokens": 794,
+      "context_length": 38520
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/core/management/commands/showmigrations.py_Command.handle_Command._validate_app_names.3.1",
+      "distance": 1.2329306602478027,
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "start_line": 42,
+      "end_line": 63,
+      "tokens": 158,
+      "context_length": 38678
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/mysql/base.py__",
+      "distance": 1.2334469556808472,
+      "file_path": "django/contrib/gis/db/backends/mysql/base.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 38678
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.validate_autopk_value_DatabaseOperations.bulk_insert_sql.3.1",
+      "distance": 1.2339887619018555,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 178,
+      "end_line": 221,
+      "tokens": 329,
+      "context_length": 39007
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_1__setup_environment.3.4.1",
+      "distance": 1.2349166870117188,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 232,
+      "context_length": 39239
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_HashIndex_HashIndex.get_with_params.3.1",
+      "distance": 1.2353299856185913,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 140,
+      "end_line": 157,
+      "tokens": 131,
+      "context_length": 39370
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper.create_cursor_DatabaseWrapper.enable_constraint_checking.5.2.self.needs_rollback.1",
+      "distance": 1.2365303039550781,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 245,
+      "end_line": 278,
+      "tokens": 241,
+      "context_length": 39611
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/client.py__",
+      "distance": 1.237462043762207,
+      "file_path": "django/contrib/gis/db/backends/spatialite/client.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 39611
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol.set_DatabaseCache.pickle_protocol.touch.3.1",
+      "distance": 1.2383742332458496,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 97,
+      "end_line": 110,
+      "tokens": 234,
+      "context_length": 39845
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper.is_usable_",
+      "distance": 1.2388346195220947,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 320,
+      "end_line": 345,
+      "tokens": 173,
+      "context_length": 40018
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle_Command.handle.28",
+      "distance": 1.239166498184204,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 67,
+      "end_line": 160,
+      "tokens": 825,
+      "context_length": 40843
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.get_rollback_BaseDatabaseWrapper.is_usable.2",
+      "distance": 1.239184856414795,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 413,
+      "end_line": 490,
+      "tokens": 525,
+      "context_length": 41368
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/db/models/signals.py_pre_init_",
+      "distance": 1.2394485473632812,
+      "file_path": "django/db/models/signals.py",
+      "start_line": 37,
+      "end_line": 54,
+      "tokens": 231,
+      "context_length": 41599
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._switch_to_test_user_DatabaseCreation.set_as_test_mirror.3",
+      "distance": 1.2396597862243652,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 102,
+      "end_line": 128,
+      "tokens": 314,
+      "context_length": 41913
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_SpGistIndex_",
+      "distance": 1.240169644355774,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 160,
+      "end_line": 178,
+      "tokens": 134,
+      "context_length": 42047
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures.supports_transactions_",
+      "distance": 1.2403080463409424,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 103,
+      "end_line": 121,
+      "tokens": 143,
+      "context_length": 42190
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.init_connection_state_DatabaseWrapper.enable_constraint_checking.1",
+      "distance": 1.2404072284698486,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 245,
+      "end_line": 289,
+      "tokens": 407,
+      "context_length": 42597
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/contrib/auth/password_validation.py_CommonPasswordValidator_",
+      "distance": 1.2406407594680786,
+      "file_path": "django/contrib/auth/password_validation.py",
+      "start_line": 160,
+      "end_line": 206,
+      "tokens": 356,
+      "context_length": 42953
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/core/management/commands/testserver.py_Command.handle_",
+      "distance": 1.2410900592803955,
+      "file_path": "django/core/management/commands/testserver.py",
+      "start_line": 29,
+      "end_line": 55,
+      "tokens": 234,
+      "context_length": 43187
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_BaseDatabaseOperations.process_clob_BaseDatabaseOperations.set_time_zone_sql.2.1",
+      "distance": 1.2419108152389526,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 307,
+      "end_line": 381,
+      "tokens": 557,
+      "context_length": 43744
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/db/backends/mysql/creation.py_DatabaseCreation._clone_db_",
+      "distance": 1.2421793937683105,
+      "file_path": "django/db/backends/mysql/creation.py",
+      "start_line": 57,
+      "end_line": 68,
+      "tokens": 154,
+      "context_length": 43898
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/core/management/commands/inspectdb.py_Command.handle_inspection_Command.handle_inspection.5.15.14.1",
+      "distance": 1.2423157691955566,
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "start_line": 38,
+      "end_line": 170,
+      "tokens": 1244,
+      "context_length": 45142
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.convert_uuidfield_value_",
+      "distance": 1.2445263862609863,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 294,
+      "end_line": 336,
+      "tokens": 429,
+      "context_length": 45571
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/jsonb.py_JSONField_JSONField.formfield.1.1",
+      "distance": 1.2446563243865967,
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "start_line": 30,
+      "end_line": 83,
+      "tokens": 361,
+      "context_length": 45932
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._test_settings_get_",
+      "distance": 1.245165228843689,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 317,
+      "end_line": 401,
+      "tokens": 739,
+      "context_length": 46671
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/introspection.py_DatabaseIntrospection.data_types_reverse.get_constraints_DatabaseIntrospection.data_types_reverse.get_constraints.9",
+      "distance": 1.245682716369629,
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "start_line": 145,
+      "end_line": 217,
+      "tokens": 756,
+      "context_length": 47427
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.2458871603012085,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 289,
+      "context_length": 47716
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchQuery.resolve_expression_SearchQuery.resolve_expression.3.1",
+      "distance": 1.2463749647140503,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 138,
+      "end_line": 145,
+      "tokens": 121,
+      "context_length": 47837
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_IntegerRangeField_",
+      "distance": 1.246569037437439,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 66,
+      "end_line": 110,
+      "tokens": 284,
+      "context_length": 48121
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/creation.py_DatabaseCreation.get_test_db_clone_settings_DatabaseCreation._clone_test_db.4.2.4.2.2",
+      "distance": 1.2466075420379639,
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "start_line": 48,
+      "end_line": 79,
+      "tokens": 317,
+      "context_length": 48438
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/core/management/commands/createcachetable.py_1_Command.add_arguments.3",
+      "distance": 1.247092843055725,
+      "file_path": "django/core/management/commands/createcachetable.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 219,
+      "context_length": 48657
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchQuery.as_sql_CombinedSearchQuery.__str__.1.1",
+      "distance": 1.2472662925720215,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 147,
+      "end_line": 179,
+      "tokens": 287,
+      "context_length": 48944
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle.29_Command.handle.45",
+      "distance": 1.2473487854003906,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 161,
+      "end_line": 242,
+      "tokens": 793,
+      "context_length": 49737
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/core/management/sql.py_emit_pre_migrate_signal_emit_pre_migrate_signal.2.3",
+      "distance": 1.2477585077285767,
+      "file_path": "django/core/management/sql.py",
+      "start_line": 21,
+      "end_line": 35,
+      "tokens": 116,
+      "context_length": 49853
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/base.py_DatabaseWrapper.get_new_connection_",
+      "distance": 1.2496609687805176,
+      "file_path": "django/contrib/gis/db/backends/spatialite/base.py",
+      "start_line": 38,
+      "end_line": 75,
+      "tokens": 295,
+      "context_length": 50148
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.get_new_connection.43_DatabaseWrapper.get_new_connection.49.1",
+      "distance": 1.249678611755371,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 237,
+      "end_line": 243,
+      "tokens": 140,
+      "context_length": 50288
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.combine_expression_DatabaseOperations.combine_expression.2.1",
+      "distance": 1.2498186826705933,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 223,
+      "end_line": 233,
+      "tokens": 151,
+      "context_length": 50439
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/operations.py_re_BILATERAL.1",
+      "distance": 1.2505486011505127,
+      "file_path": "django/contrib/gis/db/backends/postgis/operations.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 217,
+      "context_length": 50656
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/db/utils.py_ConnectionDoesNotExist_ConnectionHandler.databases.5.1",
+      "distance": 1.250584602355957,
+      "file_path": "django/db/utils.py",
+      "start_line": 131,
+      "end_line": 158,
+      "tokens": 202,
+      "context_length": 50858
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlflush.py_1_",
+      "distance": 1.2505930662155151,
+      "file_path": "django/core/management/commands/sqlflush.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 161,
+      "context_length": 51019
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher.encode_BCryptSHA256PasswordHasher.encode.7.1",
+      "distance": 1.2508466243743896,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 406,
+      "end_line": 416,
+      "tokens": 127,
+      "context_length": 51146
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand.check_BaseCommand.check.10.1.2.1",
+      "distance": 1.2509679794311523,
+      "file_path": "django/core/management/base.py",
+      "start_line": 379,
+      "end_line": 444,
+      "tokens": 614,
+      "context_length": 51760
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/contrib/postgres/utils.py_1_",
+      "distance": 1.2511577606201172,
+      "file_path": "django/contrib/postgres/utils.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 218,
+      "context_length": 51978
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/jsonb.py_KeyTransformIExact_",
+      "distance": 1.2511732578277588,
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "start_line": 140,
+      "end_line": 189,
+      "tokens": 284,
+      "context_length": 52262
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_timestamp_diff_",
+      "distance": 1.251477599143982,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 549,
+      "end_line": 571,
+      "tokens": 143,
+      "context_length": 52405
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_1_Command.execute.4",
+      "distance": 1.2526257038116455,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 266,
+      "context_length": 52671
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/core/management/commands/testserver.py_1_Command.add_arguments.4",
+      "distance": 1.2526860237121582,
+      "file_path": "django/core/management/commands/testserver.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 205,
+      "context_length": 52876
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/db/backends/mysql/compiler.py_1_",
+      "distance": 1.2530792951583862,
+      "file_path": "django/db/backends/mysql/compiler.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 163,
+      "context_length": 53039
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/postgres/signals.py_functools_get_citext_oids.2.2.1",
+      "distance": 1.2532726526260376,
+      "file_path": "django/contrib/postgres/signals.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 243,
+      "context_length": 53282
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/db/utils.py_load_backend_load_backend.4.2.backend_dir.3.3.2",
+      "distance": 1.2536718845367432,
+      "file_path": "django/db/utils.py",
+      "start_line": 100,
+      "end_line": 128,
+      "tokens": 310,
+      "context_length": 53592
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_field_DatabaseSchemaEditor.alter_field.4.6.1",
+      "distance": 1.2544267177581787,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 100,
+      "end_line": 137,
+      "tokens": 486,
+      "context_length": 54078
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/contrib/postgres/indexes.py_GistIndex_GistIndex.get_with_params.4.1",
+      "distance": 1.2545493841171265,
+      "file_path": "django/contrib/postgres/indexes.py",
+      "start_line": 115,
+      "end_line": 137,
+      "tokens": 194,
+      "context_length": 54272
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/core/management/commands/flush.py_Command.handle_",
+      "distance": 1.256041169166565,
+      "file_path": "django/core/management/commands/flush.py",
+      "start_line": 27,
+      "end_line": 83,
+      "tokens": 496,
+      "context_length": 54768
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/hstore.py_10_",
+      "distance": 1.2569084167480469,
+      "file_path": "django/contrib/postgres/fields/hstore.py",
+      "start_line": 73,
+      "end_line": 113,
+      "tokens": 261,
+      "context_length": 55029
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_datetime_DatabaseOperations.bulk_batch_size.2.3.1.1",
+      "distance": 1.2585963010787964,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 269,
+      "context_length": 55298
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/contrib/gis/management/commands/inspectdb.py_1_",
+      "distance": 1.2589112520217896,
+      "file_path": "django/contrib/gis/management/commands/inspectdb.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 146,
+      "context_length": 55444
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor.execute_BaseDatabaseSchemaEditor.42",
+      "distance": 1.2589712142944336,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 117,
+      "end_line": 143,
+      "tokens": 267,
+      "context_length": 55711
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/oracle/base.py__",
+      "distance": 1.259535789489746,
+      "file_path": "django/contrib/gis/db/backends/oracle/base.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 55711
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_copy_DatabaseSchemaEditor.remove_field.3.2",
+      "distance": 1.2605079412460327,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 400,
+      "context_length": 56111
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.sql_flush_DatabaseOperations.integer_field_ranges.sql_flush.1.14.1.1",
+      "distance": 1.261071801185608,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 371,
+      "end_line": 417,
+      "tokens": 439,
+      "context_length": 56550
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_DatabaseWrapper._dsn_DatabaseWrapper.get_new_connection.1.1",
+      "distance": 1.2612321376800537,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 207,
+      "end_line": 230,
+      "tokens": 205,
+      "context_length": 56755
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/ranges.py_DateTimeRangeContains.as_sql_20",
+      "distance": 1.2624545097351074,
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "start_line": 167,
+      "end_line": 180,
+      "tokens": 158,
+      "context_length": 56913
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/core/management/commands/showmigrations.py_sys_Command.add_arguments.6",
+      "distance": 1.2629671096801758,
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 292,
+      "context_length": 57205
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/contrib/auth/hashers.py_BCryptSHA256PasswordHasher.verify_BCryptSHA256PasswordHasher.harden_runtime.7.2",
+      "distance": 1.2630398273468018,
+      "file_path": "django/contrib/auth/hashers.py",
+      "start_line": 418,
+      "end_line": 447,
+      "tokens": 290,
+      "context_length": 57495
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/creation.py_os_DatabaseCreation._create_test_db.4.1",
+      "distance": 1.263136625289917,
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 356,
+      "context_length": 57851
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/contrib/postgres/apps.py_uninstall_if_needed_uninstall_if_needed.2.12",
+      "distance": 1.263141393661499,
+      "file_path": "django/contrib/postgres/apps.py",
+      "start_line": 20,
+      "end_line": 37,
+      "tokens": 188,
+      "context_length": 58039
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/db/backends/base/creation.py_BaseDatabaseCreation.set_as_test_mirror_BaseDatabaseCreation.serialize_db_to_string.12.1",
+      "distance": 1.2635818719863892,
+      "file_path": "django/db/backends/base/creation.py",
+      "start_line": 89,
+      "end_line": 124,
+      "tokens": 307,
+      "context_length": 58346
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0002_alter_permission_name_max_length.py__",
+      "distance": 1.2638953924179077,
+      "file_path": "django/contrib/auth/migrations/0002_alter_permission_name_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 58346
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper.isolation_levels_DatabaseWrapper.get_connection_params.17.1",
+      "distance": 1.2639057636260986,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 172,
+      "end_line": 224,
+      "tokens": 427,
+      "context_length": 58773
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlsequencereset.py_1_",
+      "distance": 1.2639379501342773,
+      "file_path": "django/core/management/commands/sqlsequencereset.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 172,
+      "context_length": 58945
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/db/backends/base/creation.py_os_BaseDatabaseCreation.create_test_db.27.1",
+      "distance": 1.264143943786621,
+      "file_path": "django/db/backends/base/creation.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 629,
+      "context_length": 59574
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/contrib/auth/handlers/modwsgi.py_1_",
+      "distance": 1.264902114868164,
+      "file_path": "django/contrib/auth/handlers/modwsgi.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 247,
+      "context_length": 59821
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.combine_expression_DatabaseOperations.integer_field_ranges.combine_expression.3.1",
+      "distance": 1.2650861740112305,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 531,
+      "end_line": 545,
+      "tokens": 228,
+      "context_length": 60049
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/db/backends/dummy/features.py__",
+      "distance": 1.2662733793258667,
+      "file_path": "django/db/backends/dummy/features.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 60049
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_datetime_BaseDatabaseOperations.date_interval_sql.2",
+      "distance": 1.2668373584747314,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 1,
+      "end_line": 102,
+      "tokens": 797,
+      "context_length": 60846
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/adapter.py_1_PostGISAdapter.prepare.2.1",
+      "distance": 1.267672061920166,
+      "file_path": "django/contrib/gis/db/backends/postgis/adapter.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 362,
+      "context_length": 61208
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.date_extract_sql_DatabaseOperations.pk_default_value.1.1",
+      "distance": 1.2686665058135986,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 66,
+      "end_line": 116,
+      "tokens": 523,
+      "context_length": 61731
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchQuery_SearchQuery.__init__.5",
+      "distance": 1.2686922550201416,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 122,
+      "end_line": 136,
+      "tokens": 142,
+      "context_length": 61873
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.quote_name_DatabaseOperations.__references_graph.3.2.1",
+      "distance": 1.26911199092865,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 163,
+      "end_line": 188,
+      "tokens": 190,
+      "context_length": 62063
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.field_cast_sql_DatabaseOperations.integer_field_ranges.limit_offset_sql.2.1",
+      "distance": 1.2694096565246582,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 248,
+      "end_line": 262,
+      "tokens": 157,
+      "context_length": 62220
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.convert_textfield_value_DatabaseOperations.integer_field_ranges.deferrable_sql.1.1",
+      "distance": 1.2694823741912842,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 186,
+      "end_line": 234,
+      "tokens": 370,
+      "context_length": 62590
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field.70_BaseDatabaseSchemaEditor._alter_field.81.1",
+      "distance": 1.2699666023254395,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 753,
+      "end_line": 793,
+      "tokens": 511,
+      "context_length": 63101
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/postgis/operations.py_PostGISOperations_PostGISOperations.function_names.3.1",
+      "distance": 1.270565390586853,
+      "file_path": "django/contrib/gis/db/backends/postgis/operations.py",
+      "start_line": 98,
+      "end_line": 156,
+      "tokens": 703,
+      "context_length": 63804
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 1.271590232849121,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1230,
+      "end_line": 1259,
+      "tokens": 242,
+      "context_length": 64046
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/django/django/core/cache/backends/base.py_BaseCache.validate_key_BaseCache.validate_key.3.1.2",
+      "distance": 1.2719192504882812,
+      "file_path": "django/core/cache/backends/base.py",
+      "start_line": 239,
+      "end_line": 256,
+      "tokens": 165,
+      "context_length": 64211
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/django/django/db/migrations/operations/special.py_RunSQL._run_sql_RunSQL._run_sql.1.2.2.1",
+      "distance": 1.2719743251800537,
+      "file_path": "django/db/migrations/operations/special.py",
+      "start_line": 116,
+      "end_line": 130,
+      "tokens": 139,
+      "context_length": 64350
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/createsuperuser.py_Command.handle_Command.handle.6.6.1",
+      "distance": 1.2724311351776123,
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "start_line": 63,
+      "end_line": 169,
+      "tokens": 962,
+      "context_length": 65312
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._execute_allow_fail_statements_DatabaseCreation._execute_allow_fail_statements.2.3.3.1",
+      "distance": 1.272759199142456,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 283,
+      "end_line": 298,
+      "tokens": 183,
+      "context_length": 65495
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field.21_BaseDatabaseSchemaEditor._alter_field.four_way_default_alteration.1",
+      "distance": 1.2729744911193848,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 610,
+      "end_line": 682,
+      "tokens": 792,
+      "context_length": 66287
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_1_sensitive_post_parameters_m.1",
+      "distance": 1.2730193138122559,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 188,
+      "context_length": 66475
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/django/django/db/backends/utils.py_names_digest_",
+      "distance": 1.2731975317001343,
+      "file_path": "django/db/backends/utils.py",
+      "start_line": 216,
+      "end_line": 253,
+      "tokens": 279,
+      "context_length": 66754
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/django/django/db/utils.py_DatabaseErrorWrapper_DatabaseErrorWrapper.__call__.inner.2.1",
+      "distance": 1.2735683917999268,
+      "file_path": "django/db/utils.py",
+      "start_line": 51,
+      "end_line": 97,
+      "tokens": 312,
+      "context_length": 67066
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command_Command.add_arguments.6",
+      "distance": 1.2737245559692383,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 32,
+      "end_line": 61,
+      "tokens": 261,
+      "context_length": 67327
+    },
+    {
+      "position": 214,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.__foreign_key_constraints_DatabaseOperations.integer_field_ranges._foreign_key_constraints.3.1",
+      "distance": 1.2740070819854736,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 332,
+      "end_line": 369,
+      "tokens": 328,
+      "context_length": 67655
+    },
+    {
+      "position": 215,
+      "id": "/tmp/repos/django/django/db/backends/dummy/base.py_DatabaseWrapper_",
+      "distance": 1.2743858098983765,
+      "file_path": "django/db/backends/dummy/base.py",
+      "start_line": 50,
+      "end_line": 74,
+      "tokens": 173,
+      "context_length": 67828
+    },
+    {
+      "position": 216,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/citext.py_1_",
+      "distance": 1.2748934030532837,
+      "file_path": "django/contrib/postgres/fields/citext.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 113,
+      "context_length": 67941
+    },
+    {
+      "position": 217,
+      "id": "/tmp/repos/django/django/core/management/commands/diffsettings.py_Command.handle_Command.handle.8.1",
+      "distance": 1.2751848697662354,
+      "file_path": "django/core/management/commands/diffsettings.py",
+      "start_line": 41,
+      "end_line": 55,
+      "tokens": 134,
+      "context_length": 68075
+    },
+    {
+      "position": 218,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper_DatabaseWrapper.pattern_ops.1",
+      "distance": 1.2754944562911987,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 96,
+      "end_line": 170,
+      "tokens": 775,
+      "context_length": 68850
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/backends/postgresql/client.py",
+      "position": 1,
+      "tokens": 269,
+      "context_length": 269
+    },
+    {
+      "file_path": "django/db/backends/mysql/client.py",
+      "position": 2,
+      "tokens": 422,
+      "context_length": 691
+    },
+    {
+      "file_path": "django/db/backends/postgresql/base.py",
+      "position": 3,
+      "tokens": 2401,
+      "context_length": 3092
+    },
+    {
+      "file_path": "django/core/management/commands/dbshell.py",
+      "position": 4,
+      "tokens": 231,
+      "context_length": 3323
+    },
+    {
+      "file_path": "django/db/backends/postgresql/features.py",
+      "position": 5,
+      "tokens": 571,
+      "context_length": 3894
+    },
+    {
+      "file_path": "django/contrib/postgres/apps.py",
+      "position": 6,
+      "tokens": 566,
+      "context_length": 4460
+    },
+    {
+      "file_path": "django/db/backends/postgresql/utils.py",
+      "position": 7,
+      "tokens": 38,
+      "context_length": 4498
+    },
+    {
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "position": 8,
+      "tokens": 648,
+      "context_length": 5146
+    },
+    {
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "position": 9,
+      "tokens": 1378,
+      "context_length": 6524
+    },
+    {
+      "file_path": "django/contrib/postgres/functions.py",
+      "position": 10,
+      "tokens": 53,
+      "context_length": 6577
+    },
+    {
+      "file_path": "django/contrib/postgres/__init__.py",
+      "position": 11,
+      "tokens": 14,
+      "context_length": 6591
+    },
+    {
+      "file_path": "django/db/backends/mysql/creation.py",
+      "position": 12,
+      "tokens": 614,
+      "context_length": 7205
+    },
+    {
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "position": 13,
+      "tokens": 2628,
+      "context_length": 9833
+    },
+    {
+      "file_path": "django/core/management/commands/shell.py",
+      "position": 14,
+      "tokens": 821,
+      "context_length": 10654
+    },
+    {
+      "file_path": "django/db/utils.py",
+      "position": 15,
+      "tokens": 2018,
+      "context_length": 12672
+    },
+    {
+      "file_path": "django/core/checks/security/base.py",
+      "position": 16,
+      "tokens": 1626,
+      "context_length": 14298
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 17,
+      "tokens": 2453,
+      "context_length": 16751
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/base.py",
+      "position": 18,
+      "tokens": 197,
+      "context_length": 16948
+    },
+    {
+      "file_path": "django/db/backends/base/client.py",
+      "position": 19,
+      "tokens": 105,
+      "context_length": 17053
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/client.py",
+      "position": 20,
+      "tokens": 58,
+      "context_length": 17111
+    },
+    {
+      "file_path": "django/db/backends/oracle/features.py",
+      "position": 21,
+      "tokens": 495,
+      "context_length": 17606
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 22,
+      "tokens": 980,
+      "context_length": 18586
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "position": 23,
+      "tokens": 5552,
+      "context_length": 24138
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/__init__.py",
+      "position": 24,
+      "tokens": 53,
+      "context_length": 24191
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "position": 25,
+      "tokens": 457,
+      "context_length": 24648
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/utils.py",
+      "position": 26,
+      "tokens": 23,
+      "context_length": 24671
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "position": 27,
+      "tokens": 3954,
+      "context_length": 28625
+    },
+    {
+      "file_path": "django/db/backends/mysql/base.py",
+      "position": 28,
+      "tokens": 2925,
+      "context_length": 31550
+    },
+    {
+      "file_path": "django/db/backends/oracle/client.py",
+      "position": 29,
+      "tokens": 102,
+      "context_length": 31652
+    },
+    {
+      "file_path": "django/contrib/postgres/operations.py",
+      "position": 30,
+      "tokens": 445,
+      "context_length": 32097
+    },
+    {
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "position": 31,
+      "tokens": 2563,
+      "context_length": 34660
+    },
+    {
+      "file_path": "django/db/backends/oracle/base.py",
+      "position": 32,
+      "tokens": 5047,
+      "context_length": 39707
+    },
+    {
+      "file_path": "django/db/backends/base/base.py",
+      "position": 33,
+      "tokens": 4785,
+      "context_length": 44492
+    },
+    {
+      "file_path": "django/contrib/postgres/indexes.py",
+      "position": 34,
+      "tokens": 1391,
+      "context_length": 45883
+    },
+    {
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "position": 35,
+      "tokens": 608,
+      "context_length": 46491
+    },
+    {
+      "file_path": "django/contrib/postgres/aggregates/__init__.py",
+      "position": 36,
+      "tokens": 20,
+      "context_length": 46511
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/__init__.py",
+      "position": 37,
+      "tokens": 42,
+      "context_length": 46553
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/schema.py",
+      "position": 38,
+      "tokens": 634,
+      "context_length": 47187
+    },
+    {
+      "file_path": "django/db/backends/mysql/validation.py",
+      "position": 39,
+      "tokens": 482,
+      "context_length": 47669
+    },
+    {
+      "file_path": "django/db/backends/oracle/creation.py",
+      "position": 40,
+      "tokens": 3895,
+      "context_length": 51564
+    },
+    {
+      "file_path": "django/db/__init__.py",
+      "position": 41,
+      "tokens": 393,
+      "context_length": 51957
+    },
+    {
+      "file_path": "django/db/backends/mysql/schema.py",
+      "position": 42,
+      "tokens": 1065,
+      "context_length": 53022
+    },
+    {
+      "file_path": "django/db/models/functions/mixins.py",
+      "position": 43,
+      "tokens": 423,
+      "context_length": 53445
+    },
+    {
+      "file_path": "django/contrib/postgres/signals.py",
+      "position": 44,
+      "tokens": 501,
+      "context_length": 53946
+    },
+    {
+      "file_path": "django/db/backends/base/operations.py",
+      "position": 45,
+      "tokens": 5393,
+      "context_length": 59339
+    },
+    {
+      "file_path": "django/core/management/commands/migrate.py",
+      "position": 46,
+      "tokens": 3140,
+      "context_length": 62479
+    },
+    {
+      "file_path": "django/db/backends/base/schema.py",
+      "position": 47,
+      "tokens": 11198,
+      "context_length": 73677
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/features.py",
+      "position": 48,
+      "tokens": 90,
+      "context_length": 73767
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/spatialite/base.py",
+      "position": 49,
+      "tokens": 619,
+      "context_length": 74386
+    },
+    {
+      "file_path": "django/db/backends/base/creation.py",
+      "position": 50,
+      "tokens": 2325,
+      "context_length": 76711
+    },
+    {
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "position": 51,
+      "tokens": 2359,
+      "context_length": 79070
+    },
+    {
+      "file_path": "django/core/management/commands/check.py",
+      "position": 52,
+      "tokens": 435,
+      "context_length": 79505
+    },
+    {
+      "file_path": "django/contrib/auth/management/commands/changepassword.py",
+      "position": 53,
+      "tokens": 539,
+      "context_length": 80044
+    },
+    {
+      "file_path": "django/contrib/postgres/serializers.py",
+      "position": 54,
+      "tokens": 101,
+      "context_length": 80145
+    },
+    {
+      "file_path": "django/db/backends/dummy/base.py",
+      "position": 55,
+      "tokens": 445,
+      "context_length": 80590
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "position": 56,
+      "tokens": 344,
+      "context_length": 80934
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "position": 57,
+      "tokens": 1234,
+      "context_length": 82168
+    },
+    {
+      "file_path": "django/core/checks/database.py",
+      "position": 58,
+      "tokens": 53,
+      "context_length": 82221
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 59,
+      "tokens": 3045,
+      "context_length": 85266
+    },
+    {
+      "file_path": "django/db/models/functions/text.py",
+      "position": 60,
+      "tokens": 2456,
+      "context_length": 87722
+    },
+    {
+      "file_path": "django/contrib/gis/utils/srs.py",
+      "position": 61,
+      "tokens": 691,
+      "context_length": 88413
+    },
+    {
+      "file_path": "django/core/management/sql.py",
+      "position": 62,
+      "tokens": 390,
+      "context_length": 88803
+    },
+    {
+      "file_path": "django/core/checks/security/csrf.py",
+      "position": 63,
+      "tokens": 299,
+      "context_length": 89102
+    },
+    {
+      "file_path": "django/contrib/postgres/lookups.py",
+      "position": 64,
+      "tokens": 470,
+      "context_length": 89572
+    },
+    {
+      "file_path": "django/conf/global_settings.py",
+      "position": 65,
+      "tokens": 5604,
+      "context_length": 95176
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/mixins.py",
+      "position": 66,
+      "tokens": 180,
+      "context_length": 95356
+    },
+    {
+      "file_path": "django/contrib/auth/hashers.py",
+      "position": 67,
+      "tokens": 4787,
+      "context_length": 100143
+    },
+    {
+      "file_path": "django/db/backends/signals.py",
+      "position": 68,
+      "tokens": 17,
+      "context_length": 100160
+    },
+    {
+      "file_path": "django/core/management/commands/createcachetable.py",
+      "position": 69,
+      "tokens": 862,
+      "context_length": 101022
+    },
+    {
+      "file_path": "django/core/cache/backends/db.py",
+      "position": 70,
+      "tokens": 2086,
+      "context_length": 103108
+    },
+    {
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "position": 71,
+      "tokens": 1186,
+      "context_length": 104294
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/mysql/base.py",
+      "position": 72,
+      "tokens": 109,
+      "context_length": 104403
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/spatialite/client.py",
+      "position": 73,
+      "tokens": 29,
+      "context_length": 104432
+    },
+    {
+      "file_path": "django/db/models/signals.py",
+      "position": 74,
+      "tokens": 487,
+      "context_length": 104919
+    },
+    {
+      "file_path": "django/contrib/auth/password_validation.py",
+      "position": 75,
+      "tokens": 1489,
+      "context_length": 106408
+    },
+    {
+      "file_path": "django/core/management/commands/testserver.py",
+      "position": 76,
+      "tokens": 434,
+      "context_length": 106842
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "position": 77,
+      "tokens": 2889,
+      "context_length": 109731
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 78,
+      "tokens": 14890,
+      "context_length": 124621
+    },
+    {
+      "file_path": "django/contrib/postgres/search.py",
+      "position": 79,
+      "tokens": 1877,
+      "context_length": 126498
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 80,
+      "tokens": 704,
+      "context_length": 127202
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "position": 81,
+      "tokens": 824,
+      "context_length": 128026
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/operations.py",
+      "position": 82,
+      "tokens": 3607,
+      "context_length": 131633
+    },
+    {
+      "file_path": "django/core/management/commands/sqlflush.py",
+      "position": 83,
+      "tokens": 161,
+      "context_length": 131794
+    },
+    {
+      "file_path": "django/core/management/base.py",
+      "position": 84,
+      "tokens": 4355,
+      "context_length": 136149
+    },
+    {
+      "file_path": "django/contrib/postgres/utils.py",
+      "position": 85,
+      "tokens": 218,
+      "context_length": 136367
+    },
+    {
+      "file_path": "django/db/backends/mysql/compiler.py",
+      "position": 86,
+      "tokens": 164,
+      "context_length": 136531
+    },
+    {
+      "file_path": "django/core/management/commands/flush.py",
+      "position": 87,
+      "tokens": 697,
+      "context_length": 137228
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/hstore.py",
+      "position": 88,
+      "tokens": 694,
+      "context_length": 137922
+    },
+    {
+      "file_path": "django/contrib/gis/management/commands/inspectdb.py",
+      "position": 89,
+      "tokens": 147,
+      "context_length": 138069
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/oracle/base.py",
+      "position": 90,
+      "tokens": 103,
+      "context_length": 138172
+    },
+    {
+      "file_path": "django/db/backends/oracle/schema.py",
+      "position": 91,
+      "tokens": 1745,
+      "context_length": 139917
+    },
+    {
+      "file_path": "django/db/backends/oracle/operations.py",
+      "position": 92,
+      "tokens": 5484,
+      "context_length": 145401
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "position": 93,
+      "tokens": 1753,
+      "context_length": 147154
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0002_alter_permission_name_max_length.py",
+      "position": 94,
+      "tokens": 68,
+      "context_length": 147222
+    },
+    {
+      "file_path": "django/core/management/commands/sqlsequencereset.py",
+      "position": 95,
+      "tokens": 172,
+      "context_length": 147394
+    },
+    {
+      "file_path": "django/contrib/auth/handlers/modwsgi.py",
+      "position": 96,
+      "tokens": 247,
+      "context_length": 147641
+    },
+    {
+      "file_path": "django/db/backends/dummy/features.py",
+      "position": 97,
+      "tokens": 32,
+      "context_length": 147673
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/postgis/adapter.py",
+      "position": 98,
+      "tokens": 489,
+      "context_length": 148162
+    },
+    {
+      "file_path": "django/core/cache/backends/base.py",
+      "position": 99,
+      "tokens": 2157,
+      "context_length": 150319
+    },
+    {
+      "file_path": "django/db/migrations/operations/special.py",
+      "position": 100,
+      "tokens": 1558,
+      "context_length": 151877
+    },
+    {
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "position": 101,
+      "tokens": 1715,
+      "context_length": 153592
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 102,
+      "tokens": 1726,
+      "context_length": 155318
+    },
+    {
+      "file_path": "django/db/backends/utils.py",
+      "position": 103,
+      "tokens": 1893,
+      "context_length": 157211
+    },
+    {
+      "file_path": "django/core/management/commands/loaddata.py",
+      "position": 104,
+      "tokens": 2876,
+      "context_length": 160087
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/citext.py",
+      "position": 105,
+      "tokens": 114,
+      "context_length": 160201
+    },
+    {
+      "file_path": "django/core/management/commands/diffsettings.py",
+      "position": 106,
+      "tokens": 691,
+      "context_length": 160892
+    }
+  ]
+}

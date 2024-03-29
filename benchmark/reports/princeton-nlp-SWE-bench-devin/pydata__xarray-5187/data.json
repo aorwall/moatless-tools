@@ -1,0 +1,961 @@
+{
+  "instance_id": "pydata__xarray-5187",
+  "model_patch": "diff --git a/xarray/core/missing.py b/xarray/core/missing.py\nindex e6dd8b53..4f37b2a0 100644\n--- a/xarray/core/missing.py\n+++ b/xarray/core/missing.py\n@@ -392,13 +392,19 @@ def _bfill(arr, n=None, axis=-1):\n     \"\"\"inverse of ffill\"\"\"\n     import bottleneck as bn\n \n+    print(\"Array before first flip:\", arr)\n     arr = np.flip(arr, axis=axis)\n+    print(\"Array after first flip:\", arr)\n \n     # fill\n+    print(\"n parameter for push:\", n)\n     arr = bn.push(arr, axis=axis, n=n)\n+    print(\"Array after push:\", arr)\n \n     # reverse back to original\n-    return np.flip(arr, axis=axis)\n+    arr = np.flip(arr, axis=axis)\n+    print(\"Array after second flip (final state):\", arr)\n+    return arr\n \n \n def ffill(arr, dim=None, limit=None):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/missing.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "b2351cbe3f3e92f0e242312dae5791fc83a4467a",
+  "patch": "diff --git a/xarray/core/dask_array_ops.py b/xarray/core/dask_array_ops.py\n--- a/xarray/core/dask_array_ops.py\n+++ b/xarray/core/dask_array_ops.py\n@@ -51,3 +51,24 @@ def least_squares(lhs, rhs, rcond=None, skipna=False):\n         # See issue dask/dask#6516\n         coeffs, residuals, _, _ = da.linalg.lstsq(lhs_da, rhs)\n     return coeffs, residuals\n+\n+\n+def push(array, n, axis):\n+    \"\"\"\n+    Dask-aware bottleneck.push\n+    \"\"\"\n+    from bottleneck import push\n+\n+    if len(array.chunks[axis]) > 1 and n is not None and n < array.shape[axis]:\n+        raise NotImplementedError(\n+            \"Cannot fill along a chunked axis when limit is not None.\"\n+            \"Either rechunk to a single chunk along this axis or call .compute() or .load() first.\"\n+        )\n+    if all(c == 1 for c in array.chunks[axis]):\n+        array = array.rechunk({axis: 2})\n+    pushed = array.map_blocks(push, axis=axis, n=n)\n+    if len(array.chunks[axis]) > 1:\n+        pushed = pushed.map_overlap(\n+            push, axis=axis, n=n, depth={axis: (1, 0)}, boundary=\"none\"\n+        )\n+    return pushed\ndiff --git a/xarray/core/dataarray.py b/xarray/core/dataarray.py\n--- a/xarray/core/dataarray.py\n+++ b/xarray/core/dataarray.py\n@@ -2515,7 +2515,8 @@ def ffill(self, dim: Hashable, limit: int = None) -> \"DataArray\":\n             The maximum number of consecutive NaN values to forward fill. In\n             other words, if there is a gap with more than this number of\n             consecutive NaNs, it will only be partially filled. Must be greater\n-            than 0 or None for no limit.\n+            than 0 or None for no limit. Must be None or greater than or equal\n+            to axis length if filling along chunked axes (dimensions).\n \n         Returns\n         -------\n@@ -2539,7 +2540,8 @@ def bfill(self, dim: Hashable, limit: int = None) -> \"DataArray\":\n             The maximum number of consecutive NaN values to backward fill. In\n             other words, if there is a gap with more than this number of\n             consecutive NaNs, it will only be partially filled. Must be greater\n-            than 0 or None for no limit.\n+            than 0 or None for no limit. Must be None or greater than or equal\n+            to axis length if filling along chunked axes (dimensions).\n \n         Returns\n         -------\ndiff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -4654,7 +4654,8 @@ def ffill(self, dim: Hashable, limit: int = None) -> \"Dataset\":\n             The maximum number of consecutive NaN values to forward fill. In\n             other words, if there is a gap with more than this number of\n             consecutive NaNs, it will only be partially filled. Must be greater\n-            than 0 or None for no limit.\n+            than 0 or None for no limit. Must be None or greater than or equal\n+            to axis length if filling along chunked axes (dimensions).\n \n         Returns\n         -------\n@@ -4679,7 +4680,8 @@ def bfill(self, dim: Hashable, limit: int = None) -> \"Dataset\":\n             The maximum number of consecutive NaN values to backward fill. In\n             other words, if there is a gap with more than this number of\n             consecutive NaNs, it will only be partially filled. Must be greater\n-            than 0 or None for no limit.\n+            than 0 or None for no limit. Must be None or greater than or equal\n+            to axis length if filling along chunked axes (dimensions).\n \n         Returns\n         -------\ndiff --git a/xarray/core/duck_array_ops.py b/xarray/core/duck_array_ops.py\n--- a/xarray/core/duck_array_ops.py\n+++ b/xarray/core/duck_array_ops.py\n@@ -631,3 +631,12 @@ def least_squares(lhs, rhs, rcond=None, skipna=False):\n         return dask_array_ops.least_squares(lhs, rhs, rcond=rcond, skipna=skipna)\n     else:\n         return nputils.least_squares(lhs, rhs, rcond=rcond, skipna=skipna)\n+\n+\n+def push(array, n, axis):\n+    from bottleneck import push\n+\n+    if is_duck_dask_array(array):\n+        return dask_array_ops.push(array, n, axis)\n+    else:\n+        return push(array, n, axis)\ndiff --git a/xarray/core/missing.py b/xarray/core/missing.py\n--- a/xarray/core/missing.py\n+++ b/xarray/core/missing.py\n@@ -11,7 +11,7 @@\n from . import utils\n from .common import _contains_datetime_like_objects, ones_like\n from .computation import apply_ufunc\n-from .duck_array_ops import datetime_to_numeric, timedelta_to_numeric\n+from .duck_array_ops import datetime_to_numeric, push, timedelta_to_numeric\n from .options import _get_keep_attrs\n from .pycompat import is_duck_dask_array\n from .utils import OrderedSet, is_scalar\n@@ -390,12 +390,10 @@ def func_interpolate_na(interpolator, y, x, **kwargs):\n \n def _bfill(arr, n=None, axis=-1):\n     \"\"\"inverse of ffill\"\"\"\n-    import bottleneck as bn\n-\n     arr = np.flip(arr, axis=axis)\n \n     # fill\n-    arr = bn.push(arr, axis=axis, n=n)\n+    arr = push(arr, axis=axis, n=n)\n \n     # reverse back to original\n     return np.flip(arr, axis=axis)\n@@ -403,17 +401,15 @@ def _bfill(arr, n=None, axis=-1):\n \n def ffill(arr, dim=None, limit=None):\n     \"\"\"forward fill missing values\"\"\"\n-    import bottleneck as bn\n-\n     axis = arr.get_axis_num(dim)\n \n     # work around for bottleneck 178\n     _limit = limit if limit is not None else arr.shape[axis]\n \n     return apply_ufunc(\n-        bn.push,\n+        push,\n         arr,\n-        dask=\"parallelized\",\n+        dask=\"allowed\",\n         keep_attrs=True,\n         output_dtypes=[arr.dtype],\n         kwargs=dict(n=_limit, axis=axis),\n@@ -430,7 +426,7 @@ def bfill(arr, dim=None, limit=None):\n     return apply_ufunc(\n         _bfill,\n         arr,\n-        dask=\"parallelized\",\n+        dask=\"allowed\",\n         keep_attrs=True,\n         output_dtypes=[arr.dtype],\n         kwargs=dict(n=_limit, axis=axis),\n",
+  "test_patch": "diff --git a/xarray/tests/test_duck_array_ops.py b/xarray/tests/test_duck_array_ops.py\n--- a/xarray/tests/test_duck_array_ops.py\n+++ b/xarray/tests/test_duck_array_ops.py\n@@ -20,6 +20,7 @@\n     mean,\n     np_timedelta64_to_float,\n     pd_timedelta_to_float,\n+    push,\n     py_timedelta_to_float,\n     stack,\n     timedelta_to_numeric,\n@@ -34,6 +35,7 @@\n     has_dask,\n     has_scipy,\n     raise_if_dask_computes,\n+    requires_bottleneck,\n     requires_cftime,\n     requires_dask,\n )\n@@ -858,3 +860,26 @@ def test_least_squares(use_dask, skipna):\n \n     np.testing.assert_allclose(coeffs, [1.5, 1.25])\n     np.testing.assert_allclose(residuals, [2.0])\n+\n+\n+@requires_dask\n+@requires_bottleneck\n+def test_push_dask():\n+    import bottleneck\n+    import dask.array\n+\n+    array = np.array([np.nan, np.nan, np.nan, 1, 2, 3, np.nan, np.nan, 4, 5, np.nan, 6])\n+    expected = bottleneck.push(array, axis=0)\n+    for c in range(1, 11):\n+        with raise_if_dask_computes():\n+            actual = push(dask.array.from_array(array, chunks=c), axis=0, n=None)\n+        np.testing.assert_equal(actual, expected)\n+\n+    # some chunks of size-1 with NaN\n+    with raise_if_dask_computes():\n+        actual = push(\n+            dask.array.from_array(array, chunks=(1, 2, 3, 2, 2, 1, 1)),\n+            axis=0,\n+            n=None,\n+        )\n+    np.testing.assert_equal(actual, expected)\ndiff --git a/xarray/tests/test_missing.py b/xarray/tests/test_missing.py\n--- a/xarray/tests/test_missing.py\n+++ b/xarray/tests/test_missing.py\n@@ -17,6 +17,7 @@\n     assert_allclose,\n     assert_array_equal,\n     assert_equal,\n+    raise_if_dask_computes,\n     requires_bottleneck,\n     requires_cftime,\n     requires_dask,\n@@ -393,37 +394,39 @@ def test_ffill():\n \n @requires_bottleneck\n @requires_dask\n-def test_ffill_dask():\n+@pytest.mark.parametrize(\"method\", [\"ffill\", \"bfill\"])\n+def test_ffill_bfill_dask(method):\n     da, _ = make_interpolate_example_data((40, 40), 0.5)\n     da = da.chunk({\"x\": 5})\n-    actual = da.ffill(\"time\")\n-    expected = da.load().ffill(\"time\")\n-    assert isinstance(actual.data, dask_array_type)\n-    assert_equal(actual, expected)\n \n-    # with limit\n-    da = da.chunk({\"x\": 5})\n-    actual = da.ffill(\"time\", limit=3)\n-    expected = da.load().ffill(\"time\", limit=3)\n-    assert isinstance(actual.data, dask_array_type)\n+    dask_method = getattr(da, method)\n+    numpy_method = getattr(da.compute(), method)\n+    # unchunked axis\n+    with raise_if_dask_computes():\n+        actual = dask_method(\"time\")\n+    expected = numpy_method(\"time\")\n     assert_equal(actual, expected)\n \n-\n-@requires_bottleneck\n-@requires_dask\n-def test_bfill_dask():\n-    da, _ = make_interpolate_example_data((40, 40), 0.5)\n-    da = da.chunk({\"x\": 5})\n-    actual = da.bfill(\"time\")\n-    expected = da.load().bfill(\"time\")\n-    assert isinstance(actual.data, dask_array_type)\n+    # chunked axis\n+    with raise_if_dask_computes():\n+        actual = dask_method(\"x\")\n+    expected = numpy_method(\"x\")\n     assert_equal(actual, expected)\n \n     # with limit\n-    da = da.chunk({\"x\": 5})\n-    actual = da.bfill(\"time\", limit=3)\n-    expected = da.load().bfill(\"time\", limit=3)\n-    assert isinstance(actual.data, dask_array_type)\n+    with raise_if_dask_computes():\n+        actual = dask_method(\"time\", limit=3)\n+    expected = numpy_method(\"time\", limit=3)\n+    assert_equal(actual, expected)\n+\n+    # limit < axis size\n+    with pytest.raises(NotImplementedError):\n+        actual = dask_method(\"x\", limit=2)\n+\n+    # limit > axis size\n+    with raise_if_dask_computes():\n+        actual = dask_method(\"x\", limit=41)\n+    expected = numpy_method(\"x\", limit=41)\n     assert_equal(actual, expected)\n \n \n",
+  "problem_statement": "bfill behavior dask arrays with small chunk size\n```python\r\ndata = np.random.rand(100)\r\ndata[25] = np.nan\r\nda = xr.DataArray(data)\r\n\r\n#unchunked \r\nprint('output : orig',da[25].values, ' backfill : ',da.bfill('dim_0')[25].values )\r\noutput : orig nan  backfill :  0.024710724099643477\r\n\r\n#small chunk\r\nda1 = da.chunk({'dim_0':1})\r\nprint('output chunks==1 : orig',da1[25].values, ' backfill : ',da1.bfill('dim_0')[25].values )\r\noutput chunks==1 : orig nan  backfill :  nan\r\n\r\n# medium chunk\r\nda1 = da.chunk({'dim_0':10})\r\nprint('output chunks==10 : orig',da1[25].values, ' backfill : ',da1.bfill('dim_0')[25].values )\r\noutput chunks==10 : orig nan  backfill :  0.024710724099643477\r\n```\r\n\r\n\r\n\r\n\r\n#### Problem description\r\nbfill methods seems to miss nans when dask array chunk size is small. Resulting array still has nan present  (see 'small chunk' section of code)\r\n\r\n\r\n#### Expected Output\r\nabsence of nans\r\n#### Output of ``xr.show_versions()``\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.6.8.final.0\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 4.15.0-43-generic\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_CA.UTF-8\r\nLOCALE: en_CA.UTF-8\r\nxarray: 0.11.0\r\npandas: 0.23.4\r\nnumpy: 1.15.4\r\nscipy: None\r\nnetCDF4: None\r\nh5netcdf: None\r\nh5py: None\r\nNio: None\r\nzarr: None\r\ncftime: None\r\nPseudonetCDF: None\r\nrasterio: None\r\niris: None\r\nbottleneck: 1.2.1\r\ncyordereddict: None\r\ndask: 1.0.0\r\ndistributed: 1.25.2\r\nmatplotlib: None\r\ncartopy: None\r\nseaborn: None\r\nsetuptools: 40.6.3\r\npip: 18.1\r\nconda: None\r\npytest: None\r\nIPython: None\r\nsphinx: None\r\n\r\n\n",
+  "hints_text": "Thanks for the clear report. Indeed, this looks like a bug.\r\n\r\n`bfill()` and `ffill()` are implemented on dask arrays via `apply_ufunc`, but they're applied independently on each chunk -- there's no filling between chunks:\r\nhttps://github.com/pydata/xarray/blob/ddacf405fb256714ce01e1c4c464f829e1cc5058/xarray/core/missing.py#L262-L289\r\n\r\nInstead, I think we need a multi-step process for parallelizing `bottleneck.push`, e.g.,\r\n1. Forward fill each chunk independently.\r\n2. Slice out the *last element* of each chunk and forward fill these.\r\n3. Prepend filled last elements to the start of each chunk, and forward fill them again.\nI think this will work (though it needs more tests):\r\n```python\r\nimport bottleneck\r\nimport dask.array as da\r\nimport numpy as np\r\n\r\ndef _last_element(array, axis):\r\n  slices = [slice(None)] * array.ndim\r\n  slices[axis] = slice(-1, None)\r\n  return array[tuple(slices)]\r\n\r\ndef _concat_push_slice(last_elements, array, axis):\r\n  concatenated = np.concatenate([last_elements, array], axis=axis)\r\n  pushed = bottleneck.push(concatenated, axis=axis)\r\n  slices = [slice(None)] * array.ndim\r\n  slices[axis] = slice(1, None)\r\n  sliced = pushed[tuple(slices)]\r\n  return sliced\r\n\r\ndef push(array, axis):\r\n  if axis < 0:\r\n    axis += array.ndim\r\n  pushed = array.map_blocks(bottleneck.push, dtype=array.dtype, axis=axis)\r\n  new_chunks = list(array.chunks)\r\n  new_chunks[axis] = tuple(1 for _ in array.chunks[axis])\r\n  last_elements = pushed.map_blocks(\r\n      _last_element, dtype=array.dtype, chunks=tuple(new_chunks), axis=axis)\r\n  pushed_last_elements = (\r\n      last_elements.rechunk({axis: -1})\r\n      .map_blocks(bottleneck.push, dtype=array.dtype, axis=axis)\r\n      .rechunk({axis: 1})\r\n  )\r\n  nan_shape = tuple(1 if axis == a else s for a, s in enumerate(array.shape))\r\n  nan_chunks = tuple((1,) if axis == a else c for a, c in enumerate(array.chunks))\r\n  shifted_pushed_last_elements = da.concatenate(\r\n      [da.full(np.nan, shape=nan_shape, chunks=nan_chunks),\r\n       pushed_last_elements[(slice(None),) * axis + (slice(None, -1),)]],\r\n      axis=axis)\r\n  return da.map_blocks(\r\n      _concat_push_slice,\r\n      shifted_pushed_last_elements,\r\n      pushed,\r\n      dtype=array.dtype,\r\n      chunks=array.chunks,\r\n      axis=axis,\r\n  )\r\n\r\n# tests\r\narray = np.array([np.nan, np.nan, np.nan, 1, 2, 3,\r\n                  np.nan, np.nan, 4, 5, np.nan, 6])\r\nexpected = bottleneck.push(array, axis=0)\r\nfor c in range(1, 11):\r\n  actual = push(da.from_array(array, chunks=c), axis=0).compute()\r\n  np.testing.assert_equal(actual, expected)\r\n```\nI also recently encountered this bug and without user warnings it took me a while to identify its origin. I'll use this temporary fix. Thanks\nI encountered this bug a few days ago.\r\nI understand it isn't trivial to fix, but would it be possible to check and throw an exception? Still better than having it go unnoticed. Thanks",
+  "created_at": "2021-04-18T17:00:51Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_equal[arr10-arr20]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_equal[arr11-arr21]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_equal[arr12-arr22]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_some_not_equal\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_types[1.0-2.0-3.0-nan]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_types[foo-bar-baz-None]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_types[foo-bar-baz-nan]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_types[val10-val20-val30-null0]\", \"xarray/tests/test_duck_array_ops.py::TestArrayNotNullEquiv::test_wrong_shape\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_all_nan_arrays\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_concatenate_type_promotion\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_count\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_first\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_last\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_stack_type_promotion\", \"xarray/tests/test_duck_array_ops.py::TestOps::test_where_type_promotion\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-max-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-False-min-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-True-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-True-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-True-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-max-False-True-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-True-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-True-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-True-str-1]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[x-True-min-False-True-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-max-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-max-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-max-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-max-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-max-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-min-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-min-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-min-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-min-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-False-min-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-True-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-max-False-True-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-False-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-True-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max[y-True-min-False-True-str-2]\", \"xarray/tests/test_duck_array_ops.py::test_argmin_max_error\", \"xarray/tests/test_duck_array_ops.py::test_cumprod_2d\", \"xarray/tests/test_duck_array_ops.py::test_cumsum_1d\", \"xarray/tests/test_duck_array_ops.py::test_cumsum_2d\", \"xarray/tests/test_duck_array_ops.py::test_datetime_to_numeric_datetime64\", \"xarray/tests/test_duck_array_ops.py::test_docs\", \"xarray/tests/test_duck_array_ops.py::test_isnull[array0]\", \"xarray/tests/test_duck_array_ops.py::test_isnull[array1]\", \"xarray/tests/test_duck_array_ops.py::test_isnull[array2]\", \"xarray/tests/test_duck_array_ops.py::test_isnull[array3]\", \"xarray/tests/test_duck_array_ops.py::test_isnull[array4]\", \"xarray/tests/test_duck_array_ops.py::test_least_squares[False-False]\", \"xarray/tests/test_duck_array_ops.py::test_least_squares[True-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-None-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-False-x-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-None-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[False-True-x-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-None-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-False-x-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-None-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-prod-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_min_count[True-True-x-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_dataset[prod]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_dataset[sum]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[prod-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[prod-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[prod-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[prod-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[sum-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[sum-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[sum-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_nd[sum-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[None-prod-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[None-sum-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[a-prod-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[a-sum-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[b-prod-False]\", \"xarray/tests/test_duck_array_ops.py::test_min_count_specific[b-sum-False]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-False-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-False-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-False-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-False-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-True-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-True-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-True-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[prod-True-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-False-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-False-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-False-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-False-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-True-False-bool_]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-True-False-float32]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-True-False-float]\", \"xarray/tests/test_duck_array_ops.py::test_multiple_dims[sum-True-False-int]\", \"xarray/tests/test_duck_array_ops.py::test_np_timedelta64_to_float[td0-86400000000000.0]\", \"xarray/tests/test_duck_array_ops.py::test_np_timedelta64_to_float[td1-1.0]\", \"xarray/tests/test_duck_array_ops.py::test_pd_timedelta_to_float[td0-86400000000000.0]\", \"xarray/tests/test_duck_array_ops.py::test_pd_timedelta_to_float[td1-1.0]\", \"xarray/tests/test_duck_array_ops.py::test_py_timedelta_to_float\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-max-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-mean-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-min-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-False-var-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-max-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-mean-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-min-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[None-True-var-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-max-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-mean-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-min-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-False-var-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-max-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-mean-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-min-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-sum-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-bool_-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-bool_-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-float-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-float-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-float32-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-float32-2]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-int-1]\", \"xarray/tests/test_duck_array_ops.py::test_reduce[x-True-var-False-int-2]\", \"xarray/tests/test_duck_array_ops.py::test_timedelta_to_numeric[1\", \"xarray/tests/test_duck_array_ops.py::test_timedelta_to_numeric[td0]\", \"xarray/tests/test_duck_array_ops.py::test_timedelta_to_numeric[td1]\", \"xarray/tests/test_duck_array_ops.py::test_timedelta_to_numeric[td2]\"]",
+  "PASS_TO_PASS": "[]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "xarray/core/dask_array_ops.py",
+    "xarray/core/dataarray.py",
+    "xarray/core/dataset.py",
+    "xarray/core/duck_array_ops.py",
+    "xarray/core/missing.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_duck_array_ops.py",
+    "xarray/tests/test_missing.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/dask_array_ops.py": {
+      "diffs": [
+        {
+          "start_line_old": 54,
+          "end_line_old": 54
+        }
+      ]
+    },
+    "xarray/core/dataarray.py": {
+      "diffs": [
+        {
+          "start_line_old": 2518,
+          "end_line_old": 2518,
+          "file_pos": 11,
+          "file_context_length": 111872,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_25.3.2.iris_Cube.1",
+          "closest_snippet_line_distance": 2431,
+          "pos": 25,
+          "context_length": 8842
+        },
+        {
+          "start_line_old": 2542,
+          "end_line_old": 2542,
+          "file_pos": 11,
+          "file_context_length": 111872,
+          "pos": 12,
+          "context_length": 5132
+        }
+      ]
+    },
+    "xarray/core/dataset.py": {
+      "diffs": [
+        {
+          "start_line_old": 4657,
+          "end_line_old": 4657,
+          "file_pos": 10,
+          "file_context_length": 73094,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.isel_Dataset.reindex.2.1",
+          "closest_snippet_line_distance": 1912
+        },
+        {
+          "start_line_old": 4682,
+          "end_line_old": 4682,
+          "file_pos": 10,
+          "file_context_length": 73094,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.isel_Dataset.reindex.2.1",
+          "closest_snippet_line_distance": 1937
+        }
+      ]
+    },
+    "xarray/core/duck_array_ops.py": {
+      "diffs": [
+        {
+          "start_line_old": 634,
+          "end_line_old": 634,
+          "file_pos": 12,
+          "file_context_length": 117086,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_58__mean.1",
+          "closest_snippet_line_distance": 256,
+          "pos": 44,
+          "context_length": 16997
+        }
+      ]
+    },
+    "xarray/core/missing.py": {
+      "diffs": [
+        {
+          "start_line_old": 14,
+          "end_line_old": 14,
+          "file_pos": 16,
+          "file_context_length": 124156,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/missing.py__bfill_ffill.6.1",
+          "closest_snippet_line_distance": 377,
+          "pos": 40,
+          "context_length": 14048
+        },
+        {
+          "start_line_old": 393,
+          "end_line_old": 398,
+          "file_pos": 16,
+          "file_context_length": 124156,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/missing.py_bfill__import_interpolant.2.3.1",
+          "closest_snippet_line_distance": 30,
+          "pos": 39,
+          "context_length": 13915
+        },
+        {
+          "start_line_old": 406,
+          "end_line_old": 416,
+          "file_pos": 16,
+          "file_context_length": 124156,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/missing.py_bfill__import_interpolant.2.3.1",
+          "closest_snippet_line_distance": 17,
+          "pos": 39,
+          "context_length": 13915
+        },
+        {
+          "start_line_old": 433,
+          "end_line_old": 433,
+          "file_pos": 16,
+          "file_context_length": 124156,
+          "pos": 22,
+          "context_length": 7876
+        }
+      ]
+    }
+  },
+  "vectors": 1107,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataarray_missing.py_pd_",
+      "distance": 0.650874674320221,
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 531,
+      "context_length": 531
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 0.7906316518783569,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 733,
+      "context_length": 1264
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/rolling.py_np_randn_long.1",
+      "distance": 0.8148777484893799,
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 117,
+      "context_length": 1381
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/interp.py_np_new_y_long.1",
+      "distance": 0.8258776664733887,
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 184,
+      "context_length": 1565
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/dask_array_compat.py_8_9.2.ensure_minimum_chunksize.8.1",
+      "distance": 0.8431464433670044,
+      "file_path": "xarray/core/dask_array_compat.py",
+      "start_line": 61,
+      "end_line": 152,
+      "tokens": 596,
+      "context_length": 2161
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py_nanmin_nansum.3.2.1.1",
+      "distance": 0.8592058420181274,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 78,
+      "end_line": 118,
+      "tokens": 400,
+      "context_length": 2561
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_os_IOSingleNetCDF.make_ds.self.ds.self.vinds.1",
+      "distance": 0.8658727407455444,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 703,
+      "context_length": 3264
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/unstacking.py_np_",
+      "distance": 0.8759016990661621,
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 194,
+      "context_length": 3458
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/reindexing.py_np_",
+      "distance": 0.8783887624740601,
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 413,
+      "context_length": 3871
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py__nanvar_object_",
+      "distance": 0.8842219114303589,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 163,
+      "end_line": 205,
+      "tokens": 432,
+      "context_length": 4303
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_copy__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 0.8927280902862549,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 133,
+      "tokens": 655,
+      "context_length": 4958,
+      "file_pos": 10
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.bfill_DataArray.bfill.3.1",
+      "distance": 0.8949637413024902,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 2528,
+      "end_line": 2550,
+      "tokens": 174,
+      "context_length": 5132,
+      "file_pos": 11
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_58__mean.1",
+      "distance": 0.920606255531311,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 353,
+      "end_line": 378,
+      "tokens": 270,
+      "context_length": 5402,
+      "file_pos": 12
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/rolling.py_RollingDask_RollingMemory.setup.self.ds.1",
+      "distance": 0.9311848878860474,
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "start_line": 64,
+      "end_line": 86,
+      "tokens": 215,
+      "context_length": 5617
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/pandas.py_np_",
+      "distance": 0.9366532564163208,
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 160,
+      "context_length": 5777
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadSingleNetCDF3Dask_IOReadSingleNetCDF3Dask.time_load_dataset_scipy_with_time_chunks.1.1",
+      "distance": 0.9377020597457886,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 187,
+      "end_line": 216,
+      "tokens": 265,
+      "context_length": 6042
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_25.3.2.iris_Cube.1",
+      "distance": 0.9400556683540344,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 464,
+      "context_length": 6506,
+      "file_pos": 13
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py_nanmedian_nanmedian.5.2.1",
+      "distance": 0.942903995513916,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 151,
+      "end_line": 160,
+      "tokens": 128,
+      "context_length": 6634
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_pkg_resources_",
+      "distance": 0.9437764286994934,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 603,
+      "context_length": 7237
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF3Dask_IOReadMultipleNetCDF3Dask.time_open_dataset_scipy_with_time_chunks.1.1",
+      "distance": 0.9455965161323547,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 395,
+      "end_line": 426,
+      "tokens": 264,
+      "context_length": 7501
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/pycompat.py_np_",
+      "distance": 0.9470791816711426,
+      "file_path": "xarray/core/pycompat.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 208,
+      "context_length": 7709
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_bfill__import_interpolant.2.3.1",
+      "distance": 0.9479276537895203,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 423,
+      "end_line": 447,
+      "tokens": 167,
+      "context_length": 7876,
+      "file_pos": 16
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF4Dask_IOReadMultipleNetCDF4Dask.time_open_dataset_netcdf4_with_time_chunks_multiprocessing.1.1",
+      "distance": 0.9491368532180786,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 341,
+      "end_line": 392,
+      "tokens": 442,
+      "context_length": 8318
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadSingleNetCDF4Dask_IOReadSingleNetCDF4Dask.time_load_dataset_netcdf4_with_time_chunks_multiprocessing.1.1",
+      "distance": 0.9507690668106079,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 147,
+      "end_line": 184,
+      "tokens": 349,
+      "context_length": 8667
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.ffill_DataArray.ffill.3.1",
+      "distance": 0.9543889164924622,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 2504,
+      "end_line": 2526,
+      "tokens": 175,
+      "context_length": 8842,
+      "file_pos": 16
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_1_assert_chunks_compatible.3.1.1",
+      "distance": 0.955811619758606,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 225,
+      "context_length": 9067
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.interpolate_na_DataArray.interpolate_na.3.1",
+      "distance": 0.9585613012313843,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 2388,
+      "end_line": 2502,
+      "tokens": 1219,
+      "context_length": 10286,
+      "file_pos": 17
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_warnings_T.1",
+      "distance": 0.9613672494888306,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 240,
+      "context_length": 10526
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/core/dask_array_compat.py_10_",
+      "distance": 0.9615881443023682,
+      "file_path": "xarray/core/dask_array_compat.py",
+      "start_line": 155,
+      "end_line": 225,
+      "tokens": 658,
+      "context_length": 11184
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py__get_chunk__get_chunk.da",
+      "distance": 0.9629234075546265,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 382,
+      "end_line": 412,
+      "tokens": 215,
+      "context_length": 11399,
+      "file_pos": 18
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_create_delayed_write_",
+      "distance": 0.9633241295814514,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 429,
+      "end_line": 464,
+      "tokens": 186,
+      "context_length": 11585
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/nputils.py_nanmin_",
+      "distance": 0.9633790254592896,
+      "file_path": "xarray/core/nputils.py",
+      "start_line": 205,
+      "end_line": 216,
+      "tokens": 155,
+      "context_length": 11740
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py__assert_empty__check_chunks_compatibility.1.5.1",
+      "distance": 0.9688112735748291,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 354,
+      "end_line": 379,
+      "tokens": 191,
+      "context_length": 11931,
+      "file_pos": 19
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_HugeAxisSmallSliceIndexing_",
+      "distance": 0.9727433919906616,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 145,
+      "end_line": 162,
+      "tokens": 145,
+      "context_length": 12076
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py_nanmean_nanmean.2.3.1",
+      "distance": 0.9741862416267395,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 137,
+      "end_line": 148,
+      "tokens": 115,
+      "context_length": 12191
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.sel_DataArray.sel.3.1",
+      "distance": 0.9853096008300781,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1145,
+      "end_line": 1261,
+      "tokens": 1183,
+      "context_length": 13374,
+      "file_pos": 19
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py__maybe_chunk__maybe_chunk.3.5.1.1",
+      "distance": 0.9869050979614258,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 415,
+      "end_line": 440,
+      "tokens": 207,
+      "context_length": 13581,
+      "file_pos": 19
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py__maybe_null_out__maybe_null_out.3.1",
+      "distance": 0.9876974821090698,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 34,
+      "end_line": 47,
+      "tokens": 152,
+      "context_length": 13733
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py__bfill_ffill.6.1",
+      "distance": 0.9901396036148071,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 391,
+      "end_line": 420,
+      "tokens": 182,
+      "context_length": 13915,
+      "file_pos": 19
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_dt_broadcast_variables",
+      "distance": 0.993531346321106,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 133,
+      "context_length": 14048,
+      "file_pos": 19
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/xarray/xarray/core/rolling_exp.py_1_move_exp_nanmean.3.2.1.1",
+      "distance": 0.9942111968994141,
+      "file_path": "xarray/core/rolling_exp.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 266,
+      "context_length": 14314
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/xarray/xarray/core/nanops.py_warnings__replace_nan.3.1",
+      "distance": 0.9998677968978882,
+      "file_path": "xarray/core/nanops.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 161,
+      "context_length": 14475
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_align.1_align.1",
+      "distance": 1.000122308731079,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 82,
+      "end_line": 270,
+      "tokens": 1951,
+      "context_length": 16426
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_mean.numeric_only_",
+      "distance": 1.0021958351135254,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 567,
+      "end_line": 634,
+      "tokens": 571,
+      "context_length": 16997,
+      "file_pos": 21
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/xarray/xarray/core/rolling.py_DataArrayRolling._numpy_or_bottleneck_reduce_DataArrayRolling._numpy_or_bottleneck_reduce.2.5.3.1",
+      "distance": 1.0081626176834106,
+      "file_path": "xarray/core/rolling.py",
+      "start_line": 522,
+      "end_line": 565,
+      "tokens": 350,
+      "context_length": 17347
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/xarray/xarray/core/nputils.py_warnings_nanlast.4.1",
+      "distance": 1.0129832029342651,
+      "file_path": "xarray/core/nputils.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 251,
+      "context_length": 17598
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py_enum_maybe_cast_to_coords_dtype",
+      "distance": 1.0130269527435303,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 117,
+      "context_length": 17715
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/xarray/xarray/core/npcompat.py_builtins__validate_axis.5.1",
+      "distance": 1.0210624933242798,
+      "file_path": "xarray/core/npcompat.py",
+      "start_line": 31,
+      "end_line": 52,
+      "tokens": 193,
+      "context_length": 17908
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py__create_nan_agg_method__create_nan_agg_method.4.1",
+      "distance": 1.0226364135742188,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 313,
+      "end_line": 350,
+      "tokens": 321,
+      "context_length": 18229,
+      "file_pos": 24
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/xarray/xarray/core/ops.py_fillna_fillna.3.1",
+      "distance": 1.0230087041854858,
+      "file_path": "xarray/core/ops.py",
+      "start_line": 120,
+      "end_line": 154,
+      "tokens": 305,
+      "context_length": 18534
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.pad.1_DataArray.pad.3.1",
+      "distance": 1.023357629776001,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 3789,
+      "end_line": 3939,
+      "tokens": 1801,
+      "context_length": 20335,
+      "file_pos": 25
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.isel_Dataset.reindex.2.1",
+      "distance": 1.0240976810455322,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 2097,
+      "end_line": 2745,
+      "tokens": 6100,
+      "context_length": 26435,
+      "file_pos": 25
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/xarray/xarray/core/npcompat.py_36_37.2.2.18",
+      "distance": 1.0241491794586182,
+      "file_path": "xarray/core/npcompat.py",
+      "start_line": 80,
+      "end_line": 129,
+      "tokens": 391,
+      "context_length": 26826
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/xarray/xarray/backends/api.py_os__get_default_engine.2.1",
+      "distance": 1.027742624282837,
+      "file_path": "xarray/backends/api.py",
+      "start_line": 1,
+      "end_line": 109,
+      "tokens": 668,
+      "context_length": 27494
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py__dask_array_with_chunks_hint__logical_any.1.1",
+      "distance": 1.0300579071044922,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1120,
+      "end_line": 1133,
+      "tokens": 116,
+      "context_length": 27610
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_IndexingDask_BooleanIndexing.time_indexing.1",
+      "distance": 1.0307753086090088,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 125,
+      "end_line": 142,
+      "tokens": 147,
+      "context_length": 27757
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_Base_Base.setup.self.ds.1",
+      "distance": 1.0357637405395508,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 62,
+      "end_line": 76,
+      "tokens": 151,
+      "context_length": 27908
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.reindex_DataArray.reindex.5.1",
+      "distance": 1.0358781814575195,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1450,
+      "end_line": 1541,
+      "tokens": 830,
+      "context_length": 28738,
+      "file_pos": 26
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/xarray/xarray/conventions.py_warnings_CF_RELATED_DATA_NEEDS_PARSING.1",
+      "distance": 1.0367680788040161,
+      "file_path": "xarray/conventions.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 168,
+      "context_length": 28906
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/xarray/xarray/core/rolling.py_DataArrayRolling._bottleneck_reduce_DataArrayRolling._bottleneck_reduce.12.1",
+      "distance": 1.0369517803192139,
+      "file_path": "xarray/core/rolling.py",
+      "start_line": 477,
+      "end_line": 520,
+      "tokens": 416,
+      "context_length": 29322
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.fillna_DataArray.fillna.4.1",
+      "distance": 1.037571668624878,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 2361,
+      "end_line": 2386,
+      "tokens": 204,
+      "context_length": 29526,
+      "file_pos": 27
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF3_IOReadMultipleNetCDF3.time_open_dataset_scipy.1",
+      "distance": 1.0375720262527466,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 325,
+      "end_line": 338,
+      "tokens": 112,
+      "context_length": 29638
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/xarray/xarray/backends/zarr.py__determine_zarr_chunks.35__determine_zarr_chunks.36",
+      "distance": 1.0393860340118408,
+      "file_path": "xarray/backends/zarr.py",
+      "start_line": 161,
+      "end_line": 187,
+      "tokens": 317,
+      "context_length": 29955
+    }
+  ],
+  "files": [
+    {
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "position": 1,
+      "tokens": 531,
+      "context_length": 531
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 2,
+      "tokens": 1560,
+      "context_length": 2091
+    },
+    {
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "position": 3,
+      "tokens": 993,
+      "context_length": 3084
+    },
+    {
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "position": 4,
+      "tokens": 485,
+      "context_length": 3569
+    },
+    {
+      "file_path": "xarray/core/dask_array_compat.py",
+      "position": 5,
+      "tokens": 1819,
+      "context_length": 5388
+    },
+    {
+      "file_path": "xarray/core/nanops.py",
+      "position": 6,
+      "tokens": 1862,
+      "context_length": 7250
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "position": 7,
+      "tokens": 3581,
+      "context_length": 10831
+    },
+    {
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "position": 8,
+      "tokens": 194,
+      "context_length": 11025
+    },
+    {
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "position": 9,
+      "tokens": 413,
+      "context_length": 11438
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 10,
+      "tokens": 61656,
+      "context_length": 73094
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 11,
+      "tokens": 38778,
+      "context_length": 111872
+    },
+    {
+      "file_path": "xarray/core/duck_array_ops.py",
+      "position": 12,
+      "tokens": 5214,
+      "context_length": 117086
+    },
+    {
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "position": 13,
+      "tokens": 160,
+      "context_length": 117246
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 14,
+      "tokens": 603,
+      "context_length": 117849
+    },
+    {
+      "file_path": "xarray/core/pycompat.py",
+      "position": 15,
+      "tokens": 208,
+      "context_length": 118057
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 16,
+      "tokens": 6099,
+      "context_length": 124156
+    },
+    {
+      "file_path": "xarray/core/parallel.py",
+      "position": 17,
+      "tokens": 5046,
+      "context_length": 129202
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 18,
+      "tokens": 15841,
+      "context_length": 145043
+    },
+    {
+      "file_path": "xarray/core/nputils.py",
+      "position": 19,
+      "tokens": 1849,
+      "context_length": 146892
+    },
+    {
+      "file_path": "xarray/core/rolling_exp.py",
+      "position": 20,
+      "tokens": 1104,
+      "context_length": 147996
+    },
+    {
+      "file_path": "xarray/core/alignment.py",
+      "position": 21,
+      "tokens": 6059,
+      "context_length": 154055
+    },
+    {
+      "file_path": "xarray/core/rolling.py",
+      "position": 22,
+      "tokens": 7532,
+      "context_length": 161587
+    },
+    {
+      "file_path": "xarray/core/indexing.py",
+      "position": 23,
+      "tokens": 11961,
+      "context_length": 173548
+    },
+    {
+      "file_path": "xarray/core/npcompat.py",
+      "position": 24,
+      "tokens": 1989,
+      "context_length": 175537
+    },
+    {
+      "file_path": "xarray/core/ops.py",
+      "position": 25,
+      "tokens": 2382,
+      "context_length": 177919
+    },
+    {
+      "file_path": "xarray/backends/api.py",
+      "position": 26,
+      "tokens": 12056,
+      "context_length": 189975
+    },
+    {
+      "file_path": "xarray/conventions.py",
+      "position": 27,
+      "tokens": 6401,
+      "context_length": 196376
+    },
+    {
+      "file_path": "xarray/backends/zarr.py",
+      "position": 28,
+      "tokens": 5605,
+      "context_length": 201981
+    }
+  ]
+}
