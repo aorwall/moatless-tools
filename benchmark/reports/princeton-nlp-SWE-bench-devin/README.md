@@ -1,6 +1,6 @@
 # Benchmark summary
 
-* **Dataset:** princeton-nlp/SWE-bench_Lite
+* **Dataset:** princeton-nlp/SWE-bench (devin)
 * **Embedding model:** text-embedding-3-small
 * **Splitter:** `EpicSplitter(chunk_size=750, min_chunk_size=100, comment_strategy=CommentStrategy.ASSOCIATE` 
 
