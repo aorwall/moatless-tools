@@ -1,0 +1,762 @@
+{
+  "instance_id": "sympy__sympy-21286",
+  "model_patch": "diff --git a/sympy/sets/fancysets.py b/sympy/sets/fancysets.py\nindex b1af4372be..d3c6df6bdc 100644\n--- a/sympy/sets/fancysets.py\n+++ b/sympy/sets/fancysets.py\n@@ -608,37 +608,23 @@ def __new__(cls, *args):\n     [0, 1/10, 1/5].'''))\n         start, stop, step = ok\n \n+        print(\"start:\", start, \"stop:\", stop, \"step:\", step)\n+\n         null = False\n         if any(i.has(Symbol) for i in (start, stop, step)):\n             if start == stop:\n                 null = True\n             else:\n-                end = stop\n-        elif start.is_infinite:\n-            span = step*(stop - start)\n-            if span is S.NaN or span <= 0:\n-                null = True\n-            elif step.is_Integer and stop.is_infinite and abs(step) != 1:\n-                raise ValueError(filldedent('''\n-                    Step size must be %s in this case.''' % (1 if step > 0 else -1)))\n-            else:\n-                end = stop\n-        else:\n-            oostep = step.is_infinite\n-            if oostep:\n-                step = S.One if step > 0 else S.NegativeOne\n-            n = ceiling((stop - start)/step)\n-            if n <= 0:\n-                null = True\n-            elif oostep:\n-                end = start + 1\n-                step = S.One  # make it a canonical single step\n-            else:\n-                end = start + n*step\n+                if step.has(Symbol):\n+                    # Calculate the adjustment needed to make the range canonical\n+                    adjusted_stop = start + ceiling((stop - start)/step)*step\n+                    stop = adjusted_stop\n+                else:\n+                    stop = stop\n         if null:\n-            start = end = S.Zero\n+            start = stop = S.Zero\n             step = S.One\n-        return Basic.__new__(cls, start, end, step)\n+        return Basic.__new__(cls, start, stop, step)\n \n     start = property(lambda self: self.args[0])\n     stop = property(lambda self: self.args[1])\n@@ -890,14 +876,14 @@ def _inf(self):\n \n     @property\n     def _sup(self):\n-        if not self:\n-            raise NotImplementedError\n-        if self.has(Symbol):\n-            if self.step.is_positive:\n-                return self[-1]\n-            elif self.step.is_negative:\n-                return self[0]\n-            _ = self.size  # validate\n+        if self.size == 0:\n+            return S.NegativeInfinity\n+        if self.start.is_infinite:\n+            return S.NegativeInfinity\n+        if self.stop.is_infinite:\n+            return S.Infinity\n+        if self.step.has(Symbol):\n+            return self.stop - self.step\n         if self.step > 0:\n             return self.stop - self.step\n         else:\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/sets/fancysets.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "546e10799fe55b3e59dea8fa6b3a6d6e71843d33",
+  "patch": "diff --git a/sympy/sets/fancysets.py b/sympy/sets/fancysets.py\n--- a/sympy/sets/fancysets.py\n+++ b/sympy/sets/fancysets.py\n@@ -6,11 +6,11 @@\n from sympy.core.function import Lambda\n from sympy.core.logic import fuzzy_not, fuzzy_or, fuzzy_and\n from sympy.core.numbers import oo\n-from sympy.core.relational import Eq\n+from sympy.core.relational import Eq, is_eq\n from sympy.core.singleton import Singleton, S\n from sympy.core.symbol import Dummy, symbols, Symbol\n from sympy.core.sympify import _sympify, sympify, converter\n-from sympy.logic.boolalg import And\n+from sympy.logic.boolalg import And, Or\n from sympy.sets.sets import (Set, Interval, Union, FiniteSet,\n     ProductSet)\n from sympy.utilities.misc import filldedent\n@@ -571,7 +571,7 @@ class Range(Set):\n         >>> r.inf\n         n\n         >>> pprint(r)\n-        {n, n + 3, ..., n + 17}\n+        {n, n + 3, ..., n + 18}\n     \"\"\"\n \n     is_iterable = True\n@@ -598,6 +598,8 @@ def __new__(cls, *args):\n                         w.has(Symbol) and w.is_integer != False):\n                     ok.append(w)\n                 elif not w.is_Integer:\n+                    if w.is_infinite:\n+                        raise ValueError('infinite symbols not allowed')\n                     raise ValueError\n                 else:\n                     ok.append(w)\n@@ -610,10 +612,25 @@ def __new__(cls, *args):\n \n         null = False\n         if any(i.has(Symbol) for i in (start, stop, step)):\n-            if start == stop:\n+            dif = stop - start\n+            n = dif/step\n+            if n.is_Rational:\n+                from sympy import floor\n+                if dif == 0:\n+                    null = True\n+                else:  # (x, x + 5, 2) or (x, 3*x, x)\n+                    n = floor(n)\n+                    end = start + n*step\n+                    if dif.is_Rational:  # (x, x + 5, 2)\n+                        if (end - stop).is_negative:\n+                            end += step\n+                    else:  # (x, 3*x, x)\n+                        if (end/stop - 1).is_negative:\n+                            end += step\n+            elif n.is_extended_negative:\n                 null = True\n             else:\n-                end = stop\n+                end = stop  # other methods like sup and reversed must fail\n         elif start.is_infinite:\n             span = step*(stop - start)\n             if span is S.NaN or span <= 0:\n@@ -631,8 +648,8 @@ def __new__(cls, *args):\n             if n <= 0:\n                 null = True\n             elif oostep:\n-                end = start + 1\n-                step = S.One  # make it a canonical single step\n+                step = S.One  # make it canonical\n+                end = start + step\n             else:\n                 end = start + n*step\n         if null:\n@@ -656,34 +673,42 @@ def reversed(self):\n         Range(9, -1, -1)\n         \"\"\"\n         if self.has(Symbol):\n-            _ = self.size  # validate\n-        if not self:\n+            n = (self.stop - self.start)/self.step\n+            if not n.is_extended_positive or not all(\n+                    i.is_integer or i.is_infinite for i in self.args):\n+                raise ValueError('invalid method for symbolic range')\n+        if self.start == self.stop:\n             return self\n         return self.func(\n             self.stop - self.step, self.start - self.step, -self.step)\n \n     def _contains(self, other):\n-        if not self:\n+        if self.start == self.stop:\n             return S.false\n         if other.is_infinite:\n             return S.false\n         if not other.is_integer:\n             return other.is_integer\n         if self.has(Symbol):\n-            try:\n-                _ = self.size  # validate\n-            except ValueError:\n+            n = (self.stop - self.start)/self.step\n+            if not n.is_extended_positive or not all(\n+                    i.is_integer or i.is_infinite for i in self.args):\n                 return\n+        else:\n+            n = self.size\n         if self.start.is_finite:\n             ref = self.start\n         elif self.stop.is_finite:\n             ref = self.stop\n         else:  # both infinite; step is +/- 1 (enforced by __new__)\n             return S.true\n-        if self.size == 1:\n+        if n == 1:\n             return Eq(other, self[0])\n         res = (ref - other) % self.step\n         if res == S.Zero:\n+            if self.has(Symbol):\n+                d = Dummy('i')\n+                return self.as_relational(d).subs(d, other)\n             return And(other >= self.inf, other <= self.sup)\n         elif res.is_Integer:  # off sequence\n             return S.false\n@@ -691,20 +716,19 @@ def _contains(self, other):\n             return None\n \n     def __iter__(self):\n-        if self.has(Symbol):\n-            _ = self.size  # validate\n+        n = self.size  # validate\n         if self.start in [S.NegativeInfinity, S.Infinity]:\n             raise TypeError(\"Cannot iterate over Range with infinite start\")\n-        elif self:\n+        elif self.start != self.stop:\n             i = self.start\n-            step = self.step\n-\n-            while True:\n-                if (step > 0 and not (self.start <= i < self.stop)) or \\\n-                   (step < 0 and not (self.stop < i <= self.start)):\n-                    break\n-                yield i\n-                i += step\n+            if n.is_infinite:\n+                while True:\n+                    yield i\n+                    i += self.step\n+            else:\n+                for j in range(n):\n+                    yield i\n+                    i += self.step\n \n     def __len__(self):\n         rv = self.size\n@@ -714,15 +738,15 @@ def __len__(self):\n \n     @property\n     def size(self):\n-        if not self:\n+        if self.start == self.stop:\n             return S.Zero\n         dif = self.stop - self.start\n-        n = abs(dif // self.step)\n-        if not n.is_Integer:\n-            if n.is_infinite:\n-                return S.Infinity\n+        n = dif/self.step\n+        if n.is_infinite:\n+            return S.Infinity\n+        if not n.is_Integer or not all(i.is_integer for i in self.args):\n             raise ValueError('invalid method for symbolic range')\n-        return n\n+        return abs(n)\n \n     @property\n     def is_finite_set(self):\n@@ -731,7 +755,13 @@ def is_finite_set(self):\n         return self.size.is_finite\n \n     def __bool__(self):\n-        return self.start != self.stop\n+        # this only distinguishes between definite null range\n+        # and non-null/unknown null; getting True doesn't mean\n+        # that it actually is not null\n+        b = is_eq(self.start, self.stop)\n+        if b is None:\n+            raise ValueError('cannot tell if Range is null or not')\n+        return not bool(b)\n \n     def __getitem__(self, i):\n         from sympy.functions.elementary.integers import ceiling\n@@ -745,6 +775,8 @@ def __getitem__(self, i):\n             \"with an infinite value\"\n         if isinstance(i, slice):\n             if self.size.is_finite:  # validates, too\n+                if self.start == self.stop:\n+                    return Range(0)\n                 start, stop, step = i.indices(self.size)\n                 n = ceiling((stop - start)/step)\n                 if n <= 0:\n@@ -845,44 +877,40 @@ def __getitem__(self, i):\n                 elif start > 0:\n                     raise ValueError(ooslice)\n         else:\n-            if not self:\n+            if self.start == self.stop:\n                 raise IndexError('Range index out of range')\n+            if not (all(i.is_integer or i.is_infinite\n+                    for i in self.args) and ((self.stop - self.start)/\n+                    self.step).is_extended_positive):\n+                raise ValueError('invalid method for symbolic range')\n             if i == 0:\n                 if self.start.is_infinite:\n                     raise ValueError(ooslice)\n-                if self.has(Symbol):\n-                    if (self.stop > self.start) == self.step.is_positive and self.step.is_positive is not None:\n-                        pass\n-                    else:\n-                        _ = self.size  # validate\n                 return self.start\n             if i == -1:\n                 if self.stop.is_infinite:\n                     raise ValueError(ooslice)\n-                n = self.stop - self.step\n-                if n.is_Integer or (\n-                        n.is_integer and (\n-                            (n - self.start).is_nonnegative ==\n-                            self.step.is_positive)):\n-                    return n\n-            _ = self.size  # validate\n+                return self.stop - self.step\n+            n = self.size  # must be known for any other index\n             rv = (self.stop if i < 0 else self.start) + i*self.step\n             if rv.is_infinite:\n                 raise ValueError(ooslice)\n-            if rv < self.inf or rv > self.sup:\n-                raise IndexError(\"Range index out of range\")\n-            return rv\n+            if 0 <= (rv - self.start)/self.step <= n:\n+                return rv\n+            raise IndexError(\"Range index out of range\")\n \n     @property\n     def _inf(self):\n         if not self:\n-            raise NotImplementedError\n+            return S.EmptySet.inf\n         if self.has(Symbol):\n-            if self.step.is_positive:\n-                return self[0]\n-            elif self.step.is_negative:\n-                return self[-1]\n-            _ = self.size  # validate\n+            if all(i.is_integer or i.is_infinite for i in self.args):\n+                dif = self.stop - self.start\n+                if self.step.is_positive and dif.is_positive:\n+                    return self.start\n+                elif self.step.is_negative and dif.is_negative:\n+                    return self.stop - self.step\n+            raise ValueError('invalid method for symbolic range')\n         if self.step > 0:\n             return self.start\n         else:\n@@ -891,13 +919,15 @@ def _inf(self):\n     @property\n     def _sup(self):\n         if not self:\n-            raise NotImplementedError\n+            return S.EmptySet.sup\n         if self.has(Symbol):\n-            if self.step.is_positive:\n-                return self[-1]\n-            elif self.step.is_negative:\n-                return self[0]\n-            _ = self.size  # validate\n+            if all(i.is_integer or i.is_infinite for i in self.args):\n+                dif = self.stop - self.start\n+                if self.step.is_positive and dif.is_positive:\n+                    return self.stop - self.step\n+                elif self.step.is_negative and dif.is_negative:\n+                    return self.start\n+            raise ValueError('invalid method for symbolic range')\n         if self.step > 0:\n             return self.stop - self.step\n         else:\n@@ -909,27 +939,37 @@ def _boundary(self):\n \n     def as_relational(self, x):\n         \"\"\"Rewrite a Range in terms of equalities and logic operators. \"\"\"\n-        if self.size == 1:\n-            return Eq(x, self[0])\n-        elif self.size == 0:\n-            return S.false\n+        from sympy.core.mod import Mod\n+        if self.start.is_infinite:\n+            assert not self.stop.is_infinite  # by instantiation\n+            a = self.reversed.start\n         else:\n-            from sympy.core.mod import Mod\n-            cond = None\n-            if self.start.is_infinite:\n-                if self.stop.is_infinite:\n-                    cond = S.true\n-                else:\n-                    a = self.reversed.start\n-            elif self.start == self.stop:\n-                cond = S.false  # null range\n-            else:\n-                a = self.start\n-            step = abs(self.step)\n-            cond = Eq(Mod(x, step), a % step) if cond is None else cond\n-            return And(cond,\n-                       x >= self.inf if self.inf in self else x > self.inf,\n-                       x <= self.sup if self.sup in self else x < self.sup)\n+            a = self.start\n+        step = self.step\n+        in_seq = Eq(Mod(x - a, step), 0)\n+        ints = And(Eq(Mod(a, 1), 0), Eq(Mod(step, 1), 0))\n+        n = (self.stop - self.start)/self.step\n+        if n == 0:\n+            return S.EmptySet.as_relational(x)\n+        if n == 1:\n+            return And(Eq(x, a), ints)\n+        try:\n+            a, b = self.inf, self.sup\n+        except ValueError:\n+            a = None\n+        if a is not None:\n+            range_cond = And(\n+                x > a if a.is_infinite else x >= a,\n+                x < b if b.is_infinite else x <= b)\n+        else:\n+            a, b = self.start, self.stop - self.step\n+            range_cond = Or(\n+                And(self.step >= 1, x > a if a.is_infinite else x >= a,\n+                x < b if b.is_infinite else x <= b),\n+                And(self.step <= -1, x < a if a.is_infinite else x <= a,\n+                x > b if b.is_infinite else x >= b))\n+        return And(in_seq, ints, range_cond)\n+\n \n converter[range] = lambda r: Range(r.start, r.stop, r.step)\n \n",
+  "test_patch": "diff --git a/sympy/sets/tests/test_fancysets.py b/sympy/sets/tests/test_fancysets.py\n--- a/sympy/sets/tests/test_fancysets.py\n+++ b/sympy/sets/tests/test_fancysets.py\n@@ -9,7 +9,7 @@\n                    Dummy, floor, And, Eq)\n from sympy.utilities.iterables import cartes\n from sympy.testing.pytest import XFAIL, raises\n-from sympy.abc import x, y, t\n+from sympy.abc import x, y, t, z\n from sympy.core.mod import Mod\n \n import itertools\n@@ -174,8 +174,6 @@ def test_inf_Range_len():\n     assert Range(0, -oo, -2).size is S.Infinity\n     assert Range(oo, 0, -2).size is S.Infinity\n     assert Range(-oo, 0, 2).size is S.Infinity\n-    i = Symbol('i', integer=True)\n-    assert Range(0, 4 * i, i).size == 4\n \n \n def test_Range_set():\n@@ -209,6 +207,9 @@ def test_Range_set():\n     assert Range(1, oo, -1) == empty\n     assert Range(1, -oo, 1) == empty\n     assert Range(1, -4, oo) == empty\n+    ip = symbols('ip', positive=True)\n+    assert Range(0, ip, -1) == empty\n+    assert Range(0, -ip, 1) == empty\n     assert Range(1, -4, -oo) == Range(1, 2)\n     assert Range(1, 4, oo) == Range(1, 2)\n     assert Range(-oo, oo).size == oo\n@@ -231,13 +232,8 @@ def test_Range_set():\n     assert Range(-oo, 1, 1)[-1] is S.Zero\n     assert Range(oo, 1, -1)[-1] == 2\n     assert inf not in Range(oo)\n-    inf = symbols('inf', infinite=True)\n-    assert inf not in Range(oo)\n-    assert Range(-oo, 1, 1)[-1] is S.Zero\n-    assert Range(oo, 1, -1)[-1] == 2\n     assert Range(1, 10, 1)[-1] == 9\n     assert all(i.is_Integer for i in Range(0, -1, 1))\n-\n     it = iter(Range(-oo, 0, 2))\n     raises(TypeError, lambda: next(it))\n \n@@ -278,6 +274,7 @@ def test_Range_set():\n     raises(ValueError, lambda: Range(-oo, 4, 2)[2::-1])\n     assert Range(-oo, 4, 2)[-2::2] == Range(0, 4, 4)\n     assert Range(oo, 0, -2)[-10:0:2] == empty\n+    raises(ValueError, lambda: Range(oo, 0, -2)[0])\n     raises(ValueError, lambda: Range(oo, 0, -2)[-10:10:2])\n     raises(ValueError, lambda: Range(oo, 0, -2)[0::-2])\n     assert Range(oo, 0, -2)[0:-4:-2] == empty\n@@ -297,6 +294,7 @@ def test_Range_set():\n     assert empty[:0] == empty\n     raises(NotImplementedError, lambda: empty.inf)\n     raises(NotImplementedError, lambda: empty.sup)\n+    assert empty.as_relational(x) is S.false\n \n     AB = [None] + list(range(12))\n     for R in [\n@@ -330,45 +328,91 @@ def test_Range_set():\n \n     # test Range.as_relational\n     assert Range(1, 4).as_relational(x) == (x >= 1) & (x <= 3)  & Eq(Mod(x, 1), 0)\n-    assert Range(oo, 1, -2).as_relational(x) == (x >= 3) & (x < oo)  & Eq(Mod(x, 2), 1)\n+    assert Range(oo, 1, -2).as_relational(x) == (x >= 3) & (x < oo)  & Eq(Mod(x + 1, -2), 0)\n \n \n def test_Range_symbolic():\n     # symbolic Range\n+    xr = Range(x, x + 4, 5)\n     sr = Range(x, y, t)\n     i = Symbol('i', integer=True)\n     ip = Symbol('i', integer=True, positive=True)\n-    ir = Range(i, i + 20, 2)\n+    ipr = Range(ip)\n+    inr = Range(0, -ip, -1)\n+    ir = Range(i, i + 19, 2)\n+    ir2 = Range(i, i*8, 3*i)\n+    i = Symbol('i', integer=True)\n     inf = symbols('inf', infinite=True)\n+    raises(ValueError, lambda: Range(inf))\n+    raises(ValueError, lambda: Range(inf, 0, -1))\n+    raises(ValueError, lambda: Range(inf, inf, 1))\n+    raises(ValueError, lambda: Range(1, 1, inf))\n     # args\n+    assert xr.args == (x, x + 5, 5)\n     assert sr.args == (x, y, t)\n     assert ir.args == (i, i + 20, 2)\n+    assert ir2.args == (i, 10*i, 3*i)\n     # reversed\n+    raises(ValueError, lambda: xr.reversed)\n     raises(ValueError, lambda: sr.reversed)\n-    assert ir.reversed == Range(i + 18, i - 2, -2)\n+    assert ipr.reversed.args == (ip - 1, -1, -1)\n+    assert inr.reversed.args == (-ip + 1, 1, 1)\n+    assert ir.reversed.args == (i + 18, i - 2, -2)\n+    assert ir2.reversed.args == (7*i, -2*i, -3*i)\n     # contains\n     assert inf not in sr\n     assert inf not in ir\n+    assert 0 in ipr\n+    assert 0 in inr\n+    raises(TypeError, lambda: 1 in ipr)\n+    raises(TypeError, lambda: -1 in inr)\n     assert .1 not in sr\n     assert .1 not in ir\n     assert i + 1 not in ir\n     assert i + 2 in ir\n+    raises(TypeError, lambda: x in xr)  # XXX is this what contains is supposed to do?\n     raises(TypeError, lambda: 1 in sr)  # XXX is this what contains is supposed to do?\n     # iter\n+    raises(ValueError, lambda: next(iter(xr)))\n     raises(ValueError, lambda: next(iter(sr)))\n     assert next(iter(ir)) == i\n+    assert next(iter(ir2)) == i\n     assert sr.intersect(S.Integers) == sr\n     assert sr.intersect(FiniteSet(x)) == Intersection({x}, sr)\n     raises(ValueError, lambda: sr[:2])\n+    raises(ValueError, lambda: xr[0])\n     raises(ValueError, lambda: sr[0])\n-    raises(ValueError, lambda: sr.as_relational(x))\n     # len\n     assert len(ir) == ir.size == 10\n+    assert len(ir2) == ir2.size == 3\n+    raises(ValueError, lambda: len(xr))\n+    raises(ValueError, lambda: xr.size)\n     raises(ValueError, lambda: len(sr))\n     raises(ValueError, lambda: sr.size)\n     # bool\n-    assert bool(ir) == bool(sr) == True\n+    assert bool(Range(0)) == False\n+    assert bool(xr)\n+    assert bool(ir)\n+    assert bool(ipr)\n+    assert bool(inr)\n+    raises(ValueError, lambda: bool(sr))\n+    raises(ValueError, lambda: bool(ir2))\n+    # inf\n+    raises(ValueError, lambda: xr.inf)\n+    raises(ValueError, lambda: sr.inf)\n+    assert ipr.inf == 0\n+    assert inr.inf == -ip + 1\n+    assert ir.inf == i\n+    raises(ValueError, lambda: ir2.inf)\n+    # sup\n+    raises(ValueError, lambda: xr.sup)\n+    raises(ValueError, lambda: sr.sup)\n+    assert ipr.sup == ip - 1\n+    assert inr.sup == 0\n+    assert ir.inf == i\n+    raises(ValueError, lambda: ir2.sup)\n     # getitem\n+    raises(ValueError, lambda: xr[0])\n     raises(ValueError, lambda: sr[0])\n     raises(ValueError, lambda: sr[-1])\n     raises(ValueError, lambda: sr[:2])\n@@ -376,17 +420,33 @@ def test_Range_symbolic():\n     assert ir[0] == i\n     assert ir[-2] == i + 16\n     assert ir[-1] == i + 18\n+    assert ir2[:2] == Range(i, 7*i, 3*i)\n+    assert ir2[0] == i\n+    assert ir2[-2] == 4*i\n+    assert ir2[-1] == 7*i\n     raises(ValueError, lambda: Range(i)[-1])\n-    assert Range(ip)[-1] == ip - 1\n+    assert ipr[0] == ipr.inf == 0\n+    assert ipr[-1] == ipr.sup == ip - 1\n+    assert inr[0] == inr.sup == 0\n+    assert inr[-1] == inr.inf == -ip + 1\n+    raises(ValueError, lambda: ipr[-2])\n     assert ir.inf == i\n     assert ir.sup == i + 18\n-    assert Range(ip).inf == 0\n-    assert Range(ip).sup == ip - 1\n     raises(ValueError, lambda: Range(i).inf)\n     # as_relational\n-    raises(ValueError, lambda: sr.as_relational(x))\n-    assert ir.as_relational(x) == (x >= i) & (x <= i + 18) & Eq(Mod(x, 2), Mod(i, 2))\n+    assert ir.as_relational(x) == ((x >= i) & (x <= i + 18) &\n+        Eq(Mod(-i + x, 2), 0))\n+    assert ir2.as_relational(x) == Eq(\n+        Mod(-i + x, 3*i), 0) & (((x >= i) & (x <= 7*i) & (3*i >= 1)) |\n+        ((x <= i) & (x >= 7*i) & (3*i <= -1)))\n     assert Range(i, i + 1).as_relational(x) == Eq(x, i)\n+    assert sr.as_relational(z) == Eq(\n+        Mod(t, 1), 0) & Eq(Mod(x, 1), 0) & Eq(Mod(-x + z, t), 0\n+        ) & (((z >= x) & (z <= -t + y) & (t >= 1)) |\n+        ((z <= x) & (z >= -t + y) & (t <= -1)))\n+    assert xr.as_relational(z) == Eq(z, x) & Eq(Mod(x, 1), 0)\n+    # symbols can clash if user wants (but it must be integer)\n+    assert xr.as_relational(x) == Eq(Mod(x, 1), 0)\n     # contains() for symbolic values (issue #18146)\n     e = Symbol('e', integer=True, even=True)\n     o = Symbol('o', integer=True, odd=True)\n",
+  "problem_statement": "make symbolic Range more canonical\nWhereas a Range with numerical args is canonical, the Range containing symbols is not:\r\n```python\r\n>>> [Range(3,j,2) for j in range(4,10)]\r\n[Range(3, 5, 2), Range(3, 5, 2), Range(3, 7, 2), Range(3, 7, 2), Range(3, 9, 2), Range(3, 9, 2)]\r\n\r\nvs\r\n\r\n>>> [Range(i,i+j,5) for j in range(1,6)]\r\n[Range(i, i + 1, 5), Range(i, i + 2, 5), Range(i, i + 3, 5), Range(i, i + 4, 5), Range(i, i + 5, 5)]\r\n\r\nwhich could be\r\n\r\n[Range(i, i + 1, 5), Range(i, i + 1, 5), Range(i, i + 1, 5), Range(i, i + 1, 5), Range(i, i + 1, 5)]\r\n\r\n```\r\nThe incorrect results are based on the assumption that the instantiated Range is canonical:\r\n```python\r\n>> r=Range(2, 2 + 3, 5)\r\n>>> r.inf,r.reversed.sup\r\n(2, 2)\r\n>>> r = Range(k, k + 3, 5)\r\n>>> r.inf,r.reversed.sup\r\n(k, k - 2)\r\n```\n",
+  "hints_text": "",
+  "created_at": "2021-04-10T12:15:40Z",
+  "version": "1.9",
+  "FAIL_TO_PASS": "[\"test_Range_set\", \"test_Range_symbolic\"]",
+  "PASS_TO_PASS": "[\"test_Complex\", \"test_ComplexRegion_FiniteSet\", \"test_ComplexRegion_contains\", \"test_ComplexRegion_from_real\", \"test_ComplexRegion_intersect\", \"test_ComplexRegion_measure\", \"test_ComplexRegion_union\", \"test_ImageSet\", \"test_ImageSet_contains\", \"test_ImageSet_iterator_not_injective\", \"test_ImageSet_simplification\", \"test_Integers_eval_imageset\", \"test_NZQRC_unions\", \"test_Range_eval_imageset\", \"test_Rationals\", \"test_Reals\", \"test_fun\", \"test_halfcircle\", \"test_image_is_ImageSet\", \"test_imageset_intersect_diophantine\", \"test_imageset_intersect_interval\", \"test_imageset_intersect_real\", \"test_imageset_intersection\", \"test_inf_Range_len\", \"test_infinitely_indexed_set_1\", \"test_infinitely_indexed_set_2\", \"test_infinitely_indexed_set_3\", \"test_integers\", \"test_intersections\", \"test_issue_11730\", \"test_issue_11732\", \"test_issue_11914\", \"test_issue_11938\", \"test_issue_16871\", \"test_issue_17858\", \"test_issue_18050\", \"test_issue_9543\", \"test_issue_9980\", \"test_naturals\", \"test_naturals0\", \"test_normalize_theta_set\", \"test_range_interval_intersection\", \"test_range_is_finite_set\", \"test_range_range_intersection\", \"test_union_RealSubSet\"]",
+  "environment_setup_commit": "f9a6f50ec0c74d935c50a6e9c9b2cb0469570d91",
+  "patch_files": [
+    "sympy/sets/fancysets.py"
+  ],
+  "test_patch_files": [
+    "sympy/sets/tests/test_fancysets.py"
+  ],
+  "patch_diff_details": {
+    "sympy/sets/fancysets.py": {
+      "diffs": [
+        {
+          "start_line_old": 9,
+          "end_line_old": 13,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._inf_Range._boundary.1.1",
+          "closest_snippet_line_distance": 867
+        },
+        {
+          "start_line_old": 574,
+          "end_line_old": 574,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "pos": 1,
+          "context_length": 674
+        },
+        {
+          "start_line_old": 601,
+          "end_line_old": 601,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.as_relational_23",
+          "closest_snippet_line_distance": 309,
+          "pos": 5,
+          "context_length": 2666
+        },
+        {
+          "start_line_old": 613,
+          "end_line_old": 616,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.as_relational_23",
+          "closest_snippet_line_distance": 297,
+          "pos": 5,
+          "context_length": 2666
+        },
+        {
+          "start_line_old": 634,
+          "end_line_old": 635,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.as_relational_23",
+          "closest_snippet_line_distance": 276,
+          "pos": 5,
+          "context_length": 2666
+        },
+        {
+          "start_line_old": 659,
+          "end_line_old": 683,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._inf_Range._boundary.1.1",
+          "closest_snippet_line_distance": 217
+        },
+        {
+          "start_line_old": 694,
+          "end_line_old": 707,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.12.1",
+          "closest_snippet_line_distance": 66,
+          "pos": 6,
+          "context_length": 2952
+        },
+        {
+          "start_line_old": 717,
+          "end_line_old": 725,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.12.1",
+          "closest_snippet_line_distance": 84,
+          "pos": 6,
+          "context_length": 2952
+        },
+        {
+          "start_line_old": 734,
+          "end_line_old": 734,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.12.1",
+          "closest_snippet_line_distance": 93,
+          "pos": 6,
+          "context_length": 2952
+        },
+        {
+          "start_line_old": 748,
+          "end_line_old": 748,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range_Range.is_iterable.1",
+          "closest_snippet_line_distance": 171,
+          "pos": 2,
+          "context_length": 1772
+        },
+        {
+          "start_line_old": 848,
+          "end_line_old": 885,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._inf_Range._boundary.1.1",
+          "closest_snippet_line_distance": 23
+        },
+        {
+          "start_line_old": 894,
+          "end_line_old": 900,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._contains_Range._contains.8.3.2.1",
+          "closest_snippet_line_distance": 209,
+          "pos": 11,
+          "context_length": 4452
+        },
+        {
+          "start_line_old": 912,
+          "end_line_old": 932,
+          "file_pos": 1,
+          "file_context_length": 10890,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.start_Range.reversed.4.1",
+          "closest_snippet_line_distance": 269,
+          "pos": 4,
+          "context_length": 2133
+        }
+      ]
+    }
+  },
+  "vectors": 9273,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range_Range.is_iterable.1",
+      "distance": 0.8687363862991333,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 494,
+      "end_line": 577,
+      "tokens": 674,
+      "context_length": 674,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem__.9_Range.__getitem__.9.2.9.1",
+      "distance": 0.8717566728591919,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 746,
+      "end_line": 874,
+      "tokens": 1098,
+      "context_length": 1772,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.start_Range.reversed.4.1",
+      "distance": 0.8833933472633362,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 643,
+      "end_line": 663,
+      "tokens": 143,
+      "context_length": 1915,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.as_relational_23",
+      "distance": 0.9311789274215698,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 910,
+      "end_line": 934,
+      "tokens": 218,
+      "context_length": 2133,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.12.1",
+      "distance": 0.9725601077079773,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 579,
+      "end_line": 641,
+      "tokens": 533,
+      "context_length": 2666,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__iter___Range.__bool__.1.1",
+      "distance": 1.0024662017822266,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 693,
+      "end_line": 734,
+      "tokens": 286,
+      "context_length": 2952,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem___Range.__getitem__.ambiguous.1",
+      "distance": 1.0197994709014893,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 736,
+      "end_line": 745,
+      "tokens": 151,
+      "context_length": 3103,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_function_range.10_function_range.11.1",
+      "distance": 1.0335047245025635,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 173,
+      "end_line": 222,
+      "tokens": 347,
+      "context_length": 3450
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._contains_Range._contains.8.3.2.1",
+      "distance": 1.0511747598648071,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 665,
+      "end_line": 691,
+      "tokens": 206,
+      "context_length": 3656,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_function_range_function_range.9.3.1",
+      "distance": 1.0677541494369507,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 89,
+      "end_line": 171,
+      "tokens": 611,
+      "context_length": 4267
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._inf_Range._boundary.1.1",
+      "distance": 1.0688538551330566,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 876,
+      "end_line": 908,
+      "tokens": 185,
+      "context_length": 4452,
+      "file_pos": 2
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/tensor/indexed.py_Indexed.ranges_Indexed.ranges.4.1",
+      "distance": 1.0997796058654785,
+      "file_path": "sympy/tensor/indexed.py",
+      "start_line": 306,
+      "end_line": 335,
+      "tokens": 291,
+      "context_length": 4743
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot.py_check_arguments_check_arguments.3.4.6.1",
+      "distance": 1.1318888664245605,
+      "file_path": "sympy/plotting/plot.py",
+      "start_line": 2381,
+      "end_line": 2431,
+      "tokens": 430,
+      "context_length": 5173
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.is_shape_numeric_ArrayComprehension.is_shape_numeric.3.1",
+      "distance": 1.1343514919281006,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 163,
+      "end_line": 185,
+      "tokens": 198,
+      "context_length": 5371
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_15_intersection_sets_16.2.1",
+      "distance": 1.1370823383331299,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 105,
+      "end_line": 220,
+      "tokens": 985,
+      "context_length": 6356
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.rank_ArrayComprehension.rank.2.1",
+      "distance": 1.1410683393478394,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 187,
+      "end_line": 200,
+      "tokens": 112,
+      "context_length": 6468
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot.py_check_arguments.4_",
+      "distance": 1.1421031951904297,
+      "file_path": "sympy/plotting/plot.py",
+      "start_line": 2433,
+      "end_line": 2485,
+      "tokens": 526,
+      "context_length": 6994
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_itertools_ArrayComprehension.1",
+      "distance": 1.1484729051589966,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 354,
+      "context_length": 7348
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_1_dummy_sgs.8.1",
+      "distance": 1.1493346691131592,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 746,
+      "context_length": 8094
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/stats/rv.py_RandomIndexedSymbol_RandomIndexedSymbol.pspace.1.1",
+      "distance": 1.1541316509246826,
+      "file_path": "sympy/stats/rv.py",
+      "start_line": 309,
+      "end_line": 339,
+      "tokens": 220,
+      "context_length": 8314
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_symbols_symbols.1",
+      "distance": 1.1552640199661255,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 555,
+      "end_line": 670,
+      "tokens": 1075,
+      "context_length": 9389
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/concrete/expr_with_limits.py__process_limits__process_limits.5.1",
+      "distance": 1.1600794792175293,
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "start_line": 84,
+      "end_line": 158,
+      "tokens": 752,
+      "context_length": 10141
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/abc.py_14_",
+      "distance": 1.1638942956924438,
+      "file_path": "sympy/abc.py",
+      "start_line": 72,
+      "end_line": 111,
+      "tokens": 399,
+      "context_length": 10540
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.shape_ArrayComprehension.shape.2.1",
+      "distance": 1.167659878730774,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 137,
+      "end_line": 161,
+      "tokens": 195,
+      "context_length": 10735
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/matrices/matrices.py_MatrixBase.key2bounds_MatrixBase.key2bounds.7.1",
+      "distance": 1.1687378883361816,
+      "file_path": "sympy/matrices/matrices.py",
+      "start_line": 1786,
+      "end_line": 1815,
+      "tokens": 280,
+      "context_length": 11015
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehensionMap.__new___ArrayComprehensionMap.__new__.10.1",
+      "distance": 1.1687846183776855,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 359,
+      "end_line": 374,
+      "tokens": 172,
+      "context_length": 11187
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.limits_ArrayComprehension.limits.2.1",
+      "distance": 1.180167555809021,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 65,
+      "end_line": 80,
+      "tokens": 136,
+      "context_length": 11323
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonicalize_canonicalize.1",
+      "distance": 1.18104887008667,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 639,
+      "end_line": 763,
+      "tokens": 1423,
+      "context_length": 12746
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.free_symbols_ArrayComprehension.free_symbols.4.1",
+      "distance": 1.1811528205871582,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 82,
+      "end_line": 107,
+      "tokens": 242,
+      "context_length": 12988
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Wild_Wild.__slots__.1",
+      "distance": 1.1815004348754883,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 429,
+      "end_line": 520,
+      "tokens": 720,
+      "context_length": 13708
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_isLambda_ArrayComprehensionMap.1",
+      "distance": 1.1898396015167236,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 330,
+      "end_line": 358,
+      "tokens": 231,
+      "context_length": 13939
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_symbols.result_symbols.3.18.2.1",
+      "distance": 1.1912555694580078,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 671,
+      "end_line": 764,
+      "tokens": 721,
+      "context_length": 14660
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.function_ArrayComprehension.function.2.1",
+      "distance": 1.1917515993118286,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 49,
+      "end_line": 63,
+      "tokens": 118,
+      "context_length": 14778
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.tolist_ArrayComprehension.tolist.3",
+      "distance": 1.1933199167251587,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 274,
+      "end_line": 295,
+      "tokens": 185,
+      "context_length": 14963
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_disambiguate_",
+      "distance": 1.1962306499481201,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 830,
+      "end_line": 894,
+      "tokens": 542,
+      "context_length": 15505
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/simplify/cse_main.py_22_reps_toposort.5.1",
+      "distance": 1.2017290592193604,
+      "file_path": "sympy/simplify/cse_main.py",
+      "start_line": 30,
+      "end_line": 61,
+      "tokens": 293,
+      "context_length": 15798
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonical_free_canonical_free.h.1",
+      "distance": 1.2020297050476074,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 538,
+      "end_line": 595,
+      "tokens": 759,
+      "context_length": 16557
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Symbol.__xnew___Symbol.as_set.1.1",
+      "distance": 1.206093192100525,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 298,
+      "end_line": 358,
+      "tokens": 460,
+      "context_length": 17017
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/testutil.py_canonicalize_naive_canonicalize_naive.22.1",
+      "distance": 1.2077925205230713,
+      "file_path": "sympy/combinatorics/testutil.py",
+      "start_line": 202,
+      "end_line": 277,
+      "tokens": 700,
+      "context_length": 17717
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/tensor/indexed.py_1_19",
+      "distance": 1.211398720741272,
+      "file_path": "sympy/tensor/indexed.py",
+      "start_line": 1,
+      "end_line": 106,
+      "tokens": 872,
+      "context_length": 18589
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/series/order.py_1_Order.1",
+      "distance": 1.2136245965957642,
+      "file_path": "sympy/series/order.py",
+      "start_line": 1,
+      "end_line": 123,
+      "tokens": 1157,
+      "context_length": 19746
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/holonomic/recurrence.py_1_RecurrenceOperators.3.1",
+      "distance": 1.214026689529419,
+      "file_path": "sympy/holonomic/recurrence.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 204,
+      "context_length": 19950
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py__uniquely_named_symbol_Symbol._diff_wrt.2.1",
+      "distance": 1.2147361040115356,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 181,
+      "end_line": 227,
+      "tokens": 231,
+      "context_length": 20181
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/utilities/iterables.py_filter_symbols_numbered_symbols.4.4",
+      "distance": 1.217345952987671,
+      "file_path": "sympy/utilities/iterables.py",
+      "start_line": 643,
+      "end_line": 703,
+      "tokens": 359,
+      "context_length": 20540
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/core/symbol.py_Wild.__new____range.1",
+      "distance": 1.2197365760803223,
+      "file_path": "sympy/core/symbol.py",
+      "start_line": 522,
+      "end_line": 553,
+      "tokens": 287,
+      "context_length": 20827
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/array_comprehension.py_ArrayComprehension.__new___ArrayComprehension.__new__.9.1",
+      "distance": 1.2216399908065796,
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "start_line": 36,
+      "end_line": 47,
+      "tokens": 158,
+      "context_length": 20985
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py__invert__invert.rhs.1",
+      "distance": 1.2222681045532227,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 2960,
+      "end_line": 3024,
+      "tokens": 508,
+      "context_length": 21493
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/polys/ring_series.py__rs_series__rs_series.args.5.9.1",
+      "distance": 1.2232248783111572,
+      "file_path": "sympy/polys/ring_series.py",
+      "start_line": 1874,
+      "end_line": 1957,
+      "tokens": 817,
+      "context_length": 22310
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/sets/fancysets.py",
+      "position": 1,
+      "tokens": 10890,
+      "context_length": 10890
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 2,
+      "tokens": 11883,
+      "context_length": 22773
+    },
+    {
+      "file_path": "sympy/tensor/indexed.py",
+      "position": 3,
+      "tokens": 6033,
+      "context_length": 28806
+    },
+    {
+      "file_path": "sympy/plotting/plot.py",
+      "position": 4,
+      "tokens": 20991,
+      "context_length": 49797
+    },
+    {
+      "file_path": "sympy/tensor/array/array_comprehension.py",
+      "position": 5,
+      "tokens": 3087,
+      "context_length": 52884
+    },
+    {
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "position": 6,
+      "tokens": 4183,
+      "context_length": 57067
+    },
+    {
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "position": 7,
+      "tokens": 13072,
+      "context_length": 70139
+    },
+    {
+      "file_path": "sympy/stats/rv.py",
+      "position": 8,
+      "tokens": 12645,
+      "context_length": 82784
+    },
+    {
+      "file_path": "sympy/core/symbol.py",
+      "position": 9,
+      "tokens": 6888,
+      "context_length": 89672
+    },
+    {
+      "file_path": "sympy/concrete/expr_with_limits.py",
+      "position": 10,
+      "tokens": 4519,
+      "context_length": 94191
+    },
+    {
+      "file_path": "sympy/abc.py",
+      "position": 11,
+      "tokens": 1148,
+      "context_length": 95339
+    },
+    {
+      "file_path": "sympy/matrices/matrices.py",
+      "position": 12,
+      "tokens": 19228,
+      "context_length": 114567
+    },
+    {
+      "file_path": "sympy/simplify/cse_main.py",
+      "position": 13,
+      "tokens": 5953,
+      "context_length": 120520
+    },
+    {
+      "file_path": "sympy/combinatorics/testutil.py",
+      "position": 14,
+      "tokens": 3127,
+      "context_length": 123647
+    },
+    {
+      "file_path": "sympy/series/order.py",
+      "position": 15,
+      "tokens": 4077,
+      "context_length": 127724
+    },
+    {
+      "file_path": "sympy/holonomic/recurrence.py",
+      "position": 16,
+      "tokens": 2607,
+      "context_length": 130331
+    },
+    {
+      "file_path": "sympy/utilities/iterables.py",
+      "position": 17,
+      "tokens": 21827,
+      "context_length": 152158
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 18,
+      "tokens": 31691,
+      "context_length": 183849
+    },
+    {
+      "file_path": "sympy/polys/ring_series.py",
+      "position": 19,
+      "tokens": 18199,
+      "context_length": 202048
+    }
+  ]
+}

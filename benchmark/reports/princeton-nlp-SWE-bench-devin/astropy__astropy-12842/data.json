@@ -1,0 +1,577 @@
+{
+  "instance_id": "astropy__astropy-12842",
+  "model_patch": "diff --git a/astropy/io/ascii/ecsv.py b/astropy/io/ascii/ecsv.py\nindex 5a709c6f88..1b6272584b 100644\n--- a/astropy/io/ascii/ecsv.py\n+++ b/astropy/io/ascii/ecsv.py\n@@ -22,7 +22,7 @@ DELIMITERS = (' ', ',')\n ECSV_DATATYPES = (\n     'bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16',\n     'uint32', 'uint64', 'float16', 'float32', 'float64',\n-    'float128', 'string')  # Raise warning if not one of these standard dtypes\n+    'float128', 'string', 'datetime64')  # Added 'datetime64' to allowed dtypes\n \n \n class InvalidEcsvDatatypeWarning(AstropyUserWarning):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/io/ascii/ecsv.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "3a0cd2d8cd7b459cdc1e1b97a14f3040ccc1fffc",
+  "patch": "diff --git a/astropy/time/core.py b/astropy/time/core.py\n--- a/astropy/time/core.py\n+++ b/astropy/time/core.py\n@@ -34,7 +34,7 @@\n \n from astropy.extern import _strptime\n \n-__all__ = ['TimeBase', 'Time', 'TimeDelta', 'TimeInfo', 'update_leap_seconds',\n+__all__ = ['TimeBase', 'Time', 'TimeDelta', 'TimeInfo', 'TimeInfoBase', 'update_leap_seconds',\n            'TIME_SCALES', 'STANDARD_TIME_SCALES', 'TIME_DELTA_SCALES',\n            'ScaleValueError', 'OperandTypeError', 'TimeDeltaMissingUnitWarning']\n \n@@ -110,11 +110,13 @@ class _LeapSecondsCheck(enum.Enum):\n _LEAP_SECONDS_LOCK = threading.RLock()\n \n \n-class TimeInfo(MixinInfo):\n+class TimeInfoBase(MixinInfo):\n     \"\"\"\n     Container for meta information like name, description, format.  This is\n     required when the object is used as a mixin column within a table, but can\n     be used as a general way to store meta information.\n+\n+    This base class is common between TimeInfo and TimeDeltaInfo.\n     \"\"\"\n     attr_names = MixinInfo.attr_names | {'serialize_method'}\n     _supports_indexing = True\n@@ -133,6 +135,7 @@ class TimeInfo(MixinInfo):\n     @property\n     def _represent_as_dict_attrs(self):\n         method = self.serialize_method[self._serialize_context]\n+\n         if method == 'formatted_value':\n             out = ('value',)\n         elif method == 'jd1_jd2':\n@@ -182,7 +185,7 @@ def unit(self):\n     # When Time has mean, std, min, max methods:\n     # funcs = [lambda x: getattr(x, stat)() for stat_name in MixinInfo._stats])\n \n-    def _construct_from_dict_base(self, map):\n+    def _construct_from_dict(self, map):\n         if 'jd1' in map and 'jd2' in map:\n             # Initialize as JD but revert to desired format and out_subfmt (if needed)\n             format = map.pop('format')\n@@ -201,19 +204,6 @@ def _construct_from_dict_base(self, map):\n \n         return out\n \n-    def _construct_from_dict(self, map):\n-        delta_ut1_utc = map.pop('_delta_ut1_utc', None)\n-        delta_tdb_tt = map.pop('_delta_tdb_tt', None)\n-\n-        out = self._construct_from_dict_base(map)\n-\n-        if delta_ut1_utc is not None:\n-            out._delta_ut1_utc = delta_ut1_utc\n-        if delta_tdb_tt is not None:\n-            out._delta_tdb_tt = delta_tdb_tt\n-\n-        return out\n-\n     def new_like(self, cols, length, metadata_conflicts='warn', name=None):\n         \"\"\"\n         Return a new Time instance which is consistent with the input Time objects\n@@ -276,11 +266,69 @@ def new_like(self, cols, length, metadata_conflicts='warn', name=None):\n         return out\n \n \n-class TimeDeltaInfo(TimeInfo):\n-    _represent_as_dict_extra_attrs = ('format', 'scale')\n+class TimeInfo(TimeInfoBase):\n+    \"\"\"\n+    Container for meta information like name, description, format.  This is\n+    required when the object is used as a mixin column within a table, but can\n+    be used as a general way to store meta information.\n+    \"\"\"\n+    def _represent_as_dict(self, attrs=None):\n+        \"\"\"Get the values for the parent ``attrs`` and return as a dict.\n+\n+        By default, uses '_represent_as_dict_attrs'.\n+        \"\"\"\n+        map = super()._represent_as_dict(attrs=attrs)\n+\n+        # TODO: refactor these special cases into the TimeFormat classes?\n+\n+        # The datetime64 format requires special handling for ECSV (see #12840).\n+        # The `value` has numpy dtype datetime64 but this is not an allowed\n+        # datatype for ECSV. Instead convert to a string representation.\n+        if (self._serialize_context == 'ecsv'\n+                and map['format'] == 'datetime64'\n+                and 'value' in map):\n+            map['value'] = map['value'].astype('U')\n+\n+        # The datetime format is serialized as ISO with no loss of precision.\n+        if map['format'] == 'datetime' and 'value' in map:\n+            map['value'] = np.vectorize(lambda x: x.isoformat())(map['value'])\n+\n+        return map\n \n     def _construct_from_dict(self, map):\n-        return self._construct_from_dict_base(map)\n+        # See comment above. May need to convert string back to datetime64.\n+        # Note that _serialize_context is not set here so we just look for the\n+        # string value directly.\n+        if (map['format'] == 'datetime64'\n+                and 'value' in map\n+                and map['value'].dtype.kind == 'U'):\n+            map['value'] = map['value'].astype('datetime64')\n+\n+        # Convert back to datetime objects for datetime format.\n+        if map['format'] == 'datetime' and 'value' in map:\n+            from datetime import datetime\n+            map['value'] = np.vectorize(datetime.fromisoformat)(map['value'])\n+\n+        delta_ut1_utc = map.pop('_delta_ut1_utc', None)\n+        delta_tdb_tt = map.pop('_delta_tdb_tt', None)\n+\n+        out = super()._construct_from_dict(map)\n+\n+        if delta_ut1_utc is not None:\n+            out._delta_ut1_utc = delta_ut1_utc\n+        if delta_tdb_tt is not None:\n+            out._delta_tdb_tt = delta_tdb_tt\n+\n+        return out\n+\n+\n+class TimeDeltaInfo(TimeInfoBase):\n+    \"\"\"\n+    Container for meta information like name, description, format.  This is\n+    required when the object is used as a mixin column within a table, but can\n+    be used as a general way to store meta information.\n+    \"\"\"\n+    _represent_as_dict_extra_attrs = ('format', 'scale')\n \n     def new_like(self, cols, length, metadata_conflicts='warn', name=None):\n         \"\"\"\n@@ -1815,7 +1863,7 @@ def earth_rotation_angle(self, longitude=None):\n         and is rigorously corrected for polar motion.\n         (except when ``longitude='tio'``).\n \n-        \"\"\"\n+        \"\"\"  # noqa\n         if isinstance(longitude, str) and longitude == 'tio':\n             longitude = 0\n             include_tio = False\n@@ -1877,7 +1925,7 @@ def sidereal_time(self, kind, longitude=None, model=None):\n         the equator of the Celestial Intermediate Pole (CIP) and is rigorously\n         corrected for polar motion (except when ``longitude='tio'`` or ``'greenwich'``).\n \n-        \"\"\"  # docstring is formatted below\n+        \"\"\"  # noqa (docstring is formatted below)\n \n         if kind.lower() not in SIDEREAL_TIME_MODELS.keys():\n             raise ValueError('The kind of sidereal time has to be {}'.format(\n@@ -1929,7 +1977,7 @@ def _sid_time_or_earth_rot_ang(self, longitude, function, scales, include_tio=Tr\n         `~astropy.coordinates.Longitude`\n             Local sidereal time or Earth rotation angle, with units of hourangle.\n \n-        \"\"\"\n+        \"\"\"  # noqa\n         from astropy.coordinates import Longitude, EarthLocation\n         from astropy.coordinates.builtin_frames.utils import get_polar_motion\n         from astropy.coordinates.matrix_utilities import rotation_matrix\n@@ -1956,7 +2004,7 @@ def _sid_time_or_earth_rot_ang(self, longitude, function, scales, include_tio=Tr\n             r = (rotation_matrix(longitude, 'z')\n                  @ rotation_matrix(-yp, 'x', unit=u.radian)\n                  @ rotation_matrix(-xp, 'y', unit=u.radian)\n-                 @ rotation_matrix(theta+sp, 'z', unit=u.radian))\n+                 @ rotation_matrix(theta + sp, 'z', unit=u.radian))\n             # Solve for angle.\n             angle = np.arctan2(r[..., 0, 1], r[..., 0, 0]) << u.radian\n \n@@ -2781,7 +2829,6 @@ def __init__(self, left, right, op=None):\n def _check_leapsec():\n     global _LEAP_SECONDS_CHECK\n     if _LEAP_SECONDS_CHECK != _LeapSecondsCheck.DONE:\n-        from astropy.utils import iers\n         with _LEAP_SECONDS_LOCK:\n             # There are three ways we can get here:\n             # 1. First call (NOT_STARTED).\ndiff --git a/astropy/time/formats.py b/astropy/time/formats.py\n--- a/astropy/time/formats.py\n+++ b/astropy/time/formats.py\n@@ -1745,7 +1745,7 @@ class TimeBesselianEpoch(TimeEpochDate):\n \n     def _check_val_type(self, val1, val2):\n         \"\"\"Input value validation, typically overridden by derived classes\"\"\"\n-        if hasattr(val1, 'to') and hasattr(val1, 'unit'):\n+        if hasattr(val1, 'to') and hasattr(val1, 'unit') and val1.unit is not None:\n             raise ValueError(\"Cannot use Quantities for 'byear' format, \"\n                              \"as the interpretation would be ambiguous. \"\n                              \"Use float with Besselian year instead. \")\n",
+  "test_patch": "diff --git a/astropy/io/ascii/tests/test_ecsv.py b/astropy/io/ascii/tests/test_ecsv.py\n--- a/astropy/io/ascii/tests/test_ecsv.py\n+++ b/astropy/io/ascii/tests/test_ecsv.py\n@@ -822,13 +822,13 @@ def _make_expected_values(cols):\n      'name': '2-d regular array',\n      'subtype': 'float16[2,2]'}]\n \n-cols['scalar object'] = np.array([{'a': 1}, {'b':2}], dtype=object)\n+cols['scalar object'] = np.array([{'a': 1}, {'b': 2}], dtype=object)\n exps['scalar object'] = [\n     {'datatype': 'string', 'name': 'scalar object', 'subtype': 'json'}]\n \n cols['1-d object'] = np.array(\n-    [[{'a': 1}, {'b':2}],\n-     [{'a': 1}, {'b':2}]], dtype=object)\n+    [[{'a': 1}, {'b': 2}],\n+     [{'a': 1}, {'b': 2}]], dtype=object)\n exps['1-d object'] = [\n     {'datatype': 'string',\n      'name': '1-d object',\n@@ -966,7 +966,7 @@ def test_masked_vals_in_array_subtypes():\n     assert t2.colnames == t.colnames\n     for name in t2.colnames:\n         assert t2[name].dtype == t[name].dtype\n-        assert type(t2[name]) is type(t[name])\n+        assert type(t2[name]) is type(t[name])  # noqa\n         for val1, val2 in zip(t2[name], t[name]):\n             if isinstance(val1, np.ndarray):\n                 assert val1.dtype == val2.dtype\ndiff --git a/astropy/time/tests/test_basic.py b/astropy/time/tests/test_basic.py\n--- a/astropy/time/tests/test_basic.py\n+++ b/astropy/time/tests/test_basic.py\n@@ -6,6 +6,7 @@\n import datetime\n from copy import deepcopy\n from decimal import Decimal, localcontext\n+from io import StringIO\n \n import numpy as np\n import pytest\n@@ -20,7 +21,7 @@\n from astropy.coordinates import EarthLocation\n from astropy import units as u\n from astropy.table import Column, Table\n-from astropy.utils.compat.optional_deps import HAS_PYTZ  # noqa\n+from astropy.utils.compat.optional_deps import HAS_PYTZ, HAS_H5PY  # noqa\n \n \n allclose_jd = functools.partial(np.allclose, rtol=np.finfo(float).eps, atol=0)\n@@ -2221,6 +2222,66 @@ def test_ymdhms_output():\n     assert t.ymdhms.year == 2015\n \n \n+@pytest.mark.parametrize('fmt', TIME_FORMATS)\n+def test_write_every_format_to_ecsv(fmt):\n+    \"\"\"Test special-case serialization of certain Time formats\"\"\"\n+    t = Table()\n+    # Use a time that tests the default serialization of the time format\n+    tm = (Time('2020-01-01')\n+          + [[1, 1 / 7],\n+             [3, 4.5]] * u.s)\n+    tm.format = fmt\n+    t['a'] = tm\n+    out = StringIO()\n+    t.write(out, format='ascii.ecsv')\n+    t2 = Table.read(out.getvalue(), format='ascii.ecsv')\n+    assert t['a'].format == t2['a'].format\n+    # Some loss of precision in the serialization\n+    assert not np.all(t['a'] == t2['a'])\n+    # But no loss in the format representation\n+    assert np.all(t['a'].value == t2['a'].value)\n+\n+\n+@pytest.mark.parametrize('fmt', TIME_FORMATS)\n+def test_write_every_format_to_fits(fmt, tmp_path):\n+    \"\"\"Test special-case serialization of certain Time formats\"\"\"\n+    t = Table()\n+    # Use a time that tests the default serialization of the time format\n+    tm = (Time('2020-01-01')\n+          + [[1, 1 / 7],\n+             [3, 4.5]] * u.s)\n+    tm.format = fmt\n+    t['a'] = tm\n+    out = tmp_path / 'out.fits'\n+    t.write(out, format='fits')\n+    t2 = Table.read(out, format='fits', astropy_native=True)\n+    # Currently the format is lost in FITS so set it back\n+    t2['a'].format = fmt\n+    # No loss of precision in the serialization or representation\n+    assert np.all(t['a'] == t2['a'])\n+    assert np.all(t['a'].value == t2['a'].value)\n+\n+\n+@pytest.mark.skipif(not HAS_H5PY, reason='Needs h5py')\n+@pytest.mark.parametrize('fmt', TIME_FORMATS)\n+def test_write_every_format_to_hdf5(fmt, tmp_path):\n+    \"\"\"Test special-case serialization of certain Time formats\"\"\"\n+    t = Table()\n+    # Use a time that tests the default serialization of the time format\n+    tm = (Time('2020-01-01')\n+          + [[1, 1 / 7],\n+             [3, 4.5]] * u.s)\n+    tm.format = fmt\n+    t['a'] = tm\n+    out = tmp_path / 'out.h5'\n+    t.write(str(out), format='hdf5', path='root', serialize_meta=True)\n+    t2 = Table.read(str(out), format='hdf5', path='root')\n+    assert t['a'].format == t2['a'].format\n+    # No loss of precision in the serialization or representation\n+    assert np.all(t['a'] == t2['a'])\n+    assert np.all(t['a'].value == t2['a'].value)\n+\n+\n # There are two stages of validation now - one on input into a format, so that\n # the format conversion code has tidy matched arrays to work with, and the\n # other when object construction does not go through a format object. Or at\n",
+  "problem_statement": "No longer able to read BinnedTimeSeries with datetime column saved as ECSV after upgrading from 4.2.1 -> 5.0+\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check out our contributing guidelines,\r\nhttps://github.com/astropy/astropy/blob/main/CONTRIBUTING.md .\r\nPlease be sure to check out our code of conduct,\r\nhttps://github.com/astropy/astropy/blob/main/CODE_OF_CONDUCT.md . -->\r\n\r\n<!-- Please have a search on our GitHub repository to see if a similar\r\nissue has already been posted.\r\nIf a similar issue is closed, have a quick look to see if you are satisfied\r\nby the resolution.\r\nIf not please go ahead and open an issue! -->\r\n\r\n<!-- Please check that the development version still produces the same bug.\r\nYou can install development version with\r\npip install git+https://github.com/astropy/astropy\r\ncommand. -->\r\n\r\n### Description\r\n<!-- Provide a general description of the bug. -->\r\nHi, [This commit](https://github.com/astropy/astropy/commit/e807dbff9a5c72bdc42d18c7d6712aae69a0bddc) merged in PR #11569 breaks my ability to read an ECSV file created using Astropy v 4.2.1, BinnedTimeSeries class's write method, which has a datetime64 column. Downgrading astropy back to 4.2.1 fixes the issue because the strict type checking in line 177 of ecsv.py is not there.\r\n\r\nIs there a reason why this strict type checking was added to ECSV? Is there a way to preserve reading and writing of ECSV files created with BinnedTimeSeries across versions? I am happy to make a PR on this if the strict type checking is allowed to be scaled back or we can add datetime64 as an allowed type. \r\n\r\n### Expected behavior\r\n<!-- What did you expect to happen. -->\r\n\r\nThe file is read into a `BinnedTimeSeries` object from ecsv file without error.\r\n\r\n### Actual behavior\r\n<!-- What actually happened. -->\r\n<!-- Was the output confusing or poorly described? -->\r\n\r\nValueError is produced and the file is not read because ECSV.py does not accept the datetime64 column.\r\n`ValueError: datatype 'datetime64' of column 'time_bin_start' is not in allowed values ('bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64', 'float16', 'float32', 'float64', 'float128', 'string')`\r\n\r\n### Steps to Reproduce\r\n<!-- Ideally a code example could be provided so we can run it ourselves. -->\r\n<!-- If you are pasting code, use triple backticks (```) around\r\nyour code snippet. -->\r\n<!-- If necessary, sanitize your screen output to be pasted so you do not\r\nreveal secrets like tokens and passwords. -->\r\n\r\nThe file is read using:    \r\n`BinnedTimeSeries.read('<file_path>', format='ascii.ecsv')`\r\nwhich gives a long error. \r\n\r\n\r\nThe file in question is a binned time series created by  `astropy.timeseries.aggregate_downsample`. which itself is a binned version of an `astropy.timeseries.TimeSeries` instance with some TESS data. (loaded via TimeSeries.from_pandas(Tess.set_index('datetime')). I.e., it has a datetime64 index.  The file was written using the classes own .write method in Astropy V4.2.1 from an instance of said class:   \r\n`myBinnedTimeSeries.write('<file_path>',format='ascii.ecsv',overwrite=True)`\r\n\r\nI'll attach a concatenated version of the file (as it contains private data). However, the relevant part from the header is on line 4:\r\n\r\n```\r\n# %ECSV 0.9\r\n# ---\r\n# datatype:\r\n# - {name: time_bin_start, datatype: datetime64}\r\n```\r\n\r\nas you can see, the datatype is datetime64. This works fine with ECSV V0.9 but not V1.0 as some sort of strict type checking was added. \r\n\r\n### \r\nFull error log:\r\n```\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\nInput In [3], in <module>\r\n---> 49 tsrbin = BinnedTimeSeries.read('../Photometry/tsr_bin.dat', format='ascii.ecsv')\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/timeseries/binned.py:285, in BinnedTimeSeries.read(self, filename, time_bin_start_column, time_bin_end_column, time_bin_size_column, time_bin_size_unit, time_format, time_scale, format, *args, **kwargs)\r\n    230 \"\"\"\r\n    231 Read and parse a file and returns a `astropy.timeseries.BinnedTimeSeries`.\r\n    232 \r\n   (...)\r\n    279 \r\n    280 \"\"\"\r\n    282 try:\r\n    283 \r\n    284     # First we try the readers defined for the BinnedTimeSeries class\r\n--> 285     return super().read(filename, format=format, *args, **kwargs)\r\n    287 except TypeError:\r\n    288 \r\n    289     # Otherwise we fall back to the default Table readers\r\n    291     if time_bin_start_column is None:\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/table/connect.py:62, in TableRead.__call__(self, *args, **kwargs)\r\n     59 units = kwargs.pop('units', None)\r\n     60 descriptions = kwargs.pop('descriptions', None)\r\n---> 62 out = self.registry.read(cls, *args, **kwargs)\r\n     64 # For some readers (e.g., ascii.ecsv), the returned `out` class is not\r\n     65 # guaranteed to be the same as the desired output `cls`.  If so,\r\n     66 # try coercing to desired class without copying (io.registry.read\r\n     67 # would normally do a copy).  The normal case here is swapping\r\n     68 # Table <=> QTable.\r\n     69 if cls is not out.__class__:\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/io/registry/core.py:199, in UnifiedInputRegistry.read(self, cls, format, cache, *args, **kwargs)\r\n    195     format = self._get_valid_format(\r\n    196         'read', cls, path, fileobj, args, kwargs)\r\n    198 reader = self.get_reader(format, cls)\r\n--> 199 data = reader(*args, **kwargs)\r\n    201 if not isinstance(data, cls):\r\n    202     # User has read with a subclass where only the parent class is\r\n    203     # registered.  This returns the parent class, so try coercing\r\n    204     # to desired subclass.\r\n    205     try:\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/io/ascii/connect.py:18, in io_read(format, filename, **kwargs)\r\n     16     format = re.sub(r'^ascii\\.', '', format)\r\n     17     kwargs['format'] = format\r\n---> 18 return read(filename, **kwargs)\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/io/ascii/ui.py:376, in read(table, guess, **kwargs)\r\n    374     else:\r\n    375         reader = get_reader(**new_kwargs)\r\n--> 376         dat = reader.read(table)\r\n    377         _read_trace.append({'kwargs': copy.deepcopy(new_kwargs),\r\n    378                             'Reader': reader.__class__,\r\n    379                             'status': 'Success with specified Reader class '\r\n    380                                       '(no guessing)'})\r\n    382 # Static analysis (pyright) indicates `dat` might be left undefined, so just\r\n    383 # to be sure define it at the beginning and check here.\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/io/ascii/core.py:1343, in BaseReader.read(self, table)\r\n   1340 self.header.update_meta(self.lines, self.meta)\r\n   1342 # Get the table column definitions\r\n-> 1343 self.header.get_cols(self.lines)\r\n   1345 # Make sure columns are valid\r\n   1346 self.header.check_column_names(self.names, self.strict_names, self.guessing)\r\n\r\nFile ~/Apps/miniconda3/envs/py310_latest/lib/python3.10/site-packages/astropy/io/ascii/ecsv.py:177, in EcsvHeader.get_cols(self, lines)\r\n    175 col.dtype = header_cols[col.name]['datatype']\r\n    176 if col.dtype not in ECSV_DATATYPES:\r\n--> 177     raise ValueError(f'datatype {col.dtype!r} of column {col.name!r} '\r\n    178                      f'is not in allowed values {ECSV_DATATYPES}')\r\n    180 # Subtype is written like \"int64[2,null]\" and we want to split this\r\n    181 # out to \"int64\" and [2, None].\r\n    182 subtype = col.subtype\r\n\r\nValueError: datatype 'datetime64' of column 'time_bin_start' is not in allowed values ('bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64', 'float16', 'float32', 'float64', 'float128', 'string')\r\n```\r\n### System Details\r\n<!-- Even if you do not think this is necessary, it is useful information for the maintainers.\r\nPlease run the following snippet and paste the output below:\r\nimport platform; print(platform.platform())\r\nimport sys; print(\"Python\", sys.version)\r\nimport numpy; print(\"Numpy\", numpy.__version__)\r\nimport erfa; print(\"pyerfa\", erfa.__version__)\r\nimport astropy; print(\"astropy\", astropy.__version__)\r\nimport scipy; print(\"Scipy\", scipy.__version__)\r\nimport matplotlib; print(\"Matplotlib\", matplotlib.__version__)\r\n-->\r\n(For the version that does not work)\r\nPython 3.10.2 | packaged by conda-forge | (main, Feb  1 2022, 19:28:35) [GCC 9.4.0]\r\nNumpy 1.22.2\r\npyerfa 2.0.0.1\r\nastropy 5.0.1\r\nScipy 1.8.0\r\nMatplotlib 3.5.1\r\n\r\n(For the version that does work)\r\nPython 3.7.11 (default, Jul 27 2021, 14:32:16) [GCC 7.5.0]\r\nNumpy 1.20.3\r\npyerfa 2.0.0.1\r\nastropy 4.2.1\r\nScipy 1.7.0\r\nMatplotlib 3.4.2\r\n\n",
+  "hints_text": "I hope you don't mind me tagging you @taldcroft as it was your commit, maybe you can help me figure out if this is a bug or an evolution in `astropy.TimeSeries` that requires an alternative file format? I was pretty happy using ecsv formatted files to save complex data as they have been pretty stable, easy to visually inspect, and read in/out of scripts with astropy. \r\n\r\n\r\n[example_file.dat.txt](https://github.com/astropy/astropy/files/8043511/example_file.dat.txt)\r\n(Also I had to add a .txt to the filename to allow github to put it up.)\n@emirkmo - sorry, it was probably a mistake to make the reader be strict like that and raise an exception. Although that file is technically non-compliant with the ECSV spec, the reader should instead issue a warning but still carry on if possible (being liberal on input). I'll put in a PR to fix that.\r\n\r\nThe separate issue is that the `Time` object has a format of `datetime64` which leads to that unexpected numpy dtype in the output. I'm not immediately sure of what the right behavior for writing ECSV should be there. Maybe actually just `datetime64` as an allowed type, but that opens a small can of worms itself. Any thoughts @mhvk?\r\n\r\nOne curiosity @emirko is how you ended up with the timeseries object `time_bin_start` column having that `datetime64` format (`ts['time_bin_start'].format`). In my playing around it normally has `isot` format, which would not have led to this problem.\nI would be happy to contribute this PR @taldcroft, as I have been working on it on a local copy anyway, and am keen to get it working. I currently monkey patched ecsv in my code to not raise, and it seems to work. If you let me know what the warning should say, I can make a first attempt. `UserWarning` of some sort? \r\n\r\nThe `datetime64` comes through a chain:\r\n\r\n - Data is read into `pandas` with a `datetime64` index.\r\n - `TimeSeries` object is created using `.from_pandas`.\r\n - `aggregate_downsample` is used to turn this into a `BinnedTimeSeries`\r\n - `BinnedTimeSeries` object is written to an .ecsv file using its internal method.\r\n\r\nHere is the raw code, although some of what you see may be illegible due to variable names. I didn't have easy access to the original raw data anymore, hence why I got stuck in trying to read it from the binned light curve. \r\n```\r\nperday = 12\r\nTess['datetime'] = pd.to_datetime(Tess.JD, unit='D', origin='julian')\r\nts = TimeSeries.from_pandas(Tess.set_index('datetime'))\r\ntsb = aggregate_downsample(ts, time_bin_size=(1.0/perday)*u.day, \r\n                           time_bin_start=Time(beg.to_datetime64()), n_bins=nbin)\r\ntsb.write('../Photometry/Tess_binned.ecsv', format='ascii.ecsv', overwrite=True)\r\n```\nMy PR above at least works for reading in the example file and my original file. Also passes my local tests on io module. \nOuch, that is painful! Apart from changing the error to a warning (good idea!), I guess the writing somehow should change the data type from `datetime64` to `string`. Given that the format is stored as `datetime64`, I think this would still round-trip fine. I guess it would mean overwriting `_represent_as_dict` in `TimeInfo`.\n> I guess it would mean overwriting _represent_as_dict in TimeInfo\r\n\r\nThat's where I got to, we need to be a little more careful about serializing `Time`. In some sense I'd like to just use `jd1_jd2` always for Time in ECSV (think of this as lossless serialization), but that change might not go down well.\nYes, what to pick is tricky: `jd1_jd2` is lossless, but much less readable.\nAs a user, I would expect the serializer picked to maintain the current time format in some way, or at least have a general mapping from all available  formats to the most nearby easily serializable ones if some of them are hard to work with. (Days as ISOT string, etc.)\r\n\r\nECSV seems designed to be human readable so I would find it strange if the format was majorly changed, although now I see that all other ways of saving the data use jd1_jd2. I assume a separate PR is needed for changing this.\r\n\nIndeed, the other formats use `jd1_jd2`, but they are less explicitly meant to be human-readable.  I think this particular case of numpy datetime should not be too hard to fix, without actually changing how the file looks.\nAgreed to keep the ECSV serialization as the `value` of the Time object.",
+  "created_at": "2022-02-12T12:38:10Z",
+  "version": "4.3",
+  "FAIL_TO_PASS": "[\"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[byear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[datetime64]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[datetime]\"]",
+  "PASS_TO_PASS": "[\"astropy/io/ascii/tests/test_ecsv.py::astropy.io.ascii.tests.test_ecsv.test_round_trip_masked_table_default\", \"astropy/io/ascii/tests/test_ecsv.py::test_bad_delimiter\", \"astropy/io/ascii/tests/test_ecsv.py::test_bad_delimiter_input\", \"astropy/io/ascii/tests/test_ecsv.py::test_bad_header_start\", \"astropy/io/ascii/tests/test_ecsv.py::test_csv_ecsv_colnames_mismatch\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-QTable-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[1-Table-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-QTable-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[2-Table-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-QTable-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col10]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col11]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col12]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col13]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col14]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col15]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col16]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col17]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col18]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col19]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col1]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col20]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col21]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col22]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col23]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col2]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col3]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col4]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col5]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col6]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col8]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_mixins_per_column[3-Table-name_col9]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_round_trip_user_defined_unit[QTable]\", \"astropy/io/ascii/tests/test_ecsv.py::test_ecsv_round_trip_user_defined_unit[Table]\", \"astropy/io/ascii/tests/test_ecsv.py::test_full_repr_roundtrip\", \"astropy/io/ascii/tests/test_ecsv.py::test_full_subtypes\", \"astropy/io/ascii/tests/test_ecsv.py::test_guess_ecsv_with_one_column\", \"astropy/io/ascii/tests/test_ecsv.py::test_masked_empty_subtypes\", \"astropy/io/ascii/tests/test_ecsv.py::test_masked_vals_in_array_subtypes\", \"astropy/io/ascii/tests/test_ecsv.py::test_multidim_bad_shape\", \"astropy/io/ascii/tests/test_ecsv.py::test_multidim_input\", \"astropy/io/ascii/tests/test_ecsv.py::test_multidim_unknown_subtype[complex]\", \"astropy/io/ascii/tests/test_ecsv.py::test_multidim_unknown_subtype[some-user-type]\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_bad_datatype\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_bad_datatype_for_object_subtype\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_complex\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_masked_bool\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_not_json_serializable\", \"astropy/io/ascii/tests/test_ecsv.py::test_read_str\", \"astropy/io/ascii/tests/test_ecsv.py::test_regression_5604\", \"astropy/io/ascii/tests/test_ecsv.py::test_round_trip_empty_table\", \"astropy/io/ascii/tests/test_ecsv.py::test_round_trip_masked_table_default\", \"astropy/io/ascii/tests/test_ecsv.py::test_round_trip_masked_table_serialize_mask\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-bool-data_mask]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-bool-null_value]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-float64-data_mask]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-float64-null_value]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-int64-data_mask]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-int64-null_value]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-str-data_mask]\", \"astropy/io/ascii/tests/test_ecsv.py::test_roundtrip_multidim_masked_array[,-str-null_value]\", \"astropy/io/ascii/tests/test_ecsv.py::test_specialized_columns[1-d\", \"astropy/io/ascii/tests/test_ecsv.py::test_specialized_columns[2-d\", \"astropy/io/ascii/tests/test_ecsv.py::test_specialized_columns[scalar\", \"astropy/io/ascii/tests/test_ecsv.py::test_specialized_columns[scalar-col0-exp0]\", \"astropy/io/ascii/tests/test_ecsv.py::test_structured_input\", \"astropy/io/ascii/tests/test_ecsv.py::test_write_full\", \"astropy/io/ascii/tests/test_ecsv.py::test_write_not_json_serializable\", \"astropy/io/ascii/tests/test_ecsv.py::test_write_read_roundtrip\", \"astropy/io/ascii/tests/test_ecsv.py::test_write_simple\", \"astropy/time/tests/test_basic.py::TestBasic::test_all_scale_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_copy_time[2455197.5]\", \"astropy/time/tests/test_basic.py::TestBasic::test_copy_time[value1]\", \"astropy/time/tests/test_basic.py::TestBasic::test_creating_all_formats\", \"astropy/time/tests/test_basic.py::TestBasic::test_datetime\", \"astropy/time/tests/test_basic.py::TestBasic::test_datetime64\", \"astropy/time/tests/test_basic.py::TestBasic::test_different_dimensions\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[byear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[byear_str]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[cxcsec]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[datetime64]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[datetime]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[decimalyear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[fits]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[gps]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[iso]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[isot]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jd]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jyear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jyear_str]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[mjd]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[plot_date]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[stardate]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[unix]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[unix_tai]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[yday]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[ymdhms]\", \"astropy/time/tests/test_basic.py::TestBasic::test_epoch_transform\", \"astropy/time/tests/test_basic.py::TestBasic::test_getitem\", \"astropy/time/tests/test_basic.py::TestBasic::test_init_from_time_objects\", \"astropy/time/tests/test_basic.py::TestBasic::test_input_validation\", \"astropy/time/tests/test_basic.py::TestBasic::test_local_format_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_location\", \"astropy/time/tests/test_basic.py::TestBasic::test_location_array\", \"astropy/time/tests/test_basic.py::TestBasic::test_precision\", \"astropy/time/tests/test_basic.py::TestBasic::test_properties\", \"astropy/time/tests/test_basic.py::TestBasic::test_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_transforms_no_location\", \"astropy/time/tests/test_basic.py::TestBasic::test_utc_leap_sec\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_copy\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_immutable_input\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_replicate\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_basic_subformat_cache_does_not_crash\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_basic_subformat_setting\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_caching\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[cxcsec]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[gps]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[jd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[jyear]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[mjd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[unix]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_example\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_longdouble\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_longdouble_one_val\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[byear-1950.1-1950.1-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[cxcsec-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[decimalyear-2000.54321-2000.0-0.54321]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[gps-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[jd-2451544.5333981-2451544.5-0.0333981]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[jyear-2000.1-2000.1-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[unix-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[cxcsec]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[mjd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[unix]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_need_format_argument\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_not_allowed_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_input\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_output[bytes]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_output[str]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_switch_to_format_with_no_out_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-decimal-Decimal]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-long-longdouble]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-str-str]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_wrong_in_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_wrong_subfmt\", \"astropy/time/tests/test_basic.py::TestSofaErrors::test_bad_time\", \"astropy/time/tests/test_basic.py::TestStardate::test_iso_to_stardate\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates0]\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates1]\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates2]\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_bad_input_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_epoch_times\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_fits_format\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_fits_scale\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_input_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_input_subformat_fail\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_output_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_plot_date\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_scale_default\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_scale_input\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_yday_format\", \"astropy/time/tests/test_basic.py::TestVal2::test_broadcast_not_writable\", \"astropy/time/tests/test_basic.py::TestVal2::test_broadcast_one_not_writable\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d0]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d1]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d2]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d3]\", \"astropy/time/tests/test_basic.py::TestVal2::test_val2\", \"astropy/time/tests/test_basic.py::TestVal2::test_val_broadcasts_against_val2\", \"astropy/time/tests/test_basic.py::test_TimeFormat_scale\", \"astropy/time/tests/test_basic.py::test_bool\", \"astropy/time/tests/test_basic.py::test_broadcasting_writeable\", \"astropy/time/tests/test_basic.py::test_byteorder\", \"astropy/time/tests/test_basic.py::test_bytes_input\", \"astropy/time/tests/test_basic.py::test_cache\", \"astropy/time/tests/test_basic.py::test_datetime64_no_format\", \"astropy/time/tests/test_basic.py::test_datetime_tzinfo\", \"astropy/time/tests/test_basic.py::test_decimalyear\", \"astropy/time/tests/test_basic.py::test_dir\", \"astropy/time/tests/test_basic.py::test_epoch_date_jd_is_day_fraction\", \"astropy/time/tests/test_basic.py::test_fits_year0\", \"astropy/time/tests/test_basic.py::test_fits_year10000\", \"astropy/time/tests/test_basic.py::test_format_subformat_compatibility\", \"astropy/time/tests/test_basic.py::test_get_time_fmt_exception_messages\", \"astropy/time/tests/test_basic.py::test_hash_time\", \"astropy/time/tests/test_basic.py::test_hash_time_delta\", \"astropy/time/tests/test_basic.py::test_insert_exceptions\", \"astropy/time/tests/test_basic.py::test_insert_time\", \"astropy/time/tests/test_basic.py::test_isiterable\", \"astropy/time/tests/test_basic.py::test_len_size\", \"astropy/time/tests/test_basic.py::test_location_init[None]\", \"astropy/time/tests/test_basic.py::test_location_init[location1]\", \"astropy/time/tests/test_basic.py::test_location_init_fail\", \"astropy/time/tests/test_basic.py::test_now\", \"astropy/time/tests/test_basic.py::test_python_builtin_copy\", \"astropy/time/tests/test_basic.py::test_remove_astropy_time\", \"astropy/time/tests/test_basic.py::test_replicate_value_error\", \"astropy/time/tests/test_basic.py::test_set_format_basic\", \"astropy/time/tests/test_basic.py::test_set_format_does_not_share_subfmt\", \"astropy/time/tests/test_basic.py::test_set_format_shares_subfmt\", \"astropy/time/tests/test_basic.py::test_setitem_bad_item\", \"astropy/time/tests/test_basic.py::test_setitem_deltas\", \"astropy/time/tests/test_basic.py::test_setitem_from_python_objects\", \"astropy/time/tests/test_basic.py::test_setitem_from_time_objects\", \"astropy/time/tests/test_basic.py::test_setitem_location\", \"astropy/time/tests/test_basic.py::test_strftime_array\", \"astropy/time/tests/test_basic.py::test_strftime_array_2\", \"astropy/time/tests/test_basic.py::test_strftime_array_fracsec\", \"astropy/time/tests/test_basic.py::test_strftime_leapsecond\", \"astropy/time/tests/test_basic.py::test_strftime_scalar\", \"astropy/time/tests/test_basic.py::test_strftime_scalar_fracsec\", \"astropy/time/tests/test_basic.py::test_strftime_scalar_fracsec_precision\", \"astropy/time/tests/test_basic.py::test_string_valued_columns\", \"astropy/time/tests/test_basic.py::test_strptime_3_digit_year\", \"astropy/time/tests/test_basic.py::test_strptime_array\", \"astropy/time/tests/test_basic.py::test_strptime_badinput\", \"astropy/time/tests/test_basic.py::test_strptime_fracsec_array\", \"astropy/time/tests/test_basic.py::test_strptime_fracsec_scalar\", \"astropy/time/tests/test_basic.py::test_strptime_input_bytes_array\", \"astropy/time/tests/test_basic.py::test_strptime_input_bytes_scalar\", \"astropy/time/tests/test_basic.py::test_strptime_leapsecond\", \"astropy/time/tests/test_basic.py::test_strptime_scalar\", \"astropy/time/tests/test_basic.py::test_subclass\", \"astropy/time/tests/test_basic.py::test_subfmts_regex\", \"astropy/time/tests/test_basic.py::test_sum_is_equivalent\", \"astropy/time/tests/test_basic.py::test_time_from_epoch_jds\", \"astropy/time/tests/test_basic.py::test_to_datetime\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[byear-TimeBesselianEpoch]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[byear_str-TimeBesselianEpochString]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[cxcsec-TimeCxcSec]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[datetime-TimeDatetime]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[datetime64-TimeDatetime64]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[decimalyear-TimeDecimalYear]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[fits-TimeFITS]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[gps-TimeGPS]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[iso-TimeISO]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[isot-TimeISOT]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jd-TimeJD]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jyear-TimeJulianEpoch]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jyear_str-TimeJulianEpochString]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[mjd-TimeMJD]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[plot_date-TimePlotDate]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[stardate-TimeStardate]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[unix-TimeUnix]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[unix_tai-TimeUnixTai]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[yday-TimeYearDayTime]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[ymdhms-TimeYMDHMS]\", \"astropy/time/tests/test_basic.py::test_unix_tai_format\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[byear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[cxcsec]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[decimalyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[fits]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[gps]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[iso]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[isot]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jyear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[mjd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[plot_date]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[stardate]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[unix]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[unix_tai]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[yday]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[ymdhms]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[byear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[byear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[cxcsec]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[datetime64]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[datetime]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[decimalyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[fits]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[gps]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[iso]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[isot]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jyear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[mjd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[plot_date]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[stardate]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[unix]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[unix_tai]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[yday]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[ymdhms]\", \"astropy/time/tests/test_basic.py::test_writeable_flag\", \"astropy/time/tests/test_basic.py::test_ymdhms_defaults\", \"astropy/time/tests/test_basic.py::test_ymdhms_exceptions\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_array\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_scalar[kwargs0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_scalar[kwargs1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_masked\", \"astropy/time/tests/test_basic.py::test_ymdhms_output\"]",
+  "environment_setup_commit": "298ccb478e6bf092953bca67a3d29dc6c35f6752",
+  "patch_files": [
+    "astropy/time/core.py",
+    "astropy/time/formats.py"
+  ],
+  "test_patch_files": [
+    "astropy/io/ascii/tests/test_ecsv.py",
+    "astropy/time/tests/test_basic.py"
+  ],
+  "patch_diff_details": {
+    "astropy/time/core.py": {
+      "diffs": [
+        {
+          "start_line_old": 37,
+          "end_line_old": 37,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "pos": 11,
+          "context_length": 6685
+        },
+        {
+          "start_line_old": 113,
+          "end_line_old": 113,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 35
+        },
+        {
+          "start_line_old": 136,
+          "end_line_old": 136,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 58
+        },
+        {
+          "start_line_old": 185,
+          "end_line_old": 185,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 107
+        },
+        {
+          "start_line_old": 204,
+          "end_line_old": 216,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 138
+        },
+        {
+          "start_line_old": 279,
+          "end_line_old": 283,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 205
+        },
+        {
+          "start_line_old": 1818,
+          "end_line_old": 1818,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 1740
+        },
+        {
+          "start_line_old": 1880,
+          "end_line_old": 1880,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 1802
+        },
+        {
+          "start_line_old": 1932,
+          "end_line_old": 1932,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 1854
+        },
+        {
+          "start_line_old": 1959,
+          "end_line_old": 1959,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 1881
+        },
+        {
+          "start_line_old": 2784,
+          "end_line_old": 2784,
+          "file_pos": 6,
+          "file_context_length": 64169,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+          "closest_snippet_line_distance": 2706
+        }
+      ]
+    },
+    "astropy/time/formats.py": {
+      "diffs": [
+        {
+          "start_line_old": 1748,
+          "end_line_old": 1748,
+          "file_pos": 5,
+          "file_context_length": 38186,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/formats.py_1_FITS_DEPRECATED_SCALES.1",
+          "closest_snippet_line_distance": 1703
+        }
+      ]
+    }
+  },
+  "vectors": 4507,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/timeseries/binned.py_BinnedTimeSeries.read.2_",
+      "distance": 0.7392261028289795,
+      "file_path": "astropy/timeseries/binned.py",
+      "start_line": 282,
+      "end_line": 346,
+      "tokens": 645,
+      "context_length": 645
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_EcsvHeader.get_cols.29_EcsvHeader.get_cols.29.14.col.subtype.1",
+      "distance": 0.7976499795913696,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 175,
+      "end_line": 206,
+      "tokens": 378,
+      "context_length": 1023
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/__init__.py_masked_",
+      "distance": 0.8046591281890869,
+      "file_path": "astropy/io/ascii/__init__.py",
+      "start_line": 7,
+      "end_line": 48,
+      "tokens": 302,
+      "context_length": 1325
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/utils/iers/iers.py_re_INTERPOLATE_ERROR.1",
+      "distance": 0.8163604736328125,
+      "file_path": "astropy/utils/iers/iers.py",
+      "start_line": 12,
+      "end_line": 77,
+      "tokens": 747,
+      "context_length": 2072
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/timeseries/binned.py_BinnedTimeSeries.__init___BinnedTimeSeries.__init__.20.5",
+      "distance": 0.8440418243408203,
+      "file_path": "astropy/timeseries/binned.py",
+      "start_line": 74,
+      "end_line": 185,
+      "tokens": 1038,
+      "context_length": 3110
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_Ecsv_Ecsv.9",
+      "distance": 0.8623385429382324,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 412,
+      "end_line": 452,
+      "tokens": 311,
+      "context_length": 3421
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_1_FITS_DEPRECATED_SCALES.1",
+      "distance": 0.862682044506073,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 443,
+      "context_length": 3864,
+      "file_pos": 5
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/timeseries/binned.py_BinnedTimeSeries.read_BinnedTimeSeries.read.1",
+      "distance": 0.880990207195282,
+      "file_path": "astropy/timeseries/binned.py",
+      "start_line": 226,
+      "end_line": 280,
+      "tokens": 586,
+      "context_length": 4450
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_re_InvalidEcsvDatatypeWarning.1",
+      "distance": 0.8812589645385742,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 7,
+      "end_line": 31,
+      "tokens": 187,
+      "context_length": 4637
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_EcsvOutputter._convert_vals_EcsvOutputter._convert_vals.2.1.4.1",
+      "distance": 0.8867560625076294,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 236,
+      "end_line": 340,
+      "tokens": 1111,
+      "context_length": 5748
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_1_46",
+      "distance": 0.8879500031471252,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 937,
+      "context_length": 6685,
+      "file_pos": 6
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/table/__init__.py__config___all__.1",
+      "distance": 0.8936158418655396,
+      "file_path": "astropy/table/__init__.py",
+      "start_line": 3,
+      "end_line": 14,
+      "tokens": 188,
+      "context_length": 6873
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/table/__init__.py_conf_",
+      "distance": 0.9147975444793701,
+      "file_path": "astropy/table/__init__.py",
+      "start_line": 47,
+      "end_line": 78,
+      "tokens": 338,
+      "context_length": 7211
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/timeseries/core.py_BaseTimeSeries_",
+      "distance": 0.9153594970703125,
+      "file_path": "astropy/timeseries/core.py",
+      "start_line": 46,
+      "end_line": 93,
+      "tokens": 376,
+      "context_length": 7587
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py_re__GUESS.1",
+      "distance": 0.9260522723197937,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 12,
+      "end_line": 48,
+      "tokens": 193,
+      "context_length": 7780
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/docs/conf.py_1_81",
+      "distance": 0.9309831261634827,
+      "file_path": "docs/conf.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 794,
+      "context_length": 8574
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/io/misc/yaml.py_base64__timedelta_constructor.3.1",
+      "distance": 0.9317656755447388,
+      "file_path": "astropy/io/misc/yaml.py",
+      "start_line": 59,
+      "end_line": 112,
+      "tokens": 337,
+      "context_length": 8911
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/utils/console.py_1__DEFAULT_ENCODING.1",
+      "distance": 0.9360038638114929,
+      "file_path": "astropy/utils/console.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 178,
+      "context_length": 9089
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_copy_61",
+      "distance": 0.9361500144004822,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 3,
+      "end_line": 77,
+      "tokens": 761,
+      "context_length": 9850
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/io/fits/column.py_ASCII_DEFAULT_WIDTHS_91",
+      "distance": 0.9373000264167786,
+      "file_path": "astropy/io/fits/column.py",
+      "start_line": 78,
+      "end_line": 128,
+      "tokens": 753,
+      "context_length": 10603
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ui.py__guess.15__guess.26.3.2.5.7",
+      "distance": 0.9385480880737305,
+      "file_path": "astropy/io/ascii/ui.py",
+      "start_line": 480,
+      "end_line": 553,
+      "tokens": 771,
+      "context_length": 11374
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/time.py_np__assert_earthlocation_equal.5",
+      "distance": 0.9396936893463135,
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "start_line": 3,
+      "end_line": 30,
+      "tokens": 194,
+      "context_length": 11568
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py_EcsvHeader.get_cols_EcsvHeader.get_cols.28",
+      "distance": 0.9423862099647522,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 107,
+      "end_line": 174,
+      "tokens": 601,
+      "context_length": 12169
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/utils/compat/numpycompat.py_np_",
+      "distance": 0.9438018798828125,
+      "file_path": "astropy/utils/compat/numpycompat.py",
+      "start_line": 7,
+      "end_line": 24,
+      "tokens": 269,
+      "context_length": 12438
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_E19_E22.message_template.1",
+      "distance": 0.9548577070236206,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 1423,
+      "end_line": 1457,
+      "tokens": 223,
+      "context_length": 12661
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/ecsv.py__check_dtype_is_str_EcsvOutputter.__call__.out.8.1",
+      "distance": 0.9549273252487183,
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "start_line": 209,
+      "end_line": 234,
+      "tokens": 228,
+      "context_length": 12889
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_io__resize.5.1",
+      "distance": 0.9564110040664673,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 5,
+      "end_line": 69,
+      "tokens": 531,
+      "context_length": 13420
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/wcs/docstrings.py_wtb_dateref.1",
+      "distance": 0.9569671750068665,
+      "file_path": "astropy/wcs/docstrings.py",
+      "start_line": 2654,
+      "end_line": 2821,
+      "tokens": 708,
+      "context_length": 14128
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/cds.py_Cds_Cds.1",
+      "distance": 0.9577537775039673,
+      "file_path": "astropy/io/ascii/cds.py",
+      "start_line": 196,
+      "end_line": 300,
+      "tokens": 1129,
+      "context_length": 15257
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/io/fits/hdu/table.py_BinTableHDU._tdump_file_format_BinTableHDU._tdump_file_format.1",
+      "distance": 0.9632161259651184,
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "start_line": 1001,
+      "end_line": 1052,
+      "tokens": 676,
+      "context_length": 15933
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/io/ascii/core.py_copy_FAST_CLASSES.1",
+      "distance": 0.9688872694969177,
+      "file_path": "astropy/io/ascii/core.py",
+      "start_line": 12,
+      "end_line": 40,
+      "tokens": 122,
+      "context_length": 16055
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/timeseries/binned.py",
+      "position": 1,
+      "tokens": 3254,
+      "context_length": 3254
+    },
+    {
+      "file_path": "astropy/io/ascii/ecsv.py",
+      "position": 2,
+      "tokens": 4197,
+      "context_length": 7451
+    },
+    {
+      "file_path": "astropy/io/ascii/__init__.py",
+      "position": 3,
+      "tokens": 338,
+      "context_length": 7789
+    },
+    {
+      "file_path": "astropy/utils/iers/iers.py",
+      "position": 4,
+      "tokens": 11235,
+      "context_length": 19024
+    },
+    {
+      "file_path": "astropy/time/formats.py",
+      "position": 5,
+      "tokens": 19162,
+      "context_length": 38186
+    },
+    {
+      "file_path": "astropy/time/core.py",
+      "position": 6,
+      "tokens": 25983,
+      "context_length": 64169
+    },
+    {
+      "file_path": "astropy/table/__init__.py",
+      "position": 7,
+      "tokens": 845,
+      "context_length": 65014
+    },
+    {
+      "file_path": "astropy/timeseries/core.py",
+      "position": 8,
+      "tokens": 647,
+      "context_length": 65661
+    },
+    {
+      "file_path": "astropy/io/ascii/ui.py",
+      "position": 9,
+      "tokens": 7696,
+      "context_length": 73357
+    },
+    {
+      "file_path": "docs/conf.py",
+      "position": 10,
+      "tokens": 4331,
+      "context_length": 77688
+    },
+    {
+      "file_path": "astropy/io/misc/yaml.py",
+      "position": 11,
+      "tokens": 2935,
+      "context_length": 80623
+    },
+    {
+      "file_path": "astropy/utils/console.py",
+      "position": 12,
+      "tokens": 8255,
+      "context_length": 88878
+    },
+    {
+      "file_path": "astropy/io/fits/column.py",
+      "position": 13,
+      "tokens": 22337,
+      "context_length": 111215
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "position": 14,
+      "tokens": 994,
+      "context_length": 112209
+    },
+    {
+      "file_path": "astropy/utils/compat/numpycompat.py",
+      "position": 15,
+      "tokens": 310,
+      "context_length": 112519
+    },
+    {
+      "file_path": "astropy/io/votable/exceptions.py",
+      "position": 16,
+      "tokens": 13332,
+      "context_length": 125851
+    },
+    {
+      "file_path": "astropy/io/votable/tree.py",
+      "position": 17,
+      "tokens": 29143,
+      "context_length": 154994
+    },
+    {
+      "file_path": "astropy/wcs/docstrings.py",
+      "position": 18,
+      "tokens": 21453,
+      "context_length": 176447
+    },
+    {
+      "file_path": "astropy/io/ascii/cds.py",
+      "position": 19,
+      "tokens": 3085,
+      "context_length": 179532
+    },
+    {
+      "file_path": "astropy/io/fits/hdu/table.py",
+      "position": 20,
+      "tokens": 13109,
+      "context_length": 192641
+    },
+    {
+      "file_path": "astropy/io/ascii/core.py",
+      "position": 21,
+      "tokens": 13627,
+      "context_length": 206268
+    }
+  ]
+}

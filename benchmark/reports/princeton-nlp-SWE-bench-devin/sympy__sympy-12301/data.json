@@ -1,0 +1,911 @@
+{
+  "instance_id": "sympy__sympy-12301",
+  "model_patch": "diff --git a/sympy/simplify/cse_main.py b/sympy/simplify/cse_main.py\nindex a771dd377b..e2fc4b2cd4 100644\n--- a/sympy/simplify/cse_main.py\n+++ b/sympy/simplify/cse_main.py\n@@ -13,6 +13,11 @@\n \n from . import cse_opts\n \n+import logging\n+\n+logging.basicConfig(filename='/home/ubuntu/sympy/sympy/simplify/cse_debug.log', level=logging.DEBUG,\n+                    format='%(asctime)s:%(levelname)s:%(message)s')\n+\n # (preprocessor, postprocessor) pairs which are commonly useful. They should\n # each take a sympy expression and return a possibly transformed expression.\n # When used in the function ``cse()``, the target expressions will be transformed\n@@ -158,11 +163,13 @@ def pairwise_most_common(sets):\n     from sympy.utilities.iterables import subsets\n     from collections import defaultdict\n     most = -1\n+    best_keys = []\n+    best = defaultdict(list)\n     for i, j in subsets(list(range(len(sets))), 2):\n         com = sets[i] & sets[j]\n         if com and len(com) > most:\n-            best = defaultdict(list)\n             best_keys = []\n+            best = defaultdict(list)\n             most = len(com)\n         if len(com) == most:\n             if com not in best_keys:\n@@ -393,6 +400,7 @@ def restore(dafi):\n     # split muls into commutative\n     commutative_muls = set()\n     for m in muls:\n+        logging.debug(f\"Splitting Mul objects into commutative and non-commutative parts: {m}\")\n         c, nc = m.args_cnc(cset=True)\n         if c:\n             c_mul = m.func(*c)\n@@ -400,6 +408,7 @@ def restore(dafi):\n                 opt_subs[m] = m.func(c_mul, m.func(*nc), evaluate=False)\n             if len(c) > 1:\n                 commutative_muls.add(c_mul)\n+        logging.debug(f\"Finished splitting Mul objects into commutative and non-commutative parts: {m}\")\n \n     _match_common_args(Add, adds)\n     _match_common_args(Mul, commutative_muls)\n@@ -417,12 +426,17 @@ def tree_cse(exprs, symbols, opt_subs=None, order='canonical', ignore=()):\n         The expressions to reduce.\n     symbols : infinite iterator yielding unique Symbols\n         The symbols used to label the common subexpressions which are pulled\n-        out.\n+        out. The ``numbered_symbols`` generator is useful. The default is a\n+        stream of symbols of the form \"x0\", \"x1\", etc. This must be an\n+        infinite iterator.\n     opt_subs : dictionary of expression substitutions\n         The expressions to be substituted before any CSE action is performed.\n     order : string, 'none' or 'canonical'\n-        The order by which Mul and Add arguments are processed. For large\n-        expressions where speed is a concern, use the setting order='none'.\n+        The order by which Mul and Add arguments are processed. If set to\n+        'canonical', arguments will be canonically ordered. If set to 'none',\n+        ordering will be faster but dependent on expressions hashes, thus\n+        machine dependent and variable. For large expressions where speed is a\n+        concern, use the setting order='none'.\n     ignore : iterable of Symbols\n         Substitutions containing any Symbol from ``ignore`` will be ignored.\n     \"\"\"\n@@ -496,6 +510,7 @@ def _rebuild(expr):\n         # If enabled, parse Muls and Adds arguments by order to ensure\n         # replacement order independent from hashes\n         if order != 'none':\n+            logging.debug(f\"Before canonical ordering: {expr}\")\n             if isinstance(expr, (Mul, MatMul)):\n                 c, nc = expr.args_cnc()\n                 if c == [1]:\n@@ -506,6 +521,7 @@ def _rebuild(expr):\n                 args = list(ordered(expr.args))\n             else:\n                 args = expr.args\n+            logging.debug(f\"After canonical ordering: {expr}\")\n         else:\n             args = expr.args\n \n@@ -515,6 +531,8 @@ def _rebuild(expr):\n         else:\n             new_expr = expr\n \n+        logging.debug(f\"Rebuilding expression: {expr}\")\n+\n         if orig_expr in to_eliminate:\n             try:\n                 sym = next(symbols)\n@@ -546,6 +564,7 @@ def _rebuild(expr):\n     #     R = [(x0, d + f), (x1, b + d)]\n     #     C = [e + x0 + x1, g + x0 + x1, a + c + d + f + g]\n     # but the args of C[-1] should not be `(a + c, d + f + g)`\n+    logging.debug(f\"Before hollow nesting prevention: {exprs}\")\n     nested = [[i for i in f.args if isinstance(i, f.func)] for f in exprs]\n     for i in range(len(exprs)):\n         F = reduced_exprs[i].func\n@@ -563,6 +582,7 @@ def _rebuild(expr):\n             else:\n                 args.append(a)\n         reduced_exprs[i] = F(*args)\n+    logging.debug(f\"After hollow nesting prevention: {reduced_exprs}\")\n \n     return replacements, reduced_exprs\n \n@@ -644,6 +664,8 @@ def cse(exprs, symbols=None, optimizations=None, postprocess=None,\n     from sympy.matrices import (MatrixBase, Matrix, ImmutableMatrix,\n                                 SparseMatrix, ImmutableSparseMatrix)\n \n+    logging.debug(\"Starting cse function\")\n+\n     # Handle the case if just one expression was passed.\n     if isinstance(exprs, (Basic, MatrixBase)):\n         exprs = [exprs]\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/simplify/cse_main.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "5155b7641fa389e10aeb5cfebcbefba02cb9221c",
+  "patch": "diff --git a/sympy/simplify/cse_main.py b/sympy/simplify/cse_main.py\n--- a/sympy/simplify/cse_main.py\n+++ b/sympy/simplify/cse_main.py\n@@ -310,10 +310,18 @@ def update(k):\n             # remove it\n             if Func is Add:\n                 take = min(func_dicts[k][i] for i in com_dict)\n-                com_func_take = Mul(take, from_dict(com_dict), evaluate=False)\n+                _sum = from_dict(com_dict)\n+                if take == 1:\n+                    com_func_take = _sum\n+                else:\n+                    com_func_take = Mul(take, _sum, evaluate=False)\n             else:\n                 take = igcd(*[func_dicts[k][i] for i in com_dict])\n-                com_func_take = Pow(from_dict(com_dict), take, evaluate=False)\n+                base = from_dict(com_dict)\n+                if take == 1:\n+                    com_func_take = base\n+                else:\n+                    com_func_take = Pow(base, take, evaluate=False)\n             for di in com_dict:\n                 func_dicts[k][di] -= take*com_dict[di]\n             # compute the remaining expression\n@@ -546,23 +554,12 @@ def _rebuild(expr):\n     #     R = [(x0, d + f), (x1, b + d)]\n     #     C = [e + x0 + x1, g + x0 + x1, a + c + d + f + g]\n     # but the args of C[-1] should not be `(a + c, d + f + g)`\n-    nested = [[i for i in f.args if isinstance(i, f.func)] for f in exprs]\n     for i in range(len(exprs)):\n         F = reduced_exprs[i].func\n         if not (F is Mul or F is Add):\n             continue\n-        nested = [a for a in exprs[i].args if isinstance(a, F)]\n-        args = []\n-        for a in reduced_exprs[i].args:\n-            if isinstance(a, F):\n-                for ai in a.args:\n-                    if isinstance(ai, F) and ai not in nested:\n-                        args.extend(ai.args)\n-                    else:\n-                        args.append(ai)\n-            else:\n-                args.append(a)\n-        reduced_exprs[i] = F(*args)\n+        if any(isinstance(a, F) for a in reduced_exprs[i].args):\n+            reduced_exprs[i] = F(*reduced_exprs[i].args)\n \n     return replacements, reduced_exprs\n \n",
+  "test_patch": "diff --git a/sympy/simplify/tests/test_cse.py b/sympy/simplify/tests/test_cse.py\n--- a/sympy/simplify/tests/test_cse.py\n+++ b/sympy/simplify/tests/test_cse.py\n@@ -422,6 +422,13 @@ def test_issue_8891():\n \n \n def test_issue_11230():\n+    # a specific test that always failed\n+    a, b, f, k, l, i = symbols('a b f k l i')\n+    p = [a*b*f*k*l, a*i*k**2*l, f*i*k**2*l]\n+    R, C = cse(p)\n+    assert not any(i.is_Mul for a in C for i in a.args)\n+\n+    # random tests for the issue\n     from random import choice\n     from sympy.core.function import expand_mul\n     s = symbols('a:m')\n",
+  "problem_statement": "Test failure in Travis\n```\n______________ sympy/simplify/tests/test_cse.py:test_issue_11230 _______________\n  File \"/home/travis/virtualenv/python3.5.2/lib/python3.5/site-packages/sympy-1.0.1.dev0-py3.5.egg/sympy/simplify/tests/test_cse.py\", line 433, in test_issue_11230\n    assert not any(i.is_Mul for a in C for i in a.args)\nAssertionError\n```\n\nI was able to reproduce this locally on a 64-bit system running Ubuntu 16.04.\n\nHow to reproduce:\n\n``` bash\nconda create -n test_sympy python=3.5 matplotlib numpy scipy pip llvmlite\nsource activate test_sympy\npython\n```\n\n``` Python\n>>> import os\n>>> os.environ['PYTHONHASHSEED'] = '736538842'\n>>> import sympy\n>>> sympy.test(split='4/4', seed=57601301)\n```\n\n",
+  "hints_text": "Log is here, https://travis-ci.org/sympy/sympy/jobs/163790187\nPermanent link, https://gist.github.com/isuruf/9410c21df1be658d168727018007a63a\n\nping @smichr \n\nSeeing jobs failing frequently now\nhttps://travis-ci.org/sympy/sympy/jobs/164977570\nhttps://travis-ci.org/sympy/sympy/jobs/164880234\n\nIt seems that the failure is generated in the following way.\n\n```\n>>> from sympy import cse\n>>> from sympy.abc import a, c, i, g, l, m\n>>> p = [c*g*i**2*m, a*c*i*l*m, g*i**2*l*m]\n>>> cse(p)\n([(x0, g*i), (x1, i*m)], [c*x0*x1, a*l*(c*i*m), l*x0*x1])\n```\n\n`c*i*m` is recognized as a common factor of the first two expressions, and is marked as a candidate by writing it in the form `(c*i*m)**1` by [`update`](https://github.com/sympy/sympy/blob/master/sympy/simplify/cse_main.py#L316). It is later abandoned as a part of `c*g*i**2*m` and is left alone in `a*c*i*l*m`. When its expression tree is rebuilt, the following results.\n\n```\n>>> from sympy import Mul, Pow\n>>> Mul(a, l, Pow(c*i*m, 1, evaluate=False))\na*l*(c*i*m)\n```\n\n(`x0*x1 = g*i**2*m` is not recognized as a common subexpression for some reason.)\n\nDo we have a fix for this? If not, let's revert the PR. @smichr \n\n@smichr, ping.\n\nJust seeing this now. I thought that there was a line of code to remove exponents of \"`1\". I may be able to look at this tomorrow, but it's more realistic to expect a delay up until Friday. I'll see what I can do but if this is really a hassle for tests it can be reverted and I'll try again later.\n\nThanks for looking into this. We can wait for a few more days.\n\nI am working on this...perhaps can finish before Monday. I am getting 3 different possibilities, @jksuom for the test expression you gave:\r\n\r\n```\r\n============================= test process starts =============================\r\nexecutable:         C:\\Python27\\python.exe  (2.7.7-final-0) [CPython]\r\narchitecture:       32-bit\r\ncache:              yes\r\nground types:       python\r\nrandom seed:        36014997\r\nhash randomization: on (PYTHONHASHSEED=643787914)\r\n\r\nsympy\\simplify\\tests\\test_cse.py[1] ([(x0, g*i), (x1, i*m)], [c*x0*x1, a*c*l*x1, l*x0*x1])\r\n.                                      [OK]\r\n\r\n================== tests finished: 1 passed, in 0.48 seconds ==================\r\nrerun 3\r\n============================= test process starts =============================\r\nexecutable:         C:\\Python27\\python.exe  (2.7.7-final-0) [CPython]\r\narchitecture:       32-bit\r\ncache:              yes\r\nground types:       python\r\nrandom seed:        30131441\r\nhash randomization: on (PYTHONHASHSEED=2864749239)\r\n\r\nsympy\\simplify\\tests\\test_cse.py[1] ([(x0, g*i), (x1, c*i*m)], [x0*x1, a*l*x1, i*l*m*x0])\r\n.                                      [OK]\r\n\r\n================== tests finished: 1 passed, in 0.37 seconds ==================\r\nrerun 4\r\n============================= test process starts =============================\r\nexecutable:         C:\\Python27\\python.exe  (2.7.7-final-0) [CPython]\r\narchitecture:       32-bit\r\ncache:              yes\r\nground types:       python\r\nrandom seed:        20393357\r\nhash randomization: on (PYTHONHASHSEED=1323273449)\r\n\r\nsympy\\simplify\\tests\\test_cse.py[1] ([(x0, g*i**2*m)], [c*x0, (c*i)*(a*l*m), l*x0])\r\n.                                      [OK]\r\n```\r\n\r\nSo it looks like I have to make this canonical, too.",
+  "created_at": "2017-03-13T01:22:47Z",
+  "version": "1.0",
+  "FAIL_TO_PASS": "[\"test_issue_11230\"]",
+  "PASS_TO_PASS": "[\"test_Piecewise\", \"test_bypass_non_commutatives\", \"test_cse_MatrixExpr\", \"test_cse_MatrixSymbol\", \"test_cse_not_possible\", \"test_cse_single\", \"test_cse_single2\", \"test_dont_cse_tuples\", \"test_hollow_rejection\", \"test_issue_10228\", \"test_issue_4020\", \"test_issue_4203\", \"test_issue_4498\", \"test_issue_4499\", \"test_issue_6169\", \"test_issue_6263\", \"test_issue_7840\", \"test_issue_8891\", \"test_multiple_expressions\", \"test_name_conflict\", \"test_name_conflict_cust_symbols\", \"test_nested_substitution\", \"test_numbered_symbols\", \"test_postprocess\", \"test_postprocess_for_cse\", \"test_pow_invpow\", \"test_preprocess_for_cse\", \"test_subtraction_opt\", \"test_symbols_exhausted_error\"]",
+  "environment_setup_commit": "50b81f9f6be151014501ffac44e5dc6b2416938f",
+  "patch_files": [
+    "sympy/simplify/cse_main.py"
+  ],
+  "test_patch_files": [
+    "sympy/simplify/tests/test_cse.py"
+  ],
+  "patch_diff_details": {
+    "sympy/simplify/cse_main.py": {
+      "diffs": [
+        {
+          "start_line_old": 313,
+          "end_line_old": 316
+        },
+        {
+          "start_line_old": 549,
+          "end_line_old": 565
+        }
+      ]
+    }
+  },
+  "vectors": 6883,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/release/fabfile.py_test_pypi_test_pypi.7.2.2",
+      "distance": 0.8054985404014587,
+      "file_path": "release/fabfile.py",
+      "start_line": 938,
+      "end_line": 959,
+      "tokens": 193,
+      "context_length": 193
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests._enhance_asserts.Transform_SymPyTests._enhance_asserts.6.1",
+      "distance": 0.843518853187561,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1028,
+      "end_line": 1049,
+      "tokens": 268,
+      "context_length": 461
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/conftest.py_1_process_split.8",
+      "distance": 0.8689985275268555,
+      "file_path": "sympy/conftest.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 189,
+      "context_length": 650
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests._enhance_asserts_SymPyTests._enhance_asserts.ops.1",
+      "distance": 0.8690996170043945,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1020,
+      "end_line": 1026,
+      "tokens": 130,
+      "context_length": 780
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests.test_file_SymPyTests.test_file.5.1",
+      "distance": 0.8910250663757324,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1051,
+      "end_line": 1136,
+      "tokens": 637,
+      "context_length": 1417
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/release/fabfile.py_test_tarball_test_tarball.5.2.3.2",
+      "distance": 0.8958801627159119,
+      "file_path": "release/fabfile.py",
+      "start_line": 239,
+      "end_line": 258,
+      "tokens": 222,
+      "context_length": 1639
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests.test_file.6_SymPyTests.test_file.7",
+      "distance": 0.8987579345703125,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1138,
+      "end_line": 1180,
+      "tokens": 367,
+      "context_length": 2006
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyDocTests.test_file_SymPyDocTests.test_file.19",
+      "distance": 0.9002394676208496,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1243,
+      "end_line": 1325,
+      "tokens": 756,
+      "context_length": 2762
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/setup.py_28_",
+      "distance": 0.905551552772522,
+      "file_path": "setup.py",
+      "start_line": 331,
+      "end_line": 371,
+      "tokens": 366,
+      "context_length": 3128
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_1_future_flags.1",
+      "distance": 0.9171842336654663,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 254,
+      "context_length": 3382
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_test.subprocess_test.8.3.1.1",
+      "distance": 0.9175506830215454,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 435,
+      "end_line": 459,
+      "tokens": 235,
+      "context_length": 3617
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_pdoctest._indent_34.DocTestRunner.report_failure.1",
+      "distance": 0.9327183365821838,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 67,
+      "end_line": 82,
+      "tokens": 110,
+      "context_length": 3727
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/setup.py_22_27.long_description.1",
+      "distance": 0.9342595934867859,
+      "file_path": "setup.py",
+      "start_line": 261,
+      "end_line": 329,
+      "tokens": 655,
+      "context_length": 4382
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/bin/get_sympy.py_1_",
+      "distance": 0.9412835836410522,
+      "file_path": "bin/get_sympy.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 106,
+      "context_length": 4488
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/setup.py_modules_modules.1",
+      "distance": 0.9427819848060608,
+      "file_path": "setup.py",
+      "start_line": 69,
+      "end_line": 138,
+      "tokens": 607,
+      "context_length": 5095
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/examples/all.py_1_EXAMPLE_DIR.1",
+      "distance": 0.9540765285491943,
+      "file_path": "examples/all.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 549,
+      "context_length": 5644
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/__init__.py_1_",
+      "distance": 0.9579281806945801,
+      "file_path": "sympy/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 665,
+      "context_length": 6309
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_get_sympy_dir_setup_pprint.5",
+      "distance": 0.9622293710708618,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 104,
+      "end_line": 133,
+      "tokens": 232,
+      "context_length": 6541
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests.test_SymPyTests.test.5.1",
+      "distance": 0.968654215335846,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 997,
+      "end_line": 1018,
+      "tokens": 156,
+      "context_length": 6697
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py__doctest.30__doctest.55.1",
+      "distance": 0.9687261581420898,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 704,
+      "end_line": 806,
+      "tokens": 879,
+      "context_length": 7576
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyDocTestFinder._find.16_SymPyDocTestFinder._find.16.1.2.4.3.5",
+      "distance": 0.9700357913970947,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1527,
+      "end_line": 1555,
+      "tokens": 291,
+      "context_length": 7867
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests_SymPyTests.__init__.15.2.self._slow_threshold.1",
+      "distance": 0.9700447916984558,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 970,
+      "end_line": 995,
+      "tokens": 239,
+      "context_length": 8106
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_sympytestfile.2_sympytestfile.17.1",
+      "distance": 0.9707008004188538,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 921,
+      "end_line": 967,
+      "tokens": 405,
+      "context_length": 8511
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyDocTests._process_dependencies_SymPyDocTests._process_dependencies.11.1",
+      "distance": 0.9718706607818604,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1360,
+      "end_line": 1445,
+      "tokens": 630,
+      "context_length": 9141
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/setup.py_test_sympy_test_sympy.run.2",
+      "distance": 0.9727582931518555,
+      "file_path": "setup.py",
+      "start_line": 212,
+      "end_line": 231,
+      "tokens": 148,
+      "context_length": 9289
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/bin/coverage_doctest.py_go_go.5.1",
+      "distance": 0.9728114604949951,
+      "file_path": "bin/coverage_doctest.py",
+      "start_line": 536,
+      "end_line": 558,
+      "tokens": 286,
+      "context_length": 9575
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/bin/coverage_doctest.py_1_print_header.3.1",
+      "distance": 0.9801270365715027,
+      "file_path": "bin/coverage_doctest.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 437,
+      "context_length": 10012
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/bin/coverage_doctest.py_26_",
+      "distance": 0.9877387881278992,
+      "file_path": "bin/coverage_doctest.py",
+      "start_line": 560,
+      "end_line": 651,
+      "tokens": 920,
+      "context_length": 10932
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_PyTestReporter.entering_filename_",
+      "distance": 0.9893414378166199,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 2148,
+      "end_line": 2231,
+      "tokens": 650,
+      "context_length": 11582
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_run_in_subprocess_with_hash_randomization.commandstring_run_in_subprocess_with_hash_randomization.14.4.3.3.1",
+      "distance": 0.9894648790359497,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 208,
+      "end_line": 224,
+      "tokens": 188,
+      "context_length": 11770
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_doctest_doctest.8.3.1.1",
+      "distance": 0.9916630983352661,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 540,
+      "end_line": 612,
+      "tokens": 651,
+      "context_length": 12421
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_PyTestReporter.start_PyTestReporter.start.self._t_start.1",
+      "distance": 0.9964158535003662,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 2027,
+      "end_line": 2062,
+      "tokens": 408,
+      "context_length": 12829
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/bin/generate_test_list.py_get_paths_",
+      "distance": 1.0003951787948608,
+      "file_path": "bin/generate_test_list.py",
+      "start_line": 36,
+      "end_line": 72,
+      "tokens": 313,
+      "context_length": 13142
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/core/backend.py_os_",
+      "distance": 1.0006980895996094,
+      "file_path": "sympy/core/backend.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 341,
+      "context_length": 13483
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/core/benchmarks/bench_basic.py__",
+      "distance": 1.0070784091949463,
+      "file_path": "sympy/core/benchmarks/bench_basic.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 0,
+      "context_length": 13483
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/series/benchmarks/bench_limit.py__",
+      "distance": 1.007204532623291,
+      "file_path": "sympy/series/benchmarks/bench_limit.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 13483
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyDocTests_SymPyDocTests.test.4.1",
+      "distance": 1.0088324546813965,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1218,
+      "end_line": 1241,
+      "tokens": 148,
+      "context_length": 13631
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py__doctest__doctest.not_blacklisted.1",
+      "distance": 1.0094999074935913,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 615,
+      "end_line": 703,
+      "tokens": 768,
+      "context_length": 14399
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_test_test.1",
+      "distance": 1.015423059463501,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 300,
+      "end_line": 434,
+      "tokens": 1131,
+      "context_length": 15530
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/core/__init__.py_1_",
+      "distance": 1.0156053304672241,
+      "file_path": "sympy/core/__init__.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 353,
+      "context_length": 15883
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/conftest.py_pytest_report_header_pytest_report_header.9.1",
+      "distance": 1.0179731845855713,
+      "file_path": "sympy/conftest.py",
+      "start_line": 30,
+      "end_line": 44,
+      "tokens": 152,
+      "context_length": 16035
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py__intcache_hits_int_trace.7.1",
+      "distance": 1.020362377166748,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1753,
+      "end_line": 1778,
+      "tokens": 157,
+      "context_length": 16192
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/release.py__",
+      "distance": 1.0233006477355957,
+      "file_path": "sympy/release.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 16192
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/bin/generate_test_list.py_1_3",
+      "distance": 1.0237776041030884,
+      "file_path": "bin/generate_test_list.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 220,
+      "context_length": 16412
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests.get_test_files_SymPyTests.get_test_files.5.1",
+      "distance": 1.026018738746643,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1204,
+      "end_line": 1215,
+      "tokens": 129,
+      "context_length": 16541
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests._timeout_SymPyTests.matches.4.1",
+      "distance": 1.0274174213409424,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1182,
+      "end_line": 1202,
+      "tokens": 158,
+      "context_length": 16699
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/release/fabfile.py_44_52",
+      "distance": 1.02983558177948,
+      "file_path": "release/fabfile.py",
+      "start_line": 360,
+      "end_line": 435,
+      "tokens": 767,
+      "context_length": 17466
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/assumptions/__init__.py__",
+      "distance": 1.0347487926483154,
+      "file_path": "sympy/assumptions/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 17466
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/series/sequences.py_1_17",
+      "distance": 1.0374019145965576,
+      "file_path": "sympy/series/sequences.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 175,
+      "context_length": 17641
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/release/fabfile.py_get_sympy_short_version_test_sympy.2.1",
+      "distance": 1.0396699905395508,
+      "file_path": "release/fabfile.py",
+      "start_line": 220,
+      "end_line": 237,
+      "tokens": 128,
+      "context_length": 17769
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/sets/__init__.py__",
+      "distance": 1.040055274963379,
+      "file_path": "sympy/sets/__init__.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 17769
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/core/benchmarks/bench_assumptions.py__",
+      "distance": 1.040972113609314,
+      "file_path": "sympy/core/benchmarks/bench_assumptions.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 17769
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py__test__test.37.1",
+      "distance": 1.0457533597946167,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 462,
+      "end_line": 537,
+      "tokens": 634,
+      "context_length": 18403
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_1_10",
+      "distance": 1.047110915184021,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 113,
+      "context_length": 18516
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/core/benchmarks/bench_expand.py_1_",
+      "distance": 1.0473629236221313,
+      "file_path": "sympy/core/benchmarks/bench_expand.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 162,
+      "context_length": 18678
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/series/benchmarks/bench_order.py__",
+      "distance": 1.051538109779358,
+      "file_path": "sympy/series/benchmarks/bench_order.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 18678
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_run_all_tests_run_all_tests.6.3.3",
+      "distance": 1.051845669746399,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 227,
+      "end_line": 297,
+      "tokens": 587,
+      "context_length": 19265
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/functions/special/benchmarks/bench_special.py__",
+      "distance": 1.0518615245819092,
+      "file_path": "sympy/functions/special/benchmarks/bench_special.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 19265
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/solvers/benchmarks/bench_solvers.py__",
+      "distance": 1.051905632019043,
+      "file_path": "sympy/solvers/benchmarks/bench_solvers.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 19265
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/core/benchmarks/bench_sympify.py__",
+      "distance": 1.0524506568908691,
+      "file_path": "sympy/core/benchmarks/bench_sympify.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 19265
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/codegen/__init__.py__",
+      "distance": 1.054699182510376,
+      "file_path": "sympy/codegen/__init__.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 19265
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/miscellaneous.py_1_18",
+      "distance": 1.056265115737915,
+      "file_path": "sympy/functions/elementary/miscellaneous.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 182,
+      "context_length": 19447
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_1__LOG2.1",
+      "distance": 1.0570878982543945,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 294,
+      "context_length": 19741
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_54_SymPyOutputChecker.__init__.got_floats.self.num_want_rgx.1",
+      "distance": 1.0586624145507812,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1704,
+      "end_line": 1737,
+      "tokens": 423,
+      "context_length": 20164
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_1_18",
+      "distance": 1.0587736368179321,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 239,
+      "context_length": 20403
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/benchmarks/bench_exp.py__",
+      "distance": 1.0591633319854736,
+      "file_path": "sympy/functions/elementary/benchmarks/bench_exp.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 20403
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/unify/__init__.py__",
+      "distance": 1.0610018968582153,
+      "file_path": "sympy/unify/__init__.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 20403
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/polys/benchmarks/bench_solvers.py_eqs_10x8_",
+      "distance": 1.061173915863037,
+      "file_path": "sympy/polys/benchmarks/bench_solvers.py",
+      "start_line": 501,
+      "end_line": 546,
+      "tokens": 302,
+      "context_length": 20705
+    }
+  ],
+  "files": [
+    {
+      "file_path": "release/fabfile.py",
+      "position": 1,
+      "tokens": 11132,
+      "context_length": 11132
+    },
+    {
+      "file_path": "sympy/utilities/runtests.py",
+      "position": 2,
+      "tokens": 18683,
+      "context_length": 29815
+    },
+    {
+      "file_path": "sympy/conftest.py",
+      "position": 3,
+      "tokens": 584,
+      "context_length": 30399
+    },
+    {
+      "file_path": "setup.py",
+      "position": 4,
+      "tokens": 2941,
+      "context_length": 33340
+    },
+    {
+      "file_path": "bin/get_sympy.py",
+      "position": 5,
+      "tokens": 107,
+      "context_length": 33447
+    },
+    {
+      "file_path": "examples/all.py",
+      "position": 6,
+      "tokens": 1538,
+      "context_length": 34985
+    },
+    {
+      "file_path": "sympy/__init__.py",
+      "position": 7,
+      "tokens": 665,
+      "context_length": 35650
+    },
+    {
+      "file_path": "bin/coverage_doctest.py",
+      "position": 8,
+      "tokens": 5472,
+      "context_length": 41122
+    },
+    {
+      "file_path": "bin/generate_test_list.py",
+      "position": 9,
+      "tokens": 534,
+      "context_length": 41656
+    },
+    {
+      "file_path": "sympy/core/backend.py",
+      "position": 10,
+      "tokens": 342,
+      "context_length": 41998
+    },
+    {
+      "file_path": "sympy/core/benchmarks/bench_basic.py",
+      "position": 11,
+      "tokens": 73,
+      "context_length": 42071
+    },
+    {
+      "file_path": "sympy/series/benchmarks/bench_limit.py",
+      "position": 12,
+      "tokens": 44,
+      "context_length": 42115
+    },
+    {
+      "file_path": "sympy/core/__init__.py",
+      "position": 13,
+      "tokens": 354,
+      "context_length": 42469
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 14,
+      "tokens": 27460,
+      "context_length": 69929
+    },
+    {
+      "file_path": "sympy/release.py",
+      "position": 15,
+      "tokens": 12,
+      "context_length": 69941
+    },
+    {
+      "file_path": "sympy/assumptions/__init__.py",
+      "position": 16,
+      "tokens": 37,
+      "context_length": 69978
+    },
+    {
+      "file_path": "sympy/series/sequences.py",
+      "position": 17,
+      "tokens": 7313,
+      "context_length": 77291
+    },
+    {
+      "file_path": "sympy/sets/__init__.py",
+      "position": 18,
+      "tokens": 61,
+      "context_length": 77352
+    },
+    {
+      "file_path": "sympy/core/benchmarks/bench_assumptions.py",
+      "position": 19,
+      "tokens": 61,
+      "context_length": 77413
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 20,
+      "tokens": 27963,
+      "context_length": 105376
+    },
+    {
+      "file_path": "sympy/core/benchmarks/bench_expand.py",
+      "position": 21,
+      "tokens": 162,
+      "context_length": 105538
+    },
+    {
+      "file_path": "sympy/series/benchmarks/bench_order.py",
+      "position": 22,
+      "tokens": 63,
+      "context_length": 105601
+    },
+    {
+      "file_path": "sympy/functions/special/benchmarks/bench_special.py",
+      "position": 23,
+      "tokens": 60,
+      "context_length": 105661
+    },
+    {
+      "file_path": "sympy/solvers/benchmarks/bench_solvers.py",
+      "position": 24,
+      "tokens": 93,
+      "context_length": 105754
+    },
+    {
+      "file_path": "sympy/core/benchmarks/bench_sympify.py",
+      "position": 25,
+      "tokens": 54,
+      "context_length": 105808
+    },
+    {
+      "file_path": "sympy/codegen/__init__.py",
+      "position": 26,
+      "tokens": 14,
+      "context_length": 105822
+    },
+    {
+      "file_path": "sympy/functions/elementary/miscellaneous.py",
+      "position": 27,
+      "tokens": 5152,
+      "context_length": 110974
+    },
+    {
+      "file_path": "sympy/simplify/trigsimp.py",
+      "position": 28,
+      "tokens": 12062,
+      "context_length": 123036
+    },
+    {
+      "file_path": "sympy/functions/elementary/benchmarks/bench_exp.py",
+      "position": 29,
+      "tokens": 55,
+      "context_length": 123091
+    },
+    {
+      "file_path": "sympy/unify/__init__.py",
+      "position": 30,
+      "tokens": 64,
+      "context_length": 123155
+    },
+    {
+      "file_path": "sympy/polys/benchmarks/bench_solvers.py",
+      "position": 31,
+      "tokens": 238119,
+      "context_length": 361274
+    }
+  ]
+}

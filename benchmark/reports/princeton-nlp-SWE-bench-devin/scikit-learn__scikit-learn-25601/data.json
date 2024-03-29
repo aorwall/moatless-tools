@@ -1,0 +1,1119 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-25601",
+  "model_patch": "diff --git a/sklearn/ensemble/_forest.py b/sklearn/ensemble/_forest.py\nindex c60a71771..6a23dec2e 100644\n--- a/sklearn/ensemble/_forest.py\n+++ b/sklearn/ensemble/_forest.py\n@@ -111,13 +111,15 @@ def _get_n_samples_bootstrap(n_samples, max_samples):\n         return n_samples\n \n     if isinstance(max_samples, Integral):\n-        if max_samples > n_samples:\n-            msg = \"`max_samples` must be <= n_samples={} but got value {}\"\n-            raise ValueError(msg.format(n_samples, max_samples))\n+        if max_samples < 1:\n+            raise ValueError(\"`max_samples` must be at least 1 but got value {}\".format(max_samples))\n         return max_samples\n \n     if isinstance(max_samples, Real):\n-        return round(n_samples * max_samples)\n+        n_samples_bootstrap = round(n_samples * max_samples)\n+        if n_samples_bootstrap < 1:\n+            raise ValueError(\"`max_samples` as a fraction of the number of samples must result in at least 1 sample but got value {}\".format(n_samples_bootstrap))\n+        return n_samples_bootstrap\n \n \n def _generate_sample_indices(random_state, n_samples, n_samples_bootstrap):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/ensemble/_forest.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "c991e30c96ace1565604b429de22e36ed6b1e7bd",
+  "patch": "diff --git a/sklearn/ensemble/_forest.py b/sklearn/ensemble/_forest.py\n--- a/sklearn/ensemble/_forest.py\n+++ b/sklearn/ensemble/_forest.py\n@@ -117,7 +117,7 @@ def _get_n_samples_bootstrap(n_samples, max_samples):\n         return max_samples\n \n     if isinstance(max_samples, Real):\n-        return round(n_samples * max_samples)\n+        return max(round(n_samples * max_samples), 1)\n \n \n def _generate_sample_indices(random_state, n_samples, n_samples_bootstrap):\n@@ -1283,7 +1283,7 @@ class RandomForestClassifier(ForestClassifier):\n \n         - If None (default), then draw `X.shape[0]` samples.\n         - If int, then draw `max_samples` samples.\n-        - If float, then draw `max_samples * X.shape[0]` samples. Thus,\n+        - If float, then draw `max(round(n_samples * max_samples), 1)` samples. Thus,\n           `max_samples` should be in the interval `(0.0, 1.0]`.\n \n         .. versionadded:: 0.22\n@@ -1636,7 +1636,7 @@ class RandomForestRegressor(ForestRegressor):\n \n         - If None (default), then draw `X.shape[0]` samples.\n         - If int, then draw `max_samples` samples.\n-        - If float, then draw `max_samples * X.shape[0]` samples. Thus,\n+        - If float, then draw `max(round(n_samples * max_samples), 1)` samples. Thus,\n           `max_samples` should be in the interval `(0.0, 1.0]`.\n \n         .. versionadded:: 0.22\n",
+  "test_patch": "diff --git a/sklearn/ensemble/tests/test_forest.py b/sklearn/ensemble/tests/test_forest.py\n--- a/sklearn/ensemble/tests/test_forest.py\n+++ b/sklearn/ensemble/tests/test_forest.py\n@@ -1807,3 +1807,16 @@ def test_read_only_buffer(monkeypatch):\n \n     clf = RandomForestClassifier(n_jobs=2, random_state=rng)\n     cross_val_score(clf, X, y, cv=2)\n+\n+\n+@pytest.mark.parametrize(\"class_weight\", [\"balanced_subsample\", None])\n+def test_round_samples_to_one_when_samples_too_low(class_weight):\n+    \"\"\"Check low max_samples works and is rounded to one.\n+\n+    Non-regression test for gh-24037.\n+    \"\"\"\n+    X, y = datasets.load_wine(return_X_y=True)\n+    forest = RandomForestClassifier(\n+        n_estimators=10, max_samples=1e-4, class_weight=class_weight, random_state=0\n+    )\n+    forest.fit(X, y)\n",
+  "problem_statement": "RandomForestClassifier class_weight/max_samples interaction can lead to ungraceful and nondescriptive failure\n### Describe the bug\r\n\r\nThe acceptable values for `max_samples` are `(0, 1]`. One possible option for `class_weight` is `balanced_subsample`. However, for values of `max_samples` near zero and `class_weight='balanced_subsample'`, the model fails with an unhelpful error related to having an empty array as an indexer.\r\n\r\nThis is only likely to come up in a grid search, as it seems unlikely that someone would deliberately force a subsample of zero items. However, it might be useful to have a minimum of one sample, or it might be useful to fail gracefully with a more descriptive error.\r\n\r\n\r\n### Steps/Code to Reproduce\r\n\r\n```python\r\nfrom sklearn.datasets import load_wine\r\nfrom sklearn.ensemble import RandomForestClassifier\r\n\r\nX, y = load_wine(return_X_y=True)\r\n\r\nclf = RandomForestClassifier(max_samples=1e-4, class_weight='balanced_subsample')\r\nclf.fit(X,y)\r\n```\r\n### Expected Results\r\n\r\nEITHER:\r\nNo error is thrown\r\n\r\nOR\r\n```\r\nValueError: insufficient samples for max_samples value\r\n```\r\n\r\n### Actual Results\r\n\r\n```\r\n---------------------------------------------------------------------------\r\nIndexError                                Traceback (most recent call last)\r\n<ipython-input-4-afd4cda53619> in <module>()\r\n----> 1 clf.fit(X,y)\r\n\r\n11 frames\r\n[/usr/local/lib/python3.7/dist-packages/sklearn/ensemble/_forest.py](https://localhost:8080/#) in fit(self, X, y, sample_weight)\r\n    465                     n_samples_bootstrap=n_samples_bootstrap,\r\n    466                 )\r\n--> 467                 for i, t in enumerate(trees)\r\n    468             )\r\n    469 \r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/parallel.py](https://localhost:8080/#) in __call__(self, iterable)\r\n   1041             # remaining jobs.\r\n   1042             self._iterating = False\r\n-> 1043             if self.dispatch_one_batch(iterator):\r\n   1044                 self._iterating = self._original_iterator is not None\r\n   1045 \r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/parallel.py](https://localhost:8080/#) in dispatch_one_batch(self, iterator)\r\n    859                 return False\r\n    860             else:\r\n--> 861                 self._dispatch(tasks)\r\n    862                 return True\r\n    863 \r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/parallel.py](https://localhost:8080/#) in _dispatch(self, batch)\r\n    777         with self._lock:\r\n    778             job_idx = len(self._jobs)\r\n--> 779             job = self._backend.apply_async(batch, callback=cb)\r\n    780             # A job can complete so quickly than its callback is\r\n    781             # called before we get here, causing self._jobs to\r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/_parallel_backends.py](https://localhost:8080/#) in apply_async(self, func, callback)\r\n    206     def apply_async(self, func, callback=None):\r\n    207         \"\"\"Schedule a func to be run\"\"\"\r\n--> 208         result = ImmediateResult(func)\r\n    209         if callback:\r\n    210             callback(result)\r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/_parallel_backends.py](https://localhost:8080/#) in __init__(self, batch)\r\n    570         # Don't delay the application, to avoid keeping the input\r\n    571         # arguments in memory\r\n--> 572         self.results = batch()\r\n    573 \r\n    574     def get(self):\r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/parallel.py](https://localhost:8080/#) in __call__(self)\r\n    261         with parallel_backend(self._backend, n_jobs=self._n_jobs):\r\n    262             return [func(*args, **kwargs)\r\n--> 263                     for func, args, kwargs in self.items]\r\n    264 \r\n    265     def __reduce__(self):\r\n\r\n[/usr/local/lib/python3.7/dist-packages/joblib/parallel.py](https://localhost:8080/#) in <listcomp>(.0)\r\n    261         with parallel_backend(self._backend, n_jobs=self._n_jobs):\r\n    262             return [func(*args, **kwargs)\r\n--> 263                     for func, args, kwargs in self.items]\r\n    264 \r\n    265     def __reduce__(self):\r\n\r\n[/usr/local/lib/python3.7/dist-packages/sklearn/utils/fixes.py](https://localhost:8080/#) in __call__(self, *args, **kwargs)\r\n    214     def __call__(self, *args, **kwargs):\r\n    215         with config_context(**self.config):\r\n--> 216             return self.function(*args, **kwargs)\r\n    217 \r\n    218 \r\n\r\n[/usr/local/lib/python3.7/dist-packages/sklearn/ensemble/_forest.py](https://localhost:8080/#) in _parallel_build_trees(tree, forest, X, y, sample_weight, tree_idx, n_trees, verbose, class_weight, n_samples_bootstrap)\r\n    181                 curr_sample_weight *= compute_sample_weight(\"auto\", y, indices=indices)\r\n    182         elif class_weight == \"balanced_subsample\":\r\n--> 183             curr_sample_weight *= compute_sample_weight(\"balanced\", y, indices=indices)\r\n    184 \r\n    185         tree.fit(X, y, sample_weight=curr_sample_weight, check_input=False)\r\n\r\n[/usr/local/lib/python3.7/dist-packages/sklearn/utils/class_weight.py](https://localhost:8080/#) in compute_sample_weight(class_weight, y, indices)\r\n    157             weight_k = np.take(\r\n    158                 compute_class_weight(\r\n--> 159                     class_weight_k, classes=classes_subsample, y=y_subsample\r\n    160                 ),\r\n    161                 np.searchsorted(classes_subsample, classes_full),\r\n\r\n[/usr/local/lib/python3.7/dist-packages/sklearn/utils/class_weight.py](https://localhost:8080/#) in compute_class_weight(class_weight, classes, y)\r\n     51 \r\n     52         recip_freq = len(y) / (len(le.classes_) * np.bincount(y_ind).astype(np.float64))\r\n---> 53         weight = recip_freq[le.transform(classes)]\r\n     54     else:\r\n     55         # user-defined dictionary\r\n\r\nIndexError: arrays used as indices must be of integer (or boolean) type\r\n```\r\n\r\n### Versions\r\n\r\n```shell\r\nSystem:\r\n    python: 3.7.13 (default, Apr 24 2022, 01:04:09)  [GCC 7.5.0]\r\nexecutable: /usr/bin/python3\r\n   machine: Linux-5.4.188+-x86_64-with-Ubuntu-18.04-bionic\r\n\r\nPython dependencies:\r\n          pip: 21.1.3\r\n   setuptools: 57.4.0\r\n      sklearn: 1.0.2\r\n        numpy: 1.21.6\r\n        scipy: 1.7.3\r\n       Cython: 0.29.30\r\n       pandas: 1.3.5\r\n   matplotlib: 3.2.2\r\n       joblib: 1.1.0\r\nthreadpoolctl: 3.1.0\r\n```\r\n\n",
+  "hints_text": "We should probably add a check before launching the actual `fit` to be sure that the condition is met to do so. A nice error message is indeed what we need here.\n@swight-prc are you interested to submit a bugfix and add your snippet of code as a non-regression test?\r\n\n> @swight-prc are you interested to submit a bugfix and add your snippet of code as a non-regression test?\r\n\r\nI'm not terribly familiar with the codebase. I'm not opposed to doing so, but it may take me longer than others to get it done.\nI will put a help wanted to tag. Feel free to submit a PR if you see that this is still unsolved. Thanks for reporting.\nHi @glemaitre If this is a good first issue i would like to contribute but i am a complete beginner. Could i work on this ?\nFeel free to solve this issue. Check our contribution guideline for help: https://scikit-learn.org/dev/developers/contributing.html\n@glemaitre, can you take a look at this PR?\nCould you please check my pull request? #24285\nHi everyone, I am starting in Open Source and willing to contribute. Can I work on this issue and can anyone help to get started?\r\n\n@Dev-Khant there is already an open PR to address this issue. Maybe you could consider another 'good first issue' ?\r\n\r\nCheck our contribution guideline for help: https://scikit-learn.org/dev/developers/contributing.html\nDear all, as nobody seemed to have pushed the resolve about this break, so I made a pull request with the resolve. \r\n\r\nIt says merge conflicts that I cannot resolve, but the fix should work fine. \r\n\r\nPlease let me know if I could do more. Thank you.\nhttps://github.com/scikit-learn/scikit-learn/pull/25140 might be stale, if that's the case, could I pick it up?\r\n\n@JanFidor agreed, you can follow the stalled PR guide: https://scikit-learn.org/stable/developers/contributing.html#stalled-pull-requests\n@lucyleeow I tried pulling from #25140 but it seems to be terribly out of date, my merge attempt threw up 301 conflicts, so I think it might be better to start over from the beginning",
+  "created_at": "2023-02-13T21:42:21Z",
+  "version": "1.3",
+  "FAIL_TO_PASS": "[\"sklearn/ensemble/tests/test_forest.py::test_round_samples_to_one_when_samples_too_low[balanced_subsample]\"]",
+  "PASS_TO_PASS": "[\"sklearn/ensemble/tests/test_forest.py::test_1d_input[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_1d_input[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_1d_input[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_1d_input[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_1d_input[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_backend_respected\", \"sklearn/ensemble/tests/test_forest.py::test_balance_property_random_forest[poisson]\", \"sklearn/ensemble/tests/test_forest.py::test_balance_property_random_forest[squared_error]\", \"sklearn/ensemble/tests/test_forest.py::test_base_estimator_property_deprecated[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_base_estimator_property_deprecated[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_base_estimator_property_deprecated[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_base_estimator_property_deprecated[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_base_estimator_property_deprecated[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weight_balanced_and_bootstrap_multi_output[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weight_balanced_and_bootstrap_multi_output[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weight_errors[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weight_errors[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weights[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_class_weights[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_classes_shape[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_classes_shape[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_classification_toy[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_classification_toy[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_decision_path[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_decision_path[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_decision_path[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_decision_path[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_distribution\", \"sklearn/ensemble/tests/test_forest.py::test_dtype_convert\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X0-y0-0.9-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X1-y1-0.65-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X2-y2-0.65-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[True-X3-y3-0.18-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X0-y0-0.9-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X1-y1-0.65-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X2-y2-0.65-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-array-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-array-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-sparse_csc-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-sparse_csc-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-sparse_csr-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_classifier_oob[oob_score1-X3-y3-0.18-sparse_csr-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_degenerate_feature_importances\", \"sklearn/ensemble/tests/test_forest.py::test_forest_feature_importances_sum\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_error[X0-y0-params0-Out\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_error[X1-y1-params1-The\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_warning[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_warning[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_warning[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_oob_warning[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-array-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-array-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-sparse_csc-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-sparse_csc-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-sparse_csr-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X0-y0-0.7-sparse_csr-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-array-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-array-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-sparse_csc-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-sparse_csc-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-sparse_csr-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[True-X1-y1-0.55-sparse_csr-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-array-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-array-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-sparse_csc-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-sparse_csc-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-sparse_csr-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X0-y0-0.7-sparse_csr-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-array-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-array-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-sparse_csc-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-sparse_csc-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-sparse_csr-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_regressor_oob[explained_variance_score-X1-y1-0.55-sparse_csr-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_forest_y_sparse\", \"sklearn/ensemble/tests/test_forest.py::test_gridsearch[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_gridsearch[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesClassifier-gini-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesClassifier-gini-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesClassifier-log_loss-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesClassifier-log_loss-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-absolute_error-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-absolute_error-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-friedman_mse-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-friedman_mse-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-squared_error-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[ExtraTreesRegressor-squared_error-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestClassifier-gini-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestClassifier-gini-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestClassifier-log_loss-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestClassifier-log_loss-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-absolute_error-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-absolute_error-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-friedman_mse-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-friedman_mse-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-squared_error-float32]\", \"sklearn/ensemble/tests/test_forest.py::test_importances[RandomForestRegressor-squared_error-float64]\", \"sklearn/ensemble/tests/test_forest.py::test_importances_asymptotic\", \"sklearn/ensemble/tests/test_forest.py::test_iris[gini-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_iris[gini-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_iris[log_loss-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_iris[log_loss-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_large_max_samples_exception[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_large_max_samples_exception[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_large_max_samples_exception[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_large_max_samples_exception[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_little_tree_with_small_max_samples[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_little_tree_with_small_max_samples[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_features_deprecation[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_features_deprecation[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_features_deprecation[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_features_deprecation[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_leaf_nodes_max_depth[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_leaf_nodes_max_depth[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_leaf_nodes_max_depth[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_leaf_nodes_max_depth[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_leaf_nodes_max_depth[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_bootstrap[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_bootstrap[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_bootstrap[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_bootstrap[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_boundary_classifiers[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_boundary_classifiers[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_boundary_regressors[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_max_samples_boundary_regressors[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float32-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float32-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float32-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float32-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float64-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float64-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float64-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_memory_layout[float64-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_impurity_decrease\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_leaf[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_leaf[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_leaf[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_leaf[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_leaf[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_split[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_split[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_split[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_split[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_samples_split[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_min_weight_fraction_leaf[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_weight_fraction_leaf[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_weight_fraction_leaf[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_min_weight_fraction_leaf[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_min_weight_fraction_leaf[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_mse_criterion_object_segfault_smoke_test[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_mse_criterion_object_segfault_smoke_test[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput_string[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_multioutput_string[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_parallel[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_parallel[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_parallel[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_parallel[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_parallel_train\", \"sklearn/ensemble/tests/test_forest.py::test_pickle[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_pickle[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_pickle[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_pickle[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_poisson_vs_mse\", \"sklearn/ensemble/tests/test_forest.py::test_poisson_y_positive_check\", \"sklearn/ensemble/tests/test_forest.py::test_probability[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_probability[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_random_hasher\", \"sklearn/ensemble/tests/test_forest.py::test_random_hasher_sparse_data\", \"sklearn/ensemble/tests/test_forest.py::test_random_trees_dense_equal\", \"sklearn/ensemble/tests/test_forest.py::test_random_trees_dense_type\", \"sklearn/ensemble/tests/test_forest.py::test_random_trees_embedding_feature_names_out\", \"sklearn/ensemble/tests/test_forest.py::test_random_trees_embedding_raise_error_oob[False]\", \"sklearn/ensemble/tests/test_forest.py::test_random_trees_embedding_raise_error_oob[True]\", \"sklearn/ensemble/tests/test_forest.py::test_read_only_buffer\", \"sklearn/ensemble/tests/test_forest.py::test_regression[absolute_error-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regression[absolute_error-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regression[friedman_mse-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regression[friedman_mse-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regression[squared_error-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regression[squared_error-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regressor_attributes[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_regressor_attributes[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_round_samples_to_one_when_samples_too_low[None]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[coo_matrix-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[coo_matrix-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[coo_matrix-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[coo_matrix-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[coo_matrix-RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csc_matrix-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csc_matrix-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csc_matrix-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csc_matrix-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csc_matrix-RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csr_matrix-ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csr_matrix-ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csr_matrix-RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csr_matrix-RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_sparse_input[csr_matrix-RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_unfitted_feature_importances[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_unfitted_feature_importances[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_unfitted_feature_importances[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_unfitted_feature_importances[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_unfitted_feature_importances[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_clear[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_clear[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_clear[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_clear[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_clear[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_equal_n_estimators[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_equal_n_estimators[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_equal_n_estimators[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_equal_n_estimators[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_equal_n_estimators[RandomTreesEmbedding]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_oob[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_oob[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_oob[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_oob[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_smaller_n_estimators[ExtraTreesClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_smaller_n_estimators[ExtraTreesRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_smaller_n_estimators[RandomForestClassifier]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_smaller_n_estimators[RandomForestRegressor]\", \"sklearn/ensemble/tests/test_forest.py::test_warm_start_smaller_n_estimators[RandomTreesEmbedding]\"]",
+  "environment_setup_commit": "1e8a5b833d1b58f3ab84099c4582239af854b23a",
+  "patch_files": [
+    "sklearn/ensemble/_forest.py"
+  ],
+  "test_patch_files": [
+    "sklearn/ensemble/tests/test_forest.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/ensemble/_forest.py": {
+      "diffs": [
+        {
+          "start_line_old": 120,
+          "end_line_old": 120,
+          "file_pos": 1,
+          "file_context_length": 24021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest_BaseForest.__init__.self.max_samples.1",
+          "closest_snippet_line_distance": 71
+        },
+        {
+          "start_line_old": 1286,
+          "end_line_old": 1286,
+          "file_pos": 1,
+          "file_context_length": 24021,
+          "pos": 1,
+          "context_length": 2938
+        },
+        {
+          "start_line_old": 1639,
+          "end_line_old": 1639,
+          "file_pos": 1,
+          "file_context_length": 24021,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest.fit.18_BaseForest.fit.23.3.11",
+          "closest_snippet_line_distance": 1145,
+          "pos": 5,
+          "context_length": 7278
+        }
+      ]
+    }
+  },
+  "vectors": 3916,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestClassifier.1_RandomForestClassifier.1",
+      "distance": 0.7436426877975464,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1104,
+      "end_line": 1393,
+      "tokens": 2938,
+      "context_length": 2938,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ForestClassifier._validate_y_class_weight_ForestClassifier._validate_y_class_weight.11.1",
+      "distance": 0.7864334583282471,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 761,
+      "end_line": 813,
+      "tokens": 427,
+      "context_length": 3365,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest.fit.18_BaseForest.fit.23.3.11",
+      "distance": 0.8080861568450928,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 410,
+      "end_line": 494,
+      "tokens": 736,
+      "context_length": 4101,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestRegressor.1_RandomForestRegressor.1",
+      "distance": 0.8266911506652832,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1466,
+      "end_line": 1740,
+      "tokens": 2752,
+      "context_length": 6853,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestClassifier._parameter_constraints_RandomForestRegressor",
+      "distance": 0.8295981884002686,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1395,
+      "end_line": 1801,
+      "tokens": 425,
+      "context_length": 7278,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_1_MAX_INT.1",
+      "distance": 0.8366022109985352,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 570,
+      "context_length": 7848,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesClassifier.1_ExtraTreesClassifier.1",
+      "distance": 0.8454561233520508,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1805,
+      "end_line": 2088,
+      "tokens": 2846,
+      "context_length": 10694,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest._validate_y_class_weight_BaseForest._validate_X_predict.5.1",
+      "distance": 0.8580154180526733,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 604,
+      "end_line": 615,
+      "tokens": 138,
+      "context_length": 10832,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_gb.py_GradientBoostingClassifier.1_GradientBoostingClassifier.1",
+      "distance": 0.8709440231323242,
+      "file_path": "sklearn/ensemble/_gb.py",
+      "start_line": 867,
+      "end_line": 1195,
+      "tokens": 3416,
+      "context_length": 14248
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeClassifier.1_ExtraTreeClassifier.1",
+      "distance": 0.8714208602905273,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1284,
+      "end_line": 1507,
+      "tokens": 2270,
+      "context_length": 16518
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesRegressor.1_ExtraTreesRegressor.1",
+      "distance": 0.8729145526885986,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2161,
+      "end_line": 2422,
+      "tokens": 2575,
+      "context_length": 19093,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_ensemble_oob.py_1_",
+      "distance": 0.874451756477356,
+      "file_path": "examples/ensemble/plot_ensemble_oob.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 705,
+      "context_length": 19798
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_X_132_",
+      "distance": 0.8898497819900513,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 195,
+      "end_line": 281,
+      "tokens": 764,
+      "context_length": 20562
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_13_",
+      "distance": 0.8902648687362671,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 62,
+      "end_line": 123,
+      "tokens": 522,
+      "context_length": 21084
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomTreesEmbedding.1_RandomTreesEmbedding.1",
+      "distance": 0.895543098449707,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2487,
+      "end_line": 2667,
+      "tokens": 1845,
+      "context_length": 22929,
+      "file_pos": 6
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomForestRegressor._parameter_constraints_ExtraTreesClassifier",
+      "distance": 0.8983392715454102,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 1742,
+      "end_line": 2157,
+      "tokens": 389,
+      "context_length": 23318,
+      "file_pos": 6
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_one_run_one_run.cat_score_duration.1",
+      "distance": 0.9146326780319214,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 92,
+      "end_line": 171,
+      "tokens": 754,
+      "context_length": 24072
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest.fit.24_BaseForest.fit.27.1",
+      "distance": 0.9149909019470215,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 496,
+      "end_line": 522,
+      "tokens": 282,
+      "context_length": 24354,
+      "file_pos": 7
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesClassifier._parameter_constraints_ExtraTreesRegressor",
+      "distance": 0.9193111062049866,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2090,
+      "end_line": 2483,
+      "tokens": 427,
+      "context_length": 24781,
+      "file_pos": 7
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_ExtraTreeRegressor.1_ExtraTreeRegressor.1",
+      "distance": 0.9238805174827576,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1542,
+      "end_line": 1740,
+      "tokens": 1949,
+      "context_length": 26730
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_DecisionTreeClassifier.1_DecisionTreeClassifier.1",
+      "distance": 0.9257563352584839,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 596,
+      "end_line": 820,
+      "tokens": 2353,
+      "context_length": 29083
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_numbers_IsolationForest",
+      "distance": 0.9257575869560242,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 5,
+      "end_line": 520,
+      "tokens": 138,
+      "context_length": 29221
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_IsolationForest.1_IsolationForest.1",
+      "distance": 0.9327154159545898,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 29,
+      "end_line": 202,
+      "tokens": 1647,
+      "context_length": 30868
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_1_58",
+      "distance": 0.9355296492576599,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 749,
+      "context_length": 31617
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_20newsgroups.py_1_",
+      "distance": 0.9390707015991211,
+      "file_path": "benchmarks/bench_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 754,
+      "context_length": 32371
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_23_0.py_np_62_117",
+      "distance": 0.9430897235870361,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "start_line": 98,
+      "end_line": 175,
+      "tokens": 789,
+      "context_length": 33160
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_gb.py_GradientBoostingRegressor.1_GradientBoostingRegressor.1",
+      "distance": 0.9452816247940063,
+      "file_path": "sklearn/ensemble/_gb.py",
+      "start_line": 1446,
+      "end_line": 1758,
+      "tokens": 3265,
+      "context_length": 36425
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_IsolationForest._parameter_constraints_IsolationForest._parallel_args.5.1",
+      "distance": 0.9464544057846069,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 204,
+      "end_line": 265,
+      "tokens": 439,
+      "context_length": 36864
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_23_0.py_1_scipy",
+      "distance": 0.9469797611236572,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 857,
+      "context_length": 37721
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_83_149",
+      "distance": 0.947492241859436,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 121,
+      "end_line": 210,
+      "tokens": 777,
+      "context_length": 38498
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_1_np_82",
+      "distance": 0.949739396572113,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 1,
+      "end_line": 120,
+      "tokens": 1150,
+      "context_length": 39648
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_one_run_one_run.27.1",
+      "distance": 0.951749324798584,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 142,
+      "end_line": 238,
+      "tokens": 894,
+      "context_length": 40542
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_41_49.3.1.3",
+      "distance": 0.9535145163536072,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 87,
+      "end_line": 139,
+      "tokens": 382,
+      "context_length": 40924
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification.1_make_classification.1",
+      "distance": 0.955576479434967,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 79,
+      "end_line": 194,
+      "tokens": 1509,
+      "context_length": 42433
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/class_weight.py_compute_sample_weight.7_",
+      "distance": 0.9557822942733765,
+      "file_path": "sklearn/utils/class_weight.py",
+      "start_line": 149,
+      "end_line": 195,
+      "tokens": 354,
+      "context_length": 42787
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_1_39",
+      "distance": 0.9582861065864563,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 516,
+      "context_length": 43303
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/asv_benchmarks/benchmarks/ensemble.py_1_RandomForestClassifierBenchmark.make_scorers.1",
+      "distance": 0.9583402872085571,
+      "file_path": "asv_benchmarks/benchmarks/ensemble.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 292,
+      "context_length": 43595
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_22_0.py_estimators_131",
+      "distance": 0.9588943123817444,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "start_line": 90,
+      "end_line": 193,
+      "tokens": 896,
+      "context_length": 44491
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 0.9637143015861511,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 150,
+      "end_line": 253,
+      "tokens": 602,
+      "context_length": 45093
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/_classes.py_1_SPARSE_SPLITTERS.1",
+      "distance": 0.9647222757339478,
+      "file_path": "sklearn/tree/_classes.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 471,
+      "context_length": 45564
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_n_samples_list_",
+      "distance": 0.9673242568969727,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 204,
+      "end_line": 292,
+      "tokens": 753,
+      "context_length": 46317
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification_make_classification",
+      "distance": 0.9702973365783691,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 42,
+      "end_line": 309,
+      "tokens": 392,
+      "context_length": 46709
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_isolation_forest.py_19_",
+      "distance": 0.9724370837211609,
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "start_line": 54,
+      "end_line": 165,
+      "tokens": 1035,
+      "context_length": 47744
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py_HistGradientBoostingClassifier.2_HistGradientBoostingClassifier.predict.4.1",
+      "distance": 0.9740520715713501,
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "start_line": 1800,
+      "end_line": 1896,
+      "tokens": 606,
+      "context_length": 48350
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_categorical_only.py_argparse_",
+      "distance": 0.9748841524124146,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 651,
+      "context_length": 49001
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py_HistGradientBoostingClassifier.1_HistGradientBoostingClassifier.1",
+      "distance": 0.9794319868087769,
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "start_line": 1553,
+      "end_line": 1798,
+      "tokens": 2716,
+      "context_length": 51717
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.9803743362426758,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 83,
+      "end_line": 117,
+      "tokens": 323,
+      "context_length": 52040
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_threading.py_max_threads_66.3.1",
+      "distance": 0.9810929894447327,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "start_line": 241,
+      "end_line": 289,
+      "tokens": 367,
+      "context_length": 52407
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_29_",
+      "distance": 0.981630802154541,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 120,
+      "end_line": 234,
+      "tokens": 761,
+      "context_length": 53168
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/__init__.py_1_",
+      "distance": 0.9827959537506104,
+      "file_path": "sklearn/ensemble/__init__.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 324,
+      "context_length": 53492
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification.generator_make_classification.n_samples_per_cluster.1",
+      "distance": 0.9832925796508789,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 195,
+      "end_line": 235,
+      "tokens": 760,
+      "context_length": 54252
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_forest_importances_faces.py_1_",
+      "distance": 0.9869792461395264,
+      "file_path": "examples/ensemble/plot_forest_importances_faces.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 668,
+      "context_length": 54920
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_1_max_bins.1",
+      "distance": 0.989376425743103,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 397,
+      "context_length": 55317
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification.29_make_classification.40.1",
+      "distance": 0.989534854888916,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 277,
+      "end_line": 309,
+      "tokens": 673,
+      "context_length": 55990
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_24_",
+      "distance": 0.991011381149292,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 113,
+      "end_line": 232,
+      "tokens": 820,
+      "context_length": 56810
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_1_bench_scikit_tree_regressor.10",
+      "distance": 0.9913177490234375,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 340,
+      "context_length": 57150
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/_samples_generator.py_make_classification.12_make_classification.28",
+      "distance": 0.991330623626709,
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "start_line": 237,
+      "end_line": 276,
+      "tokens": 804,
+      "context_length": 57954
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest.fit_BaseForest.fit.17",
+      "distance": 0.9933664798736572,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 313,
+      "end_line": 409,
+      "tokens": 796,
+      "context_length": 58750,
+      "file_pos": 23
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_RandomTreesEmbedding._parameter_constraints_RandomTreesEmbedding._set_oob_score_and_attributes.1",
+      "distance": 0.9936400651931763,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2669,
+      "end_line": 2731,
+      "tokens": 435,
+      "context_length": 59185,
+      "file_pos": 23
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.9943410158157349,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 101,
+      "end_line": 110,
+      "tokens": 137,
+      "context_length": 59322
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_higgsboson.py_df_",
+      "distance": 0.9944089651107788,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "start_line": 78,
+      "end_line": 125,
+      "tokens": 391,
+      "context_length": 59713
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/__init__.py_1_37.6.__SKLEARN_SETUP__.1",
+      "distance": 0.995235800743103,
+      "file_path": "sklearn/__init__.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 554,
+      "context_length": 60267
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py__accumulate_prediction_ForestClassifier.__init__.1",
+      "distance": 0.9960623979568481,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 653,
+      "end_line": 707,
+      "tokens": 316,
+      "context_length": 60583,
+      "file_pos": 25
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_ExtraTreesRegressor._parameter_constraints_RandomTreesEmbedding",
+      "distance": 0.996168851852417,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 2424,
+      "end_line": 2848,
+      "tokens": 394,
+      "context_length": 60977,
+      "file_pos": 25
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_weighted_samples.py_6_",
+      "distance": 0.9964622259140015,
+      "file_path": "examples/svm/plot_weighted_samples.py",
+      "start_line": 45,
+      "end_line": 72,
+      "tokens": 248,
+      "context_length": 61225
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/examples/release_highlights/plot_release_highlights_0_24_0.py_display_",
+      "distance": 0.9967354536056519,
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "start_line": 211,
+      "end_line": 265,
+      "tokens": 510,
+      "context_length": 61735
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_IsolationForest._compute_chunked_score_samples_IsolationForest._compute_chunked_score_samples.17.1",
+      "distance": 0.9985101222991943,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 441,
+      "end_line": 471,
+      "tokens": 271,
+      "context_length": 62006
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_logistic.py_LogisticRegression.1_LogisticRegression.1",
+      "distance": 1.0035040378570557,
+      "file_path": "sklearn/linear_model/_logistic.py",
+      "start_line": 784,
+      "end_line": 1066,
+      "tokens": 3073,
+      "context_length": 65079
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/examples/datasets/plot_random_dataset.py_1_",
+      "distance": 1.0038284063339233,
+      "file_path": "examples/datasets/plot_random_dataset.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 674,
+      "context_length": 65753
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_forest.py_BaseForest_BaseForest.__init__.self.max_samples.1",
+      "distance": 1.0040628910064697,
+      "file_path": "sklearn/ensemble/_forest.py",
+      "start_line": 191,
+      "end_line": 245,
+      "tokens": 348,
+      "context_length": 66101,
+      "file_pos": 28
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py_RandomizedSearchCV.1_RandomizedSearchCV.1",
+      "distance": 1.0051496028900146,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 1418,
+      "end_line": 1757,
+      "tokens": 3420,
+      "context_length": 69521
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_iforest.py_IsolationForest._compute_score_samples_IsolationForest._more_tags.1.1",
+      "distance": 1.0062923431396484,
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "start_line": 473,
+      "end_line": 520,
+      "tokens": 343,
+      "context_length": 69864
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/_stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 1.0076377391815186,
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "start_line": 9,
+      "end_line": 56,
+      "tokens": 405,
+      "context_length": 70269
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sample_without_replacement.py_13_",
+      "distance": 1.0097026824951172,
+      "file_path": "benchmarks/bench_sample_without_replacement.py",
+      "start_line": 35,
+      "end_line": 227,
+      "tokens": 1279,
+      "context_length": 71548
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/__init__.py_1__IS_32BIT.1",
+      "distance": 1.0115903615951538,
+      "file_path": "sklearn/utils/__init__.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 513,
+      "context_length": 72061
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_forest_iris.py_1_models.1",
+      "distance": 1.012596607208252,
+      "file_path": "examples/ensemble/plot_forest_iris.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 585,
+      "context_length": 72646
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_isolation_forest.py_1_57",
+      "distance": 1.0126558542251587,
+      "file_path": "examples/ensemble/plot_isolation_forest.py",
+      "start_line": 1,
+      "end_line": 92,
+      "tokens": 771,
+      "context_length": 73417
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_multiclass.py_33_",
+      "distance": 1.0146610736846924,
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "start_line": 92,
+      "end_line": 124,
+      "tokens": 253,
+      "context_length": 73670
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_random_forest_embedding.py_1_ax_43.1",
+      "distance": 1.0155971050262451,
+      "file_path": "examples/ensemble/plot_random_forest_embedding.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 756,
+      "context_length": 74426
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_forest_importances.py_1_",
+      "distance": 1.015854001045227,
+      "file_path": "examples/ensemble/plot_forest_importances.py",
+      "start_line": 1,
+      "end_line": 117,
+      "tokens": 899,
+      "context_length": 75325
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_weight_boosting.py_1___all__.1",
+      "distance": 1.0162944793701172,
+      "file_path": "sklearn/ensemble/_weight_boosting.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 314,
+      "context_length": 75639
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/ensemble/_forest.py",
+      "position": 1,
+      "tokens": 24021,
+      "context_length": 24021
+    },
+    {
+      "file_path": "sklearn/ensemble/_gb.py",
+      "position": 2,
+      "tokens": 16225,
+      "context_length": 40246
+    },
+    {
+      "file_path": "sklearn/tree/_classes.py",
+      "position": 3,
+      "tokens": 15346,
+      "context_length": 55592
+    },
+    {
+      "file_path": "examples/ensemble/plot_ensemble_oob.py",
+      "position": 4,
+      "tokens": 757,
+      "context_length": 56349
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_22_0.py",
+      "position": 5,
+      "tokens": 2410,
+      "context_length": 58759
+    },
+    {
+      "file_path": "benchmarks/bench_tree.py",
+      "position": 6,
+      "tokens": 862,
+      "context_length": 59621
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "position": 7,
+      "tokens": 2427,
+      "context_length": 62048
+    },
+    {
+      "file_path": "sklearn/ensemble/_iforest.py",
+      "position": 8,
+      "tokens": 4440,
+      "context_length": 66488
+    },
+    {
+      "file_path": "benchmarks/bench_20newsgroups.py",
+      "position": 9,
+      "tokens": 754,
+      "context_length": 67242
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_23_0.py",
+      "position": 10,
+      "tokens": 1782,
+      "context_length": 69024
+    },
+    {
+      "file_path": "examples/release_highlights/plot_release_highlights_0_24_0.py",
+      "position": 11,
+      "tokens": 2438,
+      "context_length": 71462
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_threading.py",
+      "position": 12,
+      "tokens": 2738,
+      "context_length": 74200
+    },
+    {
+      "file_path": "sklearn/datasets/_samples_generator.py",
+      "position": 13,
+      "tokens": 15932,
+      "context_length": 90132
+    },
+    {
+      "file_path": "sklearn/utils/class_weight.py",
+      "position": 14,
+      "tokens": 1629,
+      "context_length": 91761
+    },
+    {
+      "file_path": "asv_benchmarks/benchmarks/ensemble.py",
+      "position": 15,
+      "tokens": 649,
+      "context_length": 92410
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 16,
+      "tokens": 2046,
+      "context_length": 94456
+    },
+    {
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "position": 17,
+      "tokens": 1471,
+      "context_length": 95927
+    },
+    {
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "position": 18,
+      "tokens": 17203,
+      "context_length": 113130
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_categorical_only.py",
+      "position": 19,
+      "tokens": 651,
+      "context_length": 113781
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 20,
+      "tokens": 1801,
+      "context_length": 115582
+    },
+    {
+      "file_path": "sklearn/ensemble/__init__.py",
+      "position": 21,
+      "tokens": 324,
+      "context_length": 115906
+    },
+    {
+      "file_path": "examples/ensemble/plot_forest_importances_faces.py",
+      "position": 22,
+      "tokens": 668,
+      "context_length": 116574
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 23,
+      "tokens": 1918,
+      "context_length": 118492
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "position": 24,
+      "tokens": 1060,
+      "context_length": 119552
+    },
+    {
+      "file_path": "sklearn/__init__.py",
+      "position": 25,
+      "tokens": 1116,
+      "context_length": 120668
+    },
+    {
+      "file_path": "examples/svm/plot_weighted_samples.py",
+      "position": 26,
+      "tokens": 531,
+      "context_length": 121199
+    },
+    {
+      "file_path": "sklearn/linear_model/_logistic.py",
+      "position": 27,
+      "tokens": 19358,
+      "context_length": 140557
+    },
+    {
+      "file_path": "examples/datasets/plot_random_dataset.py",
+      "position": 28,
+      "tokens": 674,
+      "context_length": 141231
+    },
+    {
+      "file_path": "sklearn/model_selection/_search.py",
+      "position": 29,
+      "tokens": 15563,
+      "context_length": 156794
+    },
+    {
+      "file_path": "sklearn/linear_model/_stochastic_gradient.py",
+      "position": 30,
+      "tokens": 19845,
+      "context_length": 176639
+    },
+    {
+      "file_path": "benchmarks/bench_sample_without_replacement.py",
+      "position": 31,
+      "tokens": 1440,
+      "context_length": 178079
+    },
+    {
+      "file_path": "sklearn/utils/__init__.py",
+      "position": 32,
+      "tokens": 9073,
+      "context_length": 187152
+    },
+    {
+      "file_path": "examples/ensemble/plot_forest_iris.py",
+      "position": 33,
+      "tokens": 1486,
+      "context_length": 188638
+    },
+    {
+      "file_path": "examples/ensemble/plot_isolation_forest.py",
+      "position": 34,
+      "tokens": 1050,
+      "context_length": 189688
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "position": 35,
+      "tokens": 1025,
+      "context_length": 190713
+    },
+    {
+      "file_path": "examples/ensemble/plot_random_forest_embedding.py",
+      "position": 36,
+      "tokens": 974,
+      "context_length": 191687
+    },
+    {
+      "file_path": "examples/ensemble/plot_forest_importances.py",
+      "position": 37,
+      "tokens": 899,
+      "context_length": 192586
+    },
+    {
+      "file_path": "sklearn/ensemble/_weight_boosting.py",
+      "position": 38,
+      "tokens": 9781,
+      "context_length": 202367
+    }
+  ]
+}

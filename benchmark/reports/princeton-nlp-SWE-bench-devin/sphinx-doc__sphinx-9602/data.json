@@ -1,0 +1,999 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9602",
+  "model_patch": "diff --git a/sphinx/util/typing.py b/sphinx/util/typing.py\nindex cf4318cda..6f04adb28 100644\n--- a/sphinx/util/typing.py\n+++ b/sphinx/util/typing.py\n@@ -73,13 +73,15 @@ TitleGetter = Callable[[nodes.Node], str]\n Inventory = Dict[str, Dict[str, Tuple[str, str, str, str]]]\n \n \n-def get_type_hints(obj: Any, globalns: Dict = None, localns: Dict = None) -> Dict[str, Any]:\n+def get_type_hints(obj: Any, globalns: Optional[Dict] = None, localns: Optional[Dict] = None) -> Dict[str, Any]:\n     \"\"\"Return a dictionary containing type hints for a function, method, module or class object.\n \n     This is a simple wrapper of `typing.get_type_hints()` that does not raise an error on\n     runtime.\n     \"\"\"\n     from sphinx.util.inspect import safe_getattr  # lazy loading\n+    globalns = globalns if globalns is not None else {}\n+    localns = localns if localns is not None else {}\n \n     try:\n         return typing.get_type_hints(obj, globalns, localns)\n@@ -118,11 +120,11 @@ def restify(cls: Optional[Type]) -> str:\n         elif inspect.isNewType(cls):\n             return ':class:`%s`' % cls.__name__\n         elif UnionType and isinstance(cls, UnionType):\n-            if len(cls.__args__) > 1 and None in cls.__args__:\n-                args = ' | '.join(restify(a) for a in cls.__args__ if a)\n+            if getattr(cls, '__args__', None) is not None and len(cls.__args__) > 1 and None in cls.__args__:\n+                args = ' | '.join(restify(a) for a in cls.__args__ if a) if cls.__args__ is not None else ''\n                 return 'Optional[%s]' % args\n             else:\n-                return ' | '.join(restify(a) for a in cls.__args__)\n+                return ' | '.join(restify(a) for a in cls.__args__) if getattr(cls, '__args__', None) is not None else ''\n         elif cls.__module__ in ('__builtin__', 'builtins'):\n             if hasattr(cls, '__args__'):\n                 return ':class:`%s`\\\\ [%s]' % (\n@@ -145,9 +147,9 @@ def _restify_py37(cls: Optional[Type]) -> str:\n     from sphinx.util import inspect  # lazy loading\n \n     if (inspect.isgenericalias(cls) and\n-            cls.__module__ == 'typing' and cls.__origin__ is Union):\n+            cls.__module__ == 'typing' and getattr(cls, '_name', None) == 'Callable'):\n         # Union\n-        if len(cls.__args__) > 1 and cls.__args__[-1] is NoneType:\n+        if getattr(cls, '__args__', None) is not None and len(cls.__args__) > 1 and cls.__args__[-1] is NoneType:\n             if len(cls.__args__) > 2:\n                 args = ', '.join(restify(a) for a in cls.__args__[:-1])\n                 return ':obj:`~typing.Optional`\\\\ [:obj:`~typing.Union`\\\\ [%s]]' % args\n@@ -173,12 +175,13 @@ def _restify_py37(cls: Optional[Type]) -> str:\n         elif all(is_system_TypeVar(a) for a in cls.__args__):\n             # Suppress arguments if all system defined TypeVars (ex. Dict[KT, VT])\n             pass\n-        elif cls.__module__ == 'typing' and cls._name == 'Callable':\n+        elif cls.__module__ == 'typing' and getattr(origin, '_name', None) == 'Callable':\n             args = ', '.join(restify(a) for a in cls.__args__[:-1])\n             text += r\"\\ [[%s], %s]\" % (args, restify(cls.__args__[-1]))\n         elif cls.__module__ == 'typing' and getattr(origin, '_name', None) == 'Literal':\n-            text += r\"\\ [%s]\" % ', '.join(repr(a) for a in cls.__args__)\n-        elif cls.__args__:\n+            # Handle Literal types without creating class references\n+            return f'Literal[{\", \".join(repr(a) for a in cls.__args__)}]'\n+        elif getattr(cls, '__args__', None):\n             text += r\"\\ [%s]\" % \", \".join(restify(a) for a in cls.__args__)\n \n         return text\n@@ -368,28 +371,28 @@ def _stringify_py37(annotation: Any) -> str:\n                 else:\n                     return 'Optional[%s]' % stringify(annotation.__args__[0])\n             else:\n-                args = ', '.join(stringify(a) for a in annotation.__args__)\n+                args = ', '.join(stringify(a) for a in annotation.__args__) if annotation.__args__ is not None else ''\n                 return 'Union[%s]' % args\n         elif qualname == 'types.Union':\n             if len(annotation.__args__) > 1 and None in annotation.__args__:\n-                args = ' | '.join(stringify(a) for a in annotation.__args__ if a)\n+                args = ' | '.join(stringify(a) for a in annotation.__args__ if a) if annotation.__args__ is not None else ''\n                 return 'Optional[%s]' % args\n             else:\n-                return ' | '.join(stringify(a) for a in annotation.__args__)\n+                return ' | '.join(stringify(a) for a in annotation.__args__) if annotation.__args__ is not None else ''\n         elif qualname == 'Callable':\n             args = ', '.join(stringify(a) for a in annotation.__args__[:-1])\n             returns = stringify(annotation.__args__[-1])\n             return '%s[[%s], %s]' % (qualname, args, returns)\n         elif qualname == 'Literal':\n             args = ', '.join(repr(a) for a in annotation.__args__)\n-            return '%s[%s]' % (qualname, args)\n+            return f'Literal[{args}]'\n         elif str(annotation).startswith('typing.Annotated'):  # for py39+\n             return stringify(annotation.__args__[0])\n         elif all(is_system_TypeVar(a) for a in annotation.__args__):\n             # Suppress arguments if all system defined TypeVars (ex. Dict[KT, VT])\n-            return qualname\n+            pass\n         else:\n-            args = ', '.join(stringify(a) for a in annotation.__args__)\n+            args = ', '.join(stringify(a) for a in annotation.__args__) if annotation.__args__ is not None else ''\n             return '%s[%s]' % (qualname, args)\n \n     return qualname\n@@ -447,7 +450,7 @@ def _stringify_py36(annotation: Any) -> str:\n                 else:\n                     return 'Optional[%s]' % stringify(params[0])\n             else:\n-                param_str = ', '.join(stringify(p) for p in params)\n+                param_str = ', '.join(stringify(p) for p in params) if params is not None else ''\n                 return 'Union[%s]' % param_str\n \n     return qualname\ndiff --git a/tox.ini b/tox.ini\nindex b6a67fd85..483f2df92 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -28,7 +28,7 @@ setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils,ignore::DeprecationWarning:pip._vendor.packaging.version\n     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes\n commands=\n-    python -X dev -m pytest --durations 25 {posargs}\n+    python -X dev -m pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sphinx/util/typing.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "6c38f68dae221e8cfc70c137974b8b88bd3baaab",
+  "patch": "diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\n--- a/sphinx/domains/python.py\n+++ b/sphinx/domains/python.py\n@@ -123,7 +123,7 @@ def unparse(node: ast.AST) -> List[Node]:\n             if node.value is Ellipsis:\n                 return [addnodes.desc_sig_punctuation('', \"...\")]\n             else:\n-                return [nodes.Text(node.value)]\n+                return [nodes.Text(repr(node.value))]\n         elif isinstance(node, ast.Expr):\n             return unparse(node.value)\n         elif isinstance(node, ast.Index):\n@@ -149,6 +149,12 @@ def unparse(node: ast.AST) -> List[Node]:\n             result.append(addnodes.desc_sig_punctuation('', '['))\n             result.extend(unparse(node.slice))\n             result.append(addnodes.desc_sig_punctuation('', ']'))\n+\n+            # Wrap the Text nodes inside brackets by literal node if the subscript is a Literal\n+            if result[0] in ('Literal', 'typing.Literal'):\n+                for i, subnode in enumerate(result[1:], start=1):\n+                    if isinstance(subnode, nodes.Text):\n+                        result[i] = nodes.literal('', '', subnode)\n             return result\n         elif isinstance(node, ast.Tuple):\n             if node.elts:\n@@ -179,7 +185,9 @@ def unparse(node: ast.AST) -> List[Node]:\n         tree = ast_parse(annotation)\n         result = unparse(tree)\n         for i, node in enumerate(result):\n-            if isinstance(node, nodes.Text) and node.strip():\n+            if isinstance(node, nodes.literal):\n+                result[i] = node[0]\n+            elif isinstance(node, nodes.Text) and node.strip():\n                 result[i] = type_to_xref(str(node), env)\n         return result\n     except SyntaxError:\n",
+  "test_patch": "diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py\n--- a/tests/test_domain_py.py\n+++ b/tests/test_domain_py.py\n@@ -342,6 +342,27 @@ def test_parse_annotation(app):\n     assert_node(doctree[0], pending_xref, refdomain=\"py\", reftype=\"obj\", reftarget=\"None\")\n \n \n+@pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\n+def test_parse_annotation_Literal(app):\n+    doctree = _parse_annotation(\"Literal[True, False]\", app.env)\n+    assert_node(doctree, ([pending_xref, \"Literal\"],\n+                          [desc_sig_punctuation, \"[\"],\n+                          \"True\",\n+                          [desc_sig_punctuation, \", \"],\n+                          \"False\",\n+                          [desc_sig_punctuation, \"]\"]))\n+\n+    doctree = _parse_annotation(\"typing.Literal[0, 1, 'abc']\", app.env)\n+    assert_node(doctree, ([pending_xref, \"typing.Literal\"],\n+                          [desc_sig_punctuation, \"[\"],\n+                          \"0\",\n+                          [desc_sig_punctuation, \", \"],\n+                          \"1\",\n+                          [desc_sig_punctuation, \", \"],\n+                          \"'abc'\",\n+                          [desc_sig_punctuation, \"]\"]))\n+\n+\n def test_pyfunction_signature(app):\n     text = \".. py:function:: hello(name: str) -> str\"\n     doctree = restructuredtext.parse(app, text)\n",
+  "problem_statement": "Nitpick flags Literal annotation values as missing py:class\n### Describe the bug\n\nWhen a value is present in a type annotation as `Literal`, sphinx will treat the value as a `py:class`. With nitpick enabled, values like `Literal[True]` end up failing, because `True` is not a class.\r\n\r\nThis is a problem for builds which want to use `-n -W` to catch doc errors.\n\n### How to Reproduce\n\nSetup a simple function which uses Literal, then attempt to autodoc it. e.g.\r\n```python\r\nimport typing\r\n@typing.overload\r\ndef foo(x: \"typing.Literal[True]\") -> int: ...\r\n@typing.overload\r\ndef foo(x: \"typing.Literal[False]\") -> str: ...\r\ndef foo(x: bool):\r\n    \"\"\"a func\"\"\"\r\n    return 1 if x else \"foo\"\r\n```\r\n\r\nI've pushed an example [failing project](https://github.com/sirosen/repro/tree/master/sphinxdoc/literal) to [my repro repo](https://github.com/sirosen/repro). Just run `./doc.sh` with `sphinx-build` available to see the failing build.\n\n### Expected behavior\n\n`Literal[True]` (or whatever literal value) should be present in the type annotation but should not trigger the nitpick warning.\n\n### Your project\n\nhttps://github.com/sirosen/repro/tree/master/sphinxdoc/literal\n\n### Screenshots\n\n_No response_\n\n### OS\n\nLinux\n\n### Python version\n\n3.8, 3.9\n\n### Sphinx version\n\n4.1.2\n\n### Sphinx extensions\n\nautodoc\n\n### Extra tools\n\n_No response_\n\n### Additional context\n\n_No response_\n",
+  "hints_text": "",
+  "created_at": "2021-09-01T17:26:58Z",
+  "version": "4.2",
+  "FAIL_TO_PASS": "[\"tests/test_domain_py.py::test_parse_annotation_Literal\"]",
+  "PASS_TO_PASS": "[\"tests/test_domain_py.py::test_canonical\", \"tests/test_domain_py.py::test_canonical_definition_overrides\", \"tests/test_domain_py.py::test_canonical_definition_skip\", \"tests/test_domain_py.py::test_canonical_duplicated\", \"tests/test_domain_py.py::test_domain_py_canonical\", \"tests/test_domain_py.py::test_domain_py_find_obj\", \"tests/test_domain_py.py::test_domain_py_objects\", \"tests/test_domain_py.py::test_domain_py_xrefs\", \"tests/test_domain_py.py::test_domain_py_xrefs_abbreviations\", \"tests/test_domain_py.py::test_function_signatures\", \"tests/test_domain_py.py::test_get_full_qualified_name\", \"tests/test_domain_py.py::test_info_field_list\", \"tests/test_domain_py.py::test_info_field_list_piped_type\", \"tests/test_domain_py.py::test_info_field_list_var\", \"tests/test_domain_py.py::test_modindex_common_prefix\", \"tests/test_domain_py.py::test_module_index\", \"tests/test_domain_py.py::test_module_index_not_collapsed\", \"tests/test_domain_py.py::test_module_index_submodule\", \"tests/test_domain_py.py::test_noindexentry\", \"tests/test_domain_py.py::test_optional_pyfunction_signature\", \"tests/test_domain_py.py::test_parse_annotation\", \"tests/test_domain_py.py::test_pyattribute\", \"tests/test_domain_py.py::test_pyclass_options\", \"tests/test_domain_py.py::test_pyclassmethod\", \"tests/test_domain_py.py::test_pydata\", \"tests/test_domain_py.py::test_pydata_signature\", \"tests/test_domain_py.py::test_pydata_signature_old\", \"tests/test_domain_py.py::test_pydata_with_union_type_operator\", \"tests/test_domain_py.py::test_pydecorator_signature\", \"tests/test_domain_py.py::test_pydecoratormethod_signature\", \"tests/test_domain_py.py::test_pyexception_signature\", \"tests/test_domain_py.py::test_pyfunction\", \"tests/test_domain_py.py::test_pyfunction_signature\", \"tests/test_domain_py.py::test_pyfunction_signature_full\", \"tests/test_domain_py.py::test_pyfunction_signature_full_py38\", \"tests/test_domain_py.py::test_pyfunction_with_number_literals\", \"tests/test_domain_py.py::test_pyfunction_with_union_type_operator\", \"tests/test_domain_py.py::test_pymethod_options\", \"tests/test_domain_py.py::test_pyobject_prefix\", \"tests/test_domain_py.py::test_pyproperty\", \"tests/test_domain_py.py::test_pystaticmethod\", \"tests/test_domain_py.py::test_python_python_use_unqualified_type_names\", \"tests/test_domain_py.py::test_python_python_use_unqualified_type_names_disabled\", \"tests/test_domain_py.py::test_resolve_xref_for_properties\", \"tests/test_domain_py.py::test_warn_missing_reference\"]",
+  "environment_setup_commit": "336605b8e4b14c5da9f4d872fb730dc6894edb77",
+  "patch_files": [
+    "sphinx/domains/python.py"
+  ],
+  "test_patch_files": [
+    "tests/test_domain_py.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/domains/python.py": {
+      "diffs": [
+        {
+          "start_line_old": 126,
+          "end_line_old": 126,
+          "file_pos": 2,
+          "file_context_length": 15974,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_42_PyXrefMixin.make_xref.result.6.1",
+          "closest_snippet_line_distance": 161
+        },
+        {
+          "start_line_old": 152,
+          "end_line_old": 152,
+          "file_pos": 2,
+          "file_context_length": 15974,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_42_PyXrefMixin.make_xref.result.6.1",
+          "closest_snippet_line_distance": 135
+        },
+        {
+          "start_line_old": 182,
+          "end_line_old": 182,
+          "file_pos": 2,
+          "file_context_length": 15974,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_42_PyXrefMixin.make_xref.result.6.1",
+          "closest_snippet_line_distance": 105
+        }
+      ]
+    }
+  },
+  "vectors": 1525,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralInclude_LiteralInclude.option_spec.1",
+      "distance": 0.9432082176208496,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 372,
+      "end_line": 405,
+      "tokens": 288,
+      "context_length": 288
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtin_resolver_builtin_resolver.4.1",
+      "distance": 0.9549840688705444,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 1383,
+      "end_line": 1405,
+      "tokens": 211,
+      "context_length": 499,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtins_ModuleEntry.deprecated",
+      "distance": 0.9613555669784546,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 518,
+      "context_length": 1017,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralInclude.run_",
+      "distance": 0.9899613261222839,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 407,
+      "end_line": 470,
+      "tokens": 642,
+      "context_length": 1659
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/util/inspect.py_builtins_memory_address_re.1",
+      "distance": 0.9912707805633545,
+      "file_path": "sphinx/util/inspect.py",
+      "start_line": 11,
+      "end_line": 47,
+      "tokens": 290,
+      "context_length": 1949
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/domains/changeset.py_VersionChange_VersionChange.run.15.1",
+      "distance": 1.0145940780639648,
+      "file_path": "sphinx/domains/changeset.py",
+      "start_line": 49,
+      "end_line": 107,
+      "tokens": 516,
+      "context_length": 2465
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/utils/checks.py_sphinx_has_header_",
+      "distance": 1.028801441192627,
+      "file_path": "utils/checks.py",
+      "start_line": 33,
+      "end_line": 109,
+      "tokens": 545,
+      "context_length": 3010
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_re_exclude_members_option.3.1",
+      "distance": 1.030846118927002,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 13,
+      "end_line": 114,
+      "tokens": 788,
+      "context_length": 3798
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader_LiteralIncludeReader.parse_options.1.1.1",
+      "distance": 1.0391967296600342,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 180,
+      "end_line": 209,
+      "tokens": 248,
+      "context_length": 4046
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/ext/doctest.py_doctest_doctestopt_re.1",
+      "distance": 1.0411244630813599,
+      "file_path": "sphinx/ext/doctest.py",
+      "start_line": 12,
+      "end_line": 43,
+      "tokens": 227,
+      "context_length": 4273
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/ext/napoleon/docstring.py_collections__convert_type_spec.3.1",
+      "distance": 1.0500407218933105,
+      "file_path": "sphinx/ext/napoleon/docstring.py",
+      "start_line": 13,
+      "end_line": 67,
+      "tokens": 578,
+      "context_length": 4851
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/testing/util.py_functools_assert_startswith.1.1",
+      "distance": 1.0517148971557617,
+      "file_path": "sphinx/testing/util.py",
+      "start_line": 10,
+      "end_line": 45,
+      "tokens": 270,
+      "context_length": 5121
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.pyobject_filter_LiteralIncludeReader.pyobject_filter.3.1",
+      "distance": 1.0526118278503418,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 251,
+      "end_line": 267,
+      "tokens": 162,
+      "context_length": 5283
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/directives/__init__.py_re_optional_int.2.2.3.1",
+      "distance": 1.0527052879333496,
+      "file_path": "sphinx/directives/__init__.py",
+      "start_line": 11,
+      "end_line": 47,
+      "tokens": 253,
+      "context_length": 5536
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/type_comment.py_2_not_suppressed.2.4.2.1",
+      "distance": 1.0551910400390625,
+      "file_path": "sphinx/ext/autodoc/type_comment.py",
+      "start_line": 11,
+      "end_line": 35,
+      "tokens": 239,
+      "context_length": 5775
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/environment/__init__.py_os_versioning_conditions.1",
+      "distance": 1.0593000650405884,
+      "file_path": "sphinx/environment/__init__.py",
+      "start_line": 11,
+      "end_line": 82,
+      "tokens": 508,
+      "context_length": 6283
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/application.py_os_42.3",
+      "distance": 1.0649489164352417,
+      "file_path": "sphinx/application.py",
+      "start_line": 13,
+      "end_line": 58,
+      "tokens": 361,
+      "context_length": 6644
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_re_int_or_nothing.2.1",
+      "distance": 1.0673160552978516,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 9,
+      "end_line": 38,
+      "tokens": 229,
+      "context_length": 6873
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_RuntimeInstanceAttributeMixin.import_object_RuntimeInstanceAttributeMixin.get_doc.1.2.2",
+      "distance": 1.0711709260940552,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2397,
+      "end_line": 2432,
+      "tokens": 313,
+      "context_length": 7186
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.import_object_AttributeDocumenter.should_suppress_value_header.2.1",
+      "distance": 1.0722260475158691,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2569,
+      "end_line": 2592,
+      "tokens": 229,
+      "context_length": 7415
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_argparse_logger.1",
+      "distance": 1.075026273727417,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 20,
+      "end_line": 53,
+      "tokens": 257,
+      "context_length": 7672
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/errors.py_BuildEnvironmentError_",
+      "distance": 1.0783616304397583,
+      "file_path": "sphinx/errors.py",
+      "start_line": 77,
+      "end_line": 134,
+      "tokens": 297,
+      "context_length": 7969
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_importlib_mangle.3.1",
+      "distance": 1.0790581703186035,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 11,
+      "end_line": 40,
+      "tokens": 211,
+      "context_length": 8180
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/cmd/quickstart.py_argparse_choice",
+      "distance": 1.0804811716079712,
+      "file_path": "sphinx/cmd/quickstart.py",
+      "start_line": 11,
+      "end_line": 119,
+      "tokens": 756,
+      "context_length": 8936
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/doc/conf.py_1_todo_include_todos.1",
+      "distance": 1.081322193145752,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 731,
+      "context_length": 9667
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/highlighting.py_2_30.1",
+      "distance": 1.0821126699447632,
+      "file_path": "sphinx/highlighting.py",
+      "start_line": 11,
+      "end_line": 68,
+      "tokens": 620,
+      "context_length": 10287
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/builders/__init__.py_pickle_logger.1",
+      "distance": 1.082788109779358,
+      "file_path": "sphinx/builders/__init__.py",
+      "start_line": 11,
+      "end_line": 48,
+      "tokens": 302,
+      "context_length": 10589
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.lines_filter_LiteralIncludeReader.lines_filter.3.1",
+      "distance": 1.0832481384277344,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 269,
+      "end_line": 291,
+      "tokens": 243,
+      "context_length": 10832
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_42_PyXrefMixin.make_xref.result.6.1",
+      "distance": 1.0844193696975708,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 287,
+      "end_line": 321,
+      "tokens": 382,
+      "context_length": 11214,
+      "file_pos": 21
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/registry.py_traceback_EXTENSION_BLACKLIST.1",
+      "distance": 1.0857176780700684,
+      "file_path": "sphinx/registry.py",
+      "start_line": 11,
+      "end_line": 51,
+      "tokens": 314,
+      "context_length": 11528
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/typehints.py_augment_descriptions_with_types_",
+      "distance": 1.0859155654907227,
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "start_line": 130,
+      "end_line": 185,
+      "tokens": 454,
+      "context_length": 11982
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/pycode/ast.py_sys_OPERATORS.1",
+      "distance": 1.0862709283828735,
+      "file_path": "sphinx/pycode/ast.py",
+      "start_line": 11,
+      "end_line": 44,
+      "tokens": 214,
+      "context_length": 12196
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/directive.py_warnings_DummyOptionSpec.__getitem__.1.1",
+      "distance": 1.0881145000457764,
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "start_line": 9,
+      "end_line": 47,
+      "tokens": 310,
+      "context_length": 12506
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/parsers.py_warnings_13.1",
+      "distance": 1.0895463228225708,
+      "file_path": "sphinx/parsers.py",
+      "start_line": 11,
+      "end_line": 26,
+      "tokens": 113,
+      "context_length": 12619
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_re_token_re.1",
+      "distance": 1.092273473739624,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 11,
+      "end_line": 46,
+      "tokens": 311,
+      "context_length": 12930
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/io.py_codecs_logger.1",
+      "distance": 1.093665599822998,
+      "file_path": "sphinx/io.py",
+      "start_line": 10,
+      "end_line": 39,
+      "tokens": 234,
+      "context_length": 13164
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/config.py_re_is_serializable.3.1",
+      "distance": 1.094064474105835,
+      "file_path": "sphinx/config.py",
+      "start_line": 11,
+      "end_line": 55,
+      "tokens": 325,
+      "context_length": 13489
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/config.py_check_confval_types_check_confval_types.2.4.4.6.5.2",
+      "distance": 1.0972646474838257,
+      "file_path": "sphinx/config.py",
+      "start_line": 408,
+      "end_line": 460,
+      "tokens": 474,
+      "context_length": 13963
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/setup.py_16_",
+      "distance": 1.0999696254730225,
+      "file_path": "setup.py",
+      "start_line": 176,
+      "end_line": 252,
+      "tokens": 638,
+      "context_length": 14601
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.prepend_filter_LiteralIncludeReader.dedent_filter.1.2.1.1",
+      "distance": 1.1025463342666626,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 351,
+      "end_line": 369,
+      "tokens": 169,
+      "context_length": 14770
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/sphinx/ext/doctest.py_DocTestBuilder.compile_DocTestBuilder.test_group.run_setup_cleanup.12.1",
+      "distance": 1.1051050424575806,
+      "file_path": "sphinx/ext/doctest.py",
+      "start_line": 481,
+      "end_line": 504,
+      "tokens": 264,
+      "context_length": 15034
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.read_LiteralIncludeReader.show_diff.5.1",
+      "distance": 1.105909824371338,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 227,
+      "end_line": 249,
+      "tokens": 196,
+      "context_length": 15230
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/post_transforms/code.py_TrimDoctestFlagsTransform.is_pyconsole_",
+      "distance": 1.1118969917297363,
+      "file_path": "sphinx/transforms/post_transforms/code.py",
+      "start_line": 114,
+      "end_line": 143,
+      "tokens": 208,
+      "context_length": 15438
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.end_filter_LiteralIncludeReader.end_filter.3.1",
+      "distance": 1.1150591373443604,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 324,
+      "end_line": 349,
+      "tokens": 193,
+      "context_length": 15631
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sphinx/sphinx/util/typing.py_sys_Inventory.1",
+      "distance": 1.115220069885254,
+      "file_path": "sphinx/util/typing.py",
+      "start_line": 11,
+      "end_line": 73,
+      "tokens": 454,
+      "context_length": 16085
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sphinx/sphinx/config.py_Config.config_values_Config.config_values.1",
+      "distance": 1.1159794330596924,
+      "file_path": "sphinx/config.py",
+      "start_line": 91,
+      "end_line": 150,
+      "tokens": 740,
+      "context_length": 16825
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/mock.py_contextlib__MockObject.__repr__.1.1",
+      "distance": 1.1172271966934204,
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "start_line": 11,
+      "end_line": 69,
+      "tokens": 452,
+      "context_length": 17277
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sphinx/sphinx/domains/rst.py_re_dir_sig_re.1",
+      "distance": 1.1197072267532349,
+      "file_path": "sphinx/domains/rst.py",
+      "start_line": 11,
+      "end_line": 32,
+      "tokens": 170,
+      "context_length": 17447
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sphinx/sphinx/util/__init__.py_functools_path_stabilize.3.1",
+      "distance": 1.1201238632202148,
+      "file_path": "sphinx/util/__init__.py",
+      "start_line": 11,
+      "end_line": 64,
+      "tokens": 445,
+      "context_length": 17892
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sphinx/sphinx/writers/latex.py_re_UnsupportedError.category.1",
+      "distance": 1.1206576824188232,
+      "file_path": "sphinx/writers/latex.py",
+      "start_line": 14,
+      "end_line": 70,
+      "tokens": 441,
+      "context_length": 18333
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_105_",
+      "distance": 1.122347116470337,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2789,
+      "end_line": 2832,
+      "tokens": 528,
+      "context_length": 18861
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sphinx/sphinx/domains/citation.py_2_logger.1",
+      "distance": 1.1232845783233643,
+      "file_path": "sphinx/domains/citation.py",
+      "start_line": 11,
+      "end_line": 29,
+      "tokens": 125,
+      "context_length": 18986
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_float_literal_re.1",
+      "distance": 1.1238455772399902,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 62,
+      "tokens": 749,
+      "context_length": 19735
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/__init__.py_re_default_substitutions.1",
+      "distance": 1.1254584789276123,
+      "file_path": "sphinx/transforms/__init__.py",
+      "start_line": 11,
+      "end_line": 44,
+      "tokens": 231,
+      "context_length": 19966
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sphinx/sphinx/builders/dummy.py_2_",
+      "distance": 1.1261721849441528,
+      "file_path": "sphinx/builders/dummy.py",
+      "start_line": 11,
+      "end_line": 53,
+      "tokens": 223,
+      "context_length": 20189
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sphinx/sphinx/ext/doctest.py_TestsetupDirective_parser.1",
+      "distance": 1.1280139684677124,
+      "file_path": "sphinx/ext/doctest.py",
+      "start_line": 153,
+      "end_line": 197,
+      "tokens": 292,
+      "context_length": 20481
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.start_filter_LiteralIncludeReader.start_filter.3.1",
+      "distance": 1.1281485557556152,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 293,
+      "end_line": 322,
+      "tokens": 212,
+      "context_length": 20693
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sphinx/sphinx/builders/latex/__init__.py_os_33",
+      "distance": 1.1284281015396118,
+      "file_path": "sphinx/builders/latex/__init__.py",
+      "start_line": 11,
+      "end_line": 42,
+      "tokens": 331,
+      "context_length": 21024
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_warn_missing_reference_",
+      "distance": 1.1286944150924683,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 1113,
+      "end_line": 1138,
+      "tokens": 209,
+      "context_length": 21233
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sphinx/sphinx/application.py_Sphinx.build_Sphinx.build.3",
+      "distance": 1.1290911436080933,
+      "file_path": "sphinx/application.py",
+      "start_line": 332,
+      "end_line": 381,
+      "tokens": 410,
+      "context_length": 21643
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sphinx/sphinx/ext/inheritance_diagram.py_builtins_py_builtins.1",
+      "distance": 1.1299183368682861,
+      "file_path": "sphinx/ext/inheritance_diagram.py",
+      "start_line": 38,
+      "end_line": 67,
+      "tokens": 243,
+      "context_length": 21886
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_AttributeDocumenter.isinstanceattribute_AttributeDocumenter.isinstanceattribute.5.1",
+      "distance": 1.1301937103271484,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 2526,
+      "end_line": 2545,
+      "tokens": 224,
+      "context_length": 22110
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sphinx/setup.py_os_Tee.flush.1",
+      "distance": 1.1328434944152832,
+      "file_path": "setup.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 478,
+      "context_length": 22588
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sphinx/sphinx/domains/javascript.py_2_logger.1",
+      "distance": 1.1363235712051392,
+      "file_path": "sphinx/domains/javascript.py",
+      "start_line": 11,
+      "end_line": 33,
+      "tokens": 199,
+      "context_length": 22787
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_LiteralIncludeReader.read_file_LiteralIncludeReader.read_file.1.3.1",
+      "distance": 1.1373629570007324,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 211,
+      "end_line": 225,
+      "tokens": 159,
+      "context_length": 22946
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sphinx/sphinx/util/typing.py__stringify_py36_",
+      "distance": 1.1379427909851074,
+      "file_path": "sphinx/util/typing.py",
+      "start_line": 398,
+      "end_line": 461,
+      "tokens": 638,
+      "context_length": 23584
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sphinx/sphinx/util/smartypants.py_12_",
+      "distance": 1.1382189989089966,
+      "file_path": "sphinx/util/smartypants.py",
+      "start_line": 380,
+      "end_line": 392,
+      "tokens": 137,
+      "context_length": 23721
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/directives/code.py",
+      "position": 1,
+      "tokens": 3851,
+      "context_length": 3851
+    },
+    {
+      "file_path": "sphinx/domains/python.py",
+      "position": 2,
+      "tokens": 12123,
+      "context_length": 15974
+    },
+    {
+      "file_path": "sphinx/util/inspect.py",
+      "position": 3,
+      "tokens": 6702,
+      "context_length": 22676
+    },
+    {
+      "file_path": "sphinx/domains/changeset.py",
+      "position": 4,
+      "tokens": 1254,
+      "context_length": 23930
+    },
+    {
+      "file_path": "utils/checks.py",
+      "position": 5,
+      "tokens": 906,
+      "context_length": 24836
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "position": 6,
+      "tokens": 23835,
+      "context_length": 48671
+    },
+    {
+      "file_path": "sphinx/ext/doctest.py",
+      "position": 7,
+      "tokens": 5018,
+      "context_length": 53689
+    },
+    {
+      "file_path": "sphinx/ext/napoleon/docstring.py",
+      "position": 8,
+      "tokens": 11000,
+      "context_length": 64689
+    },
+    {
+      "file_path": "sphinx/testing/util.py",
+      "position": 9,
+      "tokens": 1751,
+      "context_length": 66440
+    },
+    {
+      "file_path": "sphinx/directives/__init__.py",
+      "position": 10,
+      "tokens": 2252,
+      "context_length": 68692
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/type_comment.py",
+      "position": 11,
+      "tokens": 1224,
+      "context_length": 69916
+    },
+    {
+      "file_path": "sphinx/environment/__init__.py",
+      "position": 12,
+      "tokens": 5497,
+      "context_length": 75413
+    },
+    {
+      "file_path": "sphinx/application.py",
+      "position": 13,
+      "tokens": 11622,
+      "context_length": 87035
+    },
+    {
+      "file_path": "sphinx/directives/other.py",
+      "position": 14,
+      "tokens": 3127,
+      "context_length": 90162
+    },
+    {
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "position": 15,
+      "tokens": 5299,
+      "context_length": 95461
+    },
+    {
+      "file_path": "sphinx/errors.py",
+      "position": 16,
+      "tokens": 796,
+      "context_length": 96257
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "position": 17,
+      "tokens": 2462,
+      "context_length": 98719
+    },
+    {
+      "file_path": "sphinx/cmd/quickstart.py",
+      "position": 18,
+      "tokens": 5569,
+      "context_length": 104288
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 19,
+      "tokens": 1464,
+      "context_length": 105752
+    },
+    {
+      "file_path": "sphinx/highlighting.py",
+      "position": 20,
+      "tokens": 1546,
+      "context_length": 107298
+    },
+    {
+      "file_path": "sphinx/builders/__init__.py",
+      "position": 21,
+      "tokens": 5350,
+      "context_length": 112648
+    },
+    {
+      "file_path": "sphinx/registry.py",
+      "position": 22,
+      "tokens": 4640,
+      "context_length": 117288
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "position": 23,
+      "tokens": 1448,
+      "context_length": 118736
+    },
+    {
+      "file_path": "sphinx/pycode/ast.py",
+      "position": 24,
+      "tokens": 2087,
+      "context_length": 120823
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "position": 25,
+      "tokens": 1451,
+      "context_length": 122274
+    },
+    {
+      "file_path": "sphinx/parsers.py",
+      "position": 26,
+      "tokens": 847,
+      "context_length": 123121
+    },
+    {
+      "file_path": "sphinx/domains/std.py",
+      "position": 27,
+      "tokens": 10297,
+      "context_length": 133418
+    },
+    {
+      "file_path": "sphinx/io.py",
+      "position": 28,
+      "tokens": 1406,
+      "context_length": 134824
+    },
+    {
+      "file_path": "sphinx/config.py",
+      "position": 29,
+      "tokens": 4460,
+      "context_length": 139284
+    },
+    {
+      "file_path": "setup.py",
+      "position": 30,
+      "tokens": 1760,
+      "context_length": 141044
+    },
+    {
+      "file_path": "sphinx/transforms/post_transforms/code.py",
+      "position": 31,
+      "tokens": 1017,
+      "context_length": 142061
+    },
+    {
+      "file_path": "sphinx/util/typing.py",
+      "position": 32,
+      "tokens": 4431,
+      "context_length": 146492
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "position": 33,
+      "tokens": 1348,
+      "context_length": 147840
+    },
+    {
+      "file_path": "sphinx/domains/rst.py",
+      "position": 34,
+      "tokens": 2479,
+      "context_length": 150319
+    },
+    {
+      "file_path": "sphinx/util/__init__.py",
+      "position": 35,
+      "tokens": 4878,
+      "context_length": 155197
+    },
+    {
+      "file_path": "sphinx/writers/latex.py",
+      "position": 36,
+      "tokens": 19390,
+      "context_length": 174587
+    },
+    {
+      "file_path": "sphinx/domains/citation.py",
+      "position": 37,
+      "tokens": 1281,
+      "context_length": 175868
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 38,
+      "tokens": 3459,
+      "context_length": 179327
+    },
+    {
+      "file_path": "sphinx/transforms/__init__.py",
+      "position": 39,
+      "tokens": 3171,
+      "context_length": 182498
+    },
+    {
+      "file_path": "sphinx/builders/dummy.py",
+      "position": 40,
+      "tokens": 276,
+      "context_length": 182774
+    },
+    {
+      "file_path": "sphinx/builders/latex/__init__.py",
+      "position": 41,
+      "tokens": 5712,
+      "context_length": 188486
+    },
+    {
+      "file_path": "sphinx/ext/inheritance_diagram.py",
+      "position": 42,
+      "tokens": 3866,
+      "context_length": 192352
+    },
+    {
+      "file_path": "sphinx/domains/javascript.py",
+      "position": 43,
+      "tokens": 4064,
+      "context_length": 196416
+    },
+    {
+      "file_path": "sphinx/util/smartypants.py",
+      "position": 44,
+      "tokens": 4145,
+      "context_length": 200561
+    }
+  ]
+}

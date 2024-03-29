@@ -1,0 +1,211 @@
+{
+  "instance_id": "pydata__xarray-7120",
+  "model_patch": "diff --git a/xarray/core/dataarray.py b/xarray/core/dataarray.py\nindex 794984b7..20f8e270 100644\n--- a/xarray/core/dataarray.py\n+++ b/xarray/core/dataarray.py\n@@ -2736,6 +2736,11 @@ class DataArray(\n         numpy.transpose\n         Dataset.transpose\n         \"\"\"\n+        # Check if any element in dims is a list and raise an error if so\n+        for dim in dims:\n+            if isinstance(dim, list):\n+                raise ValueError(\"When calling transpose, provide dimension names as separate arguments, not as a list. For example, use .transpose('dim1', 'dim2') instead of .transpose(['dim1', 'dim2']).\")\n+\n         if dims:\n             dims = tuple(utils.infix_dims(dims, self.dims, missing_dims))\n         variable = self.variable.transpose(*dims)\ndiff --git a/xarray/core/utils.py b/xarray/core/utils.py\nindex 0320ea81..2766c496 100644\n--- a/xarray/core/utils.py\n+++ b/xarray/core/utils.py\n@@ -905,6 +905,9 @@ def drop_missing_dims(\n     dims : sequence\n     missing_dims : {\"raise\", \"warn\", \"ignore\"}\n     \"\"\"\n+    for dim in supplied_dims:\n+        if not isinstance(dim, Hashable):\n+            raise ValueError(\"Dimension names must be hashable. Provide dimension names as separate arguments, not as a list.\")\n \n     if missing_dims == \"raise\":\n         supplied_dims_set = {val for val in supplied_dims if val is not ...}\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/dataarray.py",
+    "xarray/core/utils.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "58ab594aa4315e75281569902e29c8c69834151f",
+  "patch": "diff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -5401,6 +5401,13 @@ def transpose(\n         numpy.transpose\n         DataArray.transpose\n         \"\"\"\n+        # Raise error if list is passed as dims\n+        if (len(dims) > 0) and (isinstance(dims[0], list)):\n+            list_fix = [f\"{repr(x)}\" if isinstance(x, str) else f\"{x}\" for x in dims[0]]\n+            raise TypeError(\n+                f'transpose requires dims to be passed as multiple arguments. Expected `{\", \".join(list_fix)}`. Received `{dims[0]}` instead'\n+            )\n+\n         # Use infix_dims to check once for missing dimensions\n         if len(dims) != 0:\n             _ = list(infix_dims(dims, self.dims, missing_dims))\n",
+  "test_patch": "diff --git a/xarray/tests/test_dataset.py b/xarray/tests/test_dataset.py\n--- a/xarray/tests/test_dataset.py\n+++ b/xarray/tests/test_dataset.py\n@@ -1,6 +1,7 @@\n from __future__ import annotations\n \n import pickle\n+import re\n import sys\n import warnings\n from copy import copy, deepcopy\n@@ -6806,3 +6807,17 @@ def test_string_keys_typing() -> None:\n     ds = xr.Dataset(dict(x=da))\n     mapping = {\"y\": da}\n     ds.assign(variables=mapping)\n+\n+\n+def test_transpose_error() -> None:\n+    # Transpose dataset with list as argument\n+    # Should raise error\n+    ds = xr.Dataset({\"foo\": ((\"x\", \"y\"), [[21]]), \"bar\": ((\"x\", \"y\"), [[12]])})\n+\n+    with pytest.raises(\n+        TypeError,\n+        match=re.escape(\n+            \"transpose requires dims to be passed as multiple arguments. Expected `'y', 'x'`. Received `['y', 'x']` instead\"\n+        ),\n+    ):\n+        ds.transpose([\"y\", \"x\"])  # type: ignore\n",
+  "problem_statement": "Raise nicer error if passing a list of dimension names to transpose\n### What happened?\r\n\r\nHello,\r\n\r\nin xarray 0.20.1, I am getting the following error\r\n\r\n`ds = xr.Dataset({\"foo\": ((\"x\", \"y\", \"z\"), [[[42]]]), \"bar\": ((\"y\", \"z\"), [[24]])})`\r\n\r\n`ds.transpose(\"y\", \"z\", \"x\")`\r\n\r\n\r\n```\r\n868 \"\"\"Depending on the setting of missing_dims, drop any dimensions from supplied_dims that\r\n    869 are not present in dims.\r\n    870 \r\n   (...)\r\n    875 missing_dims : {\"raise\", \"warn\", \"ignore\"}\r\n    876 \"\"\"\r\n    878 if missing_dims == \"raise\":\r\n--> 879     supplied_dims_set = {val for val in supplied_dims if val is not ...}\r\n    880     invalid = supplied_dims_set - set(dims)\r\n    881     if invalid:\r\n\r\nTypeError: unhashable type: 'list'\r\n```\r\n\r\n### What did you expect to happen?\r\n\r\nThe expected result is \r\n```\r\nds.transpose(\"y\", \"z\", \"x\")\r\n\r\n<xarray.Dataset>\r\nDimensions:  (x: 1, y: 1, z: 1)\r\nDimensions without coordinates: x, y, z\r\nData variables:\r\n    foo      (y, z, x) int64 42\r\n    bar      (y, z) int64 24\r\n```\r\n\r\n### Minimal Complete Verifiable Example\r\n\r\n_No response_\r\n\r\n### Relevant log output\r\n\r\n_No response_\r\n\r\n### Anything else we need to know?\r\n\r\n_No response_\r\n\r\n### Environment\r\n\r\n<details>\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.9.12 (main, Apr  5 2022, 06:56:58) \r\n[GCC 7.5.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 3.10.0-1160.42.2.el7.x86_64\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_US\r\nLOCALE: ('en_US', 'ISO8859-1')\r\nlibhdf5: 1.12.1\r\nlibnetcdf: 4.8.1\r\n\r\nxarray: 0.20.1\r\npandas: 1.4.1\r\nnumpy: 1.21.5\r\nscipy: 1.8.0\r\nnetCDF4: 1.5.7\r\npydap: None\r\nh5netcdf: 999\r\nh5py: 3.6.0\r\nNio: None\r\nzarr: None\r\ncftime: 1.5.1.1\r\nnc_time_axis: 1.4.0\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: 1.3.4\r\ndask: 2022.02.1\r\ndistributed: 2022.2.1\r\nmatplotlib: 3.5.1\r\ncartopy: 0.18.0\r\nseaborn: 0.11.2\r\nnumbagg: None\r\nfsspec: 2022.02.0\r\ncupy: None\r\npint: 0.18\r\nsparse: 0.13.0\r\nsetuptools: 61.2.0\r\npip: 21.2.4\r\nconda: None\r\npytest: None\r\nIPython: 8.2.0\r\nsphinx: None\r\n\r\n</details>\r\n\n",
+  "hints_text": "I can't reproduce on our dev branch. Can you try upgrading xarray please?\r\n\r\nEDIT: can't reproduce on 2022.03.0 either.\nThanks. I upgraded to 2022.03.0 \r\n\r\nI am still getting the error\r\n\r\n```\r\nPython 3.9.12 (main, Apr  5 2022, 06:56:58) \r\n[GCC 7.5.0] :: Anaconda, Inc. on linux\r\nType \"help\", \"copyright\", \"credits\" or \"license\" for more information.\r\n>>> import xarray as xr\r\n>>> xr.__version__\r\n'2022.3.0'\r\n>>> ds = xr.Dataset({\"foo\": ((\"x\", \"y\", \"z\"), [[[42]]]), \"bar\": ((\"y\", \"z\"), [[24]])})\r\n>>> ds.transpose(['y','z','y'])\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/nbhome/f1p/miniconda3/envs/f1p_gfdl/lib/python3.9/site-packages/xarray/core/dataset.py\", line 4650, in transpose\r\n    _ = list(infix_dims(dims, self.dims, missing_dims))\r\n  File \"/nbhome/f1p/miniconda3/envs/f1p_gfdl/lib/python3.9/site-packages/xarray/core/utils.py\", line 786, in infix_dims\r\n    existing_dims = drop_missing_dims(dims_supplied, dims_all, missing_dims)\r\n  File \"/nbhome/f1p/miniconda3/envs/f1p_gfdl/lib/python3.9/site-packages/xarray/core/utils.py\", line 874, in drop_missing_dims\r\n    supplied_dims_set = {val for val in supplied_dims if val is not ...}\r\n  File \"/nbhome/f1p/miniconda3/envs/f1p_gfdl/lib/python3.9/site-packages/xarray/core/utils.py\", line 874, in <setcomp>\r\n    supplied_dims_set = {val for val in supplied_dims if val is not ...}\r\nTypeError: unhashable type: 'list'\r\n```\n```\r\nds.transpose(['y','z','y'])\r\n```\r\n\r\nAh... Reemove the list here and try `ds.transpose(\"y\", \"z\", x\")` (no list) which is what you have in the first post. \nOh... I am so sorry about this. This works as expected now. \r\nIt's weird that using list seemed to have worked at some point. Thanks a lot for your help\nI think we should raise a nicer error message. Transpose is an outlier in  our API. In nearly every other function, you are expected to pass a list of dimension names.",
+  "created_at": "2022-10-03T23:53:43Z",
+  "version": "2022.09",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_dataset.py::test_transpose_error\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_dataset.py::TestDataset::test_align\", \"xarray/tests/test_dataset.py::TestDataset::test_align_exact\", \"xarray/tests/test_dataset.py::TestDataset::test_align_exclude\", \"xarray/tests/test_dataset.py::TestDataset::test_align_fill_value[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_fill_value[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_fill_value[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_fill_value[fill_value3]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_index_var_attrs[left]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_index_var_attrs[override]\", \"xarray/tests/test_dataset.py::TestDataset::test_align_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_align_nocopy\", \"xarray/tests/test_dataset.py::TestDataset::test_align_non_unique\", \"xarray/tests/test_dataset.py::TestDataset::test_align_override\", \"xarray/tests/test_dataset.py::TestDataset::test_align_str_dtype\", \"xarray/tests/test_dataset.py::TestDataset::test_apply_pending_deprecated_map\", \"xarray/tests/test_dataset.py::TestDataset::test_asarray\", \"xarray/tests/test_dataset.py::TestDataset::test_assign\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_all_multiindex_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_coords_existing_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_astype_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_attr_access\", \"xarray/tests/test_dataset.py::TestDataset::test_attribute_access\", \"xarray/tests/test_dataset.py::TestDataset::test_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_binary_op_join_setting\", \"xarray/tests/test_dataset.py::TestDataset::test_binary_op_propagate_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_equals\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_exclude\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_like\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_misaligned\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_multi_index\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_nocopy\", \"xarray/tests/test_dataset.py::TestDataset::test_categorical_index\", \"xarray/tests/test_dataset.py::TestDataset::test_categorical_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_categorical_reindex\", \"xarray/tests/test_dataset.py::TestDataset::test_chunks_does_not_load_data\", \"xarray/tests/test_dataset.py::TestDataset::test_combine_first\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_0d\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_1d\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_compat\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_invalid_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_pandas_sequence\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_pandas_single\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_with_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_convert_dataframe_with_many_types_and_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_merge\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_merge_mismatched_shape\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_modify\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_set\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_setitem_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_setitem_with_new_dimension\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_to_dataset\", \"xarray/tests/test_dataset.py::TestDataset::test_copy\", \"xarray/tests/test_dataset.py::TestDataset::test_copy_with_data\", \"xarray/tests/test_dataset.py::TestDataset::test_copy_with_data_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_count\", \"xarray/tests/test_dataset.py::TestDataset::test_data_vars_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_array_math\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_dataset_math\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_exception_label_str\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_exception_n_neg\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1_label\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1_simple\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n2\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_ellipsis_transpose_different_ordered_vars\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_math_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_math_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_number_math\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_retains_period_index_on_transpose\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_transpose\", \"xarray/tests/test_dataset.py::TestDataset::test_delitem\", \"xarray/tests/test_dataset.py::TestDataset::test_delitem_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_index_labels\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_labels_by_keyword\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_labels_by_position\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_variables\", \"xarray/tests/test_dataset.py::TestDataset::test_dropna\", \"xarray/tests/test_dataset.py::TestDataset::test_equals_and_identical\", \"xarray/tests/test_dataset.py::TestDataset::test_equals_failures\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_error\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_existing_scalar_coord\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_int\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_kwargs_python36plus\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_mixed_int_and_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_fillna\", \"xarray/tests/test_dataset.py::TestDataset::test_filter_by_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_categorical\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_non_unique_columns\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_unsorted_levels\", \"xarray/tests/test_dataset.py::TestDataset::test_full_like\", \"xarray/tests/test_dataset.py::TestDataset::test_get_index\", \"xarray/tests/test_dataset.py::TestDataset::test_getitem\", \"xarray/tests/test_dataset.py::TestDataset::test_getitem_hashable\", \"xarray/tests/test_dataset.py::TestDataset::test_getitem_multiple_dtype\", \"xarray/tests/test_dataset.py::TestDataset::test_head\", \"xarray/tests/test_dataset.py::TestDataset::test_info\", \"xarray/tests/test_dataset.py::TestDataset::test_ipython_key_completion\", \"xarray/tests/test_dataset.py::TestDataset::test_isel\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_dataarray\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_expand_dims_roundtrip\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_fancy\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_fancy_convert_index_variable\", \"xarray/tests/test_dataset.py::TestDataset::test_lazy_load\", \"xarray/tests/test_dataset.py::TestDataset::test_loc\", \"xarray/tests/test_dataset.py::TestDataset::test_map\", \"xarray/tests/test_dataset.py::TestDataset::test_mean_uint_dtype\", \"xarray/tests/test_dataset.py::TestDataset::test_merge_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_modify_inplace\", \"xarray/tests/test_dataset.py::TestDataset::test_pad\", \"xarray/tests/test_dataset.py::TestDataset::test_pickle\", \"xarray/tests/test_dataset.py::TestDataset::test_polyfit_output\", \"xarray/tests/test_dataset.py::TestDataset::test_polyfit_warnings\", \"xarray/tests/test_dataset.py::TestDataset::test_propagate_attrs[<lambda>0]\", \"xarray/tests/test_dataset.py::TestDataset::test_propagate_attrs[<lambda>1]\", \"xarray/tests/test_dataset.py::TestDataset::test_propagate_attrs[abs]\", \"xarray/tests/test_dataset.py::TestDataset::test_propagate_attrs[absolute]\", \"xarray/tests/test_dataset.py::TestDataset::test_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[0.25-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[0.25-None]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[0.25-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q1-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q1-None]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q1-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q2-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q2-None]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q2-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_interpolation_deprecated[lower]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_interpolation_deprecated[midpoint]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_method[lower]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_method[midpoint]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_skipna[False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_skipna[True]\", \"xarray/tests/test_dataset.py::TestDataset::test_query[numpy-None-pandas]\", \"xarray/tests/test_dataset.py::TestDataset::test_query[numpy-None-python]\", \"xarray/tests/test_dataset.py::TestDataset::test_query[numpy-python-pandas]\", \"xarray/tests/test_dataset.py::TestDataset::test_query[numpy-python-python]\", \"xarray/tests/test_dataset.py::TestDataset::test_rank_use_bottleneck\", \"xarray/tests/test_dataset.py::TestDataset::test_real_and_imag\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_argmin\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_bad_dim\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumprod-dim1-expected0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumprod-dim2-expected1]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumprod-dim3-expected2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumprod-time-expected3]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumsum-dim1-expected0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumsum-dim2-expected1]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumsum-dim3-expected2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims[cumsum-time-expected3]\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_dtypes\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_keep_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_keepdims\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_no_axis\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_non_numeric\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_only_one_axis\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_scalars\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_strings\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_attrs_encoding\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[fill_value3]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[fill_value3]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_method\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_str_dtype[bytes]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_str_dtype[str]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_variables_copied\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_warning\", \"xarray/tests/test_dataset.py::TestDataset::test_rename\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_dimension_coord\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_dimension_coord_warnings\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_does_not_change_DatetimeIndex_type\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_old_name\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_perserve_attrs_encoding\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_same_name\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_vars\", \"xarray/tests/test_dataset.py::TestDataset::test_reorder_levels\", \"xarray/tests/test_dataset.py::TestDataset::test_repr\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_nep18\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_period_index\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[arg4-False-dropped4-converted4-renamed4]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[arg5-True-dropped5-converted5-renamed5]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[arg6-False-dropped6-converted6-renamed6]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[arg7-True-dropped7-converted7-renamed7]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[foo-False-dropped0-converted0-renamed0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[foo-True-dropped1-converted1-renamed1]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[x-False-dropped2-converted2-renamed2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_convert[x-True-dropped3-converted3-renamed3]\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_drop_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_keep_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_multidim\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_no_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_sel\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_categorical\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_categorical_error\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_dataarray\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_dataarray_mindex\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_drop_mindex\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_fancy\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_method\", \"xarray/tests/test_dataset.py::TestDataset::test_selection_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_set_index\", \"xarray/tests/test_dataset.py::TestDataset::test_set_index_deindexed_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_set_xindex\", \"xarray/tests/test_dataset.py::TestDataset::test_set_xindex_options\", \"xarray/tests/test_dataset.py::TestDataset::test_setattr_raises\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_align_new_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_both_non_unique_index\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_dimension_override\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_original_non_unique_index\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_pandas\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_str_dtype[bytes]\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_str_dtype[str]\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_using_list\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_using_list_errors[var_list0-data0-Different\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_using_list_errors[var_list1-data1-Empty\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_using_list_errors[var_list2-data2-assign\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_with_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[fill_value3]\", \"xarray/tests/test_dataset.py::TestDataset::test_slice_virtual_variable\", \"xarray/tests/test_dataset.py::TestDataset::test_sortby\", \"xarray/tests/test_dataset.py::TestDataset::test_squeeze\", \"xarray/tests/test_dataset.py::TestDataset::test_squeeze_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_stack\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_create_index[False-expected_keys1]\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_create_index[None-expected_keys2]\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_create_index[True-expected_keys0]\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_multi_index\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_non_dim_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_unstack_fast\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_unstack_slow\", \"xarray/tests/test_dataset.py::TestDataset::test_swap_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_tail\", \"xarray/tests/test_dataset.py::TestDataset::test_thin\", \"xarray/tests/test_dataset.py::TestDataset::test_time_season\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dataframe\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict_with_nan_nat\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict_with_time_dim\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_empty_dataframe\", \"xarray/tests/test_dataset.py::TestDataset::test_to_array\", \"xarray/tests/test_dataset.py::TestDataset::test_to_dict_with_numpy_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_to_pandas\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_dtype_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_invalid_sample_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_name\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_to_unstacked_dataset\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_to_unstacked_dataset_different_dimension\", \"xarray/tests/test_dataset.py::TestDataset::test_unary_ops\", \"xarray/tests/test_dataset.py::TestDataset::test_unicode_data\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack_fill_value\", \"xarray/tests/test_dataset.py::TestDataset::test_update\", \"xarray/tests/test_dataset.py::TestDataset::test_update_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_update_index\", \"xarray/tests/test_dataset.py::TestDataset::test_update_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_update_overwrite_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_variable\", \"xarray/tests/test_dataset.py::TestDataset::test_variable_indexing\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variable_same_name\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variables_default_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variables_time\", \"xarray/tests/test_dataset.py::TestDataset::test_where\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop_empty\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop_no_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_where_other\", \"xarray/tests/test_dataset.py::TestDropDuplicates::test_drop_duplicates_1d[False]\", \"xarray/tests/test_dataset.py::TestDropDuplicates::test_drop_duplicates_1d[first]\", \"xarray/tests/test_dataset.py::TestDropDuplicates::test_drop_duplicates_1d[last]\", \"xarray/tests/test_dataset.py::TestNumpyCoercion::test_from_numpy\", \"xarray/tests/test_dataset.py::test_clip[1-numpy]\", \"xarray/tests/test_dataset.py::test_constructor_raises_with_invalid_coords[unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords1]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords2]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords3]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords4]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords5]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords6]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords7]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords8]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords9]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords1]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords2]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords3]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords4]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords5]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords6]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords7]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords8]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords9]\", \"xarray/tests/test_dataset.py::test_deepcopy_obj_array\", \"xarray/tests/test_dataset.py::test_differentiate[1-False]\", \"xarray/tests/test_dataset.py::test_differentiate[1-True]\", \"xarray/tests/test_dataset.py::test_differentiate[2-False]\", \"xarray/tests/test_dataset.py::test_differentiate[2-True]\", \"xarray/tests/test_dataset.py::test_differentiate_datetime[False]\", \"xarray/tests/test_dataset.py::test_differentiate_datetime[True]\", \"xarray/tests/test_dataset.py::test_dir_expected_attrs[numpy-3]\", \"xarray/tests/test_dataset.py::test_dir_non_string[1-numpy]\", \"xarray/tests/test_dataset.py::test_dir_unicode[1-numpy]\", \"xarray/tests/test_dataset.py::test_error_message_on_set_supplied\", \"xarray/tests/test_dataset.py::test_integrate[False]\", \"xarray/tests/test_dataset.py::test_integrate[True]\", \"xarray/tests/test_dataset.py::test_isin[numpy-test_elements0]\", \"xarray/tests/test_dataset.py::test_isin[numpy-test_elements1]\", \"xarray/tests/test_dataset.py::test_isin[numpy-test_elements2]\", \"xarray/tests/test_dataset.py::test_isin_dataset\", \"xarray/tests/test_dataset.py::test_no_dict\", \"xarray/tests/test_dataset.py::test_raise_no_warning_assert_close[numpy-2]\", \"xarray/tests/test_dataset.py::test_raise_no_warning_for_nan_in_binary_ops\", \"xarray/tests/test_dataset.py::test_string_keys_typing\", \"xarray/tests/test_dataset.py::test_subclass_slots\", \"xarray/tests/test_dataset.py::test_trapz_datetime[np-False]\", \"xarray/tests/test_dataset.py::test_trapz_datetime[np-True]\", \"xarray/tests/test_dataset.py::test_weakref\"]",
+  "environment_setup_commit": "087ebbb78668bdf5d2d41c3b2553e3f29ce75be1",
+  "patch_files": [
+    "xarray/core/dataset.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_dataset.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/dataset.py": {
+      "diffs": [
+        {
+          "start_line_old": 5404,
+          "end_line_old": 5404,
+          "file_pos": 8,
+          "file_context_length": 190709,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_1_41",
+          "closest_snippet_line_distance": 5269
+        }
+      ]
+    }
+  },
+  "vectors": 1292,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_1_QueryParserOptions.1",
+      "distance": 0.7999230027198792,
+      "file_path": "xarray/core/types.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 790,
+      "context_length": 790
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_1_MissingDimensionsError.3",
+      "distance": 0.8269443511962891,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 417,
+      "context_length": 1207
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_tutorial_",
+      "distance": 0.8303527235984802,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 692,
+      "context_length": 1899
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/utils.py_drop_missing_dims_drop_missing_dims.2.7.1",
+      "distance": 0.8328779935836792,
+      "file_path": "xarray/core/utils.py",
+      "start_line": 896,
+      "end_line": 935,
+      "tokens": 274,
+      "context_length": 2173
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+      "distance": 0.8390427231788635,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 283,
+      "context_length": 2456
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_1_30.T_XarrayOther.1",
+      "distance": 0.846664309501648,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 642,
+      "context_length": 3098
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.interp.1_DataArray.108",
+      "distance": 0.8551201820373535,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1934,
+      "end_line": 2572,
+      "tokens": 5932,
+      "context_length": 9030
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.1_DataArray.reset_coords_57.7.1",
+      "distance": 0.8612610101699829,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 226,
+      "end_line": 999,
+      "tokens": 6161,
+      "context_length": 15191
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_1_19.Dataset",
+      "distance": 0.8628906011581421,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 184,
+      "context_length": 15375
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1_41",
+      "distance": 0.870018482208252,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 135,
+      "tokens": 802,
+      "context_length": 16177,
+      "file_pos": 8
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 0.8880518078804016,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 674,
+      "end_line": 926,
+      "tokens": 3146,
+      "context_length": 19323
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/types.py",
+      "position": 1,
+      "tokens": 1045,
+      "context_length": 1045
+    },
+    {
+      "file_path": "xarray/core/variable.py",
+      "position": 2,
+      "tokens": 24829,
+      "context_length": 25874
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 3,
+      "tokens": 692,
+      "context_length": 26566
+    },
+    {
+      "file_path": "xarray/core/utils.py",
+      "position": 4,
+      "tokens": 6719,
+      "context_length": 33285
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 5,
+      "tokens": 14906,
+      "context_length": 48191
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 6,
+      "tokens": 57944,
+      "context_length": 106135
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 7,
+      "tokens": 6247,
+      "context_length": 112382
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 8,
+      "tokens": 78327,
+      "context_length": 190709
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 9,
+      "tokens": 9083,
+      "context_length": 199792
+    }
+  ]
+}

@@ -1,0 +1,668 @@
+{
+  "instance_id": "pydata__xarray-4184",
+  "model_patch": "diff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\nindex a024324b..18f0d398 100644\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -1,6 +1,7 @@\n import copy\n import datetime\n import functools\n+import logging\n import sys\n import warnings\n from collections import defaultdict\n@@ -4508,6 +4509,8 @@ class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):\n         -------\n         array : xarray.DataArray\n         \"\"\"\n+        start_time = logging.getLogger().handlers[0].formatter.start_time = time.time()\n+\n         from .dataarray import DataArray\n \n         data_vars = [self.variables[k] for k in self.data_vars]\n@@ -4520,6 +4523,9 @@ class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):\n \n         dims = (dim,) + broadcast_vars[0].dims\n \n+        end_time = time.time()\n+        logging.info(f\"to_array execution time: {end_time - start_time} seconds\")\n+\n         return DataArray(\n             data, coords, dims, attrs=self.attrs, name=name, indexes=indexes\n         )\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/dataset.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "65ca92a5c0a4143d00dd7a822bcb1d49738717f1",
+  "patch": "diff --git a/asv_bench/benchmarks/pandas.py b/asv_bench/benchmarks/pandas.py\nnew file mode 100644\n--- /dev/null\n+++ b/asv_bench/benchmarks/pandas.py\n@@ -0,0 +1,24 @@\n+import numpy as np\n+import pandas as pd\n+\n+from . import parameterized\n+\n+\n+class MultiIndexSeries:\n+    def setup(self, dtype, subset):\n+        data = np.random.rand(100000).astype(dtype)\n+        index = pd.MultiIndex.from_product(\n+            [\n+                list(\"abcdefhijk\"),\n+                list(\"abcdefhijk\"),\n+                pd.date_range(start=\"2000-01-01\", periods=1000, freq=\"B\"),\n+            ]\n+        )\n+        series = pd.Series(data, index)\n+        if subset:\n+            series = series[::3]\n+        self.series = series\n+\n+    @parameterized([\"dtype\", \"subset\"], ([int, float], [True, False]))\n+    def time_to_xarray(self, dtype, subset):\n+        self.series.to_xarray()\ndiff --git a/xarray/core/dataset.py b/xarray/core/dataset.py\n--- a/xarray/core/dataset.py\n+++ b/xarray/core/dataset.py\n@@ -4543,11 +4543,10 @@ def to_dataframe(self):\n         return self._to_dataframe(self.dims)\n \n     def _set_sparse_data_from_dataframe(\n-        self, dataframe: pd.DataFrame, dims: tuple\n+        self, idx: pd.Index, arrays: List[Tuple[Hashable, np.ndarray]], dims: tuple\n     ) -> None:\n         from sparse import COO\n \n-        idx = dataframe.index\n         if isinstance(idx, pd.MultiIndex):\n             coords = np.stack([np.asarray(code) for code in idx.codes], axis=0)\n             is_sorted = idx.is_lexsorted()\n@@ -4557,11 +4556,7 @@ def _set_sparse_data_from_dataframe(\n             is_sorted = True\n             shape = (idx.size,)\n \n-        for name, series in dataframe.items():\n-            # Cast to a NumPy array first, in case the Series is a pandas\n-            # Extension array (which doesn't have a valid NumPy dtype)\n-            values = np.asarray(series)\n-\n+        for name, values in arrays:\n             # In virtually all real use cases, the sparse array will now have\n             # missing values and needs a fill_value. For consistency, don't\n             # special case the rare exceptions (e.g., dtype=int without a\n@@ -4580,18 +4575,36 @@ def _set_sparse_data_from_dataframe(\n             self[name] = (dims, data)\n \n     def _set_numpy_data_from_dataframe(\n-        self, dataframe: pd.DataFrame, dims: tuple\n+        self, idx: pd.Index, arrays: List[Tuple[Hashable, np.ndarray]], dims: tuple\n     ) -> None:\n-        idx = dataframe.index\n-        if isinstance(idx, pd.MultiIndex):\n-            # expand the DataFrame to include the product of all levels\n-            full_idx = pd.MultiIndex.from_product(idx.levels, names=idx.names)\n-            dataframe = dataframe.reindex(full_idx)\n-            shape = tuple(lev.size for lev in idx.levels)\n-        else:\n-            shape = (idx.size,)\n-        for name, series in dataframe.items():\n-            data = np.asarray(series).reshape(shape)\n+        if not isinstance(idx, pd.MultiIndex):\n+            for name, values in arrays:\n+                self[name] = (dims, values)\n+            return\n+\n+        shape = tuple(lev.size for lev in idx.levels)\n+        indexer = tuple(idx.codes)\n+\n+        # We already verified that the MultiIndex has all unique values, so\n+        # there are missing values if and only if the size of output arrays is\n+        # larger that the index.\n+        missing_values = np.prod(shape) > idx.shape[0]\n+\n+        for name, values in arrays:\n+            # NumPy indexing is much faster than using DataFrame.reindex() to\n+            # fill in missing values:\n+            # https://stackoverflow.com/a/35049899/809705\n+            if missing_values:\n+                dtype, fill_value = dtypes.maybe_promote(values.dtype)\n+                data = np.full(shape, fill_value, dtype)\n+            else:\n+                # If there are no missing values, keep the existing dtype\n+                # instead of promoting to support NA, e.g., keep integer\n+                # columns as integers.\n+                # TODO: consider removing this special case, which doesn't\n+                # exist for sparse=True.\n+                data = np.zeros(shape, values.dtype)\n+            data[indexer] = values\n             self[name] = (dims, data)\n \n     @classmethod\n@@ -4631,7 +4644,19 @@ def from_dataframe(cls, dataframe: pd.DataFrame, sparse: bool = False) -> \"Datas\n         if not dataframe.columns.is_unique:\n             raise ValueError(\"cannot convert DataFrame with non-unique columns\")\n \n-        idx, dataframe = remove_unused_levels_categories(dataframe.index, dataframe)\n+        idx = remove_unused_levels_categories(dataframe.index)\n+\n+        if isinstance(idx, pd.MultiIndex) and not idx.is_unique:\n+            raise ValueError(\n+                \"cannot convert a DataFrame with a non-unique MultiIndex into xarray\"\n+            )\n+\n+        # Cast to a NumPy array first, in case the Series is a pandas Extension\n+        # array (which doesn't have a valid NumPy dtype)\n+        # TODO: allow users to control how this casting happens, e.g., by\n+        # forwarding arguments to pandas.Series.to_numpy?\n+        arrays = [(k, np.asarray(v)) for k, v in dataframe.items()]\n+\n         obj = cls()\n \n         if isinstance(idx, pd.MultiIndex):\n@@ -4647,9 +4672,9 @@ def from_dataframe(cls, dataframe: pd.DataFrame, sparse: bool = False) -> \"Datas\n             obj[index_name] = (dims, idx)\n \n         if sparse:\n-            obj._set_sparse_data_from_dataframe(dataframe, dims)\n+            obj._set_sparse_data_from_dataframe(idx, arrays, dims)\n         else:\n-            obj._set_numpy_data_from_dataframe(dataframe, dims)\n+            obj._set_numpy_data_from_dataframe(idx, arrays, dims)\n         return obj\n \n     def to_dask_dataframe(self, dim_order=None, set_index=False):\ndiff --git a/xarray/core/indexes.py b/xarray/core/indexes.py\n--- a/xarray/core/indexes.py\n+++ b/xarray/core/indexes.py\n@@ -9,7 +9,7 @@\n from .variable import Variable\n \n \n-def remove_unused_levels_categories(index, dataframe=None):\n+def remove_unused_levels_categories(index: pd.Index) -> pd.Index:\n     \"\"\"\n     Remove unused levels from MultiIndex and unused categories from CategoricalIndex\n     \"\"\"\n@@ -25,14 +25,15 @@ def remove_unused_levels_categories(index, dataframe=None):\n                 else:\n                     level = level[index.codes[i]]\n                 levels.append(level)\n+            # TODO: calling from_array() reorders MultiIndex levels. It would\n+            # be best to avoid this, if possible, e.g., by using\n+            # MultiIndex.remove_unused_levels() (which does not reorder) on the\n+            # part of the MultiIndex that is not categorical, or by fixing this\n+            # upstream in pandas.\n             index = pd.MultiIndex.from_arrays(levels, names=index.names)\n     elif isinstance(index, pd.CategoricalIndex):\n         index = index.remove_unused_categories()\n-\n-    if dataframe is None:\n-        return index\n-    dataframe = dataframe.set_index(index)\n-    return dataframe.index, dataframe\n+    return index\n \n \n class Indexes(collections.abc.Mapping):\n",
+  "test_patch": "diff --git a/xarray/tests/test_dataset.py b/xarray/tests/test_dataset.py\n--- a/xarray/tests/test_dataset.py\n+++ b/xarray/tests/test_dataset.py\n@@ -4013,6 +4013,49 @@ def test_to_and_from_empty_dataframe(self):\n         assert len(actual) == 0\n         assert expected.equals(actual)\n \n+    def test_from_dataframe_multiindex(self):\n+        index = pd.MultiIndex.from_product([[\"a\", \"b\"], [1, 2, 3]], names=[\"x\", \"y\"])\n+        df = pd.DataFrame({\"z\": np.arange(6)}, index=index)\n+\n+        expected = Dataset(\n+            {\"z\": ((\"x\", \"y\"), [[0, 1, 2], [3, 4, 5]])},\n+            coords={\"x\": [\"a\", \"b\"], \"y\": [1, 2, 3]},\n+        )\n+        actual = Dataset.from_dataframe(df)\n+        assert_identical(actual, expected)\n+\n+        df2 = df.iloc[[3, 2, 1, 0, 4, 5], :]\n+        actual = Dataset.from_dataframe(df2)\n+        assert_identical(actual, expected)\n+\n+        df3 = df.iloc[:4, :]\n+        expected3 = Dataset(\n+            {\"z\": ((\"x\", \"y\"), [[0, 1, 2], [3, np.nan, np.nan]])},\n+            coords={\"x\": [\"a\", \"b\"], \"y\": [1, 2, 3]},\n+        )\n+        actual = Dataset.from_dataframe(df3)\n+        assert_identical(actual, expected3)\n+\n+        df_nonunique = df.iloc[[0, 0], :]\n+        with raises_regex(ValueError, \"non-unique MultiIndex\"):\n+            Dataset.from_dataframe(df_nonunique)\n+\n+    def test_from_dataframe_unsorted_levels(self):\n+        # regression test for GH-4186\n+        index = pd.MultiIndex(\n+            levels=[[\"b\", \"a\"], [\"foo\"]], codes=[[0, 1], [0, 0]], names=[\"lev1\", \"lev2\"]\n+        )\n+        df = pd.DataFrame({\"c1\": [0, 2], \"c2\": [1, 3]}, index=index)\n+        expected = Dataset(\n+            {\n+                \"c1\": ((\"lev1\", \"lev2\"), [[0], [2]]),\n+                \"c2\": ((\"lev1\", \"lev2\"), [[1], [3]]),\n+            },\n+            coords={\"lev1\": [\"b\", \"a\"], \"lev2\": [\"foo\"]},\n+        )\n+        actual = Dataset.from_dataframe(df)\n+        assert_identical(actual, expected)\n+\n     def test_from_dataframe_non_unique_columns(self):\n         # regression test for GH449\n         df = pd.DataFrame(np.zeros((2, 2)))\n",
+  "problem_statement": "Stack + to_array before to_xarray is much faster that a simple to_xarray\nI was seeing some slow performance around `to_xarray()` on MultiIndexed series, and found that unstacking one of the dimensions before running `to_xarray()`, and then restacking with `to_array()` was ~30x faster. This time difference is consistent with larger data sizes.\r\n\r\nTo reproduce:\r\n\r\nCreate a series with a MultiIndex, ensuring the MultiIndex isn't a simple product:\r\n\r\n```python\r\ns = pd.Series(\r\n    np.random.rand(100000), \r\n    index=pd.MultiIndex.from_product([\r\n        list('abcdefhijk'),\r\n        list('abcdefhijk'),\r\n        pd.DatetimeIndex(start='2000-01-01', periods=1000, freq='B'),\r\n    ]))\r\n\r\ncropped = s[::3]\r\ncropped.index=pd.MultiIndex.from_tuples(cropped.index, names=list('xyz'))\r\n\r\ncropped.head()\r\n\r\n# x  y  z         \r\n# a  a  2000-01-03    0.993989\r\n#      2000-01-06    0.850518\r\n#      2000-01-11    0.068944\r\n#      2000-01-14    0.237197\r\n#      2000-01-19    0.784254\r\n# dtype: float64\r\n```\r\n\r\nTwo approaches for getting this into xarray;\r\n1 - Simple `.to_xarray()`:\r\n\r\n```python\r\n# current_method = cropped.to_xarray()\r\n\r\n<xarray.DataArray (x: 10, y: 10, z: 1000)>\r\narray([[[0.993989,      nan, ...,      nan, 0.721663],\r\n        [     nan,      nan, ..., 0.58224 ,      nan],\r\n        ...,\r\n        [     nan, 0.369382, ...,      nan,      nan],\r\n        [0.98558 ,      nan, ...,      nan, 0.403732]],\r\n\r\n       [[     nan,      nan, ..., 0.493711,      nan],\r\n        [     nan, 0.126761, ...,      nan,      nan],\r\n        ...,\r\n        [0.976758,      nan, ...,      nan, 0.816612],\r\n        [     nan,      nan, ..., 0.982128,      nan]],\r\n\r\n       ...,\r\n\r\n       [[     nan, 0.971525, ...,      nan,      nan],\r\n        [0.146774,      nan, ...,      nan, 0.419806],\r\n        ...,\r\n        [     nan,      nan, ..., 0.700764,      nan],\r\n        [     nan, 0.502058, ...,      nan,      nan]],\r\n\r\n       [[0.246768,      nan, ...,      nan, 0.079266],\r\n        [     nan,      nan, ..., 0.802297,      nan],\r\n        ...,\r\n        [     nan, 0.636698, ...,      nan,      nan],\r\n        [0.025195,      nan, ...,      nan, 0.629305]]])\r\nCoordinates:\r\n  * x        (x) object 'a' 'b' 'c' 'd' 'e' 'f' 'h' 'i' 'j' 'k'\r\n  * y        (y) object 'a' 'b' 'c' 'd' 'e' 'f' 'h' 'i' 'j' 'k'\r\n  * z        (z) datetime64[ns] 2000-01-03 2000-01-04 ... 2003-10-30 2003-10-31\r\n```\r\n\r\nThis takes *536 ms*\r\n\r\n2 - unstack in pandas first, and then use `to_array` to do the equivalent of a restack:\r\n```\r\nproposed_version = (\r\n    cropped\r\n    .unstack('y')\r\n    .to_xarray()\r\n    .to_array('y')\r\n)\r\n```\r\n\r\nThis takes *17.3 ms*\r\n\r\nTo confirm these are identical:\r\n\r\n```\r\nproposed_version_adj = (\r\n    proposed_version\r\n    .assign_coords(y=proposed_version['y'].astype(object))\r\n    .transpose(*current_version.dims)\r\n)\r\n\r\nproposed_version_adj.equals(current_version)\r\n# True\r\n```\r\n\r\n#### Problem description\r\n\r\nA default operation is much slower than a (potentially) equivalent operation that's not the default.\r\n\r\nI need to look more at what's causing the issues. I think it's to do with the `.reindex(full_idx)`, but I'm unclear why it's so much faster in the alternative route, and whether there's a fix that we can make to make the default path fast.\r\n\r\n\r\n#### Output of ``xr.show_versions()``\r\n\r\n<details>\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 2.7.14.final.0\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 4.9.93-linuxkit-aufs\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: en_US.UTF-8\r\nLANG: en_US.utf8\r\nLOCALE: None.None\r\n\r\nxarray: 0.10.9\r\npandas: 0.23.4\r\nnumpy: 1.15.2\r\nscipy: 1.1.0\r\nnetCDF4: None\r\nh5netcdf: None\r\nh5py: None\r\nNio: None\r\nzarr: None\r\ncftime: None\r\nPseudonetCDF: None\r\nrasterio: None\r\niris: None\r\nbottleneck: 1.2.1\r\ncyordereddict: None\r\ndask: None\r\ndistributed: None\r\nmatplotlib: 2.2.3\r\ncartopy: 0.16.0\r\nseaborn: 0.9.0\r\nsetuptools: 40.4.3\r\npip: 18.0\r\nconda: None\r\npytest: 3.8.1\r\nIPython: 5.8.0\r\nsphinx: None\r\n</details>\r\n\nto_xarray() result is incorrect when one of multi-index levels is not sorted\n<!-- Please include a self-contained copy-pastable example that generates the issue if possible.\r\n\r\nPlease be concise with code posted. See guidelines below on how to provide a good bug report:\r\n\r\n- Craft Minimal Bug Reports: http://matthewrocklin.com/blog/work/2018/02/28/minimal-bug-reports\r\n- Minimal Complete Verifiable Examples: https://stackoverflow.com/help/mcve\r\n\r\nBug reports that follow these guidelines are easier to diagnose, and so are often handled much more quickly.\r\n-->\r\n\r\n**What happened**:\r\nto_xarray() sorts multi-index level **values** and returns result for the sorted values but it doesn't sort **levels** or expects levels to be sorted resulting in completely incorrect order of data for the displayed coordinates.\r\n```python\r\ndf:\r\n            C1  C2\r\nlev1 lev2        \r\nb    foo    0   1\r\na    foo    2   3 \r\n\r\ndf.to_xarray():\r\n <xarray.Dataset>\r\nDimensions:  (lev1: 2, lev2: 1)\r\nCoordinates:\r\n  * lev1     (lev1) object 'b' 'a'\r\n  * lev2     (lev2) object 'foo'\r\nData variables:\r\n    C1       (lev1, lev2) int64 2 0\r\n    C2       (lev1, lev2) int64 3 1 \r\n```\r\n\r\n**What you expected to happen**:\r\nShould account for the order of levels in the original index.\r\n\r\n**Minimal Complete Verifiable Example**:\r\n\r\n```python\r\nimport pandas as pd\r\ndf = pd.concat(\r\n    {\r\n        'b': pd.DataFrame([[0, 1]], index=['foo'], columns=['C1', 'C2']),\r\n        'a': pd.DataFrame([[2, 3]], index=['foo'], columns=['C1', 'C2']),\r\n    }\r\n).rename_axis(['lev1', 'lev2'])\r\nprint('df:\\n', df, '\\n')\r\nprint('df.to_xarray():\\n', df.to_xarray(), '\\n')\r\nprint('df.index.levels[0]:\\n', df.index.levels[0])\r\n```\r\n\r\n**Anything else we need to know?**:\r\n\r\n**Environment**:\r\n\r\n<details><summary>Output of <tt>xr.show_versions()</tt></summary>\r\n\r\n<!-- Paste the output here xr.show_versions() here -->\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.8.2 | packaged by conda-forge | (default, Apr 24 2020, 08:20:52) \r\n[GCC 7.3.0]\r\npython-bits: 64\r\nOS: Linux\r\nOS-release: 5.4.7-100.fc30.x86_64\r\nmachine: x86_64\r\nprocessor: x86_64\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_GB.UTF-8\r\nLOCALE: en_GB.UTF-8\r\nlibhdf5: 1.10.4\r\nlibnetcdf: 4.6.3\r\nxarray: 0.15.1\r\npandas: 1.0.5\r\nnumpy: 1.19.0\r\nscipy: 1.5.0\r\nnetCDF4: 1.5.3\r\npydap: None\r\nh5netcdf: None\r\nh5py: None\r\nNio: None\r\nzarr: None\r\ncftime: 1.1.3\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: 1.3.2\r\ndask: 2.19.0\r\ndistributed: 2.19.0\r\nmatplotlib: 3.2.2\r\ncartopy: None\r\nseaborn: 0.10.1\r\nnumbagg: installed\r\nsetuptools: 46.3.0.post20200513\r\npip: 20.1\r\nconda: None\r\npytest: 5.4.3\r\nIPython: 7.15.0\r\nsphinx: None\r\n\r\n</details>\r\n\n",
+  "hints_text": "Here are the top entries I see with `%prun cropped.to_xarray()`:\r\n```\r\n         308597 function calls (308454 primitive calls) in 0.651 seconds\r\n\r\n   Ordered by: internal time\r\n\r\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\r\n   100000    0.255    0.000    0.275    0.000 datetimes.py:606(<lambda>)\r\n        1    0.165    0.165    0.165    0.165 {built-in method pandas._libs.lib.is_datetime_with_singletz_array}\r\n        1    0.071    0.071    0.634    0.634 {method 'get_indexer' of 'pandas._libs.index.BaseMultiIndexCodesEngine' objects}\r\n        1    0.054    0.054    0.054    0.054 {pandas._libs.lib.fast_zip}\r\n        1    0.029    0.029    0.304    0.304 {pandas._libs.lib.map_infer}\r\n   100009    0.011    0.000    0.011    0.000 datetimelike.py:232(freq)\r\n        9    0.010    0.001    0.010    0.001 {pandas._libs.lib.infer_dtype}\r\n   100021    0.010    0.000    0.010    0.000 datetimes.py:684(tz)\r\n        1    0.009    0.009    0.009    0.009 {built-in method pandas._libs.tslib.array_to_datetime}\r\n        2    0.008    0.004    0.008    0.004 {method 'get_indexer' of 'pandas._libs.index.IndexEngine' objects}\r\n        1    0.008    0.008    0.651    0.651 dataarray.py:1827(from_series)\r\n    66/65    0.005    0.000    0.005    0.000 {built-in method numpy.core.multiarray.array}\r\n    24/22    0.001    0.000    0.362    0.016 base.py:677(_values)\r\n       17    0.001    0.000    0.001    0.000 {built-in method numpy.core.multiarray.empty}\r\n    19/18    0.001    0.000    0.189    0.010 base.py:4914(_ensure_index)\r\n        5    0.001    0.000    0.001    0.000 {method 'repeat' of 'numpy.ndarray' objects}\r\n        2    0.001    0.000    0.001    0.000 {method 'tolist' of 'numpy.ndarray' objects}\r\n        2    0.001    0.000    0.001    0.000 {pandas._libs.algos.take_1d_object_object}\r\n        4    0.001    0.000    0.001    0.000 {pandas._libs.algos.take_1d_int64_int64}\r\n     1846    0.001    0.000    0.001    0.000 {built-in method builtins.isinstance}\r\n       16    0.001    0.000    0.001    0.000 {method 'reduce' of 'numpy.ufunc' objects}\r\n        1    0.001    0.001    0.001    0.001 {method 'get_indexer' of 'pandas._libs.index.DatetimeEngine' objects}\r\n```\r\n\r\nThere seems to be a suspiciously large amount of effort applying a function to individual datetime objects.\nWhen I stepped through, it was by-and-large all taken up by https://github.com/pydata/xarray/blob/master/xarray/core/dataset.py#L3121. That's where the boxing & unboxing of the datetimes is from.\r\n\r\nI haven't yet discovered how the alternative path avoids this work. If anyone has priors please lmk!\nIt's 3x faster to unstack & stack all-but-one level, vs reindexing over a filled-out index (and I think always produces the same result). \r\n\r\nOur current code takes the slow path.\r\n\r\nI could make that change, but that strongly feels like I don't understand the root cause. I haven't spent much time with reshaping code - lmk if anyone has ideas.\r\n\r\n```python\r\n\r\nidx = cropped.index\r\nfull_idx = pd.MultiIndex.from_product(idx.levels, names=idx.names)\r\n\r\nreindexed = cropped.reindex(full_idx)\r\n\r\n%timeit reindexed = cropped.reindex(full_idx)\r\n# 1 loop, best of 3: 278 ms per loop\r\n\r\n%%timeit\r\nstack_unstack = (\r\n    cropped\r\n    .unstack(list('yz'))\r\n    .stack(list('yz'),dropna=False)\r\n)\r\n# 10 loops, best of 3: 80.8 ms per loop\r\n\r\nstack_unstack.equals(reindexed)\r\n# True\r\n```\nMy working hypothesis is that pandas has a set of fast routines in C, such that it can stack without reindexing to the full index. The routines only work in 1-2 dimensions.\r\n\r\nSo without some hackery (i.e. converting multi-dimensional arrays to pandas' size and back), the current implementation is reasonable*. Next step would be to write our own routines that can operate on multiple dimensions (numbagg!).\r\n\r\nIs that consistent with others' views, particularly those who know this area well?\r\n\r\n'* one small fix that would improve performance of `series.to_xarray()` only, is the [comment above](https://github.com/pydata/xarray/issues/2459#issuecomment-426483497). Lmk if you think worth making that change\nThe vast majority of the time in xarray's current implementation seems to be spent in `DataFrame.reindex()`, but I see no reason why this operations needs to be so slow. I expect we could probably optimize this significantly on the pandas side.\r\n\r\nSee these results from line-profiler:\r\n```\r\nIn [8]: %lprun -f xarray.Dataset.from_dataframe cropped.to_xarray()\r\nTimer unit: 1e-06 s\r\n\r\nTotal time: 0.727191 s\r\nFile: /Users/shoyer/dev/xarray/xarray/core/dataset.py\r\nFunction: from_dataframe at line 3094\r\n\r\nLine #      Hits         Time  Per Hit   % Time  Line Contents\r\n==============================================================\r\n  3094                                               @classmethod\r\n  3095                                               def from_dataframe(cls, dataframe):\r\n  3096                                                   \"\"\"Convert a pandas.DataFrame into an xarray.Dataset\r\n  3097\r\n  3098                                                   Each column will be converted into an independent variable in the\r\n  3099                                                   Dataset. If the dataframe's index is a MultiIndex, it will be expanded\r\n  3100                                                   into a tensor product of one-dimensional indices (filling in missing\r\n  3101                                                   values with NaN). This method will produce a Dataset very similar to\r\n  3102                                                   that on which the 'to_dataframe' method was called, except with\r\n  3103                                                   possibly redundant dimensions (since all dataset variables will have\r\n  3104                                                   the same dimensionality).\r\n  3105                                                   \"\"\"\r\n  3106                                                   # TODO: Add an option to remove dimensions along which the variables\r\n  3107                                                   # are constant, to enable consistent serialization to/from a dataframe,\r\n  3108                                                   # even if some variables have different dimensionality.\r\n  3109\r\n  3110         1        352.0    352.0      0.0          if not dataframe.columns.is_unique:\r\n  3111                                                       raise ValueError(\r\n  3112                                                           'cannot convert DataFrame with non-unique columns')\r\n  3113\r\n  3114         1          3.0      3.0      0.0          idx = dataframe.index\r\n  3115         1        356.0    356.0      0.0          obj = cls()\r\n  3116\r\n  3117         1          2.0      2.0      0.0          if isinstance(idx, pd.MultiIndex):\r\n  3118                                                       # it's a multi-index\r\n  3119                                                       # expand the DataFrame to include the product of all levels\r\n  3120         1       4524.0   4524.0      0.6              full_idx = pd.MultiIndex.from_product(idx.levels, names=idx.names)\r\n  3121         1     717008.0 717008.0     98.6              dataframe = dataframe.reindex(full_idx)\r\n  3122         1          3.0      3.0      0.0              dims = [name if name is not None else 'level_%i' % n\r\n  3123         1         20.0     20.0      0.0                      for n, name in enumerate(idx.names)]\r\n  3124         4          9.0      2.2      0.0              for dim, lev in zip(dims, idx.levels):\r\n  3125         3       2973.0    991.0      0.4                  obj[dim] = (dim, lev)\r\n  3126         1         37.0     37.0      0.0              shape = [lev.size for lev in idx.levels]\r\n  3127                                                   else:\r\n  3128                                                       dims = (idx.name if idx.name is not None else 'index',)\r\n  3129                                                       obj[dims[0]] = (dims, idx)\r\n  3130                                                       shape = -1\r\n  3131\r\n  3132         2        350.0    175.0      0.0          for name, series in iteritems(dataframe):\r\n  3133         1         33.0     33.0      0.0              data = np.asarray(series).reshape(shape)\r\n  3134         1       1520.0   1520.0      0.2              obj[name] = (dims, data)\r\n  3135         1          1.0      1.0      0.0          return obj\r\n```\n@max-sixty nevermind, you seem to have already discovered that :)\nI've run into this twice. This time I'm seeing a difference of very roughly 100x or more just using a transpose -- I can't test or time it properly right now, but this is what it looks like:\r\n\r\n```\r\nipdb> df\r\nx              a       b  ...    c      d\r\ny              0       0  ...    7      7\r\nz                         ...            \r\n0       0.000000     0.0  ...  0.0    0.0\r\n1      -0.000416     0.0  ...  0.0    0.0\r\n\r\n[2 rows x 2932 columns]\r\nipdb> df.to_xarray()\r\n\r\n<I quit out because it takes at least 30s>\r\n\r\nipdb> df.T.to_xarray()\r\n\r\n<Finishes instantly>\r\n\r\n```\r\n\n@tqfjo unrelated. You're comparing the creation of a dataset with 2 variables with the creation of one with 3000. Unsurprisingly, the latter will take 1500x. If your dataset doesn't functionally contain 3000 variables but just a single two-dimensional variable, use ``xarray.DataArray(ds)``.\n@crusaderky Thanks for the pointer to `xarray.DataArray(df)` -- that makes my life a ton easier. \r\n\r\n<br>\r\n\r\nThat said, if it helps anyone to know, I did just want a `DataArray`, but figured there was no alternative to first running the rather singular `to_xarray`. I also still find the runtime surprising, though I know nothing about `xarray`'s internals.\r\n\r\n\r\n\r\n\nI know this is not a recent thread but I found no resolution, and we just ran in the same issue recently. In our case we had a pandas series of roughly 15 milliion entries, with a 3-level multi-index which had to be converted to an xarray.DataArray. The .to_xarray took almost 2 minutes. Unstack + to_array took it down to roughly 3 seconds, provided the last level of the multi index was unstacked. \r\n\r\nHowever a much faster solution was through numpy array. The below code is based on the [idea of Igor Raush](https://stackoverflow.com/a/35049899)\r\n\r\n(In this case df is a dataframe with a single column, or a series)\r\n```\r\narr = np.full(df.index.levshape, np.nan)\r\narr[tuple(df.index.codes)] = df.values.flat\r\nda = xr.DataArray(arr,dims=df.index.names,coords=dict(zip(df.index.names, df.index.levels)))\r\n```\r\n\r\n\nHi All. I stumble across the same issue trying to convert a 5000 column dataframe to xarray (it was never going to happen...).\r\nI found a workaround and I am posting the test below. Hope it helps.\r\n\r\n```python\r\nimport xarray as xr\r\nimport pandas as pd\r\nimport numpy as np\r\n\r\nxr.__version__\r\n\r\n    '0.15.1'\r\n\r\npd.__version__\r\n\r\n    '1.0.5'\r\n\r\ndf = pd.DataFrame(np.random.randn(200, 500))\r\n\r\n%%time\r\none = df.to_xarray()\r\n\r\n    CPU times: user 29.6 s, sys: 60.4 ms, total: 29.6 s\r\n    Wall time: 29.7 s\r\n\r\n%%time\r\ndic={}\r\nfor name in df.columns:\r\n    dic.update({name:(['index'],df[name].values)})\r\n\r\ntwo = xr.Dataset(dic, coords={'index': ('index', df.index.values)})         \r\n\r\n    CPU times: user 17.6 ms, sys: 158 \u00b5s, total: 17.8 ms\r\n    Wall time: 17.8 ms\r\n\r\none.equals(two)\r\n\r\n    True\r\n\r\n```\n",
+  "created_at": "2020-06-26T07:39:14Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_unsorted_levels\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_dataset.py::TestDataset::test_align_exact\", \"xarray/tests/test_dataset.py::TestDataset::test_align_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_align_override\", \"xarray/tests/test_dataset.py::TestDataset::test_apply_pending_deprecated_map\", \"xarray/tests/test_dataset.py::TestDataset::test_asarray\", \"xarray/tests/test_dataset.py::TestDataset::test_assign\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_assign_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_attr_access\", \"xarray/tests/test_dataset.py::TestDataset::test_attribute_access\", \"xarray/tests/test_dataset.py::TestDataset::test_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_binary_op_propagate_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_equals\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_exclude\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_like\", \"xarray/tests/test_dataset.py::TestDataset::test_broadcast_nocopy\", \"xarray/tests/test_dataset.py::TestDataset::test_categorical_index\", \"xarray/tests/test_dataset.py::TestDataset::test_categorical_reindex\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_0d\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_1d\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_compat\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_deprecated\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_invalid_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_constructor_with_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_convert_dataframe_with_many_types_and_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_merge\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_merge_mismatched_shape\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_modify\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_set\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_setitem_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_setitem_with_new_dimension\", \"xarray/tests/test_dataset.py::TestDataset::test_coords_to_dataset\", \"xarray/tests/test_dataset.py::TestDataset::test_copy\", \"xarray/tests/test_dataset.py::TestDataset::test_copy_with_data\", \"xarray/tests/test_dataset.py::TestDataset::test_copy_with_data_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_count\", \"xarray/tests/test_dataset.py::TestDataset::test_data_vars_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_array_math\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_exception_label_str\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_exception_n_neg\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1_label\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n1_simple\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_diff_n2\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_ellipsis_transpose_different_ordered_vars\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_math_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_number_math\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_retains_period_index_on_transpose\", \"xarray/tests/test_dataset.py::TestDataset::test_dataset_transpose\", \"xarray/tests/test_dataset.py::TestDataset::test_delitem\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_index_labels\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_labels_by_keyword\", \"xarray/tests/test_dataset.py::TestDataset::test_drop_variables\", \"xarray/tests/test_dataset.py::TestDataset::test_dropna\", \"xarray/tests/test_dataset.py::TestDataset::test_equals_and_identical\", \"xarray/tests/test_dataset.py::TestDataset::test_equals_failures\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_error\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_existing_scalar_coord\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_int\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_kwargs_python36plus\", \"xarray/tests/test_dataset.py::TestDataset::test_expand_dims_mixed_int_and_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_fillna\", \"xarray/tests/test_dataset.py::TestDataset::test_filter_by_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_from_dataframe_non_unique_columns\", \"xarray/tests/test_dataset.py::TestDataset::test_full_like\", \"xarray/tests/test_dataset.py::TestDataset::test_get_index\", \"xarray/tests/test_dataset.py::TestDataset::test_getitem\", \"xarray/tests/test_dataset.py::TestDataset::test_getitem_hashable\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_iter\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_nan\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_order\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_reduce\", \"xarray/tests/test_dataset.py::TestDataset::test_groupby_returns_new_type\", \"xarray/tests/test_dataset.py::TestDataset::test_head\", \"xarray/tests/test_dataset.py::TestDataset::test_info\", \"xarray/tests/test_dataset.py::TestDataset::test_ipython_key_completion\", \"xarray/tests/test_dataset.py::TestDataset::test_isel\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_dataarray\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_expand_dims_roundtrip\", \"xarray/tests/test_dataset.py::TestDataset::test_isel_fancy\", \"xarray/tests/test_dataset.py::TestDataset::test_lazy_load\", \"xarray/tests/test_dataset.py::TestDataset::test_map\", \"xarray/tests/test_dataset.py::TestDataset::test_mean_uint_dtype\", \"xarray/tests/test_dataset.py::TestDataset::test_merge_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_modify_inplace\", \"xarray/tests/test_dataset.py::TestDataset::test_pad\", \"xarray/tests/test_dataset.py::TestDataset::test_pickle\", \"xarray/tests/test_dataset.py::TestDataset::test_polyfit_output\", \"xarray/tests/test_dataset.py::TestDataset::test_properties\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[0.25-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[0.25-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q1-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q1-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q2-False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile[q2-True]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_skipna[False]\", \"xarray/tests/test_dataset.py::TestDataset::test_quantile_skipna[True]\", \"xarray/tests/test_dataset.py::TestDataset::test_real_and_imag\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_argmin\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_bad_dim\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_cumsum_test_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_dtypes\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_keep_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_keepdims\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_no_axis\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_non_numeric\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_only_one_axis\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_scalars\", \"xarray/tests/test_dataset.py::TestDataset::test_reduce_strings\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_fill_value[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_like_fill_value[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_method\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_variables_copied\", \"xarray/tests/test_dataset.py::TestDataset::test_reindex_warning\", \"xarray/tests/test_dataset.py::TestDataset::test_rename\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_does_not_change_DatetimeIndex_type\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_inplace\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_old_name\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_same_name\", \"xarray/tests/test_dataset.py::TestDataset::test_rename_vars\", \"xarray/tests/test_dataset.py::TestDataset::test_reorder_levels\", \"xarray/tests/test_dataset.py::TestDataset::test_repr\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_nep18\", \"xarray/tests/test_dataset.py::TestDataset::test_repr_period_index\", \"xarray/tests/test_dataset.py::TestDataset::test_resample_old_api\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index\", \"xarray/tests/test_dataset.py::TestDataset::test_reset_index_keep_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_coords_none\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_multidim\", \"xarray/tests/test_dataset.py::TestDataset::test_roll_no_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_dataarray\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_dataarray_mindex\", \"xarray/tests/test_dataset.py::TestDataset::test_sel_fancy\", \"xarray/tests/test_dataset.py::TestDataset::test_selection_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_set_index\", \"xarray/tests/test_dataset.py::TestDataset::test_setattr_raises\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_align_new_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_both_non_unique_index\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_dimension_override\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_multiindex_level\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_original_non_unique_index\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_pandas\", \"xarray/tests/test_dataset.py::TestDataset::test_setitem_with_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[2.0]\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[2]\", \"xarray/tests/test_dataset.py::TestDataset::test_shift[fill_value0]\", \"xarray/tests/test_dataset.py::TestDataset::test_slice_virtual_variable\", \"xarray/tests/test_dataset.py::TestDataset::test_sortby\", \"xarray/tests/test_dataset.py::TestDataset::test_squeeze\", \"xarray/tests/test_dataset.py::TestDataset::test_squeeze_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_stack\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_unstack_fast\", \"xarray/tests/test_dataset.py::TestDataset::test_stack_unstack_slow\", \"xarray/tests/test_dataset.py::TestDataset::test_swap_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_tail\", \"xarray/tests/test_dataset.py::TestDataset::test_thin\", \"xarray/tests/test_dataset.py::TestDataset::test_time_season\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dataframe\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict_with_nan_nat\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_dict_with_time_dim\", \"xarray/tests/test_dataset.py::TestDataset::test_to_and_from_empty_dataframe\", \"xarray/tests/test_dataset.py::TestDataset::test_to_array\", \"xarray/tests/test_dataset.py::TestDataset::test_to_dict_with_numpy_attrs\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_dtype_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_invalid_sample_dims\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_name\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_to_unstacked_dataset\", \"xarray/tests/test_dataset.py::TestDataset::test_to_stacked_array_to_unstacked_dataset_different_dimension\", \"xarray/tests/test_dataset.py::TestDataset::test_unary_ops\", \"xarray/tests/test_dataset.py::TestDataset::test_unicode_data\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack_errors\", \"xarray/tests/test_dataset.py::TestDataset::test_unstack_fill_value\", \"xarray/tests/test_dataset.py::TestDataset::test_update\", \"xarray/tests/test_dataset.py::TestDataset::test_update_auto_align\", \"xarray/tests/test_dataset.py::TestDataset::test_update_index\", \"xarray/tests/test_dataset.py::TestDataset::test_update_overwrite_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_variable\", \"xarray/tests/test_dataset.py::TestDataset::test_variable_indexing\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variable_multiindex\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variable_same_name\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variables_default_coords\", \"xarray/tests/test_dataset.py::TestDataset::test_virtual_variables_time\", \"xarray/tests/test_dataset.py::TestDataset::test_where\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop_empty\", \"xarray/tests/test_dataset.py::TestDataset::test_where_drop_no_indexes\", \"xarray/tests/test_dataset.py::TestDataset::test_where_other\", \"xarray/tests/test_dataset.py::test_coarsen[1-pad-right-False]\", \"xarray/tests/test_dataset.py::test_coarsen[1-pad-right-True]\", \"xarray/tests/test_dataset.py::test_coarsen[1-trim-left-False]\", \"xarray/tests/test_dataset.py::test_coarsen[1-trim-left-True]\", \"xarray/tests/test_dataset.py::test_coarsen_absent_dims_error[1]\", \"xarray/tests/test_dataset.py::test_coarsen_coords[1-False]\", \"xarray/tests/test_dataset.py::test_coarsen_coords[1-True]\", \"xarray/tests/test_dataset.py::test_coarsen_keep_attrs\", \"xarray/tests/test_dataset.py::test_constructor_raises_with_invalid_coords[unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords1]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords2]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords3]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords4]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords5]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords6]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords7]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords8]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords0-unaligned_coords9]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords0]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords1]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords2]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords3]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords4]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords5]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords6]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords7]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords8]\", \"xarray/tests/test_dataset.py::test_dataset_constructor_aligns_to_explicit_coords[coords1-unaligned_coords9]\", \"xarray/tests/test_dataset.py::test_differentiate[1-False]\", \"xarray/tests/test_dataset.py::test_differentiate[1-True]\", \"xarray/tests/test_dataset.py::test_differentiate[2-False]\", \"xarray/tests/test_dataset.py::test_differentiate[2-True]\", \"xarray/tests/test_dataset.py::test_differentiate_datetime[False]\", \"xarray/tests/test_dataset.py::test_differentiate_datetime[True]\", \"xarray/tests/test_dataset.py::test_dir_expected_attrs[None]\", \"xarray/tests/test_dataset.py::test_dir_non_string[None]\", \"xarray/tests/test_dataset.py::test_dir_unicode[None]\", \"xarray/tests/test_dataset.py::test_error_message_on_set_supplied\", \"xarray/tests/test_dataset.py::test_integrate[False]\", \"xarray/tests/test_dataset.py::test_integrate[True]\", \"xarray/tests/test_dataset.py::test_isin[test_elements0]\", \"xarray/tests/test_dataset.py::test_isin[test_elements1]\", \"xarray/tests/test_dataset.py::test_isin[test_elements2]\", \"xarray/tests/test_dataset.py::test_isin_dataset\", \"xarray/tests/test_dataset.py::test_no_dict\", \"xarray/tests/test_dataset.py::test_raise_no_warning_for_nan_in_binary_ops\", \"xarray/tests/test_dataset.py::test_rolling_construct[1-False]\", \"xarray/tests/test_dataset.py::test_rolling_construct[1-True]\", \"xarray/tests/test_dataset.py::test_rolling_construct[2-False]\", \"xarray/tests/test_dataset.py::test_rolling_construct[2-True]\", \"xarray/tests/test_dataset.py::test_rolling_construct[3-False]\", \"xarray/tests/test_dataset.py::test_rolling_construct[3-True]\", \"xarray/tests/test_dataset.py::test_rolling_construct[4-False]\", \"xarray/tests/test_dataset.py::test_rolling_construct[4-True]\", \"xarray/tests/test_dataset.py::test_rolling_keep_attrs\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-1-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-1-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-2-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-2-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-3-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-3-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-None-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[1-None-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-1-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-1-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-2-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-2-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-3-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-3-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-None-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[2-None-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-1-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-1-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-2-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-2-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-3-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-3-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-None-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[3-None-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-1-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-1-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-2-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-2-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-3-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-3-True]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-None-False]\", \"xarray/tests/test_dataset.py::test_rolling_pandas_compat[4-None-True]\", \"xarray/tests/test_dataset.py::test_rolling_properties[1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[max-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[mean-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[median-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[min-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[std-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[sum-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-1-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-2-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-3-None-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-1-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-1-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-1-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-1-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-2-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-2-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-2-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-2-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-3-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-3-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-3-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-3-True-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-None-False-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-None-False-2]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-None-True-1]\", \"xarray/tests/test_dataset.py::test_rolling_reduce[var-4-None-True-2]\", \"xarray/tests/test_dataset.py::test_subclass_slots\", \"xarray/tests/test_dataset.py::test_trapz_datetime[np-False]\", \"xarray/tests/test_dataset.py::test_trapz_datetime[np-True]\", \"xarray/tests/test_dataset.py::test_weakref\"]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "asv_bench/benchmarks/pandas.py",
+    "xarray/core/dataset.py",
+    "xarray/core/indexes.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_dataset.py"
+  ],
+  "patch_diff_details": {
+    "asv_bench/benchmarks/pandas.py": {
+      "diffs": [
+        {
+          "start_line_old": 0,
+          "end_line_old": 0
+        }
+      ]
+    },
+    "xarray/core/dataset.py": {
+      "diffs": [
+        {
+          "start_line_old": 4546,
+          "end_line_old": 4550,
+          "file_pos": 5,
+          "file_context_length": 92509,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+          "closest_snippet_line_distance": 771,
+          "pos": 28,
+          "context_length": 39181
+        },
+        {
+          "start_line_old": 4560,
+          "end_line_old": 4564,
+          "file_pos": 5,
+          "file_context_length": 92509,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+          "closest_snippet_line_distance": 785,
+          "pos": 28,
+          "context_length": 39181
+        },
+        {
+          "start_line_old": 4583,
+          "end_line_old": 4594,
+          "file_pos": 5,
+          "file_context_length": 92509,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+          "closest_snippet_line_distance": 815,
+          "pos": 28,
+          "context_length": 39181
+        },
+        {
+          "start_line_old": 4634,
+          "end_line_old": 4634,
+          "file_pos": 5,
+          "file_context_length": 92509,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+          "closest_snippet_line_distance": 855,
+          "pos": 28,
+          "context_length": 39181
+        },
+        {
+          "start_line_old": 4650,
+          "end_line_old": 4652,
+          "file_pos": 5,
+          "file_context_length": 92509,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+          "closest_snippet_line_distance": 873,
+          "pos": 28,
+          "context_length": 39181
+        }
+      ]
+    },
+    "xarray/core/indexes.py": {
+      "diffs": [
+        {
+          "start_line_old": 12,
+          "end_line_old": 12
+        },
+        {
+          "start_line_old": 28,
+          "end_line_old": 32
+        }
+      ]
+    }
+  },
+  "vectors": 976,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_align.1_align.1",
+      "distance": 0.8404841423034668,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 69,
+      "end_line": 255,
+      "tokens": 1897,
+      "context_length": 1897
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_pkg_resources_",
+      "distance": 0.8543546199798584,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 603,
+      "context_length": 2500
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_22.4.2.iris_Cube.1",
+      "distance": 0.859794020652771,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 433,
+      "context_length": 2933
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_np_vectorized_assignment_values.1",
+      "distance": 0.8663755059242249,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 730,
+      "context_length": 3663
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_copy__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 0.8758019208908081,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 136,
+      "tokens": 647,
+      "context_length": 4310,
+      "file_pos": 5
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 0.9296280145645142,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 635,
+      "end_line": 840,
+      "tokens": 2707,
+      "context_length": 7017
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/unstacking.py_np_",
+      "distance": 0.942909836769104,
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 159,
+      "context_length": 7176
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/reindexing.py_np_",
+      "distance": 0.944973349571228,
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 413,
+      "context_length": 7589
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataarray_missing.py_pd_",
+      "distance": 0.9554609060287476,
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 531,
+      "context_length": 8120
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_os_IOSingleNetCDF.make_ds.self.ds.self.vinds.1",
+      "distance": 0.9656699895858765,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 715,
+      "context_length": 8835
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 0.9673651456832886,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 516,
+      "end_line": 712,
+      "tokens": 2442,
+      "context_length": 11277
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.sortby_Dataset.unify_chunks.13.1",
+      "distance": 0.9757096767425537,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 5161,
+      "end_line": 5721,
+      "tokens": 5042,
+      "context_length": 16319,
+      "file_pos": 11
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.unstack_DataArray.unstack.3.1",
+      "distance": 0.9791814088821411,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1846,
+      "end_line": 1899,
+      "tokens": 458,
+      "context_length": 16777
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.load_store_Dataset.data_vars.2.1",
+      "distance": 0.983608067035675,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 555,
+      "end_line": 1390,
+      "tokens": 6285,
+      "context_length": 23062,
+      "file_pos": 11
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/alignment.py_reindex_variables.10_reindex_variables.13.1",
+      "distance": 0.9870434999465942,
+      "file_path": "xarray/core/alignment.py",
+      "start_line": 534,
+      "end_line": 603,
+      "tokens": 663,
+      "context_length": 23725
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/doc/conf.py_1_nbsphinx_execute.1",
+      "distance": 1.0005385875701904,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 647,
+      "context_length": 24372
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py_DataArrayGroupBy._restore_dim_order_DataArrayGroupBy._restore_dim_order",
+      "distance": 1.0018532276153564,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 740,
+      "end_line": 751,
+      "tokens": 123,
+      "context_length": 24495
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/utils.py_1_maybe_cast_to_coords_dtype.2.1",
+      "distance": 1.0042009353637695,
+      "file_path": "xarray/core/utils.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 467,
+      "context_length": 24962
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/groupby.py__ensure_1d__ensure_1d.2.1",
+      "distance": 1.0050311088562012,
+      "file_path": "xarray/core/groupby.py",
+      "start_line": 186,
+      "end_line": 200,
+      "tokens": 174,
+      "context_length": 25136
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/resample_cftime.py_CFTimeGrouper.first_items_CFTimeGrouper.first_items.11.1",
+      "distance": 1.0103522539138794,
+      "file_path": "xarray/core/resample_cftime.py",
+      "start_line": 80,
+      "end_line": 110,
+      "tokens": 261,
+      "context_length": 25397
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+      "distance": 1.0117478370666504,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 3030,
+      "end_line": 3779,
+      "tokens": 6067,
+      "context_length": 31464,
+      "file_pos": 15
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.reorder_levels_DataArray.reorder_levels.8.1",
+      "distance": 1.0140373706817627,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1755,
+      "end_line": 1790,
+      "tokens": 293,
+      "context_length": 31757
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/ci/min_deps_check.py_1_warning.1",
+      "distance": 1.0150755643844604,
+      "file_path": "ci/min_deps_check.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 227,
+      "context_length": 31984
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/util/print_versions.py_show_versions_",
+      "distance": 1.0150843858718872,
+      "file_path": "xarray/util/print_versions.py",
+      "start_line": 80,
+      "end_line": 161,
+      "tokens": 707,
+      "context_length": 32691
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_dt_broadcast_variables",
+      "distance": 1.0167429447174072,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 118,
+      "context_length": 32809
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/nputils.py_warnings_nanlast.4.1",
+      "distance": 1.0191571712493896,
+      "file_path": "xarray/core/nputils.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 244,
+      "context_length": 33053
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_warnings_T.1",
+      "distance": 1.0219011306762695,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 181,
+      "context_length": 33234
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.assign_Dataset.roll.10.1",
+      "distance": 1.0220211744308472,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 4401,
+      "end_line": 5159,
+      "tokens": 5947,
+      "context_length": 39181,
+      "file_pos": 20
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/convert.py_1__filter_attrs.2.1",
+      "distance": 1.0220365524291992,
+      "file_path": "xarray/convert.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 321,
+      "context_length": 39502
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_1__THIS_ARRAY.1",
+      "distance": 1.0272889137268066,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 154,
+      "context_length": 39656
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/plot/utils.py_itertools__determine_extend.4.1",
+      "distance": 1.0312399864196777,
+      "file_path": "xarray/plot/utils.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 283,
+      "context_length": 39939
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py__decompose_outer_indexer.10__decompose_outer_indexer.15.1",
+      "distance": 1.032327651977539,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1000,
+      "end_line": 1067,
+      "tokens": 746,
+      "context_length": 40685
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/interp.py_np_new_y_long.1",
+      "distance": 1.0325510501861572,
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 184,
+      "context_length": 40869
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray.sortby_DataArray.sortby.3.1",
+      "distance": 1.0333068370819092,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 2970,
+      "end_line": 3026,
+      "tokens": 578,
+      "context_length": 41447
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/xarray/xarray/coding/cftimeindex.py_CFTimeIndex._partial_date_slice_CFTimeIndex._partial_date_slice.7.1",
+      "distance": 1.0368330478668213,
+      "file_path": "xarray/coding/cftimeindex.py",
+      "start_line": 262,
+      "end_line": 326,
+      "tokens": 644,
+      "context_length": 42091
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/xarray/xarray/plot/plot.py__plot2d.newplotfunc.4.add_colorbar__plot2d.newplotfunc.4.42.1",
+      "distance": 1.039273738861084,
+      "file_path": "xarray/plot/plot.py",
+      "start_line": 617,
+      "end_line": 773,
+      "tokens": 1721,
+      "context_length": 43812
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/xarray/xarray/coding/times.py_re__unpack_netcdf_time_units.matches.4.1",
+      "distance": 1.0399935245513916,
+      "file_path": "xarray/coding/times.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 451,
+      "context_length": 44263
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/xarray/xarray/core/parallel.py_1_assert_chunks_compatible.3.1.1",
+      "distance": 1.0401952266693115,
+      "file_path": "xarray/core/parallel.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 226,
+      "context_length": 44489
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/alignment.py",
+      "position": 1,
+      "tokens": 5962,
+      "context_length": 5962
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 2,
+      "tokens": 603,
+      "context_length": 6565
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 3,
+      "tokens": 31933,
+      "context_length": 38498
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 4,
+      "tokens": 1412,
+      "context_length": 39910
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 5,
+      "tokens": 52599,
+      "context_length": 92509
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 6,
+      "tokens": 7823,
+      "context_length": 100332
+    },
+    {
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "position": 7,
+      "tokens": 159,
+      "context_length": 100491
+    },
+    {
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "position": 8,
+      "tokens": 413,
+      "context_length": 100904
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "position": 9,
+      "tokens": 531,
+      "context_length": 101435
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "position": 10,
+      "tokens": 3605,
+      "context_length": 105040
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 11,
+      "tokens": 6713,
+      "context_length": 111753
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 12,
+      "tokens": 3729,
+      "context_length": 115482
+    },
+    {
+      "file_path": "xarray/core/groupby.py",
+      "position": 13,
+      "tokens": 7860,
+      "context_length": 123342
+    },
+    {
+      "file_path": "xarray/core/utils.py",
+      "position": 14,
+      "tokens": 5456,
+      "context_length": 128798
+    },
+    {
+      "file_path": "xarray/core/resample_cftime.py",
+      "position": 15,
+      "tokens": 3314,
+      "context_length": 132112
+    },
+    {
+      "file_path": "ci/min_deps_check.py",
+      "position": 16,
+      "tokens": 1534,
+      "context_length": 133646
+    },
+    {
+      "file_path": "xarray/util/print_versions.py",
+      "position": 17,
+      "tokens": 1212,
+      "context_length": 134858
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 18,
+      "tokens": 5278,
+      "context_length": 140136
+    },
+    {
+      "file_path": "xarray/core/nputils.py",
+      "position": 19,
+      "tokens": 2278,
+      "context_length": 142414
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 20,
+      "tokens": 13402,
+      "context_length": 155816
+    },
+    {
+      "file_path": "xarray/convert.py",
+      "position": 21,
+      "tokens": 2353,
+      "context_length": 158169
+    },
+    {
+      "file_path": "xarray/core/coordinates.py",
+      "position": 22,
+      "tokens": 2972,
+      "context_length": 161141
+    },
+    {
+      "file_path": "xarray/plot/utils.py",
+      "position": 23,
+      "tokens": 6477,
+      "context_length": 167618
+    },
+    {
+      "file_path": "xarray/core/indexing.py",
+      "position": 24,
+      "tokens": 11663,
+      "context_length": 179281
+    },
+    {
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "position": 25,
+      "tokens": 485,
+      "context_length": 179766
+    },
+    {
+      "file_path": "xarray/coding/cftimeindex.py",
+      "position": 26,
+      "tokens": 5986,
+      "context_length": 185752
+    },
+    {
+      "file_path": "xarray/plot/plot.py",
+      "position": 27,
+      "tokens": 8187,
+      "context_length": 193939
+    },
+    {
+      "file_path": "xarray/coding/times.py",
+      "position": 28,
+      "tokens": 3854,
+      "context_length": 197793
+    },
+    {
+      "file_path": "xarray/core/parallel.py",
+      "position": 29,
+      "tokens": 5058,
+      "context_length": 202851
+    }
+  ]
+}

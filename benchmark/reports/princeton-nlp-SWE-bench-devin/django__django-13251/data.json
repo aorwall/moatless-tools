@@ -1,0 +1,841 @@
+{
+  "instance_id": "django__django-13251",
+  "model_patch": "diff --git a/django/db/models/query.py b/django/db/models/query.py\nindex 07d6ffd4ca..783216b7fb 100644\n--- a/django/db/models/query.py\n+++ b/django/db/models/query.py\n@@ -949,7 +949,7 @@ class QuerySet:\n         self._not_support_combined_queries('exclude')\n         return self._filter_or_exclude(True, *args, **kwargs)\n \n-    def _filter_or_exclude(self, negate, *args, **kwargs):\n+    def _filter_or_exclude(self, negation, *args, **kwargs):\n         if args or kwargs:\n             assert not self.query.is_sliced, \\\n                 \"Cannot filter a query once a slice has been taken.\"\n@@ -957,13 +957,13 @@ class QuerySet:\n         clone = self._chain()\n         if self._defer_next_filter:\n             self._defer_next_filter = False\n-            clone._deferred_filter = negate, args, kwargs\n+            clone._deferred_filter = negation, args, kwargs\n         else:\n-            clone._filter_or_exclude_inplace(negate, *args, **kwargs)\n+            clone._filter_or_exclude_inplace(negation, *args, **kwargs)\n         return clone\n \n-    def _filter_or_exclude_inplace(self, negate, *args, **kwargs):\n-        if negate:\n+    def _filter_or_exclude_inplace(self, negation, *args, **kwargs):\n+        if negation:\n             self._query.add_q(~Q(*args, **kwargs))\n         else:\n             self._query.add_q(Q(*args, **kwargs))\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/db/models/query.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "b6dfdaff33f19757b1cb9b3bf1d17f28b94859d4",
+  "patch": "diff --git a/django/db/models/query.py b/django/db/models/query.py\n--- a/django/db/models/query.py\n+++ b/django/db/models/query.py\n@@ -204,7 +204,7 @@ def __init__(self, model=None, query=None, using=None, hints=None):\n     def query(self):\n         if self._deferred_filter:\n             negate, args, kwargs = self._deferred_filter\n-            self._filter_or_exclude_inplace(negate, *args, **kwargs)\n+            self._filter_or_exclude_inplace(negate, args, kwargs)\n             self._deferred_filter = None\n         return self._query\n \n@@ -939,7 +939,7 @@ def filter(self, *args, **kwargs):\n         set.\n         \"\"\"\n         self._not_support_combined_queries('filter')\n-        return self._filter_or_exclude(False, *args, **kwargs)\n+        return self._filter_or_exclude(False, args, kwargs)\n \n     def exclude(self, *args, **kwargs):\n         \"\"\"\n@@ -947,9 +947,9 @@ def exclude(self, *args, **kwargs):\n         set.\n         \"\"\"\n         self._not_support_combined_queries('exclude')\n-        return self._filter_or_exclude(True, *args, **kwargs)\n+        return self._filter_or_exclude(True, args, kwargs)\n \n-    def _filter_or_exclude(self, negate, *args, **kwargs):\n+    def _filter_or_exclude(self, negate, args, kwargs):\n         if args or kwargs:\n             assert not self.query.is_sliced, \\\n                 \"Cannot filter a query once a slice has been taken.\"\n@@ -959,10 +959,10 @@ def _filter_or_exclude(self, negate, *args, **kwargs):\n             self._defer_next_filter = False\n             clone._deferred_filter = negate, args, kwargs\n         else:\n-            clone._filter_or_exclude_inplace(negate, *args, **kwargs)\n+            clone._filter_or_exclude_inplace(negate, args, kwargs)\n         return clone\n \n-    def _filter_or_exclude_inplace(self, negate, *args, **kwargs):\n+    def _filter_or_exclude_inplace(self, negate, args, kwargs):\n         if negate:\n             self._query.add_q(~Q(*args, **kwargs))\n         else:\n@@ -983,7 +983,7 @@ def complex_filter(self, filter_obj):\n             clone.query.add_q(filter_obj)\n             return clone\n         else:\n-            return self._filter_or_exclude(False, **filter_obj)\n+            return self._filter_or_exclude(False, args=(), kwargs=filter_obj)\n \n     def _combinator_query(self, combinator, *other_qs, all=False):\n         # Clone the query to inherit the select list and everything\n",
+  "test_patch": "diff --git a/tests/queries/models.py b/tests/queries/models.py\n--- a/tests/queries/models.py\n+++ b/tests/queries/models.py\n@@ -42,6 +42,7 @@ class Note(models.Model):\n     note = models.CharField(max_length=100)\n     misc = models.CharField(max_length=10)\n     tag = models.ForeignKey(Tag, models.SET_NULL, blank=True, null=True)\n+    negate = models.BooleanField(default=True)\n \n     class Meta:\n         ordering = ['note']\ndiff --git a/tests/queries/tests.py b/tests/queries/tests.py\n--- a/tests/queries/tests.py\n+++ b/tests/queries/tests.py\n@@ -47,7 +47,7 @@ def setUpTestData(cls):\n \n         cls.n1 = Note.objects.create(note='n1', misc='foo', id=1)\n         cls.n2 = Note.objects.create(note='n2', misc='bar', id=2)\n-        cls.n3 = Note.objects.create(note='n3', misc='foo', id=3)\n+        cls.n3 = Note.objects.create(note='n3', misc='foo', id=3, negate=False)\n \n         ann1 = Annotation.objects.create(name='a1', tag=cls.t1)\n         ann1.notes.add(cls.n1)\n@@ -1216,6 +1216,13 @@ def test_field_with_filterable(self):\n             [self.a3, self.a4],\n         )\n \n+    def test_negate_field(self):\n+        self.assertSequenceEqual(\n+            Note.objects.filter(negate=True),\n+            [self.n1, self.n2],\n+        )\n+        self.assertSequenceEqual(Note.objects.exclude(negate=True), [self.n3])\n+\n \n class Queries2Tests(TestCase):\n     @classmethod\n",
+  "problem_statement": "Filtering on a field named `negate` raises a TypeError\nDescription\n\t\nFiltering on a model with a field named negate raises a TypeError.\nFor example:\nclass Foo(models.Model):\n\tnegate = models.BooleanField()\nFoo.objects.filter(negate=True)\nraises TypeError: _filter_or_exclude() got multiple values for argument 'negate'\nnegate is not documented as a reserved argument for .filter(). I'm currently using .filter(negate__exact=True) as a workaround.\n",
+  "hints_text": "We should either document this limitation or change _filter_or_exclude and friends signature from (negate, *args, **kwargs) to (negate, args, kwargs). I think the second approach is favourable as there's not much benefits in using arguments unpacking in these private methods as long as the public methods filter and exclude preserve their signature.\nAaron, would you be interested in submitting a PR with the changes below plus a regression test in tests/query/tests.py? django/db/models/query.py diff --git a/django/db/models/query.py b/django/db/models/query.py index 07d6ffd4ca..d655ede8d9 100644 a b class QuerySet: 204204 def query(self): 205205 if self._deferred_filter: 206206 negate, args, kwargs = self._deferred_filter 207 self._filter_or_exclude_inplace(negate, *args, **kwargs) 207 self._filter_or_exclude_inplace(negate, args, kwargs) 208208 self._deferred_filter = None 209209 return self._query 210210 \u2026 \u2026 class QuerySet: 939939 set. 940940 \"\"\" 941941 self._not_support_combined_queries('filter') 942 return self._filter_or_exclude(False, *args, **kwargs) 942 return self._filter_or_exclude(False, args, kwargs) 943943 944944 def exclude(self, *args, **kwargs): 945945 \"\"\" \u2026 \u2026 class QuerySet: 947947 set. 948948 \"\"\" 949949 self._not_support_combined_queries('exclude') 950 return self._filter_or_exclude(True, *args, **kwargs) 950 return self._filter_or_exclude(True, args, kwargs) 951951 952 def _filter_or_exclude(self, negate, *args, **kwargs): 952 def _filter_or_exclude(self, negate, args, kwargs): 953953 if args or kwargs: 954954 assert not self.query.is_sliced, \\ 955955 \"Cannot filter a query once a slice has been taken.\" \u2026 \u2026 class QuerySet: 959959 self._defer_next_filter = False 960960 clone._deferred_filter = negate, args, kwargs 961961 else: 962 clone._filter_or_exclude_inplace(negate, *args, **kwargs) 962 clone._filter_or_exclude_inplace(negate, args, kwargs) 963963 return clone 964964 965 def _filter_or_exclude_inplace(self, negate, *args, **kwargs): 965 def _filter_or_exclude_inplace(self, negate, args, kwargs): 966966 if negate: 967967 self._query.add_q(~Q(*args, **kwargs)) 968968 else: \u2026 \u2026 class QuerySet: 983983 clone.query.add_q(filter_obj) 984984 return clone 985985 else: 986 return self._filter_or_exclude(False, **filter_obj) 986 return self._filter_or_exclude(False, args=(), kwargs=filter_obj) 987987 988988 def _combinator_query(self, combinator, *other_qs, all=False): 989989 # Clone the query to inherit the select list and everything\nReplying to Simon Charette: Aaron, would you be interested in submitting a PR with the changes below plus a regression test in tests/query/tests.py? Sure! I can do that this evening. Thanks for the patch :)",
+  "created_at": "2020-07-28T11:59:53Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"test_negate_field (queries.tests.Queries1Tests)\"]",
+  "PASS_TO_PASS": "[\"#13227 -- If a queryset is already evaluated, it can still be used as a query arg\", \"Delete queries can safely contain sliced subqueries\", \"Subselects honor any manual ordering\", \"hint: inverting your ordering might do what you need\", \"test_21001 (queries.tests.EmptyStringsAsNullTest)\", \"test_AB_ACB (queries.tests.UnionTests)\", \"test_A_AB (queries.tests.UnionTests)\", \"test_A_AB2 (queries.tests.UnionTests)\", \"test_BAB_BAC (queries.tests.UnionTests)\", \"test_BAB_BACB (queries.tests.UnionTests)\", \"test_BA_BCA__BAB_BAC_BCA (queries.tests.UnionTests)\", \"test_annotated_ordering (queries.tests.QuerysetOrderedTests)\", \"test_avoid_infinite_loop_on_too_many_subqueries (queries.tests.Queries1Tests)\", \"test_can_combine_queries_using_and_and_or_operators (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_can_get_items_using_index_and_slice_notation (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_can_get_number_of_items_in_queryset_using_standard_len (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_cleared_default_ordering (queries.tests.QuerysetOrderedTests)\", \"test_combine_join_reuse (queries.tests.Queries4Tests)\", \"test_common_mixed_case_foreign_keys (queries.tests.Queries1Tests)\", \"test_correct_lookup (queries.tests.RelatedLookupTypeTests)\", \"test_deferred_load_qs_pickling (queries.tests.Queries1Tests)\", \"test_direct_exclude (queries.tests.EmptyStringsAsNullTest)\", \"test_disjunction_promotion1 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion2 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion3 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion3_demote (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion4 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion4_demote (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion5_demote (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion6 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion7 (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion_fexpression (queries.tests.DisjunctionPromotionTests)\", \"test_disjunction_promotion_select_related (queries.tests.DisjunctionPromotionTests)\", \"test_distinct_ordered_sliced_subquery (queries.tests.SubqueryTests)\", \"test_distinct_ordered_sliced_subquery_aggregation (queries.tests.Queries6Tests)\", \"test_double_exclude (queries.tests.NullInExcludeTest)\", \"test_double_exclude (queries.tests.Queries1Tests)\", \"test_double_subquery_in (queries.tests.DoubleInSubqueryTests)\", \"test_empty_full_handling_conjunction (queries.tests.WhereNodeTest)\", \"test_empty_full_handling_disjunction (queries.tests.WhereNodeTest)\", \"test_empty_nodes (queries.tests.WhereNodeTest)\", \"test_empty_queryset (queries.tests.QuerysetOrderedTests)\", \"test_empty_resultset_sql (queries.tests.WeirdQuerysetSlicingTests)\", \"test_empty_sliced_subquery (queries.tests.WeirdQuerysetSlicingTests)\", \"test_empty_sliced_subquery_exclude (queries.tests.WeirdQuerysetSlicingTests)\", \"test_empty_string_promotion (queries.tests.EmptyStringPromotionTests)\", \"test_emptyqueryset_values (queries.tests.EmptyQuerySetTests)\", \"test_error_raised_on_filter_with_dictionary (queries.tests.Queries1Tests)\", \"test_evaluated_proxy_count (queries.tests.ProxyQueryCleanupTest)\", \"test_exclude (queries.tests.Queries1Tests)\", \"test_exclude_in (queries.tests.Queries1Tests)\", \"test_exclude_many_to_many (queries.tests.ManyToManyExcludeTest)\", \"test_exclude_nullable_fields (queries.tests.ExcludeTests)\", \"test_exclude_plain (queries.tests.ExcludeTest17600)\", \"test_exclude_plain_distinct (queries.tests.ExcludeTest17600)\", \"test_exclude_reverse_fk_field_ref (queries.tests.ExcludeTests)\", \"test_exclude_with_circular_fk_relation (queries.tests.ExcludeTests)\", \"test_exclude_with_q_is_equal_to_plain_exclude (queries.tests.ExcludeTest17600)\", \"test_exclude_with_q_is_equal_to_plain_exclude_variation (queries.tests.ExcludeTest17600)\", \"test_exclude_with_q_object_distinct (queries.tests.ExcludeTest17600)\", \"test_exclude_with_q_object_no_distinct (queries.tests.ExcludeTest17600)\", \"test_excluded_intermediary_m2m_table_joined (queries.tests.Queries1Tests)\", \"test_exists (queries.tests.ExistsSql)\", \"test_explicit_ordering (queries.tests.QuerysetOrderedTests)\", \"test_extra_multiple_select_params_values_order_by (queries.tests.ValuesQuerysetTests)\", \"test_extra_select_literal_percent_s (queries.tests.Queries5Tests)\", \"test_extra_select_params_values_order_in_extra (queries.tests.ValuesQuerysetTests)\", \"test_extra_values (queries.tests.ValuesQuerysetTests)\", \"test_extra_values_list (queries.tests.ValuesQuerysetTests)\", \"test_extra_values_order_in_extra (queries.tests.ValuesQuerysetTests)\", \"test_extra_values_order_multiple (queries.tests.ValuesQuerysetTests)\", \"test_extra_values_order_twice (queries.tests.ValuesQuerysetTests)\", \"test_field_error_values_list (queries.tests.ValuesQuerysetTests)\", \"test_field_with_filterable (queries.tests.Queries1Tests)\", \"test_filter_reverse_non_integer_pk (queries.tests.Queries4Tests)\", \"test_fk_reuse (queries.tests.JoinReuseTest)\", \"test_fk_reuse_annotation (queries.tests.JoinReuseTest)\", \"test_fk_reuse_disjunction (queries.tests.JoinReuseTest)\", \"test_fk_reuse_order_by (queries.tests.JoinReuseTest)\", \"test_fk_reuse_select_related (queries.tests.JoinReuseTest)\", \"test_flat_extra_values_list (queries.tests.ValuesQuerysetTests)\", \"test_flat_values_list (queries.tests.ValuesQuerysetTests)\", \"test_get_clears_ordering (queries.tests.Queries1Tests)\", \"test_heterogeneous_qs_combination (queries.tests.Queries1Tests)\", \"test_in_list_limit (queries.tests.ConditionalTests)\", \"test_in_query (queries.tests.ToFieldTests)\", \"test_in_subquery (queries.tests.ToFieldTests)\", \"test_infinite_loop (queries.tests.ConditionalTests)\", \"test_invalid_index (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_invalid_order_by (queries.tests.QuerySetExceptionTests)\", \"test_invalid_queryset_model (queries.tests.QuerySetExceptionTests)\", \"test_invalid_values (queries.tests.TestInvalidValuesRelation)\", \"test_inverted_q_across_relations (queries.tests.JoinReuseTest)\", \"test_isnull_filter_promotion (queries.tests.NullJoinPromotionOrTest)\", \"test_iter_exceptions (queries.tests.QuerySetExceptionTests)\", \"test_join_already_in_query (queries.tests.NullableRelOrderingTests)\", \"test_join_reuse_order (queries.tests.Queries4Tests)\", \"test_joined_exclude (queries.tests.EmptyStringsAsNullTest)\", \"test_lookup_constraint_fielderror (queries.tests.Queries1Tests)\", \"test_multiple_columns_with_the_same_name_slice (queries.tests.Queries6Tests)\", \"test_named_values_list_bad_field_name (queries.tests.ValuesQuerysetTests)\", \"test_named_values_list_expression (queries.tests.ValuesQuerysetTests)\", \"test_named_values_list_expression_with_default_alias (queries.tests.ValuesQuerysetTests)\", \"test_named_values_list_flat (queries.tests.ValuesQuerysetTests)\", \"test_named_values_list_with_fields (queries.tests.ValuesQuerysetTests)\", \"test_named_values_list_without_fields (queries.tests.ValuesQuerysetTests)\", \"test_nested_exclude (queries.tests.Queries1Tests)\", \"test_nested_in_subquery (queries.tests.ToFieldTests)\", \"test_nested_queries_sql (queries.tests.Queries6Tests)\", \"test_no_default_or_explicit_ordering (queries.tests.QuerysetOrderedTests)\", \"test_no_extra_params (queries.tests.DefaultValuesInsertTest)\", \"test_no_fields_cloning (queries.tests.CloneTests)\", \"test_no_model_options_cloning (queries.tests.CloneTests)\", \"test_non_nullable_fk_not_promoted (queries.tests.ValuesJoinPromotionTests)\", \"test_null_in_exclude_qs (queries.tests.NullInExcludeTest)\", \"test_null_join_demotion (queries.tests.NullJoinPromotionOrTest)\", \"test_or_with_both_slice (queries.tests.QuerySetBitwiseOperationTests)\", \"test_or_with_both_slice_and_ordering (queries.tests.QuerySetBitwiseOperationTests)\", \"test_or_with_lhs_slice (queries.tests.QuerySetBitwiseOperationTests)\", \"test_or_with_rhs_slice (queries.tests.QuerySetBitwiseOperationTests)\", \"test_order_by_extra (queries.tests.QuerysetOrderedTests)\", \"test_order_by_join_unref (queries.tests.Queries1Tests)\", \"test_order_by_raw_column_alias_warning (queries.tests.Queries1Tests)\", \"test_order_by_rawsql (queries.tests.Queries1Tests)\", \"test_order_by_resetting (queries.tests.Queries4Tests)\", \"test_order_by_reverse_fk (queries.tests.Queries4Tests)\", \"test_order_by_tables (queries.tests.Queries1Tests)\", \"test_ordering (queries.tests.Queries5Tests)\", \"test_parallel_iterators (queries.tests.Queries6Tests)\", \"test_primary_key (queries.tests.IsNullTests)\", \"test_reasonable_number_of_subq_aliases (queries.tests.Queries1Tests)\", \"test_recursive_fk (queries.tests.ToFieldTests)\", \"test_recursive_fk_reverse (queries.tests.ToFieldTests)\", \"test_related_sliced_subquery (queries.tests.SubqueryTests)\", \"test_reverse_in (queries.tests.ToFieldTests)\", \"test_reverse_trimming (queries.tests.ReverseJoinTrimmingTest)\", \"test_revfk_noreuse (queries.tests.JoinReuseTest)\", \"test_revo2o_reuse (queries.tests.JoinReuseTest)\", \"test_single_object (queries.tests.ToFieldTests)\", \"test_single_object_reverse (queries.tests.ToFieldTests)\", \"test_slice_subquery_and_query (queries.tests.SubqueryTests)\", \"test_slicing_can_slice_again_after_slicing (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_cannot_combine_queries_once_sliced (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_cannot_filter_queryset_once_sliced (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_cannot_reorder_queryset_once_sliced (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_with_steps_can_be_used (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_with_tests_is_not_lazy (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_slicing_without_step_is_lazy (queries.tests.QuerySetSupportsPythonIdioms)\", \"test_subquery_condition (queries.tests.Queries1Tests)\", \"test_subquery_exclude_outerref (queries.tests.ExcludeTests)\", \"test_ticket10028 (queries.tests.NullableRelOrderingTests)\", \"test_ticket10181 (queries.tests.Queries4Tests)\", \"test_ticket10205 (queries.tests.Queries1Tests)\", \"test_ticket10432 (queries.tests.GeneratorExpressionTests)\", \"test_ticket10432 (queries.tests.Queries1Tests)\", \"test_ticket1050 (queries.tests.Queries1Tests)\", \"test_ticket10742 (queries.tests.Queries1Tests)\", \"test_ticket11811 (queries.tests.Queries4Tests)\", \"test_ticket12239 (queries.tests.Queries2Tests)\", \"test_ticket14511 (queries.tests.ExcludeTests)\", \"test_ticket14729 (queries.tests.RawQueriesTests)\", \"test_ticket14876 (queries.tests.Queries4Tests)\", \"test_ticket15316_exclude_false (queries.tests.Queries4Tests)\", \"test_ticket15316_exclude_true (queries.tests.Queries4Tests)\", \"test_ticket15316_filter_false (queries.tests.Queries4Tests)\", \"test_ticket15316_filter_true (queries.tests.Queries4Tests)\", \"test_ticket15316_one2one_exclude_false (queries.tests.Queries4Tests)\", \"test_ticket15316_one2one_exclude_true (queries.tests.Queries4Tests)\", \"test_ticket15316_one2one_filter_false (queries.tests.Queries4Tests)\", \"test_ticket15316_one2one_filter_true (queries.tests.Queries4Tests)\", \"test_ticket15786 (queries.tests.Exclude15786)\", \"test_ticket17429 (queries.tests.Queries1Tests)\", \"test_ticket1801 (queries.tests.Queries1Tests)\", \"test_ticket19672 (queries.tests.Queries1Tests)\", \"test_ticket2091 (queries.tests.Queries1Tests)\", \"test_ticket22023 (queries.tests.Queries3Tests)\", \"test_ticket2253 (queries.tests.Queries1Tests)\", \"test_ticket2306 (queries.tests.Queries1Tests)\", \"test_ticket2400 (queries.tests.Queries1Tests)\", \"test_ticket24525 (queries.tests.Queries4Tests)\", \"test_ticket2496 (queries.tests.Queries1Tests)\", \"test_ticket3037 (queries.tests.Queries1Tests)\", \"test_ticket3141 (queries.tests.Queries1Tests)\", \"test_ticket3739 (queries.tests.Queries6Tests)\", \"test_ticket4289 (queries.tests.Queries2Tests)\", \"test_ticket4358 (queries.tests.Queries1Tests)\", \"test_ticket4464 (queries.tests.Queries1Tests)\", \"test_ticket4510 (queries.tests.Queries1Tests)\", \"test_ticket5261 (queries.tests.Queries5Tests)\", \"test_ticket6074 (queries.tests.Queries1Tests)\", \"test_ticket6154 (queries.tests.Queries1Tests)\", \"test_ticket6981 (queries.tests.Queries1Tests)\", \"test_ticket7045 (queries.tests.Queries5Tests)\", \"test_ticket7076 (queries.tests.Queries1Tests)\", \"test_ticket7095 (queries.tests.Queries4Tests)\", \"test_ticket7096 (queries.tests.Queries1Tests)\", \"test_ticket7098 (queries.tests.Queries1Tests)\", \"test_ticket7107 (queries.tests.Queries3Tests)\", \"test_ticket7155 (queries.tests.Queries1Tests)\", \"test_ticket7181 (queries.tests.Queries1Tests)\", \"test_ticket7235 (queries.tests.Queries1Tests)\", \"test_ticket7256 (queries.tests.Queries5Tests)\", \"test_ticket7277 (queries.tests.Queries1Tests)\", \"test_ticket7323 (queries.tests.Queries1Tests)\", \"test_ticket7371 (queries.tests.CustomPkTests)\", \"test_ticket7378 (queries.tests.Queries1Tests)\", \"test_ticket7759 (queries.tests.Queries2Tests)\", \"test_ticket7778 (queries.tests.SubclassFKTests)\", \"test_ticket7791 (queries.tests.Queries1Tests)\", \"test_ticket7813 (queries.tests.Queries1Tests)\", \"test_ticket7872 (queries.tests.DisjunctiveFilterTests)\", \"test_ticket8283 (queries.tests.DisjunctiveFilterTests)\", \"test_ticket8439 (queries.tests.Queries1Tests)\", \"test_ticket8597 (queries.tests.ComparisonTests)\", \"test_ticket8683 (queries.tests.Queries3Tests)\", \"test_ticket9411 (queries.tests.Queries1Tests)\", \"test_ticket9848 (queries.tests.Queries5Tests)\", \"test_ticket9926 (queries.tests.Queries1Tests)\", \"test_ticket9985 (queries.tests.Queries1Tests)\", \"test_ticket9997 (queries.tests.Queries1Tests)\", \"test_ticket_10790_1 (queries.tests.Queries1Tests)\", \"test_ticket_10790_2 (queries.tests.Queries1Tests)\", \"test_ticket_10790_3 (queries.tests.Queries1Tests)\", \"test_ticket_10790_4 (queries.tests.Queries1Tests)\", \"test_ticket_10790_5 (queries.tests.Queries1Tests)\", \"test_ticket_10790_6 (queries.tests.Queries1Tests)\", \"test_ticket_10790_7 (queries.tests.Queries1Tests)\", \"test_ticket_10790_8 (queries.tests.Queries1Tests)\", \"test_ticket_10790_combine (queries.tests.Queries1Tests)\", \"test_ticket_11320 (queries.tests.Queries6Tests)\", \"test_ticket_12807 (queries.tests.Ticket12807Tests)\", \"test_ticket_12823 (queries.tests.ManyToManyExcludeTest)\", \"test_ticket_14056 (queries.tests.Ticket14056Tests)\", \"test_ticket_17886 (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_18414 (queries.tests.ExistsSql)\", \"test_ticket_18785 (queries.tests.Ticket18785Tests)\", \"test_ticket_19151 (queries.tests.EmptyQuerySetTests)\", \"test_ticket_19964 (queries.tests.RelabelCloneTest)\", \"test_ticket_20101 (queries.tests.Ticket20101Tests)\", \"test_ticket_20250 (queries.tests.Queries1Tests)\", \"test_ticket_20788 (queries.tests.Ticket20788Tests)\", \"test_ticket_20955 (queries.tests.Ticket20955Tests)\", \"test_ticket_21203 (queries.tests.Ticket21203Tests)\", \"test_ticket_21366 (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_21376 (queries.tests.ValuesJoinPromotionTests)\", \"test_ticket_21748 (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_21748_complex_filter (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_21748_double_negated_and (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_21748_double_negated_or (queries.tests.NullJoinPromotionOrTest)\", \"test_ticket_21787 (queries.tests.ForeignKeyToBaseExcludeTests)\", \"test_ticket_21879 (queries.tests.ReverseM2MCustomPkTests)\", \"test_ticket_22429 (queries.tests.Ticket22429Tests)\", \"test_ticket_23605 (queries.tests.Ticket23605Tests)\", \"test_ticket_24278 (queries.tests.TestTicket24279)\", \"test_ticket_24605 (queries.tests.TestTicket24605)\", \"test_ticket_7302 (queries.tests.EscapingTests)\", \"test_tickets_1878_2939 (queries.tests.Queries1Tests)\", \"test_tickets_2076_7256 (queries.tests.Queries1Tests)\", \"test_tickets_2080_3592 (queries.tests.Queries1Tests)\", \"test_tickets_2874_3002 (queries.tests.Queries1Tests)\", \"test_tickets_3045_3288 (queries.tests.SelectRelatedTests)\", \"test_tickets_4088_4306 (queries.tests.Queries1Tests)\", \"test_tickets_5321_7070 (queries.tests.Queries1Tests)\", \"test_tickets_5324_6704 (queries.tests.Queries1Tests)\", \"test_tickets_6180_6203 (queries.tests.Queries1Tests)\", \"test_tickets_7087_12242 (queries.tests.Queries1Tests)\", \"test_tickets_7204_7506 (queries.tests.Queries1Tests)\", \"test_tickets_7448_7707 (queries.tests.Queries1Tests)\", \"test_tickets_7698_10202 (queries.tests.WeirdQuerysetSlicingTests)\", \"test_tickets_8921_9188 (queries.tests.Queries6Tests)\", \"test_to_field (queries.tests.ExcludeTests)\", \"test_to_field (queries.tests.IsNullTests)\", \"test_values_in_subquery (queries.tests.ValuesSubqueryTests)\", \"test_values_no_promotion_for_existing (queries.tests.ValuesJoinPromotionTests)\", \"test_values_queryset_lookup (queries.tests.RelatedLookupTypeTests)\", \"test_values_subquery (queries.tests.EmptyQuerySetTests)\", \"test_wrong_backward_lookup (queries.tests.RelatedLookupTypeTests)\", \"test_wrong_type_lookup (queries.tests.RelatedLookupTypeTests)\", \"test_zero_length_values_slicing (queries.tests.WeirdQuerysetSlicingTests)\"]",
+  "environment_setup_commit": "65dfb06a1ab56c238cc80f5e1c31f61210c4577d",
+  "patch_files": [
+    "django/db/models/query.py"
+  ],
+  "test_patch_files": [
+    "tests/queries/models.py",
+    "tests/queries/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/db/models/query.py": {
+      "diffs": [
+        {
+          "start_line_old": 207,
+          "end_line_old": 207,
+          "file_pos": 18,
+          "file_context_length": 182241,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+          "closest_snippet_line_distance": 977
+        },
+        {
+          "start_line_old": 942,
+          "end_line_old": 942,
+          "file_pos": 18,
+          "file_context_length": 182241,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+          "closest_snippet_line_distance": 242
+        },
+        {
+          "start_line_old": 950,
+          "end_line_old": 952,
+          "file_pos": 18,
+          "file_context_length": 182241,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+          "closest_snippet_line_distance": 234
+        },
+        {
+          "start_line_old": 962,
+          "end_line_old": 965,
+          "file_pos": 18,
+          "file_context_length": 182241,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+          "closest_snippet_line_distance": 222
+        },
+        {
+          "start_line_old": 986,
+          "end_line_old": 986,
+          "file_pos": 18,
+          "file_context_length": 182241,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+          "closest_snippet_line_distance": 198
+        }
+      ]
+    }
+  },
+  "vectors": 3474,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_13_BooleanFieldListFilter.expected_parameters.1.1",
+      "distance": 1.0162007808685303,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 229,
+      "end_line": 244,
+      "tokens": 196,
+      "context_length": 196
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_NullBooleanField_NullBooleanField.get_internal_type.1.1",
+      "distance": 1.0247987508773804,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1928,
+      "end_line": 1955,
+      "tokens": 234,
+      "context_length": 430
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_BooleanFieldListFilter.choices_BooleanFieldListFilter.choices.2.1",
+      "distance": 1.0498193502426147,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 246,
+      "end_line": 261,
+      "tokens": 154,
+      "context_length": 584
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_15_ChoicesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.0910724401474,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 264,
+      "end_line": 276,
+      "tokens": 149,
+      "context_length": 733
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_BooleanField_BooleanField.to_python.5",
+      "distance": 1.0995317697525024,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 936,
+      "end_line": 961,
+      "tokens": 209,
+      "context_length": 942
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._get_validation_exclusions_BaseModelForm._get_validation_exclusions.6.1",
+      "distance": 1.110649824142456,
+      "file_path": "django/forms/models.py",
+      "start_line": 310,
+      "end_line": 349,
+      "tokens": 387,
+      "context_length": 1329
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.is_nullable_Query.is_nullable.7.1",
+      "distance": 1.111906886100769,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2316,
+      "end_line": 2332,
+      "tokens": 177,
+      "context_length": 1506
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_EmptyFieldListFilter_EmptyFieldListFilter.__init__.4",
+      "distance": 1.1126630306243896,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 432,
+      "end_line": 444,
+      "tokens": 142,
+      "context_length": 1648
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_BooleanField.get_prep_value_BooleanField.formfield.2.1",
+      "distance": 1.1139795780181885,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 963,
+      "end_line": 979,
+      "tokens": 176,
+      "context_length": 1824
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.get_reverse_related_filter_RelatedField.get_reverse_related_filter.6.1",
+      "distance": 1.121372938156128,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 343,
+      "end_line": 360,
+      "tokens": 163,
+      "context_length": 1987
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_ignored_options_ManyToManyField._check_ignored_options.5.1",
+      "distance": 1.128590703010559,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1202,
+      "end_line": 1233,
+      "tokens": 180,
+      "context_length": 2167
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_EmptyFieldListFilter.queryset_",
+      "distance": 1.132918119430542,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 446,
+      "end_line": 475,
+      "tokens": 226,
+      "context_length": 2393
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_19_AllValuesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.134211540222168,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 371,
+      "end_line": 395,
+      "tokens": 294,
+      "context_length": 2687
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter_RelatedFieldListFilter.field_choices.2.1",
+      "distance": 1.1377506256103516,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 162,
+      "end_line": 207,
+      "tokens": 427,
+      "context_length": 3114
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filter.19_Query.build_filter.31.1",
+      "distance": 1.146175742149353,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1285,
+      "end_line": 1350,
+      "tokens": 772,
+      "context_length": 3886
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.check_related_objects_Query.check_filterable.3.1.1",
+      "distance": 1.1480076313018799,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1106,
+      "end_line": 1138,
+      "tokens": 338,
+      "context_length": 4224
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_filtered_relation_Query.add_filtered_relation.6",
+      "distance": 1.1487665176391602,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1419,
+      "end_line": 1446,
+      "tokens": 283,
+      "context_length": 4507
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.lookup_allowed_BaseModelAdmin.lookup_allowed.14.1",
+      "distance": 1.1510274410247803,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 377,
+      "end_line": 429,
+      "tokens": 504,
+      "context_length": 5011
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.to_field_allowed_BaseModelAdmin.to_field_allowed.16.1",
+      "distance": 1.1548640727996826,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 431,
+      "end_line": 474,
+      "tokens": 350,
+      "context_length": 5361
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ChoicesFieldListFilter.choices_17",
+      "distance": 1.159398078918457,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 278,
+      "end_line": 302,
+      "tokens": 217,
+      "context_length": 5578
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_filter_item_BaseModelAdminChecks._check_filter_item.2.3.1.2.1.1",
+      "distance": 1.1650952100753784,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 416,
+      "end_line": 428,
+      "tokens": 137,
+      "context_length": 5715
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_DateFieldListFilter_DateFieldListFilter.choices.1.1",
+      "distance": 1.1707584857940674,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 305,
+      "end_line": 368,
+      "tokens": 627,
+      "context_length": 6342
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Exists_Exists.select_format.4.2.1",
+      "distance": 1.1760112047195435,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 1143,
+      "end_line": 1171,
+      "tokens": 266,
+      "context_length": 6608
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_InvalidQueryType_subclasses.2.1",
+      "distance": 1.177583932876587,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 25,
+      "end_line": 54,
+      "tokens": 185,
+      "context_length": 6793
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/forms/fields.py_NullBooleanField_CallableChoiceIterator.__iter__.1",
+      "distance": 1.1777689456939697,
+      "file_path": "django/forms/fields.py",
+      "start_line": 730,
+      "end_line": 762,
+      "tokens": 241,
+      "context_length": 7034
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_field_name_clashes_Model._check_field_name_clashes.12.1",
+      "distance": 1.17899751663208,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1394,
+      "end_line": 1449,
+      "tokens": 491,
+      "context_length": 7525
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_do_ifequal_do_ifequal.bits.9.1",
+      "distance": 1.1814645528793335,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 824,
+      "end_line": 839,
+      "tokens": 163,
+      "context_length": 7688
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field.get_filter_kwargs_for_object_Field._get_default.4",
+      "distance": 1.181899070739746,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 783,
+      "end_line": 842,
+      "tokens": 431,
+      "context_length": 8119
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_Q_Q.resolve_expression.3",
+      "distance": 1.1835618019104004,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 57,
+      "end_line": 108,
+      "tokens": 396,
+      "context_length": 8515
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/fields.py_GenericForeignKey._check_content_type_field_GenericForeignKey._check_content_type_field.2.3.1.3.1.1",
+      "distance": 1.1917917728424072,
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "start_line": 110,
+      "end_line": 158,
+      "tokens": 328,
+      "context_length": 8843
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.split_exclude_Query.split_exclude.23.1",
+      "distance": 1.1922004222869873,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1729,
+      "end_line": 1800,
+      "tokens": 784,
+      "context_length": 9627
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_24_RelatedOnlyFieldListFilter.field_choices.3.1",
+      "distance": 1.193678855895996,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 422,
+      "end_line": 429,
+      "tokens": 107,
+      "context_length": 9734
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_filter_item_ModelAdminChecks._check_list_filter_item.3.4.field.3.3.1.1",
+      "distance": 1.1964699029922485,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 809,
+      "end_line": 859,
+      "tokens": 443,
+      "context_length": 10177
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_AllValuesFieldListFilter.choices_AllValuesFieldListFilter.choices.4.1",
+      "distance": 1.1981645822525024,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 397,
+      "end_line": 419,
+      "tokens": 211,
+      "context_length": 10388
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._get_next_or_previous_by_FIELD_Model._get_next_or_previous_by_FIELD.8.2.1",
+      "distance": 1.2001633644104004,
+      "file_path": "django/db/models/base.py",
+      "start_line": 954,
+      "end_line": 968,
+      "tokens": 212,
+      "context_length": 10600
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.names_to_path.3_Query.names_to_path.4.1",
+      "distance": 1.2025526762008667,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1464,
+      "end_line": 1549,
+      "tokens": 801,
+      "context_length": 11401
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/shortcuts.py_get_list_or_404_get_list_or_404.6.1",
+      "distance": 1.206618070602417,
+      "file_path": "django/shortcuts.py",
+      "start_line": 81,
+      "end_line": 99,
+      "tokens": 200,
+      "context_length": 11601
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignObject.get_attname_column_ForeignObject.get_extra_descriptor_filter.2.1",
+      "distance": 1.212306261062622,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 670,
+      "end_line": 694,
+      "tokens": 218,
+      "context_length": 11819
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_local_fields_Model._check_local_fields.8.1",
+      "distance": 1.2123303413391113,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1654,
+      "end_line": 1702,
+      "tokens": 348,
+      "context_length": 12167
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.2123937606811523,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 619,
+      "context_length": 12786
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/template/base.py_FilterExpression.resolve_FilterExpression.resolve.3.1",
+      "distance": 1.2124059200286865,
+      "file_path": "django/template/base.py",
+      "start_line": 668,
+      "end_line": 703,
+      "tokens": 272,
+      "context_length": 13058
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_PositiveBigIntegerField_PositiveSmallIntegerField.formfield.1.1",
+      "distance": 1.213805913925171,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1975,
+      "end_line": 2011,
+      "tokens": 198,
+      "context_length": 13256
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_related_query_name_is_valid_RelatedField._check_related_query_name_is_valid.6.1",
+      "distance": 1.214090347290039,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 127,
+      "end_line": 154,
+      "tokens": 201,
+      "context_length": 13457
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey._check_on_delete_ForeignKey._check_on_delete.2.3.1.1",
+      "distance": 1.2141895294189453,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 841,
+      "end_line": 862,
+      "tokens": 169,
+      "context_length": 13626
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_MigrationQuestioner.ask_not_null_addition_MigrationQuestioner.ask_auto_now_add_addition.3.1",
+      "distance": 1.2168197631835938,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 56,
+      "end_line": 81,
+      "tokens": 220,
+      "context_length": 13846
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.9.3.seen_from.5.1",
+      "distance": 1.2176756858825684,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1235,
+      "end_line": 1352,
+      "tokens": 963,
+      "context_length": 14809
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.solve_lookup_type_Query.check_query_object_type.2.1.1",
+      "distance": 1.218637466430664,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1077,
+      "end_line": 1104,
+      "tokens": 285,
+      "context_length": 15094
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/forms/fields.py_BooleanField_BooleanField.has_changed.4.1",
+      "distance": 1.2193526029586792,
+      "file_path": "django/forms/fields.py",
+      "start_line": 703,
+      "end_line": 727,
+      "tokens": 226,
+      "context_length": 15320
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_FieldListFilter_FieldListFilter.create.1.1.1.1",
+      "distance": 1.2207226753234863,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 118,
+      "end_line": 159,
+      "tokens": 365,
+      "context_length": 15685
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter.choices_RelatedFieldListFilter.choices.3.1",
+      "distance": 1.2212927341461182,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 209,
+      "end_line": 226,
+      "tokens": 190,
+      "context_length": 15875
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+      "distance": 1.2219607830047607,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1184,
+      "end_line": 1203,
+      "tokens": 209,
+      "context_length": 16084,
+      "file_pos": 18
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_not_null_alteration_InteractiveMigrationQuestioner.ask_not_null_alteration.3.1",
+      "distance": 1.2244770526885986,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 162,
+      "end_line": 185,
+      "tokens": 246,
+      "context_length": 16330
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes.39_RelatedField._check_clashes.40.1",
+      "distance": 1.2284897565841675,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 255,
+      "end_line": 282,
+      "tokens": 269,
+      "context_length": 16599
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py__get_non_gfk_field__get_non_gfk_field.6.1",
+      "distance": 1.2320096492767334,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 287,
+      "end_line": 305,
+      "tokens": 175,
+      "context_length": 16774
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/db/models/fields/reverse_related.py_ForeignObjectRel_ForeignObjectRel.__repr__.1.1",
+      "distance": 1.2321059703826904,
+      "file_path": "django/db/models/fields/reverse_related.py",
+      "start_line": 19,
+      "end_line": 115,
+      "tokens": 635,
+      "context_length": 17409
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.deconstruct_RelatedField.get_forward_related_filter.2.1",
+      "distance": 1.2321711778640747,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 320,
+      "end_line": 341,
+      "tokens": 225,
+      "context_length": 17634
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_FilteredRelation_",
+      "distance": 1.2326774597167969,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 312,
+      "end_line": 352,
+      "tokens": 286,
+      "context_length": 17920
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.date_error_message_Model.date_error_message.3.1",
+      "distance": 1.2327667474746704,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1147,
+      "end_line": 1162,
+      "tokens": 138,
+      "context_length": 18058
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignObject._check_to_fields_exist_ForeignObject._check_to_fields_exist.2.4.1",
+      "distance": 1.2375917434692383,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 487,
+      "end_line": 507,
+      "tokens": 138,
+      "context_length": 18196
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes_RelatedField._check_clashes.potential_clashes_38.1",
+      "distance": 1.2399070262908936,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 190,
+      "end_line": 254,
+      "tokens": 673,
+      "context_length": 18869
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_FloatField_FloatField.formfield.1.1",
+      "distance": 1.2430803775787354,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1675,
+      "end_line": 1712,
+      "tokens": 226,
+      "context_length": 19095
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_RemoveField_RemoveField.reduce.3.1",
+      "distance": 1.2430956363677979,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 146,
+      "end_line": 189,
+      "tokens": 394,
+      "context_length": 19489
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py__all_related_fields__related_non_m2m_objects.3.1",
+      "distance": 1.244158148765564,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 31,
+      "end_line": 41,
+      "tokens": 120,
+      "context_length": 19609
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 1,
+      "tokens": 4093,
+      "context_length": 4093
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 2,
+      "tokens": 17689,
+      "context_length": 21782
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 3,
+      "tokens": 11774,
+      "context_length": 33556
+    },
+    {
+      "file_path": "django/db/models/sql/query.py",
+      "position": 4,
+      "tokens": 22346,
+      "context_length": 55902
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 5,
+      "tokens": 13876,
+      "context_length": 69778
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 6,
+      "tokens": 18569,
+      "context_length": 88347
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 7,
+      "tokens": 9137,
+      "context_length": 97484
+    },
+    {
+      "file_path": "django/db/models/expressions.py",
+      "position": 8,
+      "tokens": 10777,
+      "context_length": 108261
+    },
+    {
+      "file_path": "django/db/models/query_utils.py",
+      "position": 9,
+      "tokens": 2706,
+      "context_length": 110967
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 10,
+      "tokens": 9347,
+      "context_length": 120314
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 11,
+      "tokens": 16581,
+      "context_length": 136895
+    },
+    {
+      "file_path": "django/template/defaulttags.py",
+      "position": 12,
+      "tokens": 11143,
+      "context_length": 148038
+    },
+    {
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "position": 13,
+      "tokens": 5433,
+      "context_length": 153471
+    },
+    {
+      "file_path": "django/shortcuts.py",
+      "position": 14,
+      "tokens": 1098,
+      "context_length": 154569
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 15,
+      "tokens": 619,
+      "context_length": 155188
+    },
+    {
+      "file_path": "django/template/base.py",
+      "position": 16,
+      "tokens": 7878,
+      "context_length": 163066
+    },
+    {
+      "file_path": "django/db/migrations/questioner.py",
+      "position": 17,
+      "tokens": 2073,
+      "context_length": 165139
+    },
+    {
+      "file_path": "django/db/models/query.py",
+      "position": 18,
+      "tokens": 17102,
+      "context_length": 182241
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 19,
+      "tokens": 4152,
+      "context_length": 186393
+    },
+    {
+      "file_path": "django/db/models/fields/reverse_related.py",
+      "position": 20,
+      "tokens": 2143,
+      "context_length": 188536
+    },
+    {
+      "file_path": "django/db/migrations/operations/fields.py",
+      "position": 21,
+      "tokens": 3098,
+      "context_length": 191634
+    },
+    {
+      "file_path": "django/db/backends/base/schema.py",
+      "position": 22,
+      "tokens": 11842,
+      "context_length": 203476
+    }
+  ]
+}

@@ -1,0 +1,511 @@
+{
+  "instance_id": "pydata__xarray-4750",
+  "model_patch": "diff --git a/xarray/core/formatting.py b/xarray/core/formatting.py\nindex de4c0efc..df380144 100644\n--- a/xarray/core/formatting.py\n+++ b/xarray/core/formatting.py\n@@ -369,10 +369,12 @@ def _mapping_repr(mapping, title, summarizer, col_width=None):\n     if col_width is None:\n         col_width = _calculate_col_width(mapping)\n     summary = [f\"{title}:\"]\n-    if mapping:\n-        summary += [summarizer(k, v, col_width) for k, v in mapping.items()]\n+    if len(mapping) > 25:\n+        items_to_display = list(mapping.items())[:25]\n+        summary += [summarizer(k, v, col_width) for k, v in items_to_display]\n+        summary.append(\"... and more variables\")\n     else:\n-        summary += [EMPTY_REPR]\n+        summary += [summarizer(k, v, col_width) for k, v in mapping.items()]\n     return \"\\n\".join(summary)\n \n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/formatting.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "0f1eb96c924bad60ea87edd9139325adabfefa33",
+  "patch": "diff --git a/xarray/core/formatting.py b/xarray/core/formatting.py\n--- a/xarray/core/formatting.py\n+++ b/xarray/core/formatting.py\n@@ -365,12 +365,23 @@ def _calculate_col_width(col_items):\n     return col_width\n \n \n-def _mapping_repr(mapping, title, summarizer, col_width=None):\n+def _mapping_repr(mapping, title, summarizer, col_width=None, max_rows=None):\n     if col_width is None:\n         col_width = _calculate_col_width(mapping)\n+    if max_rows is None:\n+        max_rows = OPTIONS[\"display_max_rows\"]\n     summary = [f\"{title}:\"]\n     if mapping:\n-        summary += [summarizer(k, v, col_width) for k, v in mapping.items()]\n+        if len(mapping) > max_rows:\n+            first_rows = max_rows // 2 + max_rows % 2\n+            items = list(mapping.items())\n+            summary += [summarizer(k, v, col_width) for k, v in items[:first_rows]]\n+            if max_rows > 1:\n+                last_rows = max_rows // 2\n+                summary += [pretty_print(\"    ...\", col_width) + \" ...\"]\n+                summary += [summarizer(k, v, col_width) for k, v in items[-last_rows:]]\n+        else:\n+            summary += [summarizer(k, v, col_width) for k, v in mapping.items()]\n     else:\n         summary += [EMPTY_REPR]\n     return \"\\n\".join(summary)\ndiff --git a/xarray/core/options.py b/xarray/core/options.py\n--- a/xarray/core/options.py\n+++ b/xarray/core/options.py\n@@ -1,26 +1,28 @@\n import warnings\n \n-DISPLAY_WIDTH = \"display_width\"\n ARITHMETIC_JOIN = \"arithmetic_join\"\n+CMAP_DIVERGENT = \"cmap_divergent\"\n+CMAP_SEQUENTIAL = \"cmap_sequential\"\n+DISPLAY_MAX_ROWS = \"display_max_rows\"\n+DISPLAY_STYLE = \"display_style\"\n+DISPLAY_WIDTH = \"display_width\"\n ENABLE_CFTIMEINDEX = \"enable_cftimeindex\"\n FILE_CACHE_MAXSIZE = \"file_cache_maxsize\"\n-WARN_FOR_UNCLOSED_FILES = \"warn_for_unclosed_files\"\n-CMAP_SEQUENTIAL = \"cmap_sequential\"\n-CMAP_DIVERGENT = \"cmap_divergent\"\n KEEP_ATTRS = \"keep_attrs\"\n-DISPLAY_STYLE = \"display_style\"\n+WARN_FOR_UNCLOSED_FILES = \"warn_for_unclosed_files\"\n \n \n OPTIONS = {\n-    DISPLAY_WIDTH: 80,\n     ARITHMETIC_JOIN: \"inner\",\n+    CMAP_DIVERGENT: \"RdBu_r\",\n+    CMAP_SEQUENTIAL: \"viridis\",\n+    DISPLAY_MAX_ROWS: 12,\n+    DISPLAY_STYLE: \"html\",\n+    DISPLAY_WIDTH: 80,\n     ENABLE_CFTIMEINDEX: True,\n     FILE_CACHE_MAXSIZE: 128,\n-    WARN_FOR_UNCLOSED_FILES: False,\n-    CMAP_SEQUENTIAL: \"viridis\",\n-    CMAP_DIVERGENT: \"RdBu_r\",\n     KEEP_ATTRS: \"default\",\n-    DISPLAY_STYLE: \"html\",\n+    WARN_FOR_UNCLOSED_FILES: False,\n }\n \n _JOIN_OPTIONS = frozenset([\"inner\", \"outer\", \"left\", \"right\", \"exact\"])\n@@ -32,13 +34,14 @@ def _positive_integer(value):\n \n \n _VALIDATORS = {\n-    DISPLAY_WIDTH: _positive_integer,\n     ARITHMETIC_JOIN: _JOIN_OPTIONS.__contains__,\n+    DISPLAY_MAX_ROWS: _positive_integer,\n+    DISPLAY_STYLE: _DISPLAY_OPTIONS.__contains__,\n+    DISPLAY_WIDTH: _positive_integer,\n     ENABLE_CFTIMEINDEX: lambda value: isinstance(value, bool),\n     FILE_CACHE_MAXSIZE: _positive_integer,\n-    WARN_FOR_UNCLOSED_FILES: lambda value: isinstance(value, bool),\n     KEEP_ATTRS: lambda choice: choice in [True, False, \"default\"],\n-    DISPLAY_STYLE: _DISPLAY_OPTIONS.__contains__,\n+    WARN_FOR_UNCLOSED_FILES: lambda value: isinstance(value, bool),\n }\n \n \n@@ -57,8 +60,8 @@ def _warn_on_setting_enable_cftimeindex(enable_cftimeindex):\n \n \n _SETTERS = {\n-    FILE_CACHE_MAXSIZE: _set_file_cache_maxsize,\n     ENABLE_CFTIMEINDEX: _warn_on_setting_enable_cftimeindex,\n+    FILE_CACHE_MAXSIZE: _set_file_cache_maxsize,\n }\n \n \n",
+  "test_patch": "diff --git a/xarray/tests/test_formatting.py b/xarray/tests/test_formatting.py\n--- a/xarray/tests/test_formatting.py\n+++ b/xarray/tests/test_formatting.py\n@@ -463,3 +463,36 @@ def test_large_array_repr_length():\n \n     result = repr(da).splitlines()\n     assert len(result) < 50\n+\n+\n+@pytest.mark.parametrize(\n+    \"display_max_rows, n_vars, n_attr\",\n+    [(50, 40, 30), (35, 40, 30), (11, 40, 30), (1, 40, 30)],\n+)\n+def test__mapping_repr(display_max_rows, n_vars, n_attr):\n+    long_name = \"long_name\"\n+    a = np.core.defchararray.add(long_name, np.arange(0, n_vars).astype(str))\n+    b = np.core.defchararray.add(\"attr_\", np.arange(0, n_attr).astype(str))\n+    attrs = {k: 2 for k in b}\n+    coords = dict(time=np.array([0, 1]))\n+    data_vars = dict()\n+    for v in a:\n+        data_vars[v] = xr.DataArray(\n+            name=v,\n+            data=np.array([3, 4]),\n+            dims=[\"time\"],\n+            coords=coords,\n+        )\n+    ds = xr.Dataset(data_vars)\n+    ds.attrs = attrs\n+\n+    with xr.set_options(display_max_rows=display_max_rows):\n+\n+        # Parse the data_vars print and show only data_vars rows:\n+        summary = formatting.data_vars_repr(ds.data_vars).split(\"\\n\")\n+        summary = [v for v in summary if long_name in v]\n+\n+        # The length should be less than or equal to display_max_rows:\n+        len_summary = len(summary)\n+        data_vars_print_size = min(display_max_rows, len_summary)\n+        assert len_summary == data_vars_print_size\n",
+  "problem_statement": "Limit number of data variables shown in repr\n<!-- Please include a self-contained copy-pastable example that generates the issue if possible.\r\n\r\nPlease be concise with code posted. See guidelines below on how to provide a good bug report:\r\n\r\n- Craft Minimal Bug Reports: http://matthewrocklin.com/blog/work/2018/02/28/minimal-bug-reports\r\n- Minimal Complete Verifiable Examples: https://stackoverflow.com/help/mcve\r\n\r\nBug reports that follow these guidelines are easier to diagnose, and so are often handled much more quickly.\r\n-->\r\n\r\n**What happened**:\r\nxarray feels very unresponsive when using datasets with >2000 data variables because it has to print all the 2000 variables everytime you print something to console.\r\n\r\n**What you expected to happen**:\r\nxarray should limit the number of variables printed to console. Maximum maybe 25?\r\nSame idea probably apply to dimensions, coordinates and attributes as well,\r\n\r\npandas only shows 2 for reference, the first and last variables.\r\n\r\n**Minimal Complete Verifiable Example**:\r\n\r\n```python\r\nimport numpy as np\r\nimport xarray as xr\r\n\r\na = np.arange(0, 2000)\r\nb = np.core.defchararray.add(\"long_variable_name\", a.astype(str))\r\ndata_vars = dict()\r\nfor v in b:\r\n    data_vars[v] = xr.DataArray(\r\n        name=v,\r\n        data=[3, 4],\r\n        dims=[\"time\"],\r\n        coords=dict(time=[0, 1])\r\n    )\r\nds = xr.Dataset(data_vars)\r\n\r\n# Everything above feels fast. Printing to console however takes about 13 seconds for me:\r\nprint(ds)\r\n```\r\n\r\n**Anything else we need to know?**:\r\nOut of scope brainstorming:\r\nThough printing 2000 variables is probably madness for most people it is kind of nice to show all variables because you sometimes want to know what happened to a few other variables as well. Is there already an easy and fast way to create subgroup of the dataset, so we don' have to rely on the dataset printing everything to the console everytime?\r\n\r\n**Environment**:\r\n\r\n<details><summary>Output of <tt>xr.show_versions()</tt></summary>\r\n\r\nxr.show_versions()\r\n\r\nINSTALLED VERSIONS\r\n------------------\r\ncommit: None\r\npython: 3.8.5 (default, Sep  3 2020, 21:29:08) [MSC v.1916 64 bit (AMD64)]\r\npython-bits: 64\r\nOS: Windows\r\nOS-release: 10\r\n\r\nlibhdf5: 1.10.4\r\nlibnetcdf: None\r\n\r\nxarray: 0.16.2\r\npandas: 1.1.5\r\nnumpy: 1.17.5\r\nscipy: 1.4.1\r\nnetCDF4: None\r\npydap: None\r\nh5netcdf: None\r\nh5py: 2.10.0\r\nNio: None\r\nzarr: None\r\ncftime: None\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: 1.3.2\r\ndask: 2020.12.0\r\ndistributed: 2020.12.0\r\nmatplotlib: 3.3.2\r\ncartopy: None\r\nseaborn: 0.11.1\r\nnumbagg: None\r\npint: None\r\nsetuptools: 51.0.0.post20201207\r\npip: 20.3.3\r\nconda: 4.9.2\r\npytest: 6.2.1\r\nIPython: 7.19.0\r\nsphinx: 3.4.0\r\n\r\n\r\n</details>\r\n\n",
+  "hints_text": "\ud83d\udc4d\ud83c\udffd on adding a configurable option to the list of options supported via `xr.set_options()`\r\n\r\n```python\r\nimport xarray as xr\r\nxr.set_options(display_max_num_variables=25)\r\n```\r\n\r\n\nYes, this sounds like a welcome new feature! As a general rule, the output of repr() should fit on one screen.",
+  "created_at": "2021-01-02T21:14:50Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_formatting.py::test__mapping_repr[1-40-30]\", \"xarray/tests/test_formatting.py::test__mapping_repr[11-40-30]\", \"xarray/tests/test_formatting.py::test__mapping_repr[35-40-30]\", \"xarray/tests/test_formatting.py::test__mapping_repr[50-40-30]\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_formatting.py::TestFormatting::test_array_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_attribute_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_array_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_attrs_repr_with_array\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_dataset_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_first_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_array_flat\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_item\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_timestamp_out_of_bounds\", \"xarray/tests/test_formatting.py::TestFormatting::test_get_indexer_at_least_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_last_item\", \"xarray/tests/test_formatting.py::TestFormatting::test_last_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_maybe_truncate\", \"xarray/tests/test_formatting.py::TestFormatting::test_pretty_print\", \"xarray/tests/test_formatting.py::test_inline_variable_array_repr_custom_repr\", \"xarray/tests/test_formatting.py::test_large_array_repr_length\", \"xarray/tests/test_formatting.py::test_set_numpy_options\", \"xarray/tests/test_formatting.py::test_short_numpy_repr\"]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "xarray/core/formatting.py",
+    "xarray/core/options.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_formatting.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/formatting.py": {
+      "diffs": [
+        {
+          "start_line_old": 368,
+          "end_line_old": 373,
+          "file_pos": 23,
+          "file_context_length": 194877,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/formatting.py_dataset_repr_diff_dim_summary.1.2.1.1",
+          "closest_snippet_line_distance": 128
+        }
+      ]
+    },
+    "xarray/core/options.py": {
+      "diffs": [
+        {
+          "start_line_old": 3,
+          "end_line_old": 23
+        },
+        {
+          "start_line_old": 35,
+          "end_line_old": 41
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60
+        }
+      ]
+    }
+  },
+  "vectors": 1037,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_pkg_resources_",
+      "distance": 0.8037054538726807,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 603,
+      "context_length": 603
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 0.8469096422195435,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 733,
+      "context_length": 1336
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/util/print_versions.py_show_versions_",
+      "distance": 0.8588584661483765,
+      "file_path": "xarray/util/print_versions.py",
+      "start_line": 80,
+      "end_line": 161,
+      "tokens": 707,
+      "context_length": 2043
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_os_IOSingleNetCDF.make_ds.self.ds.self.vinds.1",
+      "distance": 0.8778834342956543,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 715,
+      "context_length": 2758
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/interp.py_np_new_y_long.1",
+      "distance": 0.883365273475647,
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 184,
+      "context_length": 2942
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_23.4.2.iris_Cube.1",
+      "distance": 0.8858747482299805,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 436,
+      "context_length": 3378
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/rolling.py_np_randn_long.1",
+      "distance": 0.8979975581169128,
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 117,
+      "context_length": 3495
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_copy__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 0.899350643157959,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 135,
+      "tokens": 643,
+      "context_length": 4138
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 0.906595766544342,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 635,
+      "end_line": 842,
+      "tokens": 2740,
+      "context_length": 6878
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/doc/conf.py_1_project_dir.1",
+      "distance": 0.9074636697769165,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 751,
+      "context_length": 7629
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/pandas.py_np_",
+      "distance": 0.9124449491500854,
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 160,
+      "context_length": 7789
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOMultipleNetCDF_IOMultipleNetCDF.make_ds.self.ds.11.10",
+      "distance": 0.9296385645866394,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 222,
+      "end_line": 296,
+      "tokens": 613,
+      "context_length": 8402
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/combine.py_np_",
+      "distance": 0.9311801195144653,
+      "file_path": "asv_bench/benchmarks/combine.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 332,
+      "context_length": 8734
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/reindexing.py_np_",
+      "distance": 0.9321144223213196,
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 413,
+      "context_length": 9147
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_dt_broadcast_variables",
+      "distance": 0.9433894157409668,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 133,
+      "context_length": 9280
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataarray_missing.py_pd_",
+      "distance": 0.944476306438446,
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 531,
+      "context_length": 9811
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_Variable._unstack_once_Variable._unstack_once.12.1",
+      "distance": 0.9637306332588196,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1546,
+      "end_line": 1573,
+      "tokens": 262,
+      "context_length": 10073
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_warnings_T.1",
+      "distance": 0.9644638299942017,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 183,
+      "context_length": 10256
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py_scatter_",
+      "distance": 0.9682259559631348,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 400,
+      "end_line": 450,
+      "tokens": 390,
+      "context_length": 10646
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/unstacking.py_np_",
+      "distance": 0.971591591835022,
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 159,
+      "context_length": 10805
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_copy_MissingDimensionsError.3",
+      "distance": 0.9742435216903687,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 441,
+      "context_length": 11246
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_unified_dim_sizes_SLICE_NONE.1",
+      "distance": 0.9776294231414795,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 509,
+      "end_line": 534,
+      "tokens": 196,
+      "context_length": 11442
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_DataVariables_Dataset",
+      "distance": 0.9784365296363831,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 458,
+      "end_line": 6851,
+      "tokens": 411,
+      "context_length": 11853
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_Variable._roll_one_dim_Variable._roll_one_dim.7.1",
+      "distance": 0.9812431335449219,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1354,
+      "end_line": 1373,
+      "tokens": 202,
+      "context_length": 12055
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_Variable.pad.12_Variable.pad.21.1",
+      "distance": 0.9913796186447144,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1329,
+      "end_line": 1352,
+      "tokens": 371,
+      "context_length": 12426
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/plot/utils.py_itertools__determine_extend.4.1",
+      "distance": 0.9922760725021362,
+      "file_path": "xarray/plot/utils.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 283,
+      "context_length": 12709
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 0.9928423762321472,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 552,
+      "end_line": 750,
+      "tokens": 2476,
+      "context_length": 15185
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF4Dask_IOReadMultipleNetCDF4Dask.time_open_dataset_netcdf4_with_time_chunks_multiprocessing.1.1",
+      "distance": 0.9930371046066284,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 347,
+      "end_line": 398,
+      "tokens": 442,
+      "context_length": 15627
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_HugeAxisSmallSliceIndexing_",
+      "distance": 0.9945242404937744,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 145,
+      "end_line": 162,
+      "tokens": 145,
+      "context_length": 15772
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataset_io.py_IOReadMultipleNetCDF3Dask_IOReadMultipleNetCDF3Dask.time_open_dataset_scipy_with_time_chunks.1.1",
+      "distance": 0.9948892593383789,
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "start_line": 401,
+      "end_line": 432,
+      "tokens": 264,
+      "context_length": 16036
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_dataset_repr_diff_dim_summary.1.2.1.1",
+      "distance": 0.9951390027999878,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 496,
+      "end_line": 525,
+      "tokens": 206,
+      "context_length": 16242,
+      "file_pos": 23
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 1,
+      "tokens": 603,
+      "context_length": 603
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 2,
+      "tokens": 1560,
+      "context_length": 2163
+    },
+    {
+      "file_path": "xarray/util/print_versions.py",
+      "position": 3,
+      "tokens": 1212,
+      "context_length": 3375
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataset_io.py",
+      "position": 4,
+      "tokens": 3605,
+      "context_length": 6980
+    },
+    {
+      "file_path": "asv_bench/benchmarks/interp.py",
+      "position": 5,
+      "tokens": 485,
+      "context_length": 7465
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 6,
+      "tokens": 36365,
+      "context_length": 43830
+    },
+    {
+      "file_path": "asv_bench/benchmarks/rolling.py",
+      "position": 7,
+      "tokens": 629,
+      "context_length": 44459
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 8,
+      "tokens": 57434,
+      "context_length": 101893
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 9,
+      "tokens": 7867,
+      "context_length": 109760
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 10,
+      "tokens": 3549,
+      "context_length": 113309
+    },
+    {
+      "file_path": "asv_bench/benchmarks/pandas.py",
+      "position": 11,
+      "tokens": 160,
+      "context_length": 113469
+    },
+    {
+      "file_path": "asv_bench/benchmarks/combine.py",
+      "position": 12,
+      "tokens": 332,
+      "context_length": 113801
+    },
+    {
+      "file_path": "asv_bench/benchmarks/reindexing.py",
+      "position": 13,
+      "tokens": 413,
+      "context_length": 114214
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 14,
+      "tokens": 6033,
+      "context_length": 120247
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "position": 15,
+      "tokens": 531,
+      "context_length": 120778
+    },
+    {
+      "file_path": "xarray/core/variable.py",
+      "position": 16,
+      "tokens": 21959,
+      "context_length": 142737
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 17,
+      "tokens": 15346,
+      "context_length": 158083
+    },
+    {
+      "file_path": "xarray/plot/dataset_plot.py",
+      "position": 18,
+      "tokens": 3410,
+      "context_length": 161493
+    },
+    {
+      "file_path": "asv_bench/benchmarks/unstacking.py",
+      "position": 19,
+      "tokens": 159,
+      "context_length": 161652
+    },
+    {
+      "file_path": "xarray/core/computation.py",
+      "position": 20,
+      "tokens": 14114,
+      "context_length": 175766
+    },
+    {
+      "file_path": "xarray/plot/utils.py",
+      "position": 21,
+      "tokens": 6628,
+      "context_length": 182394
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 22,
+      "tokens": 7239,
+      "context_length": 189633
+    },
+    {
+      "file_path": "xarray/core/formatting.py",
+      "position": 23,
+      "tokens": 5244,
+      "context_length": 194877
+    }
+  ]
+}

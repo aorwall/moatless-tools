@@ -1,0 +1,1748 @@
+{
+  "instance_id": "sympy__sympy-11618",
+  "model_patch": "diff --git a/sympy/geometry/point.py b/sympy/geometry/point.py\nindex 593048464b..44606e0e17 100644\n--- a/sympy/geometry/point.py\n+++ b/sympy/geometry/point.py\n@@ -266,8 +266,11 @@ def distance(self, p):\n         sqrt(x**2 + y**2)\n \n         \"\"\"\n-        return sqrt(sum([(a - b)**2 for a, b in zip(\n-            self.args, p.args if isinstance(p, Point) else p)]))\n+        # handle points with different dimensions\n+        dim = max(len(self), len(p))\n+        coords_self = self.args + (S.Zero,)*(dim - len(self))\n+        coords_p = p.args + (S.Zero,)*(dim - len(p))\n+        return sqrt(sum([(a - b)**2 for a, b in zip(coords_self, coords_p)]))\n \n     def taxicab_distance(self, p):\n         \"\"\"The Taxicab Distance from self to point p.\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/geometry/point.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "360290c4c401e386db60723ddb0109ed499c9f6e",
+  "patch": "diff --git a/sympy/geometry/point.py b/sympy/geometry/point.py\n--- a/sympy/geometry/point.py\n+++ b/sympy/geometry/point.py\n@@ -266,6 +266,20 @@ def distance(self, p):\n         sqrt(x**2 + y**2)\n \n         \"\"\"\n+        if type(p) is not type(self):\n+            if len(p) == len(self):\n+                return sqrt(sum([(a - b)**2 for a, b in zip(\n+                    self.args, p.args if isinstance(p, Point) else p)]))\n+            else:\n+                p1 = [0] * max(len(p), len(self))\n+                p2 = p.args if len(p.args) > len(self.args) else self.args\n+\n+                for i in range(min(len(p), len(self))):\n+                    p1[i] = p.args[i] if len(p) < len(self) else self.args[i]\n+\n+                return sqrt(sum([(a - b)**2 for a, b in zip(\n+                    p1, p2)]))\n+\n         return sqrt(sum([(a - b)**2 for a, b in zip(\n             self.args, p.args if isinstance(p, Point) else p)]))\n \n",
+  "test_patch": "diff --git a/sympy/geometry/tests/test_point.py b/sympy/geometry/tests/test_point.py\n--- a/sympy/geometry/tests/test_point.py\n+++ b/sympy/geometry/tests/test_point.py\n@@ -243,6 +243,11 @@ def test_issue_9214():\n \n     assert Point3D.are_collinear(p1, p2, p3) is False\n \n+def test_issue_11617():\n+    p1 = Point3D(1,0,2)\n+    p2 = Point2D(2,0)\n+\n+    assert p1.distance(p2) == sqrt(5)\n \n def test_transform():\n     p = Point(1, 1)\n",
+  "problem_statement": "distance calculation wrong\n``` python\n>>> Point(2,0).distance(Point(1,0,2))\n1\n```\n\nThe 3rd dimension is being ignored when the Points are zipped together to calculate the distance so `sqrt((2-1)**2 + (0-0)**2)` is being computed instead of `sqrt(5)`.\n\n",
+  "hints_text": "",
+  "created_at": "2016-09-15T20:01:58Z",
+  "version": "1.0",
+  "FAIL_TO_PASS": "[\"test_issue_11617\"]",
+  "PASS_TO_PASS": "[\"test_Point2D\", \"test_issue_9214\", \"test_point3D\", \"test_transform\"]",
+  "environment_setup_commit": "50b81f9f6be151014501ffac44e5dc6b2416938f",
+  "patch_files": [
+    "sympy/geometry/point.py"
+  ],
+  "test_patch_files": [
+    "sympy/geometry/tests/test_point.py"
+  ],
+  "patch_diff_details": {
+    "sympy/geometry/point.py": {
+      "diffs": [
+        {
+          "start_line_old": 269,
+          "end_line_old": 269,
+          "file_pos": 1,
+          "file_context_length": 7361,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.__new___Point3D.__new__.6.1",
+          "closest_snippet_line_distance": 545,
+          "pos": 7,
+          "context_length": 1378
+        }
+      ]
+    }
+  },
+  "vectors": 6849,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D_Point3D.1",
+      "distance": 0.9322158694267273,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 765,
+      "end_line": 813,
+      "tokens": 306,
+      "context_length": 306,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.taxicab_distance_Point.taxicab_distance.3.1",
+      "distance": 0.989164412021637,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 272,
+      "end_line": 303,
+      "tokens": 177,
+      "context_length": 483,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.direction_ratio_Point3D.direction_ratio.2.1",
+      "distance": 0.9938757419586182,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 883,
+      "end_line": 905,
+      "tokens": 133,
+      "context_length": 616,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.__new___Point2D.__new__.7.1",
+      "distance": 0.9949414730072021,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 526,
+      "end_line": 548,
+      "tokens": 196,
+      "context_length": 812,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.__new___Point3D.__new__.6.1",
+      "distance": 1.0062952041625977,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 814,
+      "end_line": 833,
+      "tokens": 182,
+      "context_length": 994,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.pos_from_Point.pos_from.5.1",
+      "distance": 1.013771891593933,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 218,
+      "end_line": 244,
+      "tokens": 187,
+      "context_length": 1181
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.distance_Point.distance.2.1",
+      "distance": 1.0153911113739014,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 237,
+      "end_line": 270,
+      "tokens": 197,
+      "context_length": 1378,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.length_Point.ambient_dimension.2.1",
+      "distance": 1.027673363685608,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 204,
+      "end_line": 235,
+      "tokens": 201,
+      "context_length": 1579,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.__contains___Point3D.z.2.1",
+      "distance": 1.030334711074829,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 835,
+      "end_line": 881,
+      "tokens": 234,
+      "context_length": 1813,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Line3D.distance_Line3D.equals.3.1",
+      "distance": 1.0390512943267822,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 955,
+      "end_line": 987,
+      "tokens": 278,
+      "context_length": 2091
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.scale_Point3D.scale.3.1",
+      "distance": 1.0464571714401245,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 1056,
+      "end_line": 1081,
+      "tokens": 229,
+      "context_length": 2320,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/vector/point.py_1_Point.__new__.12.1",
+      "distance": 1.0489838123321533,
+      "file_path": "sympy/vector/point.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 314,
+      "context_length": 2634
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.distance_Plane.distance.7.6.1",
+      "distance": 1.0555086135864258,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 305,
+      "end_line": 364,
+      "tokens": 531,
+      "context_length": 3165
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.direction_cosine_Point3D.direction_cosine.4.1",
+      "distance": 1.0556879043579102,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 907,
+      "end_line": 932,
+      "tokens": 177,
+      "context_length": 3342,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.distance_Ray3D.distance.7.1",
+      "distance": 1.057532548904419,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1174,
+      "end_line": 1205,
+      "tokens": 271,
+      "context_length": 3613
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.are_coplanar_Point3D.are_coplanar.7",
+      "distance": 1.058488130569458,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 970,
+      "end_line": 1017,
+      "tokens": 393,
+      "context_length": 4006,
+      "file_pos": 5
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_farthest_points_farthest_points.2",
+      "distance": 1.0625677108764648,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 415,
+      "end_line": 449,
+      "tokens": 281,
+      "context_length": 4287
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Line.distance_Line.equals.3.1",
+      "distance": 1.064449667930603,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1138,
+      "end_line": 1177,
+      "tokens": 307,
+      "context_length": 4594
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_farthest_points.p_farthest_points.9.1",
+      "distance": 1.0659421682357788,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 476,
+      "end_line": 498,
+      "tokens": 171,
+      "context_length": 4765
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D_Point2D.1",
+      "distance": 1.066009521484375,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 477,
+      "end_line": 525,
+      "tokens": 288,
+      "context_length": 5053,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Segment3D.distance_Segment3D.distance.4",
+      "distance": 1.0811665058135986,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1406,
+      "end_line": 1441,
+      "tokens": 305,
+      "context_length": 5358
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.translate_Point3D.translate.2.1",
+      "distance": 1.0814265012741089,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 1083,
+      "end_line": 1104,
+      "tokens": 180,
+      "context_length": 5538,
+      "file_pos": 7
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.dot_Point.__abs__.3.1",
+      "distance": 1.0825843811035156,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 406,
+      "end_line": 475,
+      "tokens": 507,
+      "context_length": 6045,
+      "file_pos": 7
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point_Point.1",
+      "distance": 1.0882601737976074,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 28,
+      "end_line": 77,
+      "tokens": 312,
+      "context_length": 6357,
+      "file_pos": 7
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.scale_Point2D.scale.3.1",
+      "distance": 1.0940073728561401,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 693,
+      "end_line": 718,
+      "tokens": 208,
+      "context_length": 6565,
+      "file_pos": 7
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.__new___Point.is_concyclic.args.3.1",
+      "distance": 1.1029272079467773,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 78,
+      "end_line": 118,
+      "tokens": 339,
+      "context_length": 6904,
+      "file_pos": 7
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Ray.distance_Ray.distance.6.1",
+      "distance": 1.1058027744293213,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1412,
+      "end_line": 1445,
+      "tokens": 257,
+      "context_length": 7161
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_farthest_points.rotatingCalipers_farthest_points.rotatingCalipers.2.3.3.3.6.1",
+      "distance": 1.1058893203735352,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 451,
+      "end_line": 474,
+      "tokens": 267,
+      "context_length": 7428
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.transform_Point2D.transform.5.1",
+      "distance": 1.1093006134033203,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 743,
+      "end_line": 763,
+      "tokens": 175,
+      "context_length": 7603,
+      "file_pos": 7
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.transform_",
+      "distance": 1.1138936281204224,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 1106,
+      "end_line": 1129,
+      "tokens": 200,
+      "context_length": 7803,
+      "file_pos": 7
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.__contains___Point2D.bounds.2.1",
+      "distance": 1.1313633918762207,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 550,
+      "end_line": 590,
+      "tokens": 208,
+      "context_length": 8011,
+      "file_pos": 7
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.translate_Point2D.translate.2.1",
+      "distance": 1.1398558616638184,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 720,
+      "end_line": 741,
+      "tokens": 154,
+      "context_length": 8165,
+      "file_pos": 7
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Segment.distance_Segment.distance.4",
+      "distance": 1.1451988220214844,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1743,
+      "end_line": 1777,
+      "tokens": 256,
+      "context_length": 8421
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_1_GeometryEntity",
+      "distance": 1.1486897468566895,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 142,
+      "context_length": 8563,
+      "file_pos": 7
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Line3D.equation_Line3D.equation.5.1",
+      "distance": 1.150632619857788,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 884,
+      "end_line": 916,
+      "tokens": 308,
+      "context_length": 8871
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_closest_points_closest_points.15.1",
+      "distance": 1.152471899986267,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 336,
+      "end_line": 412,
+      "tokens": 602,
+      "context_length": 9473
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/vector/point.py_Point.position_wrt_Point.position_wrt.13.1",
+      "distance": 1.1566872596740723,
+      "file_path": "sympy/vector/point.py",
+      "start_line": 45,
+      "end_line": 93,
+      "tokens": 354,
+      "context_length": 9827
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon.distance_Polygon.distance.3",
+      "distance": 1.1584736108779907,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 694,
+      "end_line": 721,
+      "tokens": 217,
+      "context_length": 10044
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/vector/point.py_Point.express_coordinates_",
+      "distance": 1.16231369972229,
+      "file_path": "sympy/vector/point.py",
+      "start_line": 123,
+      "end_line": 157,
+      "tokens": 240,
+      "context_length": 10284
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.evalf_Point.n.1",
+      "distance": 1.162473201751709,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 334,
+      "end_line": 365,
+      "tokens": 199,
+      "context_length": 10483,
+      "file_pos": 8
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot.py_flat_flat.13.1",
+      "distance": 1.162720799446106,
+      "file_path": "sympy/plotting/plot.py",
+      "start_line": 1097,
+      "end_line": 1110,
+      "tokens": 181,
+      "context_length": 10664
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.is_scalar_multiple_Point.is_scalar_multiple.7.1",
+      "distance": 1.1690348386764526,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 193,
+      "end_line": 202,
+      "tokens": 120,
+      "context_length": 10784,
+      "file_pos": 9
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Line3D.__new___Line3D.__new__.3.1",
+      "distance": 1.1693227291107178,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 838,
+      "end_line": 852,
+      "tokens": 178,
+      "context_length": 10962
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Segment3D.length_Segment3D.length.2.1",
+      "distance": 1.1742268800735474,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1364,
+      "end_line": 1383,
+      "tokens": 140,
+      "context_length": 11102
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.length_LinearEntity3D.points.2.1",
+      "distance": 1.1747359037399292,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 140,
+      "end_line": 180,
+      "tokens": 275,
+      "context_length": 11377
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon._do_poly_distance.38_Polygon._do_poly_distance.39.1",
+      "distance": 1.1790682077407837,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 861,
+      "end_line": 920,
+      "tokens": 609,
+      "context_length": 11986
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon._do_poly_distance.22_Polygon._do_poly_distance.37",
+      "distance": 1.181416630744934,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 811,
+      "end_line": 860,
+      "tokens": 517,
+      "context_length": 12503
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Segment3D.__new___Segment3D.__new__.p1.5.1",
+      "distance": 1.1854760646820068,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1320,
+      "end_line": 1333,
+      "tokens": 214,
+      "context_length": 12717
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon._do_poly_distance_Polygon._do_poly_distance.21.2.2.1",
+      "distance": 1.1879467964172363,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 723,
+      "end_line": 809,
+      "tokens": 781,
+      "context_length": 13498
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.__new___Triangle.__new__.11.3.1.1",
+      "distance": 1.1885676383972168,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1685,
+      "end_line": 1725,
+      "tokens": 397,
+      "context_length": 13895
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.__new___Ray3D.__new__.3.1",
+      "distance": 1.1940946578979492,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1039,
+      "end_line": 1053,
+      "tokens": 178,
+      "context_length": 14073
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.perpendicular_plane_Plane.perpendicular_plane.10.1",
+      "distance": 1.1946446895599365,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 514,
+      "end_line": 578,
+      "tokens": 665,
+      "context_length": 14738
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.are_collinear_Point3D.are_collinear.2.1",
+      "distance": 1.197545051574707,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 934,
+      "end_line": 968,
+      "tokens": 265,
+      "context_length": 15003,
+      "file_pos": 9
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.zdirection_Ray3D.zdirection.2.3.1.1",
+      "distance": 1.2006611824035645,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1140,
+      "end_line": 1172,
+      "tokens": 250,
+      "context_length": 15253
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point3D.intersection_Point3D.intersection.3.1",
+      "distance": 1.2015174627304077,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 1019,
+      "end_line": 1054,
+      "tokens": 206,
+      "context_length": 15459,
+      "file_pos": 9
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.__new___Plane.__new__.3.1",
+      "distance": 1.2020683288574219,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 51,
+      "end_line": 69,
+      "tokens": 217,
+      "context_length": 15676
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/vector/point.py_Point.locate_new_Point.locate_new.2.1",
+      "distance": 1.2035362720489502,
+      "file_path": "sympy/vector/point.py",
+      "start_line": 95,
+      "end_line": 121,
+      "tokens": 176,
+      "context_length": 15852
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_centroid_",
+      "distance": 1.2072105407714844,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 634,
+      "end_line": 708,
+      "tokens": 708,
+      "context_length": 16560
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/vector/functions.py_scalar_potential_difference_scalar_potential_difference.13.1",
+      "distance": 1.2113994359970093,
+      "file_path": "sympy/vector/functions.py",
+      "start_line": 337,
+      "end_line": 403,
+      "tokens": 590,
+      "context_length": 17150
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Circle_Circle.1",
+      "distance": 1.2183263301849365,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 1286,
+      "end_line": 1332,
+      "tokens": 307,
+      "context_length": 17457
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_Point_Point.free_symbols.2.1",
+      "distance": 1.219409465789795,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 353,
+      "end_line": 410,
+      "tokens": 445,
+      "context_length": 17902
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.equation_Plane.equation.6.1",
+      "distance": 1.219422698020935,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 110,
+      "end_line": 129,
+      "tokens": 242,
+      "context_length": 18144
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/rn.py_40_",
+      "distance": 1.2247164249420166,
+      "file_path": "sympy/diffgeom/rn.py",
+      "start_line": 61,
+      "end_line": 102,
+      "tokens": 602,
+      "context_length": 18746
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/permutations.py_Permutation.get_positional_distance_Permutation.get_positional_distance.5.1",
+      "distance": 1.2265238761901855,
+      "file_path": "sympy/combinatorics/permutations.py",
+      "start_line": 2640,
+      "end_line": 2665,
+      "tokens": 214,
+      "context_length": 18960
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.midpoint_Point.midpoint.2.1",
+      "distance": 1.2271778583526611,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 305,
+      "end_line": 332,
+      "tokens": 150,
+      "context_length": 19110,
+      "file_pos": 14
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.normal_vector_Plane.normal_vector.2.1",
+      "distance": 1.2288033962249756,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 92,
+      "end_line": 108,
+      "tokens": 155,
+      "context_length": 19265
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Ellipse.focus_distance_Ellipse.focus_distance.2.1",
+      "distance": 1.2288283109664917,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 444,
+      "end_line": 470,
+      "tokens": 138,
+      "context_length": 19403
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Segment3D_Segment3D.1",
+      "distance": 1.2298336029052734,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1279,
+      "end_line": 1318,
+      "tokens": 318,
+      "context_length": 19721
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle_Triangle.1",
+      "distance": 1.2315620183944702,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1628,
+      "end_line": 1683,
+      "tokens": 413,
+      "context_length": 20134
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Segment3D.midpoint_Segment3D.midpoint.2.1",
+      "distance": 1.2345421314239502,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1385,
+      "end_line": 1404,
+      "tokens": 155,
+      "context_length": 20289
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.projection_Plane.projection.4.1",
+      "distance": 1.2349785566329956,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 131,
+      "end_line": 168,
+      "tokens": 306,
+      "context_length": 20595
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_1_Point._check_point.1.1",
+      "distance": 1.2358689308166504,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 212,
+      "context_length": 20807
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/fieldfunctions.py_scalar_potential_difference_",
+      "distance": 1.2385185956954956,
+      "file_path": "sympy/physics/vector/fieldfunctions.py",
+      "start_line": 250,
+      "end_line": 314,
+      "tokens": 554,
+      "context_length": 21361
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_LinearEntity.points_LinearEntity.bounds.5.1",
+      "distance": 1.239952564239502,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 522,
+      "end_line": 558,
+      "tokens": 228,
+      "context_length": 21589
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.vertices_Triangle.vertices.2.1",
+      "distance": 1.24263334274292,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1727,
+      "end_line": 1751,
+      "tokens": 141,
+      "context_length": 21730
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.set_pos_Point.set_pos.6",
+      "distance": 1.2440019845962524,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 275,
+      "end_line": 304,
+      "tokens": 210,
+      "context_length": 21940
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.direction_ratio_LinearEntity3D.direction_ratio.3.1",
+      "distance": 1.2448606491088867,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 96,
+      "end_line": 115,
+      "tokens": 154,
+      "context_length": 22094
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Ray.__new___Ray.__new__.3.1",
+      "distance": 1.2473746538162231,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1261,
+      "end_line": 1303,
+      "tokens": 488,
+      "context_length": 22582
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_BaseScalarField.__call___BaseScalarField.doit.1.1",
+      "distance": 1.249708890914917,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 474,
+      "end_line": 494,
+      "tokens": 201,
+      "context_length": 22783
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.is_collinear_Point.is_collinear.10.1",
+      "distance": 1.2524590492248535,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 120,
+      "end_line": 191,
+      "tokens": 573,
+      "context_length": 23356,
+      "file_pos": 15
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.partial_velocity_",
+      "distance": 1.2527680397033691,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 458,
+      "end_line": 499,
+      "tokens": 300,
+      "context_length": 23656
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.intersection.2_LinearEntity3D.intersection.3.1",
+      "distance": 1.2537543773651123,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 631,
+      "end_line": 718,
+      "tokens": 759,
+      "context_length": 24415
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.random_point_Plane.arbitrary_point.10.1",
+      "distance": 1.2554664611816406,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 580,
+      "end_line": 632,
+      "tokens": 440,
+      "context_length": 24855
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/sympy/sympy/geometry/entity.py_translate_scale.6.1",
+      "distance": 1.2565127611160278,
+      "file_path": "sympy/geometry/entity.py",
+      "start_line": 510,
+      "end_line": 531,
+      "tokens": 180,
+      "context_length": 25035
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.rotate_Point2D.rotate.10.1",
+      "distance": 1.2566163539886475,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 659,
+      "end_line": 691,
+      "tokens": 207,
+      "context_length": 25242,
+      "file_pos": 16
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.altitudes_Triangle.altitudes.4.1",
+      "distance": 1.2566825151443481,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1913,
+      "end_line": 1947,
+      "tokens": 277,
+      "context_length": 25519
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Segment.length_Segment.length.2.1",
+      "distance": 1.259775161743164,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1701,
+      "end_line": 1720,
+      "tokens": 115,
+      "context_length": 25634
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.vel_Point.vel.4.1",
+      "distance": 1.2605974674224854,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 431,
+      "end_line": 456,
+      "tokens": 171,
+      "context_length": 25805
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Ellipse.eccentricity_Ellipse.eccentricity.2.1",
+      "distance": 1.2617027759552002,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 367,
+      "end_line": 386,
+      "tokens": 114,
+      "context_length": 25919
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point.intersection_Point.intersection.3.1",
+      "distance": 1.2642592191696167,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 367,
+      "end_line": 404,
+      "tokens": 209,
+      "context_length": 26128,
+      "file_pos": 16
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.circumradius_Triangle.circumradius.2.1",
+      "distance": 1.2651798725128174,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 2008,
+      "end_line": 2033,
+      "tokens": 176,
+      "context_length": 26304
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Segment_Segment.1",
+      "distance": 1.266904592514038,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1567,
+      "end_line": 1614,
+      "tokens": 299,
+      "context_length": 26603
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.direction_cosine_LinearEntity3D.direction_cosine.3.1",
+      "distance": 1.2697625160217285,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 117,
+      "end_line": 138,
+      "tokens": 186,
+      "context_length": 26789
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.source_Ray3D.source.2.1",
+      "distance": 1.2722197771072388,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1055,
+      "end_line": 1074,
+      "tokens": 140,
+      "context_length": 26929
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_1__ordered_points.2.1",
+      "distance": 1.2749561071395874,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 115,
+      "context_length": 27044
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/sympy/sympy/geometry/__init__.py_1_",
+      "distance": 1.2752156257629395,
+      "file_path": "sympy/geometry/__init__.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 213,
+      "context_length": 27257
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/sympy/sympy/physics/unitsystems/dimensions.py_1_8",
+      "distance": 1.2778923511505127,
+      "file_path": "sympy/physics/unitsystems/dimensions.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 159,
+      "context_length": 27416
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.a2pt_theory_Point.a2pt_theory.10.1",
+      "distance": 1.2782682180404663,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 112,
+      "end_line": 156,
+      "tokens": 418,
+      "context_length": 27834
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.inradius_Triangle.inradius.2.1",
+      "distance": 1.2808687686920166,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 2133,
+      "end_line": 2157,
+      "tokens": 148,
+      "context_length": 27982
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.a1pt_theory_Point.a1pt_theory.12.1",
+      "distance": 1.2827708721160889,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 57,
+      "end_line": 110,
+      "tokens": 538,
+      "context_length": 28520
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.xdirection_Ray3D.xdirection.2.3.1.1",
+      "distance": 1.2833647727966309,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1076,
+      "end_line": 1106,
+      "tokens": 238,
+      "context_length": 28758
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Segment.__new___Segment.__new__.p1.5.1",
+      "distance": 1.2838948965072632,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1616,
+      "end_line": 1628,
+      "tokens": 188,
+      "context_length": 28946
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.p2_LinearEntity3D.p2.2.1",
+      "distance": 1.2854692935943604,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 75,
+      "end_line": 94,
+      "tokens": 142,
+      "context_length": 29088
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/sympy/sympy/geometry/point.py_Point2D.is_concyclic_Point2D.is_concyclic.6.5.3.1",
+      "distance": 1.2863340377807617,
+      "file_path": "sympy/geometry/point.py",
+      "start_line": 592,
+      "end_line": 657,
+      "tokens": 459,
+      "context_length": 29547,
+      "file_pos": 18
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Line.__new___Line.__new__.3.1",
+      "distance": 1.2866358757019043,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1002,
+      "end_line": 1028,
+      "tokens": 254,
+      "context_length": 29801
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.orthocenter_Triangle.orthocenter.4.1",
+      "distance": 1.2867193222045898,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1949,
+      "end_line": 1978,
+      "tokens": 198,
+      "context_length": 29999
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.acc_Point.acc.4.1",
+      "distance": 1.2880864143371582,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 158,
+      "end_line": 185,
+      "tokens": 176,
+      "context_length": 30175
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Circle.__new___Circle.__new__.4",
+      "distance": 1.2880868911743164,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 1334,
+      "end_line": 1353,
+      "tokens": 184,
+      "context_length": 30359
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.v1pt_theory_Point.v1pt_theory.10.1",
+      "distance": 1.2892054319381714,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 335,
+      "end_line": 384,
+      "tokens": 458,
+      "context_length": 30817
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point.v2pt_theory_Point.v2pt_theory.9.1",
+      "distance": 1.2894716262817383,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 386,
+      "end_line": 429,
+      "tokens": 375,
+      "context_length": 31192
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/sympy/sympy/physics/unitsystems/dimensions.py_Dimension.sub_Dimension.pow.other.2.2.1",
+      "distance": 1.2910219430923462,
+      "file_path": "sympy/physics/unitsystems/dimensions.py",
+      "start_line": 232,
+      "end_line": 250,
+      "tokens": 188,
+      "context_length": 31380
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D_Ray3D.1",
+      "distance": 1.2918896675109863,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 989,
+      "end_line": 1037,
+      "tokens": 311,
+      "context_length": 31691
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_CoordSystem._fill_gaps_in_transformations_CoordSystem._latex.1.1",
+      "distance": 1.294264316558838,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 259,
+      "end_line": 350,
+      "tokens": 672,
+      "context_length": 32363
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.medians_Triangle.medians.4.1",
+      "distance": 1.2952604293823242,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 2188,
+      "end_line": 2222,
+      "tokens": 283,
+      "context_length": 32646
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.intersection.6_Plane.intersection.6.2.2.14.1.1",
+      "distance": 1.2969201803207397,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 698,
+      "end_line": 723,
+      "tokens": 333,
+      "context_length": 32979
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon.centroid_Polygon.centroid.6.1",
+      "distance": 1.2969720363616943,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 355,
+      "end_line": 388,
+      "tokens": 265,
+      "context_length": 33244
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.arbitrary_point_LinearEntity3D.arbitrary_point.7.1",
+      "distance": 1.2991888523101807,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 720,
+      "end_line": 765,
+      "tokens": 372,
+      "context_length": 33616
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.angle_between_LinearEntity3D.angle_between.4.1",
+      "distance": 1.3001073598861694,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 338,
+      "end_line": 380,
+      "tokens": 323,
+      "context_length": 33939
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_LinearEntity.length_LinearEntity.slope.4.1",
+      "distance": 1.3007206916809082,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 472,
+      "end_line": 520,
+      "tokens": 283,
+      "context_length": 34222
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/sympy/sympy/physics/unitsystems/dimensions.py_DimensionSystem.dim_",
+      "distance": 1.3024557828903198,
+      "file_path": "sympy/physics/unitsystems/dimensions.py",
+      "start_line": 540,
+      "end_line": 563,
+      "tokens": 123,
+      "context_length": 34345
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Segment.midpoint_Segment.midpoint.2.1",
+      "distance": 1.3026151657104492,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1722,
+      "end_line": 1741,
+      "tokens": 126,
+      "context_length": 34471
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.medial_Triangle.medial.3.1",
+      "distance": 1.304593563079834,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 2224,
+      "end_line": 2251,
+      "tokens": 207,
+      "context_length": 34678
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Ray.source_Ray.source.2.1",
+      "distance": 1.308311939239502,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1305,
+      "end_line": 1324,
+      "tokens": 115,
+      "context_length": 34793
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/sympy/sympy/geometry/parabola.py_Parabola.focal_length_Parabola.focal_length.4.1",
+      "distance": 1.3106653690338135,
+      "file_path": "sympy/geometry/parabola.py",
+      "start_line": 166,
+      "end_line": 199,
+      "tokens": 194,
+      "context_length": 34987
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py__sss_",
+      "distance": 1.3127652406692505,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 2333,
+      "end_line": 2350,
+      "tokens": 191,
+      "context_length": 35178
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Circle.radius_Circle.radius.2.1",
+      "distance": 1.3129115104675293,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 1355,
+      "end_line": 1378,
+      "tokens": 118,
+      "context_length": 35296
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Line3D.plot_interval_Line3D.plot_interval.3.1",
+      "distance": 1.313310146331787,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 854,
+      "end_line": 882,
+      "tokens": 216,
+      "context_length": 35512
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane_Plane.1",
+      "distance": 1.3136683702468872,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 24,
+      "end_line": 50,
+      "tokens": 297,
+      "context_length": 35809
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_RegularPolygon.radius_RegularPolygon.radius.2.1",
+      "distance": 1.3146332502365112,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1203,
+      "end_line": 1230,
+      "tokens": 144,
+      "context_length": 35953
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Ray.direction_Ray.direction.2.1",
+      "distance": 1.3166282176971436,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1326,
+      "end_line": 1345,
+      "tokens": 119,
+      "context_length": 36072
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.p1_Plane.p1.2.1",
+      "distance": 1.317950963973999,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 71,
+      "end_line": 90,
+      "tokens": 144,
+      "context_length": 36216
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/sympy/sympy/geometry/line.py_Ray.xdirection_Ray.xdirection.2.3.1.1",
+      "distance": 1.3186864852905273,
+      "file_path": "sympy/geometry/line.py",
+      "start_line": 1347,
+      "end_line": 1377,
+      "tokens": 211,
+      "context_length": 36427
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__div___Float.__rmod__.3.1",
+      "distance": 1.319034457206726,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 964,
+      "end_line": 997,
+      "tokens": 368,
+      "context_length": 36795
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Triangle.circumcenter_Triangle.circumcenter.3.1",
+      "distance": 1.31930410861969,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1980,
+      "end_line": 2006,
+      "tokens": 181,
+      "context_length": 36976
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.plot_interval_Ray3D.plot_interval.3.1",
+      "distance": 1.3196114301681519,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1207,
+      "end_line": 1234,
+      "tokens": 199,
+      "context_length": 37175
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_RegularPolygon.inradius_RegularPolygon.interior_angle.2.1",
+      "distance": 1.3199846744537354,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 1298,
+      "end_line": 1338,
+      "tokens": 220,
+      "context_length": 37395
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/sympy/sympy/geometry/polygon.py_Polygon_Polygon.1",
+      "distance": 1.3200061321258545,
+      "file_path": "sympy/geometry/polygon.py",
+      "start_line": 24,
+      "end_line": 113,
+      "tokens": 766,
+      "context_length": 38161
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Ray3D.ydirection_Ray3D.ydirection.2.3.1.1",
+      "distance": 1.3202564716339111,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 1108,
+      "end_line": 1138,
+      "tokens": 239,
+      "context_length": 38400
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/sympy/sympy/physics/optics/gaussopt.py_FreeSpace_FreeSpace.__new__.1.1",
+      "distance": 1.321529746055603,
+      "file_path": "sympy/physics/optics/gaussopt.py",
+      "start_line": 200,
+      "end_line": 226,
+      "tokens": 129,
+      "context_length": 38529
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/sympy/sympy/physics/unitsystems/dimensions.py_Dimension.__repr___Dimension.add.3.1",
+      "distance": 1.3224077224731445,
+      "file_path": "sympy/physics/unitsystems/dimensions.py",
+      "start_line": 208,
+      "end_line": 230,
+      "tokens": 152,
+      "context_length": 38681
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/sympy/sympy/geometry/ellipse.py_Ellipse.vradius_Ellipse.vradius.2.1",
+      "distance": 1.3231723308563232,
+      "file_path": "sympy/geometry/ellipse.py",
+      "start_line": 204,
+      "end_line": 228,
+      "tokens": 121,
+      "context_length": 38802
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_comp_comp.8.2.1.1",
+      "distance": 1.3234859704971313,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 34,
+      "end_line": 71,
+      "tokens": 478,
+      "context_length": 39280
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_Line3D_Line3D.1",
+      "distance": 1.3236033916473389,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 806,
+      "end_line": 836,
+      "tokens": 234,
+      "context_length": 39514
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.projection_LinearEntity3D.projection.8.1",
+      "distance": 1.3237805366516113,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 513,
+      "end_line": 591,
+      "tokens": 647,
+      "context_length": 40161
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/sympy/sympy/functions/special/hyper.py_HyperRep_sqrts2_HyperRep_sqrts2._expr_small_minus.1.1",
+      "distance": 1.3243566751480103,
+      "file_path": "sympy/functions/special/hyper.py",
+      "start_line": 944,
+      "end_line": 955,
+      "tokens": 156,
+      "context_length": 40317
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/sympy/sympy/physics/units.py_6_l.liter.liters.1",
+      "distance": 1.3253527879714966,
+      "file_path": "sympy/physics/units.py",
+      "start_line": 130,
+      "end_line": 212,
+      "tokens": 791,
+      "context_length": 41108
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/sympy/sympy/geometry/entity.py_GeometryEntity.scale_GeometryEntity.scale.5",
+      "distance": 1.3266870975494385,
+      "file_path": "sympy/geometry/entity.py",
+      "start_line": 131,
+      "end_line": 159,
+      "tokens": 323,
+      "context_length": 41431
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/sympy/sympy/physics/unitsystems/__init__.py_1_",
+      "distance": 1.3272029161453247,
+      "file_path": "sympy/physics/unitsystems/__init__.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 238,
+      "context_length": 41669
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/sympy/sympy/geometry/plane.py_Plane.parallel_plane_Plane.parallel_plane.3.1",
+      "distance": 1.3274035453796387,
+      "file_path": "sympy/geometry/plane.py",
+      "start_line": 488,
+      "end_line": 512,
+      "tokens": 158,
+      "context_length": 41827
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/sympy/sympy/physics/vector/point.py_Point._pdict_list_Point._pdict_list.8",
+      "distance": 1.3286933898925781,
+      "file_path": "sympy/physics/vector/point.py",
+      "start_line": 35,
+      "end_line": 55,
+      "tokens": 210,
+      "context_length": 42037
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/sympy/sympy/geometry/line3d.py_LinearEntity3D.is_parallel_LinearEntity3D.is_parallel.9.1",
+      "distance": 1.329716682434082,
+      "file_path": "sympy/geometry/line3d.py",
+      "start_line": 250,
+      "end_line": 295,
+      "tokens": 354,
+      "context_length": 42391
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/sympy/sympy/solvers/diophantine.py_dot_dot.4.1",
+      "distance": 1.330051064491272,
+      "file_path": "sympy/solvers/diophantine.py",
+      "start_line": 2377,
+      "end_line": 2385,
+      "tokens": 145,
+      "context_length": 42536
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/geometry/point.py",
+      "position": 1,
+      "tokens": 7361,
+      "context_length": 7361
+    },
+    {
+      "file_path": "sympy/physics/vector/point.py",
+      "position": 2,
+      "tokens": 3752,
+      "context_length": 11113
+    },
+    {
+      "file_path": "sympy/geometry/line3d.py",
+      "position": 3,
+      "tokens": 10951,
+      "context_length": 22064
+    },
+    {
+      "file_path": "sympy/vector/point.py",
+      "position": 4,
+      "tokens": 1071,
+      "context_length": 23135
+    },
+    {
+      "file_path": "sympy/geometry/plane.py",
+      "position": 5,
+      "tokens": 6434,
+      "context_length": 29569
+    },
+    {
+      "file_path": "sympy/geometry/util.py",
+      "position": 6,
+      "tokens": 5492,
+      "context_length": 35061
+    },
+    {
+      "file_path": "sympy/geometry/line.py",
+      "position": 7,
+      "tokens": 12639,
+      "context_length": 47700
+    },
+    {
+      "file_path": "sympy/geometry/polygon.py",
+      "position": 8,
+      "tokens": 16787,
+      "context_length": 64487
+    },
+    {
+      "file_path": "sympy/plotting/plot.py",
+      "position": 9,
+      "tokens": 15799,
+      "context_length": 80286
+    },
+    {
+      "file_path": "sympy/vector/functions.py",
+      "position": 10,
+      "tokens": 3823,
+      "context_length": 84109
+    },
+    {
+      "file_path": "sympy/geometry/ellipse.py",
+      "position": 11,
+      "tokens": 11217,
+      "context_length": 95326
+    },
+    {
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "position": 12,
+      "tokens": 14461,
+      "context_length": 109787
+    },
+    {
+      "file_path": "sympy/diffgeom/rn.py",
+      "position": 13,
+      "tokens": 1318,
+      "context_length": 111105
+    },
+    {
+      "file_path": "sympy/combinatorics/permutations.py",
+      "position": 14,
+      "tokens": 22292,
+      "context_length": 133397
+    },
+    {
+      "file_path": "sympy/physics/vector/fieldfunctions.py",
+      "position": 15,
+      "tokens": 2324,
+      "context_length": 135721
+    },
+    {
+      "file_path": "sympy/geometry/entity.py",
+      "position": 16,
+      "tokens": 4478,
+      "context_length": 140199
+    },
+    {
+      "file_path": "sympy/geometry/__init__.py",
+      "position": 17,
+      "tokens": 214,
+      "context_length": 140413
+    },
+    {
+      "file_path": "sympy/physics/unitsystems/dimensions.py",
+      "position": 18,
+      "tokens": 3869,
+      "context_length": 144282
+    },
+    {
+      "file_path": "sympy/geometry/parabola.py",
+      "position": 19,
+      "tokens": 2113,
+      "context_length": 146395
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 20,
+      "tokens": 26488,
+      "context_length": 172883
+    },
+    {
+      "file_path": "sympy/physics/optics/gaussopt.py",
+      "position": 21,
+      "tokens": 5695,
+      "context_length": 178578
+    },
+    {
+      "file_path": "sympy/functions/special/hyper.py",
+      "position": 22,
+      "tokens": 9793,
+      "context_length": 188371
+    },
+    {
+      "file_path": "sympy/physics/units.py",
+      "position": 23,
+      "tokens": 2743,
+      "context_length": 191114
+    },
+    {
+      "file_path": "sympy/physics/unitsystems/__init__.py",
+      "position": 24,
+      "tokens": 239,
+      "context_length": 191353
+    },
+    {
+      "file_path": "sympy/solvers/diophantine.py",
+      "position": 25,
+      "tokens": 29131,
+      "context_length": 220484
+    }
+  ]
+}

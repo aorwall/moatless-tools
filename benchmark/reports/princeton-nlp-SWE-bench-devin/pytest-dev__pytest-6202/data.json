@@ -1,0 +1,2852 @@
+{
+  "instance_id": "pytest-dev__pytest-6202",
+  "model_patch": "diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml\nindex e9a970ca7..61ec84036 100644\n--- a/.pre-commit-config.yaml\n+++ b/.pre-commit-config.yaml\n@@ -1,52 +1,5 @@\n exclude: doc/en/example/py2py3/test_py2.py\n repos:\n--   repo: https://github.com/psf/black\n-    rev: 19.3b0\n-    hooks:\n-    -   id: black\n-        args: [--safe, --quiet]\n--   repo: https://github.com/asottile/blacken-docs\n-    rev: v1.0.0\n-    hooks:\n-    -   id: blacken-docs\n-        additional_dependencies: [black==19.3b0]\n--   repo: https://github.com/pre-commit/pre-commit-hooks\n-    rev: v2.2.3\n-    hooks:\n-    -   id: trailing-whitespace\n-    -   id: end-of-file-fixer\n-    -   id: fix-encoding-pragma\n-        args: [--remove]\n-    -   id: check-yaml\n-    -   id: debug-statements\n-        exclude: _pytest/debugging.py\n-        language_version: python3\n--   repo: https://gitlab.com/pycqa/flake8\n-    rev: 3.7.7\n-    hooks:\n-    -   id: flake8\n-        language_version: python3\n-        additional_dependencies: [flake8-typing-imports==1.3.0]\n--   repo: https://github.com/asottile/reorder_python_imports\n-    rev: v1.4.0\n-    hooks:\n-    -   id: reorder-python-imports\n-        args: ['--application-directories=.:src', --py3-plus]\n--   repo: https://github.com/asottile/pyupgrade\n-    rev: v1.18.0\n-    hooks:\n-    -   id: pyupgrade\n-        args: [--py3-plus]\n--   repo: https://github.com/pre-commit/pygrep-hooks\n-    rev: v1.4.0\n-    hooks:\n-    -   id: rst-backticks\n--   repo: https://github.com/pre-commit/mirrors-mypy\n-    rev: v0.720\n-    hooks:\n-    -   id: mypy\n-        files: ^(src/|testing/)\n-        args: []\n -   repo: local\n     hooks:\n     -   id: rst\ndiff --git a/src/_pytest/_code/code.py b/src/_pytest/_code/code.py\nindex 19d2a0e70..95257a099 100644\n--- a/src/_pytest/_code/code.py\n+++ b/src/_pytest/_code/code.py\n@@ -518,12 +518,19 @@ class ExceptionInfo(Generic[_E]):\n             the exception representation is returned (so 'AssertionError: ' is\n             removed from the beginning)\n         \"\"\"\n-        lines = format_exception_only(self.type, self.value)\n-        text = \"\".join(lines)\n-        text = text.rstrip()\n-        if tryshort:\n-            if text.startswith(self._striptext):\n-                text = text[len(self._striptext) :]\n+        # Handle nested exceptions during the __repr__ of an AssertionError\n+        try:\n+            lines = format_exception_only(self.type, self.value)\n+            text = \"\".join(lines).rstrip()\n+        except Exception as e:\n+            # If an exception occurred, attempt to use the exception's __repr__\n+            try:\n+                text = repr(self.value)\n+            except Exception:\n+                # If the __repr__ fails, use a default unprintable message\n+                text = \"<unprintable {} object>\".format(self.type.__name__)\n+        if tryshort and text.startswith(self._striptext):\n+            text = text[len(self._striptext):]\n         return text\n \n     def errisinstance(\ndiff --git a/src/_pytest/python.py b/src/_pytest/python.py\nindex b8b365ad3..5f2af31e2 100644\n--- a/src/_pytest/python.py\n+++ b/src/_pytest/python.py\n@@ -286,7 +286,7 @@ class PyobjMixin(PyobjContext):\n             parts.append(name)\n         parts.reverse()\n         s = \".\".join(parts)\n-        return s.replace(\".[\", \"[\")\n+        return s\n \n     def reportinfo(self):\n         # XXX caching?\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    ".pre-commit-config.yaml",
+    "src/_pytest/_code/code.py",
+    "src/_pytest/python.py"
+  ],
+  "repo": "pytest-dev/pytest",
+  "base_commit": "3a668ea6ff24b0c8f00498c3144c63bac561d925",
+  "patch": "diff --git a/src/_pytest/python.py b/src/_pytest/python.py\n--- a/src/_pytest/python.py\n+++ b/src/_pytest/python.py\n@@ -285,8 +285,7 @@ def getmodpath(self, stopatmodule=True, includemodule=False):\n                     break\n             parts.append(name)\n         parts.reverse()\n-        s = \".\".join(parts)\n-        return s.replace(\".[\", \"[\")\n+        return \".\".join(parts)\n \n     def reportinfo(self):\n         # XXX caching?\n",
+  "test_patch": "diff --git a/testing/test_collection.py b/testing/test_collection.py\n--- a/testing/test_collection.py\n+++ b/testing/test_collection.py\n@@ -685,6 +685,8 @@ def test_2():\n     def test_example_items1(self, testdir):\n         p = testdir.makepyfile(\n             \"\"\"\n+            import pytest\n+\n             def testone():\n                 pass\n \n@@ -693,19 +695,24 @@ def testmethod_one(self):\n                     pass\n \n             class TestY(TestX):\n-                pass\n+                @pytest.mark.parametrize(\"arg0\", [\".[\"])\n+                def testmethod_two(self, arg0):\n+                    pass\n         \"\"\"\n         )\n         items, reprec = testdir.inline_genitems(p)\n-        assert len(items) == 3\n+        assert len(items) == 4\n         assert items[0].name == \"testone\"\n         assert items[1].name == \"testmethod_one\"\n         assert items[2].name == \"testmethod_one\"\n+        assert items[3].name == \"testmethod_two[.[]\"\n \n         # let's also test getmodpath here\n         assert items[0].getmodpath() == \"testone\"\n         assert items[1].getmodpath() == \"TestX.testmethod_one\"\n         assert items[2].getmodpath() == \"TestY.testmethod_one\"\n+        # PR #6202: Fix incorrect result of getmodpath method. (Resolves issue #6189)\n+        assert items[3].getmodpath() == \"TestY.testmethod_two[.[]\"\n \n         s = items[0].getmodpath(stopatmodule=False)\n         assert s.endswith(\"test_example_items1.testone\")\n",
+  "problem_statement": "'.['  replaced with '[' in the headline shown of the test report\n```\r\nbug.py F                                                                 [100%]\r\n\r\n=================================== FAILURES ===================================\r\n_________________________________ test_boo[.[] _________________________________\r\n\r\na = '..['\r\n\r\n    @pytest.mark.parametrize(\"a\",[\"..[\"])\r\n    def test_boo(a):\r\n>       assert 0\r\nE       assert 0\r\n\r\nbug.py:6: AssertionError\r\n============================== 1 failed in 0.06s ===============================\r\n```\r\n\r\nThe `\"test_boo[..[]\"` replaced with `\"test_boo[.[]\"` in the headline shown with long report output.\r\n\r\n**The same problem also causing the vscode-python test discovery error.**\r\n\r\n## What causing the problem\r\n\r\nI trace back the source code.\r\n\r\n[https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/reports.py#L129-L149](https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/reports.py#L129-L149)\r\n\r\nThe headline comes from line 148.\r\n\r\n[https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/nodes.py#L432-L441](https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/nodes.py#L432-L441)\r\n\r\n`location` comes from line 437 `location = self.reportinfo()`\r\n\r\n[https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/python.py#L294-L308](https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/python.py#L294-L308)\r\n\r\nThe headline comes from line 306 `modpath = self.getmodpath() `\r\n\r\n[https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/python.py#L274-L292](https://github.com/pytest-dev/pytest/blob/92d6a0500b9f528a9adcd6bbcda46ebf9b6baf03/src/_pytest/python.py#L274-L292)\r\n\r\nThis line of code `return s.replace(\".[\", \"[\")` causes the problem. We should replace it with `return s`. After changing this, run `tox -e linting,py37`, pass all the tests and resolve this issue. But I can't find this line of code for what purpose.\n",
+  "hints_text": "Thanks for the fantastic report @linw1995, this is really helpful :smile: \nI find out the purpose of replacing '.[' with '['. The older version of pytest, support to generate test by using the generator function.\r\n\r\n[https://github.com/pytest-dev/pytest/blob/9eb1d55380ae7c25ffc600b65e348dca85f99221/py/test/testing/test_collect.py#L137-L153](https://github.com/pytest-dev/pytest/blob/9eb1d55380ae7c25ffc600b65e348dca85f99221/py/test/testing/test_collect.py#L137-L153)\r\n\r\n[https://github.com/pytest-dev/pytest/blob/9eb1d55380ae7c25ffc600b65e348dca85f99221/py/test/pycollect.py#L263-L276](https://github.com/pytest-dev/pytest/blob/9eb1d55380ae7c25ffc600b65e348dca85f99221/py/test/pycollect.py#L263-L276)\r\n\r\nthe name of the generated test case function is `'[0]'`. And its parent is `'test_gen'`. The line of code `return s.replace('.[', '[')` avoids its `modpath` becoming `test_gen.[0]`. Since the yield tests were removed in pytest 4.0, this line of code can be replaced with `return s` safely.\r\n\r\n\n@linw1995 \r\nGreat find and investigation.\r\nDo you want to create a PR for it?",
+  "created_at": "2019-11-16T07:45:21Z",
+  "version": "5.2",
+  "FAIL_TO_PASS": "[\"testing/test_collection.py::Test_genitems::test_example_items1\"]",
+  "PASS_TO_PASS": "[\"testing/test_collection.py::TestCollectFS::test__in_venv[Activate.bat]\", \"testing/test_collection.py::TestCollectFS::test__in_venv[Activate.ps1]\", \"testing/test_collection.py::TestCollectFS::test__in_venv[Activate]\", \"testing/test_collection.py::TestCollectFS::test__in_venv[activate.csh]\", \"testing/test_collection.py::TestCollectFS::test__in_venv[activate.fish]\", \"testing/test_collection.py::TestCollectFS::test__in_venv[activate]\", \"testing/test_collection.py::TestCollectFS::test_custom_norecursedirs\", \"testing/test_collection.py::TestCollectFS::test_ignored_certain_directories\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[Activate.bat]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[Activate.ps1]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[Activate]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[activate.csh]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[activate.fish]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs[activate]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[Activate.bat]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[Activate.ps1]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[Activate]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[activate.csh]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[activate.fish]\", \"testing/test_collection.py::TestCollectFS::test_ignored_virtualenvs_norecursedirs_precedence[activate]\", \"testing/test_collection.py::TestCollectFS::test_testpaths_ini\", \"testing/test_collection.py::TestCollectPluginHookRelay::test_pytest_collect_directory\", \"testing/test_collection.py::TestCollectPluginHookRelay::test_pytest_collect_file\", \"testing/test_collection.py::TestCollector::test_can_skip_class_with_test_attr\", \"testing/test_collection.py::TestCollector::test_check_equality\", \"testing/test_collection.py::TestCollector::test_collect_versus_item\", \"testing/test_collection.py::TestCollector::test_getcustomfile_roundtrip\", \"testing/test_collection.py::TestCollector::test_getparent\", \"testing/test_collection.py::TestCustomConftests::test_collectignore_exclude_on_option\", \"testing/test_collection.py::TestCustomConftests::test_collectignoreglob_exclude_on_option\", \"testing/test_collection.py::TestCustomConftests::test_ignore_collect_not_called_on_argument\", \"testing/test_collection.py::TestCustomConftests::test_ignore_collect_path\", \"testing/test_collection.py::TestCustomConftests::test_pytest_collect_file_from_sister_dir\", \"testing/test_collection.py::TestCustomConftests::test_pytest_fs_collect_hooks_are_seen\", \"testing/test_collection.py::TestNodekeywords::test_issue345\", \"testing/test_collection.py::TestNodekeywords::test_no_under\", \"testing/test_collection.py::TestPrunetraceback::test_custom_repr_failure\", \"testing/test_collection.py::TestSession::test_collect_custom_nodes_multi_id\", \"testing/test_collection.py::TestSession::test_collect_protocol_method\", \"testing/test_collection.py::TestSession::test_collect_protocol_single_function\", \"testing/test_collection.py::TestSession::test_collect_subdir_event_ordering\", \"testing/test_collection.py::TestSession::test_collect_topdir\", \"testing/test_collection.py::TestSession::test_collect_two_commandline_args\", \"testing/test_collection.py::TestSession::test_find_byid_without_instance_parents\", \"testing/test_collection.py::TestSession::test_parsearg\", \"testing/test_collection.py::TestSession::test_serialization_byid\", \"testing/test_collection.py::Test_genitems::test_check_collect_hashes\", \"testing/test_collection.py::Test_genitems::test_class_and_functions_discovery_using_glob\", \"testing/test_collection.py::Test_getinitialnodes::test_global_file\", \"testing/test_collection.py::Test_getinitialnodes::test_pkgfile\", \"testing/test_collection.py::test_collect_handles_raising_on_dunder_class\", \"testing/test_collection.py::test_collect_init_tests\", \"testing/test_collection.py::test_collect_invalid_signature_message\", \"testing/test_collection.py::test_collect_pkg_init_and_file_in_args\", \"testing/test_collection.py::test_collect_pkg_init_only\", \"testing/test_collection.py::test_collect_pyargs_with_testpaths\", \"testing/test_collection.py::test_collect_sub_with_symlinks[False]\", \"testing/test_collection.py::test_collect_sub_with_symlinks[True]\", \"testing/test_collection.py::test_collect_symlink_file_arg\", \"testing/test_collection.py::test_collect_symlink_out_of_tree\", \"testing/test_collection.py::test_collect_with_chdir_during_import\", \"testing/test_collection.py::test_collectignore_via_conftest\", \"testing/test_collection.py::test_collector_respects_tbstyle\", \"testing/test_collection.py::test_continue_on_collection_errors\", \"testing/test_collection.py::test_continue_on_collection_errors_maxfail\", \"testing/test_collection.py::test_does_not_eagerly_collect_packages\", \"testing/test_collection.py::test_does_not_put_src_on_path\", \"testing/test_collection.py::test_exit_on_collection_error\", \"testing/test_collection.py::test_exit_on_collection_with_maxfail_bigger_than_n_errors\", \"testing/test_collection.py::test_exit_on_collection_with_maxfail_smaller_than_n_errors\", \"testing/test_collection.py::test_fixture_scope_sibling_conftests\", \"testing/test_collection.py::test_matchnodes_two_collections_same_file\"]",
+  "environment_setup_commit": "f36ea240fe3579f945bf5d6cc41b5e45a572249d",
+  "patch_files": [
+    "src/_pytest/python.py"
+  ],
+  "test_patch_files": [
+    "testing/test_collection.py"
+  ],
+  "patch_diff_details": {
+    "src/_pytest/python.py": {
+      "diffs": [
+        {
+          "start_line_old": 288,
+          "end_line_old": 289,
+          "file_pos": 16,
+          "file_context_length": 99606,
+          "closest_snippet_id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test.write_item_showfixtures.2.1",
+          "closest_snippet_line_distance": 950
+        }
+      ]
+    }
+  },
+  "vectors": 892,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pytest/src/pytest.py_1_",
+      "distance": 0.9312632083892822,
+      "file_path": "src/pytest.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 708,
+      "context_length": 708
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py_BaseReport.head_line_BaseReport.head_line.2.2.1",
+      "distance": 0.9336166381835938,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 129,
+      "end_line": 149,
+      "tokens": 117,
+      "context_length": 825
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestItem.repr_failure_DoctestItem.reportinfo.1.1",
+      "distance": 0.9360212087631226,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 219,
+      "end_line": 275,
+      "tokens": 495,
+      "context_length": 1320
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.short_test_summary.show_skipped_TerminalReporter.short_test_summary.show_skipped.5.2.2.1",
+      "distance": 0.9485248327255249,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 905,
+      "end_line": 920,
+      "tokens": 187,
+      "context_length": 1507
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.short_test_summary_TerminalReporter.short_test_summary.show_xpassed.2.4",
+      "distance": 0.950019359588623,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 873,
+      "end_line": 903,
+      "tokens": 250,
+      "context_length": 1757
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pytest/doc/en/example/xfail_demo.py_pytest_",
+      "distance": 0.9530166387557983,
+      "file_path": "doc/en/example/xfail_demo.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 143,
+      "context_length": 1900
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py_1_getslaveinfoline.1.2.4.1",
+      "distance": 0.9570346474647522,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 244,
+      "context_length": 2144
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_runtest_logreport_TerminalReporter.pytest_runtest_logreport.10.2.3.3.self.currentfspath.1",
+      "distance": 0.9587678909301758,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 386,
+      "end_line": 435,
+      "tokens": 420,
+      "context_length": 2564
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._getfailureheadline_TerminalReporter.getreports.3.1",
+      "distance": 0.9630407094955444,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 722,
+      "end_line": 745,
+      "tokens": 142,
+      "context_length": 2706
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_generate_same_function_names_issue403_TestMetafuncFunctional.test_parametrize_misspelling.4",
+      "distance": 0.9656760096549988,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1308,
+      "end_line": 1346,
+      "tokens": 243,
+      "context_length": 2949
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_pytest_collect_file_MultipleDoctestFailures.__init__.self.failures.1",
+      "distance": 0.9671899080276489,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 87,
+      "end_line": 128,
+      "tokens": 311,
+      "context_length": 3260
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.summary_failures_TerminalReporter.summary_failures.1.4.2.3.4.1",
+      "distance": 0.9729874134063721,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 811,
+      "end_line": 832,
+      "tokens": 180,
+      "context_length": 3440
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pytest/src/_pytest/pastebin.py_pytest_terminal_summary_",
+      "distance": 0.9750261306762695,
+      "file_path": "src/_pytest/pastebin.py",
+      "start_line": 83,
+      "end_line": 104,
+      "tokens": 181,
+      "context_length": 3621
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_inspect_28.2",
+      "distance": 0.9760183691978455,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 164,
+      "context_length": 3785
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._locationline_TerminalReporter._locationline",
+      "distance": 0.9808963537216187,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 700,
+      "end_line": 720,
+      "tokens": 191,
+      "context_length": 3976
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_syntax_error_with_non_ascii_chars_test_skip_duplicates_by_default.6",
+      "distance": 0.980908989906311,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1205,
+      "end_line": 1230,
+      "tokens": 186,
+      "context_length": 4162
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_parametrize_skipif_TestFunction.test_function_original_name.2",
+      "distance": 0.984376072883606,
+      "file_path": "testing/python/collect.py",
+      "start_line": 559,
+      "end_line": 658,
+      "tokens": 662,
+      "context_length": 4824
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/source.py_18_deindent.1.1",
+      "distance": 0.9854966402053833,
+      "file_path": "src/_pytest/_code/source.py",
+      "start_line": 231,
+      "end_line": 259,
+      "tokens": 162,
+      "context_length": 4986
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestReportInfo.test_reportinfo_with_nasty_getattr_TestReportInfo.test_reportinfo_with_nasty_getattr.modcol.4",
+      "distance": 0.9859853386878967,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1055,
+      "end_line": 1073,
+      "tokens": 154,
+      "context_length": 5140
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_dont_collect_non_function_callable_test_dont_collect_non_function_callable.4",
+      "distance": 0.9861013889312744,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1146,
+      "end_line": 1172,
+      "tokens": 181,
+      "context_length": 5321
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__NodeReporter.append_skipped__NodeReporter.finalize.self.to_xml.1",
+      "distance": 0.9881547689437866,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 249,
+      "end_line": 277,
+      "tokens": 217,
+      "context_length": 5538
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pytest/src/_pytest/runner.py_pytest_report_teststatus_check_interactive_exception.1.1",
+      "distance": 0.9921640157699585,
+      "file_path": "src/_pytest/runner.py",
+      "start_line": 160,
+      "end_line": 191,
+      "tokens": 238,
+      "context_length": 5776
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_modulecol_roundtrip_TestTracebackCutting.test_traceback_argsetup.16",
+      "distance": 0.9930452108383179,
+      "file_path": "testing/python/collect.py",
+      "start_line": 881,
+      "end_line": 918,
+      "tokens": 321,
+      "context_length": 6097
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_runtest_makereport_",
+      "distance": 0.9932805299758911,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 120,
+      "end_line": 178,
+      "tokens": 529,
+      "context_length": 6626
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_os_TestModule.test_import_duplicate.8",
+      "distance": 0.9950429797172546,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 225,
+      "context_length": 6851
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.short_test_summary.REPORTCHAR_ACTIONS__get_pos.2.1",
+      "distance": 0.9961529970169067,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 922,
+      "end_line": 947,
+      "tokens": 199,
+      "context_length": 7050
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pytest/src/_pytest/skipping.py_pytest_configure_pytest_configure.4",
+      "distance": 1.0009992122650146,
+      "file_path": "src/_pytest/skipping.py",
+      "start_line": 28,
+      "end_line": 65,
+      "tokens": 363,
+      "context_length": 7413
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__NodeReporter.append_pass__NodeReporter.append_failure.2.2.5",
+      "distance": 1.0010991096496582,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 214,
+      "end_line": 231,
+      "tokens": 161,
+      "context_length": 7574
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__NodeReporter.append_collect_error__NodeReporter.append_error.2",
+      "distance": 1.0013177394866943,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 233,
+      "end_line": 247,
+      "tokens": 132,
+      "context_length": 7706
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureMarker.test_class_ordering_TestContextManagerFixtureFuncs.test_teardown_exception.3",
+      "distance": 1.0026193857192993,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 2475,
+      "end_line": 3503,
+      "tokens": 6208,
+      "context_length": 13914
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.verbosity_TerminalReporter.hasopt.2.1",
+      "distance": 1.00277841091156,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 256,
+      "end_line": 280,
+      "tokens": 161,
+      "context_length": 14075
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestSpecialisedExplanations_TestSpecialisedExplanations.test_eq_attrs.5",
+      "distance": 1.0065909624099731,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 43,
+      "end_line": 121,
+      "tokens": 680,
+      "context_length": 14755
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__showfixtures_main_write_docstring.4.1.1",
+      "distance": 1.0071015357971191,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1268,
+      "end_line": 1337,
+      "tokens": 487,
+      "context_length": 15242,
+      "file_pos": 16
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.summary_errors_TerminalReporter.summary_errors.1.4.4",
+      "distance": 1.008659839630127,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 834,
+      "end_line": 847,
+      "tokens": 125,
+      "context_length": 15367
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestReportInfo.test_func_reportinfo_TestReportInfo.test_class_reportinfo.6",
+      "distance": 1.0095927715301514,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1034,
+      "end_line": 1053,
+      "tokens": 167,
+      "context_length": 15534
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pytest/src/_pytest/nodes.py_os_tracebackcutdir.1",
+      "distance": 1.0103981494903564,
+      "file_path": "src/_pytest/nodes.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 148,
+      "context_length": 15682
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pytest/doc/en/example/py2py3/conftest.py__",
+      "distance": 1.0115803480148315,
+      "file_path": "doc/en/example/py2py3/conftest.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 15682
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.write_ensure_prefix_TerminalReporter.write_line.3",
+      "distance": 1.0151199102401733,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 295,
+      "end_line": 316,
+      "tokens": 165,
+      "context_length": 15847
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__NodeReporter.write_captured_output__NodeReporter.write_captured_output.6.2.2",
+      "distance": 1.0152961015701294,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 161,
+      "end_line": 212,
+      "tokens": 333,
+      "context_length": 16180
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pytest/doc/en/conftest.py__",
+      "distance": 1.0170879364013672,
+      "file_path": "doc/en/conftest.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 16180
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._write_report_lines_from_hooks_TerminalReporter.pytest_report_header.8.1",
+      "distance": 1.0180637836456299,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 573,
+      "end_line": 593,
+      "tokens": 187,
+      "context_length": 16367
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__get_checker.LiteralsOutputChecker.check_output__get_checker.LiteralsOutputChecker.check_output.10.1",
+      "distance": 1.0184235572814941,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 509,
+      "end_line": 534,
+      "tokens": 237,
+      "context_length": 16604
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestClass.test_setup_teardown_class_as_classmethod_TestClass.test_issue2234_property.3",
+      "distance": 1.0207239389419556,
+      "file_path": "testing/python/collect.py",
+      "start_line": 196,
+      "end_line": 249,
+      "tokens": 320,
+      "context_length": 16924
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFillFixtures_TestFixtureUsages.test_receives_funcargs_scope_mismatch.3",
+      "distance": 1.0209647417068481,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 85,
+      "end_line": 1065,
+      "tokens": 6303,
+      "context_length": 23227
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.summary_passes_TerminalReporter.print_teardown_sections.3.2.3",
+      "distance": 1.0225896835327148,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 785,
+      "end_line": 809,
+      "tokens": 203,
+      "context_length": 23430
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._printcollecteditems_TerminalReporter._printcollecteditems.4.5.4.5.1.1.1",
+      "distance": 1.0233750343322754,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 612,
+      "end_line": 645,
+      "tokens": 331,
+      "context_length": 23761
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py__report_unserialization_failure__report_unserialization_failure.9",
+      "distance": 1.0234699249267578,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 182,
+      "end_line": 191,
+      "tokens": 131,
+      "context_length": 23892
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test__show_fixtures_per_test.write_fixture.6.2.1",
+      "distance": 1.0247492790222168,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1210,
+      "end_line": 1236,
+      "tokens": 208,
+      "context_length": 24100,
+      "file_pos": 19
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pytest/src/_pytest/_io/saferepr.py_pprint__ellipsize.2.1",
+      "distance": 1.02484929561615,
+      "file_path": "src/_pytest/_io/saferepr.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 159,
+      "context_length": 24259
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_pytest_TestOEJSKITSpecials.test_funcarg_non_pycollectobj.2",
+      "distance": 1.0261082649230957,
+      "file_path": "testing/python/integration.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 239,
+      "context_length": 24498
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.make_function_TestFunction.test_issue213_parametrize_value_no_equal.3",
+      "distance": 1.0266889333724976,
+      "file_path": "testing/python/collect.py",
+      "start_line": 279,
+      "end_line": 344,
+      "tokens": 471,
+      "context_length": 24969
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_49__PY_DIR.1",
+      "distance": 1.0274783372879028,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 1064,
+      "end_line": 1074,
+      "tokens": 138,
+      "context_length": 25107
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureMarker.test_scope_session_exc_two_fix_TestFixtureMarker.test_dynamic_parametrized_ordering.5",
+      "distance": 1.028393030166626,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 2074,
+      "end_line": 2473,
+      "tokens": 2558,
+      "context_length": 27665
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pytest/doc/en/example/conftest.py__",
+      "distance": 1.0286836624145508,
+      "file_path": "doc/en/example/conftest.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 27665
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__get_checker.LiteralsOutputChecker__get_checker.LiteralsOutputChecker._number_re.1",
+      "distance": 1.0292596817016602,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 477,
+      "end_line": 507,
+      "tokens": 291,
+      "context_length": 27956
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pytest/src/_pytest/compat.py_28__bytes_to_ascii.1.1",
+      "distance": 1.0295569896697998,
+      "file_path": "src/_pytest/compat.py",
+      "start_line": 147,
+      "end_line": 185,
+      "tokens": 244,
+      "context_length": 28200
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ReprFileLocation_ReprLocals.toterminal.1.1",
+      "distance": 1.030643105506897,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 998,
+      "end_line": 1021,
+      "tokens": 173,
+      "context_length": 28373
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pytest/extra/get_issues.py_report_",
+      "distance": 1.0330810546875,
+      "file_path": "extra/get_issues.py",
+      "start_line": 55,
+      "end_line": 86,
+      "tokens": 231,
+      "context_length": 28604
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.summary_warnings_TerminalReporter.summary_warnings.1.12",
+      "distance": 1.033774733543396,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 747,
+      "end_line": 783,
+      "tokens": 299,
+      "context_length": 28903
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.write_sep_TerminalReporter.pytest_internalerror.2.1",
+      "distance": 1.0346741676330566,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 336,
+      "end_line": 349,
+      "tokens": 123,
+      "context_length": 29026
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue88_initial_file_multinodes/conftest.py__",
+      "distance": 1.0350978374481201,
+      "file_path": "testing/example_scripts/issue88_initial_file_multinodes/conftest.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 29026
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestTracebackCutting.test_traceback_error_during_import_TestTracebackCutting.test_traceback_error_during_import.12",
+      "distance": 1.0353374481201172,
+      "file_path": "testing/python/collect.py",
+      "start_line": 920,
+      "end_line": 939,
+      "tokens": 178,
+      "context_length": 29204
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_TestOEJSKITSpecials.test_autouse_fixture_TestOEJSKITSpecials.test_autouse_fixture.2",
+      "distance": 1.0358266830444336,
+      "file_path": "testing/python/integration.py",
+      "start_line": 37,
+      "end_line": 68,
+      "tokens": 226,
+      "context_length": 29430
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestModule_DoctestModule.collect.MockAwareDocTestFinder._find.2.1",
+      "distance": 1.0359834432601929,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 392,
+      "end_line": 411,
+      "tokens": 159,
+      "context_length": 29589
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.report_collect_TerminalReporter.report_collect.13.3.1",
+      "distance": 1.0373272895812988,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 506,
+      "end_line": 544,
+      "tokens": 323,
+      "context_length": 29912
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestReportInfo_TestReportInfo.test_itemreport_reportinfo.4",
+      "distance": 1.038121223449707,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1017,
+      "end_line": 1032,
+      "tokens": 133,
+      "context_length": 30045
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestFixtureUsages.test_receives_funcargs_scope_mismatch_issue660_TestFixtureMarker.test_scope_session_exc.3",
+      "distance": 1.0389423370361328,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 1067,
+      "end_line": 2072,
+      "tokens": 6201,
+      "context_length": 36246
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py__NodeReporter.record_testreport__NodeReporter._add_simple.3",
+      "distance": 1.0390608310699463,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 118,
+      "end_line": 159,
+      "tokens": 339,
+      "context_length": 36585
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_pytest_configure_getreportopt.5.1",
+      "distance": 1.0404857397079468,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 140,
+      "end_line": 167,
+      "tokens": 216,
+      "context_length": 36801
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue_519.py_pprint_checked_order.4",
+      "distance": 1.0424144268035889,
+      "file_path": "testing/example_scripts/issue_519.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 350,
+      "context_length": 37151
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pytest/src/_pytest/outcomes.py_TEST_OUTCOME_Skipped.__module__.__init__.self.allow_module_level.1",
+      "distance": 1.0424566268920898,
+      "file_path": "src/_pytest/outcomes.py",
+      "start_line": 39,
+      "end_line": 54,
+      "tokens": 124,
+      "context_length": 37275
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ReprTraceback_ReprEntryNative.toterminal.1",
+      "distance": 1.043049931526184,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 920,
+      "end_line": 961,
+      "tokens": 294,
+      "context_length": 37569
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo_FormattedExcinfo.repr_args.1.3.1",
+      "distance": 1.043354868888855,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 614,
+      "end_line": 657,
+      "tokens": 307,
+      "context_length": 37876
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestModule.test_syntax_error_in_module_TestModule.test_invalid_test_module_name.4",
+      "distance": 1.044160008430481,
+      "file_path": "testing/python/collect.py",
+      "start_line": 59,
+      "end_line": 77,
+      "tokens": 189,
+      "context_length": 38065
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_nested_fixtures_test_show_nested_fixtures.5",
+      "distance": 1.0475022792816162,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 63,
+      "end_line": 94,
+      "tokens": 190,
+      "context_length": 38255
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pytest/testing/freeze/tox_run.py__",
+      "distance": 1.0496419668197632,
+      "file_path": "testing/freeze/tox_run.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 38255
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_linecomp_rex_outcome.1",
+      "distance": 1.0496968030929565,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 311,
+      "end_line": 347,
+      "tokens": 210,
+      "context_length": 38465
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_terminal_summary_TerminalReporter.pytest_unconfigure.1.1",
+      "distance": 1.049752950668335,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 668,
+      "end_line": 684,
+      "tokens": 122,
+      "context_length": 38587
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_customized_python_discovery_functions_test_unorderable_types.4",
+      "distance": 1.0498098134994507,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1106,
+      "end_line": 1143,
+      "tokens": 209,
+      "context_length": 38796
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ReprEntry_ReprEntry.__str__.1.1",
+      "distance": 1.0500600337982178,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 964,
+      "end_line": 995,
+      "tokens": 277,
+      "context_length": 39073
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pytest/src/_pytest/faulthandler.py_io__get_stderr_fileno.1.2.4.1",
+      "distance": 1.0503127574920654,
+      "file_path": "src/_pytest/faulthandler.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 249,
+      "context_length": 39322
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_TestContextManagerFixtureFuncs.test_yields_more_than_one_",
+      "distance": 1.051024317741394,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 3505,
+      "end_line": 4210,
+      "tokens": 4568,
+      "context_length": 43890
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo.repr_locals_FormattedExcinfo.repr_locals.1.5.1",
+      "distance": 1.051525354385376,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 695,
+      "end_line": 719,
+      "tokens": 236,
+      "context_length": 44126
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pytest/testing/python/fixtures.py_sys_test_getfuncargnames_staticmethod_partial.6",
+      "distance": 1.0520011186599731,
+      "file_path": "testing/python/fixtures.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 492,
+      "context_length": 44618
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pytest/src/_pytest/nodes.py_Node._repr_failure_py_Node.repr_failure.1.1",
+      "distance": 1.0524098873138428,
+      "file_path": "src/_pytest/nodes.py",
+      "start_line": 258,
+      "end_line": 303,
+      "tokens": 373,
+      "context_length": 44991
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_LsofFdLeakChecker.pytest_runtest_protocol_LsofFdLeakChecker.pytest_runtest_protocol.7.11",
+      "distance": 1.0532608032226562,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 116,
+      "end_line": 137,
+      "tokens": 243,
+      "context_length": 45234
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pytest/doc/en/example/costlysetup/conftest.py__",
+      "distance": 1.0549819469451904,
+      "file_path": "doc/en/example/costlysetup/conftest.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 0,
+      "context_length": 45234
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py_1_37",
+      "distance": 1.0566579103469849,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 624,
+      "context_length": 45858
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_16_test_dynamic_compile_shows_nicely.10",
+      "distance": 1.0580281019210815,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 191,
+      "end_line": 203,
+      "tokens": 114,
+      "context_length": 45972
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_TerminalRepr_ExceptionRepr.toterminal.1.2",
+      "distance": 1.0588819980621338,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 865,
+      "end_line": 888,
+      "tokens": 185,
+      "context_length": 46157
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestRaises_TestRaises.func1.1",
+      "distance": 1.059532880783081,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 164,
+      "end_line": 188,
+      "tokens": 159,
+      "context_length": 46316
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py_BaseReport_BaseReport.count_towards_summary.2.1",
+      "distance": 1.0595550537109375,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 34,
+      "end_line": 127,
+      "tokens": 572,
+      "context_length": 46888
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestCustomAssertMsg_",
+      "distance": 1.06132972240448,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 256,
+      "end_line": 283,
+      "tokens": 161,
+      "context_length": 47049
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_runtest_logfinish_TerminalReporter.pytest_runtest_logfinish.1.4.2.3.2",
+      "distance": 1.0613559484481812,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 437,
+      "end_line": 456,
+      "tokens": 198,
+      "context_length": 47247
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pytest/src/_pytest/helpconfig.py_showhelp_showhelp.24",
+      "distance": 1.0624362230300903,
+      "file_path": "src/_pytest/helpconfig.py",
+      "start_line": 139,
+      "end_line": 206,
+      "tokens": 550,
+      "context_length": 47797
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestTextfile_DoctestTextfile.collect.13.1",
+      "distance": 1.0624806880950928,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 313,
+      "end_line": 339,
+      "tokens": 198,
+      "context_length": 47995
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_1_RUNNER_CLASS.1",
+      "distance": 1.0627756118774414,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 251,
+      "context_length": 48246
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestItem_DoctestItem._disable_output_capturing_for_darwin.4.4",
+      "distance": 1.0630520582199097,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 180,
+      "end_line": 217,
+      "tokens": 303,
+      "context_length": 48549
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py__report_to_json.d__report_to_json.9.1",
+      "distance": 1.0647577047348022,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 392,
+      "end_line": 407,
+      "tokens": 151,
+      "context_length": 48700
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureLookupErrorRepr_FixtureLookupErrorRepr.toterminal.2.5",
+      "distance": 1.0650132894515991,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 737,
+      "end_line": 761,
+      "tokens": 214,
+      "context_length": 48914
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/pytest/src/_pytest/config/__init__.py__fail_on_non_top_pytest_plugins__fail_on_non_top_pytest_plugins.2",
+      "distance": 1.0656238794326782,
+      "file_path": "src/_pytest/config/__init__.py",
+      "start_line": 223,
+      "end_line": 233,
+      "tokens": 154,
+      "context_length": 49068
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_PyobjMixin.reportinfo_PyobjMixin.reportinfo.obj.6.1",
+      "distance": 1.0690600872039795,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 291,
+      "end_line": 305,
+      "tokens": 141,
+      "context_length": 49209,
+      "file_pos": 35
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/pytest/src/_pytest/debugging.py__postmortem_traceback_",
+      "distance": 1.0706360340118408,
+      "file_path": "src/_pytest/debugging.py",
+      "start_line": 319,
+      "end_line": 334,
+      "tokens": 117,
+      "context_length": 49326
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_different_scopes_test_show_different_scopes.4",
+      "distance": 1.0709314346313477,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 34,
+      "end_line": 60,
+      "tokens": 167,
+      "context_length": 49493
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.write_fspath_result_TerminalReporter.write_fspath_result.5",
+      "distance": 1.071677327156067,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 282,
+      "end_line": 293,
+      "tokens": 165,
+      "context_length": 49658
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._report_keyboardinterrupt_TerminalReporter._report_keyboardinterrupt.4.1.2.2",
+      "distance": 1.0726943016052246,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 686,
+      "end_line": 698,
+      "tokens": 119,
+      "context_length": 49777
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/pytest/testing/example_scripts/conftest_usageerror/conftest.py__",
+      "distance": 1.0730946063995361,
+      "file_path": "testing/example_scripts/conftest_usageerror/conftest.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 49777
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/pytest/src/_pytest/python_api.py_inspect__non_numeric_type_error.2.1",
+      "distance": 1.0736523866653442,
+      "file_path": "src/_pytest/python_api.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 229,
+      "context_length": 50006
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_sessionstart_TerminalReporter.pytest_sessionstart.12",
+      "distance": 1.0746040344238281,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 546,
+      "end_line": 571,
+      "tokens": 258,
+      "context_length": 50264
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_1_IGNORE_PAM.1",
+      "distance": 1.0750296115875244,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 175,
+      "context_length": 50439
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_pytest_cmdline_main_pytest_generate_tests.alt_spellings.3.1",
+      "distance": 1.0752339363098145,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 111,
+      "end_line": 129,
+      "tokens": 176,
+      "context_length": 50615,
+      "file_pos": 38
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py__",
+      "distance": 1.0754268169403076,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 50615
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/pytest/src/_pytest/helpconfig.py_conftest_options_",
+      "distance": 1.0755085945129395,
+      "file_path": "src/_pytest/helpconfig.py",
+      "start_line": 209,
+      "end_line": 245,
+      "tokens": 252,
+      "context_length": 50867
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir_TestConftestCustomization.test_customized_pymakemodule_issue205_subdir.5",
+      "distance": 1.0755653381347656,
+      "file_path": "testing/python/collect.py",
+      "start_line": 730,
+      "end_line": 753,
+      "tokens": 170,
+      "context_length": 51037
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_warning_captured_TerminalReporter.pytest_warning_captured.2",
+      "distance": 1.0764915943145752,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 351,
+      "end_line": 363,
+      "tokens": 121,
+      "context_length": 51158
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_pytest_collection_modifyitems__bestrelpath_cache.__missing__.3.1",
+      "distance": 1.076637625694275,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 311,
+      "end_line": 362,
+      "tokens": 303,
+      "context_length": 51461
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_TracebackEntry.getsource_TracebackEntry.getsource.11.1",
+      "distance": 1.0768351554870605,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 216,
+      "end_line": 240,
+      "tokens": 199,
+      "context_length": 51660
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/conftest.py__",
+      "distance": 1.0768752098083496,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/conftest.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 51660
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/pytest/src/_pytest/compat.py_1_is_generator.2.1",
+      "distance": 1.077479600906372,
+      "file_path": "src/_pytest/compat.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 225,
+      "context_length": 51885
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_fixture_parametrized_empty_ids_TestMetafuncFunctional.test_parametrized_empty_ids.4",
+      "distance": 1.0784006118774414,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1157,
+      "end_line": 1186,
+      "tokens": 199,
+      "context_length": 52084
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo.repr_traceback_entry_FormattedExcinfo.repr_traceback_entry.10.1",
+      "distance": 1.079773187637329,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 721,
+      "end_line": 752,
+      "tokens": 310,
+      "context_length": 52394
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/pytest/src/_pytest/setuponly.py__show_fixture_action_",
+      "distance": 1.0803784132003784,
+      "file_path": "src/_pytest/setuponly.py",
+      "start_line": 47,
+      "end_line": 80,
+      "tokens": 242,
+      "context_length": 52636
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter_TerminalReporter.__init__.self._collect_report_last_write.1",
+      "distance": 1.0806152820587158,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 218,
+      "end_line": 241,
+      "tokens": 203,
+      "context_length": 52839
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/pytest/src/_pytest/outcomes.py_xfail_xfail.Exception.1",
+      "distance": 1.0809986591339111,
+      "file_path": "src/_pytest/outcomes.py",
+      "start_line": 139,
+      "end_line": 154,
+      "tokens": 130,
+      "context_length": 52969
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/pytest/setup.py_1_INSTALL_REQUIRES.1",
+      "distance": 1.0811305046081543,
+      "file_path": "setup.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 156,
+      "context_length": 53125
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestModule.test_import_prepend_append_TestModule.test_import_prepend_append.8.4",
+      "distance": 1.0811431407928467,
+      "file_path": "testing/python/collect.py",
+      "start_line": 35,
+      "end_line": 57,
+      "tokens": 187,
+      "context_length": 53312
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/pytest/doc/en/_themes/flask_theme_support.py_1_",
+      "distance": 1.0812902450561523,
+      "file_path": "doc/en/_themes/flask_theme_support.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 1273,
+      "context_length": 54585
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/pytest/src/_pytest/pastebin.py_pytest_unconfigure_pytest_unconfigure.1.2",
+      "distance": 1.081603765487671,
+      "file_path": "src/_pytest/pastebin.py",
+      "start_line": 41,
+      "end_line": 54,
+      "tokens": 145,
+      "context_length": 54730
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_pytest_addoption_pytest_addoption.12",
+      "distance": 1.082463264465332,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 50,
+      "end_line": 137,
+      "tokens": 630,
+      "context_length": 55360
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_functools_get_scope_node.3.1",
+      "distance": 1.0827561616897583,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 1,
+      "end_line": 106,
+      "tokens": 687,
+      "context_length": 56047
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_capturing_test_capturing.3",
+      "distance": 1.0830910205841064,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 230,
+      "end_line": 249,
+      "tokens": 122,
+      "context_length": 56169
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_pytest_pycollect_makeitem_TestConftestCustomization.test_makeitem_non_underscore.5",
+      "distance": 1.083695411682129,
+      "file_path": "testing/python/collect.py",
+      "start_line": 788,
+      "end_line": 810,
+      "tokens": 195,
+      "context_length": 56364
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/structures.py_inspect_istestfunc.1.1",
+      "distance": 1.083898901939392,
+      "file_path": "src/_pytest/mark/structures.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 188,
+      "context_length": 56552
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_getdecoded_LineComp.assert_contains_lines.7.1",
+      "distance": 1.0843557119369507,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 1211,
+      "end_line": 1235,
+      "tokens": 162,
+      "context_length": 56714
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_20_",
+      "distance": 1.0847989320755005,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 242,
+      "end_line": 283,
+      "tokens": 286,
+      "context_length": 57000
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_fail_fixturefunc__teardown_yield_fixture.2.3.1",
+      "distance": 1.0849297046661377,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 764,
+      "end_line": 793,
+      "tokens": 242,
+      "context_length": 57242
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/pytest/src/_pytest/resultlog.py_ResultLog.pytest_runtest_logreport_ResultLog.pytest_runtest_logreport.5",
+      "distance": 1.085511565208435,
+      "file_path": "src/_pytest/resultlog.py",
+      "start_line": 62,
+      "end_line": 79,
+      "tokens": 144,
+      "context_length": 57386
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/pytest/setup.py_main_",
+      "distance": 1.0863094329833984,
+      "file_path": "setup.py",
+      "start_line": 19,
+      "end_line": 40,
+      "tokens": 115,
+      "context_length": 57501
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_TestMoreErrors_TestMoreErrors.test_try_finally.2.2.x.1",
+      "distance": 1.0863144397735596,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 206,
+      "end_line": 253,
+      "tokens": 228,
+      "context_length": 57729
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_module/conftest.py__",
+      "distance": 1.0866016149520874,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_module/conftest.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 57729
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestFunction.test_issue751_multiple_parametrize_with_ids_TestFunction.test_issue751_multiple_parametrize_with_ids.6",
+      "distance": 1.0867557525634766,
+      "file_path": "testing/python/collect.py",
+      "start_line": 540,
+      "end_line": 557,
+      "tokens": 182,
+      "context_length": 57911
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo._makepath_FormattedExcinfo.repr_traceback.7.1",
+      "distance": 1.087203025817871,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 754,
+      "end_line": 780,
+      "tokens": 210,
+      "context_length": 58121
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py_pytest_unconfigure_mangle_test_address.9.1",
+      "distance": 1.0881099700927734,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 446,
+      "end_line": 465,
+      "tokens": 143,
+      "context_length": 58264
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_autoname_TestMetafunc.test_idmaker_with_bytes_regex.3",
+      "distance": 1.088172197341919,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 304,
+      "end_line": 325,
+      "tokens": 229,
+      "context_length": 58493
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/pytest/src/_pytest/monkeypatch.py_resolve_resolve.parts.5.1",
+      "distance": 1.0882039070129395,
+      "file_path": "src/_pytest/monkeypatch.py",
+      "start_line": 39,
+      "end_line": 65,
+      "tokens": 180,
+      "context_length": 58673
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/__init__.py__",
+      "distance": 1.0889171361923218,
+      "file_path": "src/_pytest/_code/__init__.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 58673
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_1_70",
+      "distance": 1.089153528213501,
+      "file_path": "doc/en/conf.py",
+      "start_line": 1,
+      "end_line": 116,
+      "tokens": 789,
+      "context_length": 59462
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameter_ids_function_test_show_fixtures_with_parameter_ids_function.4",
+      "distance": 1.0895960330963135,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 186,
+      "end_line": 201,
+      "tokens": 119,
+      "context_length": 59581
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/pytest/src/_pytest/runner.py_pytest_runtest_makereport_pytest_make_collect_report.7.1",
+      "distance": 1.0897425413131714,
+      "file_path": "src/_pytest/runner.py",
+      "start_line": 251,
+      "end_line": 280,
+      "tokens": 269,
+      "context_length": 59850
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameters_test_show_fixtures_with_parameters.5",
+      "distance": 1.0899921655654907,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 124,
+      "end_line": 154,
+      "tokens": 183,
+      "context_length": 60033
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/pytest/src/_pytest/assertion/rewrite.py__should_repr_global_name__call_reprcompare.2.4.1",
+      "distance": 1.0904282331466675,
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "start_line": 367,
+      "end_line": 398,
+      "tokens": 240,
+      "context_length": 60273
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_TestRaises.test_raises_match_TestRaises.test_raises_match.7.1.1",
+      "distance": 1.091073751449585,
+      "file_path": "testing/python/raises.py",
+      "start_line": 187,
+      "end_line": 202,
+      "tokens": 135,
+      "context_length": 60408
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_LsofFdLeakChecker._parse_lsof_output_LsofFdLeakChecker.matching_platform.1.3.1.1",
+      "distance": 1.0917445421218872,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 85,
+      "end_line": 114,
+      "tokens": 193,
+      "context_length": 60601
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/pytest/doc/en/example/costlysetup/sub_a/__init__.py__",
+      "distance": 1.0929005146026611,
+      "file_path": "doc/en/example/costlysetup/sub_a/__init__.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 60601
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/pytest/src/_pytest/runner.py_pytest_runtest_call_pytest_runtest_call.3.2.2",
+      "distance": 1.0930535793304443,
+      "file_path": "src/_pytest/runner.py",
+      "start_line": 121,
+      "end_line": 135,
+      "tokens": 136,
+      "context_length": 60737
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_TestCaseFunction_TestCaseFunction._addexcinfo.rawexcinfo.3",
+      "distance": 1.0931164026260376,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 106,
+      "end_line": 155,
+      "tokens": 349,
+      "context_length": 61086
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_customized_python_discovery_test_customized_python_discovery.9",
+      "distance": 1.0935254096984863,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1076,
+      "end_line": 1103,
+      "tokens": 183,
+      "context_length": 61269
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_latex_logo_",
+      "distance": 1.0939022302627563,
+      "file_path": "doc/en/conf.py",
+      "start_line": 241,
+      "end_line": 341,
+      "tokens": 656,
+      "context_length": 61925
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_format_args_TestMetafunc.test_format_args",
+      "distance": 1.0939139127731323,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 891,
+      "end_line": 910,
+      "tokens": 129,
+      "context_length": 62054
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py__report_to_json.serialize_longrepr__report_to_json.serialize_longrepr.3.1",
+      "distance": 1.0949550867080688,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 372,
+      "end_line": 390,
+      "tokens": 163,
+      "context_length": 62217
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/pytest/src/_pytest/assertion/rewrite.py_1_PYC_TAIL.1",
+      "distance": 1.0951673984527588,
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 229,
+      "context_length": 62446
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_parametrize_issue323_TestMetafuncFunctional.test_usefixtures_seen_in_generate_tests.3",
+      "distance": 1.0951893329620361,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1250,
+      "end_line": 1282,
+      "tokens": 199,
+      "context_length": 62645
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/pytest/src/_pytest/__init__.py__",
+      "distance": 1.0954035520553589,
+      "file_path": "src/_pytest/__init__.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 62645
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/pytest/src/_pytest/pastebin.py_1_pytest_configure.1.5.config._pastebinfile.tr._tw.write.1",
+      "distance": 1.0954452753067017,
+      "file_path": "src/_pytest/pastebin.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 268,
+      "context_length": 62913
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter._outrep_summary_TerminalReporter.summary_stats.6.1",
+      "distance": 1.095868706703186,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 849,
+      "end_line": 871,
+      "tokens": 206,
+      "context_length": 63119
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_sessionfinish_TerminalReporter.pytest_sessionfinish.7",
+      "distance": 1.096170425415039,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 647,
+      "end_line": 666,
+      "tokens": 153,
+      "context_length": 63272
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py_test_attribute_globf.1.1",
+      "distance": 1.096531629562378,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 124,
+      "end_line": 161,
+      "tokens": 143,
+      "context_length": 63415
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/pytest/src/_pytest/stepwise.py_StepwisePlugin.pytest_runtest_logreport_",
+      "distance": 1.0969107151031494,
+      "file_path": "src/_pytest/stepwise.py",
+      "start_line": 73,
+      "end_line": 109,
+      "tokens": 290,
+      "context_length": 63705
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py__report_kwargs_from_json.deserialize_repr_traceback_",
+      "distance": 1.097621202468872,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 444,
+      "end_line": 484,
+      "tokens": 318,
+      "context_length": 64023
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/pytest/src/_pytest/config/exceptions.py__",
+      "distance": 1.098233699798584,
+      "file_path": "src/_pytest/config/exceptions.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 64023
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/pytest/src/_pytest/resultlog.py_ResultLog.pytest_collectreport_",
+      "distance": 1.100441575050354,
+      "file_path": "src/_pytest/resultlog.py",
+      "start_line": 81,
+      "end_line": 98,
+      "tokens": 159,
+      "context_length": 64182
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/pytest/doc/en/example/costlysetup/sub_b/__init__.py__",
+      "distance": 1.1005407571792603,
+      "file_path": "doc/en/example/costlysetup/sub_b/__init__.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 64182
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/pytest/src/_pytest/runner.py_pytest_terminal_summary_pytest_terminal_summary.11.2",
+      "distance": 1.1005622148513794,
+      "file_path": "src/_pytest/runner.py",
+      "start_line": 41,
+      "end_line": 67,
+      "tokens": 232,
+      "context_length": 64414
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/pytest/testing/python/raises.py_sys_TestRaises.test_raises_repr_inflight.3.4",
+      "distance": 1.1019057035446167,
+      "file_path": "testing/python/raises.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 300,
+      "context_length": 64714
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_WarningReport.get_location_WarningReport.get_location.4.1",
+      "distance": 1.1023683547973633,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 199,
+      "end_line": 215,
+      "tokens": 142,
+      "context_length": 64856
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/pytest/extra/get_issues.py_main__get_kind.3.1",
+      "distance": 1.1030333042144775,
+      "file_path": "extra/get_issues.py",
+      "start_line": 33,
+      "end_line": 52,
+      "tokens": 143,
+      "context_length": 64999
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_autouse_test_show_fixtures_with_autouse.4",
+      "distance": 1.103638768196106,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 97,
+      "end_line": 121,
+      "tokens": 150,
+      "context_length": 65149
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__get_checker.LiteralsOutputChecker._remove_unwanted_precision__get_checker.7.1",
+      "distance": 1.104343295097351,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 536,
+      "end_line": 564,
+      "tokens": 291,
+      "context_length": 65440
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/failure_demo.py__pytest._code_TestFailing.test_not.2",
+      "distance": 1.1047829389572144,
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 169,
+      "context_length": 65609
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py__",
+      "distance": 1.1047950983047485,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 65609
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/pytest/doc/en/example/assertion/global_testmodule_config/conftest.py__",
+      "distance": 1.1049091815948486,
+      "file_path": "doc/en/example/assertion/global_testmodule_config/conftest.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 65609
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_build_summary_stats_line_build_summary_stats_line.8.1",
+      "distance": 1.1049985885620117,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 1010,
+      "end_line": 1043,
+      "tokens": 240,
+      "context_length": 65849
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_bad_scope_TestMetafunc.test_parametrize_request_name.4.1",
+      "distance": 1.1052526235580444,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 64,
+      "end_line": 86,
+      "tokens": 178,
+      "context_length": 66027
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_Session._tryconvertpyarg_Session._tryconvertpyarg.3.3.1.1",
+      "distance": 1.1055340766906738,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 616,
+      "end_line": 630,
+      "tokens": 132,
+      "context_length": 66159
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/pytest/testing/python/integration.py_test_wrapped_getfslineno_test_wrapped_getfslineno",
+      "distance": 1.1056110858917236,
+      "file_path": "testing/python/integration.py",
+      "start_line": 71,
+      "end_line": 86,
+      "tokens": 109,
+      "context_length": 66268
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_Module._importtestmodule_Module._importtestmodule.importmode.4.1",
+      "distance": 1.1056957244873047,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 497,
+      "end_line": 545,
+      "tokens": 468,
+      "context_length": 66736,
+      "file_pos": 60
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_setup_only_available_in_subdir_test_setup_only_available_in_subdir.8",
+      "distance": 1.1059510707855225,
+      "file_path": "testing/python/collect.py",
+      "start_line": 846,
+      "end_line": 878,
+      "tokens": 304,
+      "context_length": 67040
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization.test_customized_pymakeitem_TestConftestCustomization.test_customized_pymakeitem.5",
+      "distance": 1.1062445640563965,
+      "file_path": "testing/python/collect.py",
+      "start_line": 755,
+      "end_line": 786,
+      "tokens": 204,
+      "context_length": 67244
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py_LogXML.node_reporter_LogXML._opentestcase.3.1",
+      "distance": 1.1065294742584229,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 508,
+      "end_line": 533,
+      "tokens": 177,
+      "context_length": 67421
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_show_fixtures_with_parameter_ids_test_show_fixtures_with_parameter_ids.5",
+      "distance": 1.108677864074707,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 157,
+      "end_line": 183,
+      "tokens": 167,
+      "context_length": 67588
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py_1_pyobj_property",
+      "distance": 1.1099936962127686,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 373,
+      "context_length": 67961,
+      "file_pos": 60
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/pytest/testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py__",
+      "distance": 1.1102901697158813,
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 67961
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/pytest/testing/example_scripts/config/collect_pytest_prefix/conftest.py__",
+      "distance": 1.1107873916625977,
+      "file_path": "testing/example_scripts/config/collect_pytest_prefix/conftest.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 67961
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/pytest/src/_pytest/config/findpaths.py_get_dirs_from_args_CFG_PYTEST_SECTION.1",
+      "distance": 1.1109715700149536,
+      "file_path": "src/_pytest/config/findpaths.py",
+      "start_line": 85,
+      "end_line": 107,
+      "tokens": 157,
+      "context_length": 68118
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/pytest/doc/en/conf.py_71_141",
+      "distance": 1.111325979232788,
+      "file_path": "doc/en/conf.py",
+      "start_line": 118,
+      "end_line": 240,
+      "tokens": 811,
+      "context_length": 68929
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/source.py_getstatementrange_ast_",
+      "distance": 1.1117088794708252,
+      "file_path": "src/_pytest/_code/source.py",
+      "start_line": 286,
+      "end_line": 326,
+      "tokens": 371,
+      "context_length": 69300
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/pytest/src/_pytest/unittest.py_pytest_runtest_makereport_pytest_runtest_makereport.3.call2.call.excinfo.1",
+      "distance": 1.1117558479309082,
+      "file_path": "src/_pytest/unittest.py",
+      "start_line": 223,
+      "end_line": 239,
+      "tokens": 138,
+      "context_length": 69438
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/pytest/testing/example_scripts/issue_519.py_fix1_",
+      "distance": 1.1135765314102173,
+      "file_path": "testing/example_scripts/issue_519.py",
+      "start_line": 34,
+      "end_line": 52,
+      "tokens": 115,
+      "context_length": 69553
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests_TestMetafuncFunctional.test_issue28_setup_method_in_generate_tests.3",
+      "distance": 1.1137785911560059,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1013,
+      "end_line": 1027,
+      "tokens": 112,
+      "context_length": 69665
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/pytest/src/_pytest/outcomes.py_18_XFailed.1",
+      "distance": 1.1139342784881592,
+      "file_path": "src/_pytest/outcomes.py",
+      "start_line": 115,
+      "end_line": 136,
+      "tokens": 174,
+      "context_length": 69839
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_Testdir._makefile_Testdir._makefile.6.1",
+      "distance": 1.1163450479507446,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 542,
+      "end_line": 562,
+      "tokens": 177,
+      "context_length": 70016
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_collection_finish_TerminalReporter.pytest_collection_finish.5.1.2.1",
+      "distance": 1.1165695190429688,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 595,
+      "end_line": 610,
+      "tokens": 128,
+      "context_length": 70144
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py__get_flag_lookup__get_flag_lookup.2.1",
+      "distance": 1.1166795492172241,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 278,
+      "end_line": 291,
+      "tokens": 130,
+      "context_length": 70274
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_FixtureLookupError_FixtureLookupError.formatrepr.9.1",
+      "distance": 1.1173632144927979,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 683,
+      "end_line": 734,
+      "tokens": 470,
+      "context_length": 70744
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/pytest/src/_pytest/python.py__show_fixtures_per_test.write_item_showfixtures.2.1",
+      "distance": 1.1174328327178955,
+      "file_path": "src/_pytest/python.py",
+      "start_line": 1238,
+      "end_line": 1265,
+      "tokens": 217,
+      "context_length": 70961,
+      "file_pos": 63
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ReprFuncArgs_ReprFuncArgs.toterminal.1.4",
+      "distance": 1.1192677021026611,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 1024,
+      "end_line": 1044,
+      "tokens": 150,
+      "context_length": 71111
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/pytest/src/_pytest/pytester.py_pytest_configure_LsofFdLeakChecker._exec_lsof.3.1.1",
+      "distance": 1.1193212270736694,
+      "file_path": "src/_pytest/pytester.py",
+      "start_line": 58,
+      "end_line": 83,
+      "tokens": 201,
+      "context_length": 71312
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_ids_returns_non_string_TestMetafunc.test_idmaker_with_ids_unique_names.3",
+      "distance": 1.1199207305908203,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 526,
+      "end_line": 565,
+      "tokens": 329,
+      "context_length": 71641
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/pytest/extra/setup-py.test/setup.py__",
+      "distance": 1.119950771331787,
+      "file_path": "extra/setup-py.test/setup.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 71641
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_noself_in_method_TestMetafuncFunctional.test_generate_tests_in_class.3",
+      "distance": 1.1210694313049316,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 968,
+      "end_line": 994,
+      "tokens": 196,
+      "context_length": 71837
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/pytest/src/_pytest/outcomes.py_Failed_exit.Exception.1",
+      "distance": 1.121245265007019,
+      "file_path": "src/_pytest/outcomes.py",
+      "start_line": 57,
+      "end_line": 89,
+      "tokens": 198,
+      "context_length": 72035
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/pytest/doc/en/example/nonpython/conftest.py_1_",
+      "distance": 1.1221638917922974,
+      "file_path": "doc/en/example/nonpython/conftest.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 314,
+      "context_length": 72349
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctionalAuto.test_parametrize_issue634_TestMetafuncFunctionalAuto.test_parametrize_issue634.5",
+      "distance": 1.1223396062850952,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1476,
+      "end_line": 1508,
+      "tokens": 225,
+      "context_length": 72574
+    },
+    {
+      "position": 214,
+      "id": "/tmp/repos/pytest/src/_pytest/python_api.py_raises.Exception_RaisesContext.__enter__.2.1",
+      "distance": 1.1228830814361572,
+      "file_path": "src/_pytest/python_api.py",
+      "start_line": 720,
+      "end_line": 737,
+      "tokens": 149,
+      "context_length": 72723
+    },
+    {
+      "position": 215,
+      "id": "/tmp/repos/pytest/src/_pytest/mark/__init__.py_pytest_cmdline_main_pytest_cmdline_main.tryfirst.1",
+      "distance": 1.1229469776153564,
+      "file_path": "src/_pytest/mark/__init__.py",
+      "start_line": 77,
+      "end_line": 95,
+      "tokens": 141,
+      "context_length": 72864
+    },
+    {
+      "position": 216,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_find_parametrized_scope_TestMetafunc.test_find_parametrized_scope.21",
+      "distance": 1.1234164237976074,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 88,
+      "end_line": 132,
+      "tokens": 448,
+      "context_length": 73312
+    },
+    {
+      "position": 217,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py_CollectReport_CollectReport.__repr__.1.1",
+      "distance": 1.1239488124847412,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 300,
+      "end_line": 318,
+      "tokens": 143,
+      "context_length": 73455
+    },
+    {
+      "position": 218,
+      "id": "/tmp/repos/pytest/src/_pytest/assertion/rewrite.py_AssertionRewriter.visit_Starred_AssertionRewriter.visit_Attribute.7.1",
+      "distance": 1.1243140697479248,
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "start_line": 966,
+      "end_line": 980,
+      "tokens": 181,
+      "context_length": 73636
+    },
+    {
+      "position": 219,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_idmaker_non_printable_characters_TestMetafunc.test_idmaker_non_printable_characters.3",
+      "distance": 1.1243866682052612,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 362,
+      "end_line": 376,
+      "tokens": 144,
+      "context_length": 73780
+    },
+    {
+      "position": 220,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_ExceptionInfo.from_current_ExceptionInfo.from_current.7.1",
+      "distance": 1.1243880987167358,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 432,
+      "end_line": 452,
+      "tokens": 188,
+      "context_length": 73968
+    },
+    {
+      "position": 221,
+      "id": "/tmp/repos/pytest/src/_pytest/terminal.py_TerminalReporter.pytest_plugin_registered_TerminalReporter.pytest_runtest_logstart.3.3.2",
+      "distance": 1.1250909566879272,
+      "file_path": "src/_pytest/terminal.py",
+      "start_line": 365,
+      "end_line": 384,
+      "tokens": 196,
+      "context_length": 74164
+    },
+    {
+      "position": 222,
+      "id": "/tmp/repos/pytest/testing/python/setup_only.py_test_setup_show_with_KeyboardInterrupt_in_test_",
+      "distance": 1.1256731748580933,
+      "file_path": "testing/python/setup_only.py",
+      "start_line": 273,
+      "end_line": 295,
+      "tokens": 143,
+      "context_length": 74307
+    },
+    {
+      "position": 223,
+      "id": "/tmp/repos/pytest/testing/python/approx.py_TestApprox.test_unicode_plus_minus_TestApprox.test_unicode_plus_minus.5",
+      "distance": 1.125737190246582,
+      "file_path": "testing/python/approx.py",
+      "start_line": 427,
+      "end_line": 443,
+      "tokens": 137,
+      "context_length": 74444
+    },
+    {
+      "position": 224,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_test_package_with_modules_test_package_with_modules.20",
+      "distance": 1.1263190507888794,
+      "file_path": "testing/python/collect.py",
+      "start_line": 1266,
+      "end_line": 1303,
+      "tokens": 320,
+      "context_length": 74764
+    },
+    {
+      "position": 225,
+      "id": "/tmp/repos/pytest/src/_pytest/main.py_pytest_addoption_pytest_addoption.19",
+      "distance": 1.1274971961975098,
+      "file_path": "src/_pytest/main.py",
+      "start_line": 44,
+      "end_line": 152,
+      "tokens": 757,
+      "context_length": 75521
+    },
+    {
+      "position": 226,
+      "id": "/tmp/repos/pytest/src/_pytest/junitxml.py_LogXML.pytest_sessionfinish_LogXML.pytest_sessionfinish.10",
+      "distance": 1.1275238990783691,
+      "file_path": "src/_pytest/junitxml.py",
+      "start_line": 645,
+      "end_line": 675,
+      "tokens": 261,
+      "context_length": 75782
+    },
+    {
+      "position": 227,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional.test_two_functions_TestMetafuncFunctional.test_two_functions.3",
+      "distance": 1.12754487991333,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 944,
+      "end_line": 966,
+      "tokens": 170,
+      "context_length": 75952
+    },
+    {
+      "position": 228,
+      "id": "/tmp/repos/pytest/testing/python/collect.py_TestConftestCustomization_TestConftestCustomization.test_pytest_pycollect_module.5",
+      "distance": 1.128015398979187,
+      "file_path": "testing/python/collect.py",
+      "start_line": 713,
+      "end_line": 728,
+      "tokens": 143,
+      "context_length": 76095
+    },
+    {
+      "position": 229,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_pytest_make_parametrize_id_with_argname_",
+      "distance": 1.128174066543579,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1763,
+      "end_line": 1800,
+      "tokens": 253,
+      "context_length": 76348
+    },
+    {
+      "position": 230,
+      "id": "/tmp/repos/pytest/src/_pytest/_code/code.py_FormattedExcinfo.get_source_FormattedExcinfo.get_exconly.7.1",
+      "distance": 1.129246711730957,
+      "file_path": "src/_pytest/_code/code.py",
+      "start_line": 659,
+      "end_line": 693,
+      "tokens": 330,
+      "context_length": 76678
+    },
+    {
+      "position": 231,
+      "id": "/tmp/repos/pytest/src/_pytest/fixtures.py_scopes_scope2index.2.2.1",
+      "distance": 1.1295228004455566,
+      "file_path": "src/_pytest/fixtures.py",
+      "start_line": 660,
+      "end_line": 680,
+      "tokens": 132,
+      "context_length": 76810
+    },
+    {
+      "position": 232,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafuncFunctional_TestMetafuncFunctional.test_attributes.3",
+      "distance": 1.1301419734954834,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 913,
+      "end_line": 942,
+      "tokens": 221,
+      "context_length": 77031
+    },
+    {
+      "position": 233,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg_TestMarkersWithParametrization.test_xfail_with_arg_and_kwarg.4",
+      "distance": 1.1302803754806519,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1640,
+      "end_line": 1654,
+      "tokens": 132,
+      "context_length": 77163
+    },
+    {
+      "position": 234,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMarkersWithParametrization.test_xfail_with_kwarg_TestMarkersWithParametrization.test_xfail_with_kwarg.4",
+      "distance": 1.1304409503936768,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 1624,
+      "end_line": 1638,
+      "tokens": 127,
+      "context_length": 77290
+    },
+    {
+      "position": 235,
+      "id": "/tmp/repos/pytest/src/_pytest/config/__init__.py_Config.notify_exception_Config.notify_exception.4.1.2",
+      "distance": 1.1307926177978516,
+      "file_path": "src/_pytest/config/__init__.py",
+      "start_line": 755,
+      "end_line": 767,
+      "tokens": 139,
+      "context_length": 77429
+    },
+    {
+      "position": 236,
+      "id": "/tmp/repos/pytest/src/_pytest/doctest.py_DoctestModule.collect.3_DoctestModule.collect.8.1.2",
+      "distance": 1.131737470626831,
+      "file_path": "src/_pytest/doctest.py",
+      "start_line": 413,
+      "end_line": 435,
+      "tokens": 208,
+      "context_length": 77637
+    },
+    {
+      "position": 237,
+      "id": "/tmp/repos/pytest/src/_pytest/reports.py_CollectErrorRepr_pytest_report_from_serializable.1.2",
+      "distance": 1.131845235824585,
+      "file_path": "src/_pytest/reports.py",
+      "start_line": 321,
+      "end_line": 344,
+      "tokens": 171,
+      "context_length": 77808
+    },
+    {
+      "position": 238,
+      "id": "/tmp/repos/pytest/testing/example_scripts/collect/package_infinite_recursion/conftest.py__",
+      "distance": 1.1321978569030762,
+      "file_path": "testing/example_scripts/collect/package_infinite_recursion/conftest.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 77808
+    },
+    {
+      "position": 239,
+      "id": "/tmp/repos/pytest/testing/python/metafunc.py_TestMetafunc.test_parametrize_ids_exception_TestMetafunc.test_parametrize_ids_exception.4",
+      "distance": 1.1325403451919556,
+      "file_path": "testing/python/metafunc.py",
+      "start_line": 501,
+      "end_line": 524,
+      "tokens": 149,
+      "context_length": 77957
+    }
+  ],
+  "files": [
+    {
+      "file_path": "src/pytest.py",
+      "position": 1,
+      "tokens": 708,
+      "context_length": 708
+    },
+    {
+      "file_path": "src/_pytest/reports.py",
+      "position": 2,
+      "tokens": 3377,
+      "context_length": 4085
+    },
+    {
+      "file_path": "src/_pytest/doctest.py",
+      "position": 3,
+      "tokens": 4500,
+      "context_length": 8585
+    },
+    {
+      "file_path": "src/_pytest/terminal.py",
+      "position": 4,
+      "tokens": 8232,
+      "context_length": 16817
+    },
+    {
+      "file_path": "doc/en/example/xfail_demo.py",
+      "position": 5,
+      "tokens": 144,
+      "context_length": 16961
+    },
+    {
+      "file_path": "testing/python/metafunc.py",
+      "position": 6,
+      "tokens": 13194,
+      "context_length": 30155
+    },
+    {
+      "file_path": "src/_pytest/pastebin.py",
+      "position": 7,
+      "tokens": 805,
+      "context_length": 30960
+    },
+    {
+      "file_path": "src/_pytest/_code/code.py",
+      "position": 8,
+      "tokens": 8212,
+      "context_length": 39172
+    },
+    {
+      "file_path": "testing/python/collect.py",
+      "position": 9,
+      "tokens": 9276,
+      "context_length": 48448
+    },
+    {
+      "file_path": "src/_pytest/_code/source.py",
+      "position": 10,
+      "tokens": 2382,
+      "context_length": 50830
+    },
+    {
+      "file_path": "src/_pytest/junitxml.py",
+      "position": 11,
+      "tokens": 5054,
+      "context_length": 55884
+    },
+    {
+      "file_path": "src/_pytest/runner.py",
+      "position": 12,
+      "tokens": 2847,
+      "context_length": 58731
+    },
+    {
+      "file_path": "src/_pytest/skipping.py",
+      "position": 13,
+      "tokens": 1474,
+      "context_length": 60205
+    },
+    {
+      "file_path": "testing/python/fixtures.py",
+      "position": 14,
+      "tokens": 26306,
+      "context_length": 86511
+    },
+    {
+      "file_path": "doc/en/example/assertion/failure_demo.py",
+      "position": 15,
+      "tokens": 1659,
+      "context_length": 88170
+    },
+    {
+      "file_path": "src/_pytest/python.py",
+      "position": 16,
+      "tokens": 11436,
+      "context_length": 99606
+    },
+    {
+      "file_path": "src/_pytest/nodes.py",
+      "position": 17,
+      "tokens": 3295,
+      "context_length": 102901
+    },
+    {
+      "file_path": "doc/en/example/py2py3/conftest.py",
+      "position": 18,
+      "tokens": 86,
+      "context_length": 102987
+    },
+    {
+      "file_path": "doc/en/conftest.py",
+      "position": 19,
+      "tokens": 7,
+      "context_length": 102994
+    },
+    {
+      "file_path": "src/_pytest/_io/saferepr.py",
+      "position": 20,
+      "tokens": 492,
+      "context_length": 103486
+    },
+    {
+      "file_path": "testing/python/integration.py",
+      "position": 21,
+      "tokens": 2925,
+      "context_length": 106411
+    },
+    {
+      "file_path": "doc/en/example/conftest.py",
+      "position": 22,
+      "tokens": 7,
+      "context_length": 106418
+    },
+    {
+      "file_path": "src/_pytest/compat.py",
+      "position": 23,
+      "tokens": 2505,
+      "context_length": 108923
+    },
+    {
+      "file_path": "extra/get_issues.py",
+      "position": 24,
+      "tokens": 543,
+      "context_length": 109466
+    },
+    {
+      "file_path": "testing/example_scripts/issue88_initial_file_multinodes/conftest.py",
+      "position": 25,
+      "tokens": 53,
+      "context_length": 109519
+    },
+    {
+      "file_path": "testing/example_scripts/issue_519.py",
+      "position": 26,
+      "tokens": 466,
+      "context_length": 109985
+    },
+    {
+      "file_path": "src/_pytest/outcomes.py",
+      "position": 27,
+      "tokens": 1514,
+      "context_length": 111499
+    },
+    {
+      "file_path": "testing/python/setup_only.py",
+      "position": 28,
+      "tokens": 1686,
+      "context_length": 113185
+    },
+    {
+      "file_path": "testing/freeze/tox_run.py",
+      "position": 29,
+      "tokens": 85,
+      "context_length": 113270
+    },
+    {
+      "file_path": "src/_pytest/pytester.py",
+      "position": 30,
+      "tokens": 10336,
+      "context_length": 123606
+    },
+    {
+      "file_path": "src/_pytest/faulthandler.py",
+      "position": 31,
+      "tokens": 575,
+      "context_length": 124181
+    },
+    {
+      "file_path": "doc/en/example/costlysetup/conftest.py",
+      "position": 32,
+      "tokens": 80,
+      "context_length": 124261
+    },
+    {
+      "file_path": "src/_pytest/helpconfig.py",
+      "position": 33,
+      "tokens": 1689,
+      "context_length": 125950
+    },
+    {
+      "file_path": "src/_pytest/fixtures.py",
+      "position": 34,
+      "tokens": 11710,
+      "context_length": 137660
+    },
+    {
+      "file_path": "src/_pytest/config/__init__.py",
+      "position": 35,
+      "tokens": 8777,
+      "context_length": 146437
+    },
+    {
+      "file_path": "src/_pytest/debugging.py",
+      "position": 36,
+      "tokens": 2431,
+      "context_length": 148868
+    },
+    {
+      "file_path": "testing/example_scripts/conftest_usageerror/conftest.py",
+      "position": 37,
+      "tokens": 31,
+      "context_length": 148899
+    },
+    {
+      "file_path": "src/_pytest/python_api.py",
+      "position": 38,
+      "tokens": 6570,
+      "context_length": 155469
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/pkg/conftest.py",
+      "position": 39,
+      "tokens": 18,
+      "context_length": 155487
+    },
+    {
+      "file_path": "src/_pytest/main.py",
+      "position": 40,
+      "tokens": 5296,
+      "context_length": 160783
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_conftest/conftest.py",
+      "position": 41,
+      "tokens": 14,
+      "context_length": 160797
+    },
+    {
+      "file_path": "src/_pytest/setuponly.py",
+      "position": 42,
+      "tokens": 538,
+      "context_length": 161335
+    },
+    {
+      "file_path": "setup.py",
+      "position": 43,
+      "tokens": 271,
+      "context_length": 161606
+    },
+    {
+      "file_path": "doc/en/_themes/flask_theme_support.py",
+      "position": 44,
+      "tokens": 1273,
+      "context_length": 162879
+    },
+    {
+      "file_path": "src/_pytest/mark/structures.py",
+      "position": 45,
+      "tokens": 2863,
+      "context_length": 165742
+    },
+    {
+      "file_path": "src/_pytest/unittest.py",
+      "position": 46,
+      "tokens": 1997,
+      "context_length": 167739
+    },
+    {
+      "file_path": "src/_pytest/resultlog.py",
+      "position": 47,
+      "tokens": 721,
+      "context_length": 168460
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_extend_fixture_conftest_module/conftest.py",
+      "position": 48,
+      "tokens": 14,
+      "context_length": 168474
+    },
+    {
+      "file_path": "src/_pytest/monkeypatch.py",
+      "position": 49,
+      "tokens": 2415,
+      "context_length": 170889
+    },
+    {
+      "file_path": "src/_pytest/_code/__init__.py",
+      "position": 50,
+      "tokens": 101,
+      "context_length": 170990
+    },
+    {
+      "file_path": "doc/en/conf.py",
+      "position": 51,
+      "tokens": 2459,
+      "context_length": 173449
+    },
+    {
+      "file_path": "src/_pytest/assertion/rewrite.py",
+      "position": 52,
+      "tokens": 9031,
+      "context_length": 182480
+    },
+    {
+      "file_path": "testing/python/raises.py",
+      "position": 53,
+      "tokens": 1722,
+      "context_length": 184202
+    },
+    {
+      "file_path": "doc/en/example/costlysetup/sub_a/__init__.py",
+      "position": 54,
+      "tokens": 1,
+      "context_length": 184203
+    },
+    {
+      "file_path": "src/_pytest/__init__.py",
+      "position": 55,
+      "tokens": 56,
+      "context_length": 184259
+    },
+    {
+      "file_path": "src/_pytest/stepwise.py",
+      "position": 56,
+      "tokens": 714,
+      "context_length": 184973
+    },
+    {
+      "file_path": "src/_pytest/config/exceptions.py",
+      "position": 57,
+      "tokens": 45,
+      "context_length": 185018
+    },
+    {
+      "file_path": "doc/en/example/costlysetup/sub_b/__init__.py",
+      "position": 58,
+      "tokens": 1,
+      "context_length": 185019
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub1/conftest.py",
+      "position": 59,
+      "tokens": 26,
+      "context_length": 185045
+    },
+    {
+      "file_path": "doc/en/example/assertion/global_testmodule_config/conftest.py",
+      "position": 60,
+      "tokens": 81,
+      "context_length": 185126
+    },
+    {
+      "file_path": "testing/example_scripts/fixtures/fill_fixtures/test_conftest_funcargs_only_available_in_subdir/sub2/conftest.py",
+      "position": 61,
+      "tokens": 25,
+      "context_length": 185151
+    },
+    {
+      "file_path": "testing/example_scripts/config/collect_pytest_prefix/conftest.py",
+      "position": 62,
+      "tokens": 8,
+      "context_length": 185159
+    },
+    {
+      "file_path": "src/_pytest/config/findpaths.py",
+      "position": 63,
+      "tokens": 1158,
+      "context_length": 186317
+    },
+    {
+      "file_path": "extra/setup-py.test/setup.py",
+      "position": 64,
+      "tokens": 78,
+      "context_length": 186395
+    },
+    {
+      "file_path": "doc/en/example/nonpython/conftest.py",
+      "position": 65,
+      "tokens": 314,
+      "context_length": 186709
+    },
+    {
+      "file_path": "src/_pytest/mark/__init__.py",
+      "position": 66,
+      "tokens": 1171,
+      "context_length": 187880
+    },
+    {
+      "file_path": "testing/python/approx.py",
+      "position": 67,
+      "tokens": 5801,
+      "context_length": 193681
+    },
+    {
+      "file_path": "testing/example_scripts/collect/package_infinite_recursion/conftest.py",
+      "position": 68,
+      "tokens": 10,
+      "context_length": 193691
+    }
+  ]
+}

@@ -1,0 +1,994 @@
+{
+  "instance_id": "sympy__sympy-19091",
+  "model_patch": "diff --git a/sympy/tensor/tensor.py b/sympy/tensor/tensor.py\nindex ff770347d3..5b3b5248f1 100644\n--- a/sympy/tensor/tensor.py\n+++ b/sympy/tensor/tensor.py\n@@ -2897,6 +2897,7 @@ def __getitem__(self, item):\n \n     def _extract_data(self, replacement_dict):\n         from .array import Array\n+\n         for k, v in replacement_dict.items():\n             if isinstance(k, Tensor) and k.args[0] == self.args[0]:\n                 other = k\n@@ -2919,18 +2920,23 @@ def _extract_data(self, replacement_dict):\n                     raise NotImplementedError(\"%s with contractions is not implemented\" % other)\n             # Remove elements in `dum2` from `dum1`:\n             dum1 = [pair for pair in dum1 if pair not in dum2]\n-        if len(dum1) > 0:\n-            indices2 = other.get_indices()\n-            repl = {}\n-            for p1, p2 in dum1:\n-                repl[indices2[p2]] = -indices2[p1]\n-            other = other.xreplace(repl).doit()\n-            array = _TensorDataLazyEvaluator.data_contract_dum([array], dum1, len(indices2))\n \n+        indices2 = other.get_indices()\n+        repl = {}\n+        for p1, p2 in dum1:\n+            repl[indices2[p2]] = -indices2[p1]\n+        other = other.xreplace(repl).doit()\n+\n+        # Apply the metric before contraction\n         free_ind1 = self.get_free_indices()\n         free_ind2 = other.get_free_indices()\n+        array, free_ind1, free_ind2 = self._match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict)\n \n-        return self._match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict)\n+        # Perform the contraction after the metric has been applied\n+        if len(dum1) > 0:\n+            array = _TensorDataLazyEvaluator.data_contract_dum([array], dum1, len(indices2))\n+\n+        return free_ind1, array\n \n     @property\n     def data(self):\n@@ -2940,16 +2946,12 @@ def data(self):\n     @data.setter\n     def data(self, data):\n         deprecate_data()\n-        # TODO: check data compatibility with properties of tensor.\n-        _tensor_data_substitution_dict[self] = data\n+        raise ValueError(\"Not possible to set component data to a tensor expression\")\n \n     @data.deleter\n     def data(self):\n         deprecate_data()\n-        if self in _tensor_data_substitution_dict:\n-            del _tensor_data_substitution_dict[self]\n-        if self.metric in _tensor_data_substitution_dict:\n-            del _tensor_data_substitution_dict[self.metric]\n+        raise ValueError(\"Not possible to delete component data to a tensor expression\")\n \n     def _print(self):\n         indices = [str(ind) for ind in self.indices]\n@@ -3576,12 +3578,12 @@ def _get_indices_to_args_pos(self):\n         \"\"\"\n         pos_map = dict()\n         pos_counter = 0\n-        for arg_i, arg in enumerate(self.args):\n+        for i, arg in enumerate(self.args):\n             if not isinstance(arg, TensExpr):\n                 continue\n             assert isinstance(arg, Tensor)\n-            for i in range(arg.ext_rank):\n-                pos_map[pos_counter] = arg_i\n+            for j in range(arg.ext_rank):\n+                pos_map[pos_counter] = i\n                 pos_counter += 1\n         return pos_map\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/tensor/tensor.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "64d28fe0534f6993695d11244ea740f783958dc8",
+  "patch": "diff --git a/sympy/tensor/tensor.py b/sympy/tensor/tensor.py\n--- a/sympy/tensor/tensor.py\n+++ b/sympy/tensor/tensor.py\n@@ -2084,9 +2084,19 @@ def recursor(expr, pos):\n         return recursor(self, ())\n \n     @staticmethod\n-    def _match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict):\n+    def _contract_and_permute_with_metric(metric, array, pos, dim):\n+        # TODO: add possibility of metric after (spinors)\n         from .array import tensorcontraction, tensorproduct, permutedims\n \n+        array = tensorcontraction(tensorproduct(metric, array), (1, 2+pos))\n+        permu = list(range(dim))\n+        permu[0], permu[pos] = permu[pos], permu[0]\n+        return permutedims(array, permu)\n+\n+    @staticmethod\n+    def _match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict):\n+        from .array import permutedims\n+\n         index_types1 = [i.tensor_index_type for i in free_ind1]\n \n         # Check if variance of indices needs to be fixed:\n@@ -2121,13 +2131,6 @@ def _match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_di\n         if len(set(free_ind1) & set(free_ind2)) < len(free_ind1):\n             raise ValueError(\"incompatible indices: %s and %s\" % (free_ind1, free_ind2))\n \n-        # TODO: add possibility of metric after (spinors)\n-        def contract_and_permute(metric, array, pos):\n-            array = tensorcontraction(tensorproduct(metric, array), (1, 2+pos))\n-            permu = list(range(len(free_ind1)))\n-            permu[0], permu[pos] = permu[pos], permu[0]\n-            return permutedims(array, permu)\n-\n         # Raise indices:\n         for pos in pos2up:\n             index_type_pos = index_types1[pos]  # type: TensorIndexType\n@@ -2135,14 +2138,14 @@ def contract_and_permute(metric, array, pos):\n                 raise ValueError(\"No metric provided to lower index\")\n             metric = replacement_dict[index_type_pos]\n             metric_inverse = _TensorDataLazyEvaluator.inverse_matrix(metric)\n-            array = contract_and_permute(metric_inverse, array, pos)\n+            array = TensExpr._contract_and_permute_with_metric(metric_inverse, array, pos, len(free_ind1))\n         # Lower indices:\n         for pos in pos2down:\n             index_type_pos = index_types1[pos]  # type: TensorIndexType\n             if index_type_pos not in replacement_dict:\n                 raise ValueError(\"No metric provided to lower index\")\n             metric = replacement_dict[index_type_pos]\n-            array = contract_and_permute(metric, array, pos)\n+            array = TensExpr._contract_and_permute_with_metric(metric, array, pos, len(free_ind1))\n \n         if free_ind1:\n             permutation = TensExpr._get_indices_permutation(free_ind2, free_ind1)\n@@ -2920,10 +2923,17 @@ def _extract_data(self, replacement_dict):\n             # Remove elements in `dum2` from `dum1`:\n             dum1 = [pair for pair in dum1 if pair not in dum2]\n         if len(dum1) > 0:\n+            indices1 = self.get_indices()\n             indices2 = other.get_indices()\n             repl = {}\n             for p1, p2 in dum1:\n                 repl[indices2[p2]] = -indices2[p1]\n+                for pos in (p1, p2):\n+                    if indices1[pos].is_up ^ indices2[pos].is_up:\n+                        metric = replacement_dict[indices1[pos].tensor_index_type]\n+                        if indices1[pos].is_up:\n+                            metric = _TensorDataLazyEvaluator.inverse_matrix(metric)\n+                        array = self._contract_and_permute_with_metric(metric, array, pos, len(indices2))\n             other = other.xreplace(repl).doit()\n             array = _TensorDataLazyEvaluator.data_contract_dum([array], dum1, len(indices2))\n \n",
+  "test_patch": "diff --git a/sympy/tensor/tests/test_tensor.py b/sympy/tensor/tests/test_tensor.py\n--- a/sympy/tensor/tests/test_tensor.py\n+++ b/sympy/tensor/tests/test_tensor.py\n@@ -1910,6 +1910,13 @@ def test_tensor_replacement():\n     repl = {H(i, -i): 42}\n     assert expr._extract_data(repl) == ([], 42)\n \n+    expr = H(i, -i)\n+    repl = {\n+        H(-i, -j): Array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, -1]]),\n+        L: Array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, -1]]),\n+    }\n+    assert expr._extract_data(repl) == ([], 4)\n+\n     # Replace with array, raise exception if indices are not compatible:\n     expr = A(i)*A(j)\n     repl = {A(i): [1, 2]}\n",
+  "problem_statement": "Tensor contractions are wrong\nThis is essentially a generalization of #17328.\r\n\r\nThe problem in the current implementation is that contractions are handled before applications of the metric, which leads to incorrect results such as in #17328.\r\n\r\nIn `tensor/tensor.py`:\r\n```python\r\nclass Tensor(TensExpr):\r\n# ...\r\n    def _extract_data(self, replacement_dict):\r\n    # ...\r\n        if len(dum1) > 0:\r\n            indices2 = other.get_indices()\r\n            repl = {}\r\n            for p1, p2 in dum1:\r\n                repl[indices2[p2]] = -indices2[p1]\r\n            other = other.xreplace(repl).doit()\r\n            array = _TensorDataLazyEvaluator.data_contract_dum([array], dum1, len(indices2))\r\n\r\n        free_ind1 = self.get_free_indices()\r\n        free_ind2 = other.get_free_indices()\r\n\r\n        return self._match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict)\r\n```\r\nAnd thus, the issue is that `_TensorDataLazyEvaluator.data_contract_dum` is being called prior to `self._match_indices_with_other_tensor` (where the metric is applied).\r\n\r\nThe reason that this ordering matters is because tensor contraction is itself the abstraction of applying the metric to the tensors that represent psuedo-riemannian manifolds. In essence, it means that we must have it that ![equation](https://latex.codecogs.com/svg.latex?T^\\mu_\\mu=g_{\\mu\\nu}T^{\\mu\\nu}); however, this isn't the case here.\r\n\r\nI've tried tampering with the code above, but by the way tensors have been designed, this bug is essentially unavoidable. As a consequence, the tensor module needs to be refactored in order to get accurate results. (Also, I couldn't help but notice that the last argument to `_TensorDataLazyEvaluator.data_contract_dum` isn't used).\r\n\r\n@drybalka had mentioned that he had this sort of refactoring in the works, but based on his fork, progress seems to be slow. I think discussions should be in order for reorganizing how tensors actually represent their components in this module.\n",
+  "hints_text": "Hi! This is @drybalka.\n\nI totally agree, due to the module design it is impossible to solve this problem without overhaul. Tensor indices contraction is placed inside TensorMul class (for some reason twice, if I\u2019m not mistaken) even though you can have contractions in a single tensor. This code is intertwined with tensor canonicalization and explicit tensor value calculations, which in their turn depend on TensorManager. In short, this is almost all functionality of the tensor module. At some point I noticed I was almost rewriting everything from scratch in order not to lose any functionality. If it was possible, I would have downgraded the module to basics, implemented TensorIndexManager with tensor contractions uniformly both for Tensor and TensorMul, and only then used this functionality to do everything else. However, this is hard to do in one commit and even harder without braking any half-functioning functionality.\n\nI\u2019d be glad to hear your thoughts on this matter because so far I don\u2019t have any progress.\n\n> On 26 Jan 2020, at 04:57, Calvin Jay Ross <notifications@github.com> wrote:\n> \n> \ufeff\n> This is essentially a generalization of #17328.\n> \n> The problem in the current implementation is that contractions are handled before applications of the metric, which leads to incorrect results such as in #17328.\n> \n> In tensor/tensor.py:\n> \n> class Tensor(TensExpr):\n> # ...\n>     def _extract_data(self, replacement_dict):\n>     # ...\n>         if len(dum1) > 0:\n>             indices2 = other.get_indices()\n>             repl = {}\n>             for p1, p2 in dum1:\n>                 repl[indices2[p2]] = -indices2[p1]\n>             other = other.xreplace(repl).doit()\n>             array = _TensorDataLazyEvaluator.data_contract_dum([array], dum1, len(indices2))\n> \n>         free_ind1 = self.get_free_indices()\n>         free_ind2 = other.get_free_indices()\n> \n>         return self._match_indices_with_other_tensor(array, free_ind1, free_ind2, replacement_dict)\n> And thus, the issue is that _TensorDataLazyEvaluator.data_contract_dum is being called prior to self._match_indices_with_other_tensor (where the metric is applied).\n> \n> The reason that this ordering matters is because tensor contraction is itself the abstraction of applying the metric to the tensors that represent psuedo-riemannian manifolds. In essence, it means that we must have it that ; however, this isn't the case here.\n> \n> I've tried tampering with the code above, but by the way tensors have been designed, this bug is essentially unavoidable. As a consequence, the tensor module needs to be refactored in order to get accurate results. (Also, the last argument to _TensorDataLazyEvaluator.data_contract_dum isn't used).\n> \n> @drybalka, I believe mentioned that he had this sort of refactoring in the works, but based on his fork, progress seems to be slow. I think discussions should be in order for reorganizing how tensors actually represent their components in this module.\n> \n> \u2014\n> You are receiving this because you were mentioned.\n> Reply to this email directly, view it on GitHub, or unsubscribe.\n\n> I\u2019d be glad to hear your thoughts on this matter because so far I don\u2019t have any progress.\r\n\r\nI would be totally down for restructuring the module and would be down for collaborating on a pull request. Is anyone in particular in charge of the module? If so, they should definitely have a say; especially if we are going to be potentially breaking any functionality.\n@Upabjojr I noticed that you are responsible for the current implementation of `replace_with_arrays`. Do you have any thoughts on this issue?",
+  "created_at": "2020-04-08T07:43:30Z",
+  "version": "1.6",
+  "FAIL_TO_PASS": "[\"test_tensor_replacement\"]",
+  "PASS_TO_PASS": "[\"test_TensExpr\", \"test_TensMul_data\", \"test_TensorHead\", \"test_TensorIndexType\", \"test_TensorManager\", \"test_TensorSymmetry\", \"test_add1\", \"test_add2\", \"test_add3\", \"test_bug_correction_tensor_indices\", \"test_canonicalize1\", \"test_canonicalize2\", \"test_canonicalize3\", \"test_canonicalize_no_dummies\", \"test_canonicalize_no_slot_sym\", \"test_contract_delta1\", \"test_contract_metric1\", \"test_contract_metric2\", \"test_epsilon\", \"test_fun\", \"test_hash\", \"test_index_iteration\", \"test_indices\", \"test_issue_10972_TensMul_data\", \"test_issue_11020_TensAdd_data\", \"test_metric_contract3\", \"test_mul\", \"test_no_metric_symmetry\", \"test_noncommuting_components\", \"test_rewrite_tensor_to_Indexed\", \"test_riemann_cyclic\", \"test_riemann_cyclic_replace\", \"test_riemann_invariants\", \"test_riemann_products\", \"test_special_eq_ne\", \"test_substitute_indices\", \"test_tensor_alternative_construction\", \"test_tensor_expand\", \"test_tensorhead\", \"test_tensorhead_construction_without_symmetry\", \"test_tensorsymmetry\", \"test_valued_assign_numpy_ndarray\", \"test_valued_canon_bp_swapaxes\", \"test_valued_components_with_wrong_symmetry\", \"test_valued_metric_inverse\", \"test_valued_non_diagonal_metric\", \"test_valued_tensor_add_scalar\", \"test_valued_tensor_contraction\", \"test_valued_tensor_covariant_contravariant_elements\", \"test_valued_tensor_expressions\", \"test_valued_tensor_get_matrix\", \"test_valued_tensor_iter\", \"test_valued_tensor_pow\", \"test_valued_tensor_self_contraction\"]",
+  "environment_setup_commit": "28b41c73c12b70d6ad9f6e45109a80649c4456da",
+  "patch_files": [
+    "sympy/tensor/tensor.py"
+  ],
+  "test_patch_files": [
+    "sympy/tensor/tests/test_tensor.py"
+  ],
+  "patch_diff_details": {
+    "sympy/tensor/tensor.py": {
+      "diffs": [
+        {
+          "start_line_old": 2087,
+          "end_line_old": 2087,
+          "file_pos": 1,
+          "file_context_length": 34734,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensMul._dummy_data_to_dum_TensorElement._extract_data.6.1",
+          "closest_snippet_line_distance": 1103,
+          "pos": 13,
+          "context_length": 32424
+        },
+        {
+          "start_line_old": 2124,
+          "end_line_old": 2130,
+          "file_pos": 1,
+          "file_context_length": 34734,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensMul._dummy_data_to_dum_TensorElement._extract_data.6.1",
+          "closest_snippet_line_distance": 1066,
+          "pos": 13,
+          "context_length": 32424
+        },
+        {
+          "start_line_old": 2138,
+          "end_line_old": 2145,
+          "file_pos": 1,
+          "file_context_length": 34734,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensMul._dummy_data_to_dum_TensorElement._extract_data.6.1",
+          "closest_snippet_line_distance": 1052,
+          "pos": 13,
+          "context_length": 32424
+        },
+        {
+          "start_line_old": 2923,
+          "end_line_old": 2923,
+          "file_pos": 1,
+          "file_context_length": 34734,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/tensor/tensor.py_1__TensorDataLazyEvaluator.add_rearrange_tensmul_parts.2",
+          "closest_snippet_line_distance": 2208,
+          "pos": 4,
+          "context_length": 14118
+        }
+      ]
+    }
+  },
+  "vectors": 8652,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_1__TensorDataLazyEvaluator.add_rearrange_tensmul_parts.2",
+      "distance": 0.7309983968734741,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 1,
+      "end_line": 715,
+      "tokens": 6389,
+      "context_length": 6389,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/bin/coverage_report.py_1_generate_covered_files.1.3.1.1",
+      "distance": 0.7841774225234985,
+      "file_path": "bin/coverage_report.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 396,
+      "context_length": 6785
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/tensor/index_methods.py_get_contraction_structure.2_",
+      "distance": 0.819481372833252,
+      "file_path": "sympy/tensor/index_methods.py",
+      "start_line": 399,
+      "end_line": 471,
+      "tokens": 601,
+      "context_length": 7386
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensAdd.doit_TensMul._indices_to_free_dum.18.1",
+      "distance": 0.8303702473640442,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 2353,
+      "end_line": 3188,
+      "tokens": 6732,
+      "context_length": 14118,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_canon_bp_",
+      "distance": 0.8328509330749512,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 3950,
+      "end_line": 4202,
+      "tokens": 1973,
+      "context_length": 16091,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/arrayop.py_tensorcontraction.23_tensorcontraction.31.1",
+      "distance": 0.8586361408233643,
+      "file_path": "sympy/tensor/array/arrayop.py",
+      "start_line": 153,
+      "end_line": 172,
+      "tokens": 197,
+      "context_length": 16288
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/arrayop.py_tensorcontraction_tensorcontraction.22",
+      "distance": 0.8613472580909729,
+      "file_path": "sympy/tensor/array/arrayop.py",
+      "start_line": 72,
+      "end_line": 152,
+      "tokens": 797,
+      "context_length": 17085
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensMul._dummy_data_to_dum_TensorElement._extract_data.6.1",
+      "distance": 0.8663179278373718,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 3190,
+      "end_line": 3947,
+      "tokens": 6628,
+      "context_length": 23713,
+      "file_pos": 4
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/tensor/index_methods.py_get_contraction_structure_get_contraction_structure.1",
+      "distance": 0.9222503900527954,
+      "file_path": "sympy/tensor/index_methods.py",
+      "start_line": 299,
+      "end_line": 397,
+      "tokens": 1027,
+      "context_length": 24740
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction.split_multiple_contractions_CodegenArrayContraction.split_multiple_contractions.12.1",
+      "distance": 0.9328910708427429,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 126,
+      "end_line": 205,
+      "tokens": 755,
+      "context_length": 25495
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/tensor/toperators.py_PartialDerivative._extract_data_",
+      "distance": 0.9481370449066162,
+      "file_path": "sympy/tensor/toperators.py",
+      "start_line": 174,
+      "end_line": 196,
+      "tokens": 254,
+      "context_length": 25749
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction.sort_args_by_name_CodegenArrayContraction.sort_args_by_name.12.1",
+      "distance": 0.9529753923416138,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 358,
+      "end_line": 393,
+      "tokens": 424,
+      "context_length": 26173
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensorHead_TensAdd.free_indices.1.2.1.1",
+      "distance": 0.9536486864089966,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 1588,
+      "end_line": 2351,
+      "tokens": 6251,
+      "context_length": 32424,
+      "file_pos": 6
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonicalize_canonicalize.1",
+      "distance": 0.9625963568687439,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 639,
+      "end_line": 761,
+      "tokens": 1423,
+      "context_length": 33847
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction._get_contraction_links_CodegenArrayContraction._get_contraction_links.3.1",
+      "distance": 0.9845715761184692,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 395,
+      "end_line": 436,
+      "tokens": 558,
+      "context_length": 34405
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py__get_contraction_links__sort_contraction_indices.3.1",
+      "distance": 0.9877097606658936,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 870,
+      "end_line": 887,
+      "tokens": 177,
+      "context_length": 34582
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py__support_function_tp1_recognize__support_function_tp1_recognize.14.1",
+      "distance": 0.9883984327316284,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 1183,
+      "end_line": 1244,
+      "tokens": 692,
+      "context_length": 35274
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction._contraction_tuples_to_contraction_indices_CodegenArrayContraction._contraction_indices_to_components.7.1",
+      "distance": 1.0024837255477905,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 322,
+      "end_line": 356,
+      "tokens": 262,
+      "context_length": 35536
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py__TensorDataLazyEvaluator.parse_data__TensorManager.comm_i2symbol.2.1",
+      "distance": 1.0051524639129639,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 717,
+      "end_line": 807,
+      "tokens": 729,
+      "context_length": 36265,
+      "file_pos": 7
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/__init__.py_1_DenseNDimArray",
+      "distance": 1.0064010620117188,
+      "file_path": "sympy/tensor/array/__init__.py",
+      "start_line": 1,
+      "end_line": 203,
+      "tokens": 2175,
+      "context_length": 38440
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction.__mul___CodegenArrayContraction._push_indices_up.4.1",
+      "distance": 1.0069081783294678,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 89,
+      "end_line": 124,
+      "tokens": 328,
+      "context_length": 38768
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/tensor/toperators.py_PartialDerivative._contract_indices_for_derivative_PartialDerivative.doit.6.1",
+      "distance": 1.0192310810089111,
+      "file_path": "sympy/tensor/toperators.py",
+      "start_line": 64,
+      "end_line": 95,
+      "tokens": 257,
+      "context_length": 39025
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/printing/tensorflow.py_TensorflowPrinter._print_CodegenArrayContraction_TensorflowPrinter._print_CodegenArrayContraction.7",
+      "distance": 1.0192837715148926,
+      "file_path": "sympy/printing/tensorflow.py",
+      "start_line": 228,
+      "end_line": 243,
+      "tokens": 164,
+      "context_length": 39189
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/tensor/__init__.py_1_",
+      "distance": 1.020275354385376,
+      "file_path": "sympy/tensor/__init__.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 206,
+      "context_length": 39395
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonicalize.pos_free_canonicalize.45.1",
+      "distance": 1.0394001007080078,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 841,
+      "end_line": 860,
+      "tokens": 309,
+      "context_length": 39704
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction._get_contraction_tuples_CodegenArrayContraction._get_contraction_tuples.3.1",
+      "distance": 1.047961711883545,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 294,
+      "end_line": 320,
+      "tokens": 339,
+      "context_length": 40043
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/tensor/toperators.py_PartialDerivative._expand_partial_derivative_PartialDerivative._expand_partial_derivative.8.1",
+      "distance": 1.055187463760376,
+      "file_path": "sympy/tensor/toperators.py",
+      "start_line": 97,
+      "end_line": 139,
+      "tokens": 377,
+      "context_length": 40420
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/tensorproduct.py_TensorProduct.flatten_TensorProduct._sympystr.5.1",
+      "distance": 1.0597761869430542,
+      "file_path": "sympy/physics/quantum/tensorproduct.py",
+      "start_line": 132,
+      "end_line": 163,
+      "tokens": 275,
+      "context_length": 40695
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_TensorProduct_TensorProduct.1",
+      "distance": 1.0624433755874634,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 787,
+      "end_line": 836,
+      "tokens": 454,
+      "context_length": 41149
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction.flatten_contraction_of_diagonal_CodegenArrayContraction._get_free_indices_to_position_map.5.1",
+      "distance": 1.0624754428863525,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 207,
+      "end_line": 240,
+      "tokens": 316,
+      "context_length": 41465
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction._get_index_shifts_CodegenArrayContraction._get_index_shifts.13.1",
+      "distance": 1.0627694129943848,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 242,
+      "end_line": 279,
+      "tokens": 356,
+      "context_length": 41821
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/__init__.py_MatrixPermute_parse_expr",
+      "distance": 1.070854663848877,
+      "file_path": "sympy/__init__.py",
+      "start_line": 180,
+      "end_line": 224,
+      "tokens": 668,
+      "context_length": 42489
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonicalize.2_canonicalize.30",
+      "distance": 1.0793673992156982,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 762,
+      "end_line": 840,
+      "tokens": 847,
+      "context_length": 43336
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_double_coset_can_rep.21_double_coset_can_rep.22.1",
+      "distance": 1.082793951034546,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 427,
+      "end_line": 538,
+      "tokens": 1356,
+      "context_length": 44692
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_canonical_free_canonical_free.h.1",
+      "distance": 1.0870527029037476,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 541,
+      "end_line": 595,
+      "tokens": 752,
+      "context_length": 45444
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_tensor_gens.21_tensor_gens.37.1",
+      "distance": 1.0882071256637573,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 1118,
+      "end_line": 1154,
+      "tokens": 394,
+      "context_length": 45838
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py__build_push_indices_up_func_transformation_",
+      "distance": 1.0891544818878174,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 1452,
+      "end_line": 1491,
+      "tokens": 274,
+      "context_length": 46112
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction_CodegenArrayContraction.__new__.14.1",
+      "distance": 1.0911378860473633,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 60,
+      "end_line": 87,
+      "tokens": 276,
+      "context_length": 46388
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_double_coset_can_rep.1_double_coset_can_rep.1",
+      "distance": 1.0958466529846191,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 167,
+      "end_line": 404,
+      "tokens": 3179,
+      "context_length": 49567
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/tensor/toperators.py_PartialDerivative._perform_derivative_PartialDerivative.variables.1.1",
+      "distance": 1.099630355834961,
+      "file_path": "sympy/tensor/toperators.py",
+      "start_line": 141,
+      "end_line": 172,
+      "tokens": 220,
+      "context_length": 49787
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_1_dummy_sgs.8.1",
+      "distance": 1.1014455556869507,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 753,
+      "context_length": 50540
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/physics/secondquant.py_contraction_contraction.2.5.t.2",
+      "distance": 1.102766990661621,
+      "file_path": "sympy/physics/secondquant.py",
+      "start_line": 2062,
+      "end_line": 2131,
+      "tokens": 659,
+      "context_length": 51199
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/printing/tensorflow.py_TensorflowPrinter._print_CodegenArrayDiagonal_",
+      "distance": 1.103062629699707,
+      "file_path": "sympy/printing/tensorflow.py",
+      "start_line": 245,
+      "end_line": 284,
+      "tokens": 384,
+      "context_length": 51583
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_TensorProduct.__new___TensorProduct.__init__.self._args.1",
+      "distance": 1.1059526205062866,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 837,
+      "end_line": 849,
+      "tokens": 147,
+      "context_length": 51730
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/tensorproduct.py_TensorProduct._pretty_TensorProduct._pretty.5.1",
+      "distance": 1.1087442636489868,
+      "file_path": "sympy/physics/quantum/tensorproduct.py",
+      "start_line": 165,
+      "end_line": 207,
+      "tokens": 449,
+      "context_length": 52179
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/tensorproduct.py_TensorProduct._latex_TensorProduct._latex.5.1",
+      "distance": 1.110011339187622,
+      "file_path": "sympy/physics/quantum/tensorproduct.py",
+      "start_line": 209,
+      "end_line": 236,
+      "tokens": 285,
+      "context_length": 52464
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.2_kahane_simplify.resulting_indices.1",
+      "distance": 1.1109495162963867,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 415,
+      "end_line": 502,
+      "tokens": 836,
+      "context_length": 53300
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/plotting/experimental_lambdify.py_vectorized_lambdify.__call___vectorized_lambdify.__call__.4.1",
+      "distance": 1.1135790348052979,
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "start_line": 114,
+      "end_line": 171,
+      "tokens": 613,
+      "context_length": 53913
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/functions/special/tensor_functions.py_KroneckerDelta.indices_",
+      "distance": 1.1144970655441284,
+      "file_path": "sympy/functions/special/tensor_functions.py",
+      "start_line": 473,
+      "end_line": 486,
+      "tokens": 129,
+      "context_length": 54042
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.153__check_antecedents.177",
+      "distance": 1.1160755157470703,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1176,
+      "end_line": 1213,
+      "tokens": 760,
+      "context_length": 54802
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/physics/secondquant.py_64__get_contractions.5.1",
+      "distance": 1.1162387132644653,
+      "file_path": "sympy/physics/secondquant.py",
+      "start_line": 2702,
+      "end_line": 2763,
+      "tokens": 448,
+      "context_length": 55250
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/printing/tensorflow.py_TensorflowPrinter._print_MatPow_TensorflowPrinter._print_CodegenArrayTensorProduct.3.1",
+      "distance": 1.1206014156341553,
+      "file_path": "sympy/printing/tensorflow.py",
+      "start_line": 194,
+      "end_line": 226,
+      "tokens": 288,
+      "context_length": 55538
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/physics/secondquant.py_AntiSymmetricTensor.__new___AntiSymmetricTensor.__new__.5.2.1.1",
+      "distance": 1.1210415363311768,
+      "file_path": "sympy/physics/secondquant.py",
+      "start_line": 176,
+      "end_line": 195,
+      "tokens": 162,
+      "context_length": 55700
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py__TensorManager.set_comm_tensorhead.4.1",
+      "distance": 1.123942255973816,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 809,
+      "end_line": 1585,
+      "tokens": 6070,
+      "context_length": 61770,
+      "file_pos": 18
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/matrices/sparsetools.py_banded.2_",
+      "distance": 1.126741886138916,
+      "file_path": "sympy/matrices/sparsetools.py",
+      "start_line": 199,
+      "end_line": 303,
+      "tokens": 955,
+      "context_length": 62725
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_metric_to_Riemann_components_metric_to_Riemann_components.9.1",
+      "distance": 1.1276979446411133,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1543,
+      "end_line": 1594,
+      "tokens": 655,
+      "context_length": 63380
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.74__check_antecedents.109",
+      "distance": 1.133974313735962,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1097,
+      "end_line": 1134,
+      "tokens": 808,
+      "context_length": 64188
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify_kahane_simplify.1",
+      "distance": 1.1339855194091797,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 334,
+      "end_line": 413,
+      "tokens": 808,
+      "context_length": 64996
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/tensor/indexed.py_IndexedBase.name_IndexedBase.__getitem__.1.3.2.1",
+      "distance": 1.1342644691467285,
+      "file_path": "sympy/tensor/indexed.py",
+      "start_line": 470,
+      "end_line": 490,
+      "tokens": 193,
+      "context_length": 65189
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.110__check_antecedents.r.1",
+      "distance": 1.1350033283233643,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1135,
+      "end_line": 1175,
+      "tokens": 817,
+      "context_length": 66006
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/tensor/functions.py_1_TensorProduct.__new__.15.1",
+      "distance": 1.1355315446853638,
+      "file_path": "sympy/tensor/functions.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 284,
+      "context_length": 66290
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/testutil.py_canonicalize_naive_canonicalize_naive.22.1",
+      "distance": 1.137986660003662,
+      "file_path": "sympy/combinatorics/testutil.py",
+      "start_line": 193,
+      "end_line": 260,
+      "tokens": 682,
+      "context_length": 66972
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction._convert_outer_indices_to_inner_indices_CodegenArrayContraction._flatten.4.1",
+      "distance": 1.138214111328125,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 281,
+      "end_line": 292,
+      "tokens": 164,
+      "context_length": 67136
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/printing/tensorflow.py_1_TensorflowPrinter._print_And.1",
+      "distance": 1.1404142379760742,
+      "file_path": "sympy/printing/tensorflow.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 878,
+      "context_length": 68014
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py_CodegenArrayContraction.from_MatMul_get_shape.2.1",
+      "distance": 1.1457319259643555,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 438,
+      "end_line": 458,
+      "tokens": 146,
+      "context_length": 68160
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/printing/tensorflow.py_TensorflowPrinter._print_Or_TensorflowPrinter._print_Transpose.3.1",
+      "distance": 1.1479129791259766,
+      "file_path": "sympy/printing/tensorflow.py",
+      "start_line": 108,
+      "end_line": 123,
+      "tokens": 166,
+      "context_length": 68326
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/tensorproduct.py_TensorProduct.doit_TensorProduct._eval_trace.3.2.1.1",
+      "distance": 1.1485800743103027,
+      "file_path": "sympy/physics/quantum/tensorproduct.py",
+      "start_line": 238,
+      "end_line": 267,
+      "tokens": 246,
+      "context_length": 68572
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/tensor/functions.py_TensorProduct.rank_",
+      "distance": 1.1487703323364258,
+      "file_path": "sympy/tensor/functions.py",
+      "start_line": 45,
+      "end_line": 63,
+      "tokens": 137,
+      "context_length": 68709
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/physics/secondquant.py__determine_ambiguous__determine_ambiguous.all_ambiguous.13.1",
+      "distance": 1.149647831916809,
+      "file_path": "sympy/physics/secondquant.py",
+      "start_line": 2620,
+      "end_line": 2674,
+      "tokens": 557,
+      "context_length": 69266
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/codegen/array_utils.py__suppress_trivial_dims_in_tensor_product__suppress_trivial_dims_in_tensor_product.mat_11.8.1",
+      "distance": 1.154065728187561,
+      "file_path": "sympy/codegen/array_utils.py",
+      "start_line": 1397,
+      "end_line": 1418,
+      "tokens": 225,
+      "context_length": 69491
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py_double_coset_can_rep.size_double_coset_can_rep.TAB.1",
+      "distance": 1.1552544832229614,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 405,
+      "end_line": 426,
+      "tokens": 271,
+      "context_length": 69762
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py__trigpats.matchers_identity__trigpats.15.1",
+      "distance": 1.1558160781860352,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 795,
+      "end_line": 835,
+      "tokens": 729,
+      "context_length": 70491
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/combinatorics/tensor_can.py__dumx_remove__dumx_remove.3.8",
+      "distance": 1.1570475101470947,
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "start_line": 130,
+      "end_line": 148,
+      "tokens": 138,
+      "context_length": 70629
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/examples/advanced/relativity.py_curvature_eq4.5",
+      "distance": 1.157341480255127,
+      "file_path": "examples/advanced/relativity.py",
+      "start_line": 97,
+      "end_line": 157,
+      "tokens": 487,
+      "context_length": 71116
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sympy/sympy/tensor/toperators.py_1_PartialDerivative.nocoeff.1.1",
+      "distance": 1.1581122875213623,
+      "file_path": "sympy/tensor/toperators.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 381,
+      "context_length": 71497
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_unrad.46.3.3_unrad.46.3.4",
+      "distance": 1.1632111072540283,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 3558,
+      "end_line": 3656,
+      "tokens": 1432,
+      "context_length": 72929
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/tensor/tensor.py",
+      "position": 1,
+      "tokens": 34734,
+      "context_length": 34734
+    },
+    {
+      "file_path": "bin/coverage_report.py",
+      "position": 2,
+      "tokens": 838,
+      "context_length": 35572
+    },
+    {
+      "file_path": "sympy/tensor/index_methods.py",
+      "position": 3,
+      "tokens": 3897,
+      "context_length": 39469
+    },
+    {
+      "file_path": "sympy/tensor/array/arrayop.py",
+      "position": 4,
+      "tokens": 3367,
+      "context_length": 42836
+    },
+    {
+      "file_path": "sympy/codegen/array_utils.py",
+      "position": 5,
+      "tokens": 13425,
+      "context_length": 56261
+    },
+    {
+      "file_path": "sympy/tensor/toperators.py",
+      "position": 6,
+      "tokens": 1461,
+      "context_length": 57722
+    },
+    {
+      "file_path": "sympy/combinatorics/tensor_can.py",
+      "position": 7,
+      "tokens": 13109,
+      "context_length": 70831
+    },
+    {
+      "file_path": "sympy/tensor/array/__init__.py",
+      "position": 8,
+      "tokens": 2352,
+      "context_length": 73183
+    },
+    {
+      "file_path": "sympy/printing/tensorflow.py",
+      "position": 9,
+      "tokens": 2452,
+      "context_length": 75635
+    },
+    {
+      "file_path": "sympy/tensor/__init__.py",
+      "position": 10,
+      "tokens": 206,
+      "context_length": 75841
+    },
+    {
+      "file_path": "sympy/physics/quantum/tensorproduct.py",
+      "position": 11,
+      "tokens": 3502,
+      "context_length": 79343
+    },
+    {
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "position": 12,
+      "tokens": 14455,
+      "context_length": 93798
+    },
+    {
+      "file_path": "sympy/__init__.py",
+      "position": 13,
+      "tokens": 7912,
+      "context_length": 101710
+    },
+    {
+      "file_path": "sympy/physics/secondquant.py",
+      "position": 14,
+      "tokens": 22535,
+      "context_length": 124245
+    },
+    {
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "position": 15,
+      "tokens": 6380,
+      "context_length": 130625
+    },
+    {
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "position": 16,
+      "tokens": 5898,
+      "context_length": 136523
+    },
+    {
+      "file_path": "sympy/functions/special/tensor_functions.py",
+      "position": 17,
+      "tokens": 3309,
+      "context_length": 139832
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 18,
+      "tokens": 24298,
+      "context_length": 164130
+    },
+    {
+      "file_path": "sympy/matrices/sparsetools.py",
+      "position": 19,
+      "tokens": 2928,
+      "context_length": 167058
+    },
+    {
+      "file_path": "sympy/tensor/indexed.py",
+      "position": 20,
+      "tokens": 6244,
+      "context_length": 173302
+    },
+    {
+      "file_path": "sympy/tensor/functions.py",
+      "position": 21,
+      "tokens": 415,
+      "context_length": 173717
+    },
+    {
+      "file_path": "sympy/combinatorics/testutil.py",
+      "position": 22,
+      "tokens": 3074,
+      "context_length": 176791
+    },
+    {
+      "file_path": "sympy/simplify/trigsimp.py",
+      "position": 23,
+      "tokens": 12248,
+      "context_length": 189039
+    },
+    {
+      "file_path": "examples/advanced/relativity.py",
+      "position": 24,
+      "tokens": 1572,
+      "context_length": 190611
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 25,
+      "tokens": 32675,
+      "context_length": 223286
+    }
+  ]
+}

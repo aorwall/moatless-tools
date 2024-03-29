@@ -1,0 +1,1191 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-14890",
+  "model_patch": "diff --git a/sklearn/pipeline.py b/sklearn/pipeline.py\nindex a58979142..7ee8d2ff6 100644\n--- a/sklearn/pipeline.py\n+++ b/sklearn/pipeline.py\n@@ -267,15 +267,19 @@ class Pipeline(_BaseComposition):\n         fit_params_steps = {name: {} for name, step in self.steps\n                             if step is not None}\n         for pname, pval in fit_params.items():\n-            if '__' not in pname:\n+            if '__' not in pname and pname != 'sample_weight':\n                 raise ValueError(\n                     \"Pipeline.fit does not accept the {} parameter. \"\n                     \"You can pass parameters to specific steps of your \"\n                     \"pipeline using the stepname__parameter format, e.g. \"\n                     \"`Pipeline.fit(X, y, logisticregression__sample_weight\"\n                     \"=sample_weight)`.\".format(pname))\n-            step, param = pname.split('__', 1)\n-            fit_params_steps[step][param] = pval\n+            if '__' in pname:\n+                step, param = pname.split('__', 1)\n+                fit_params_steps[step][param] = pval\n+            elif pname == 'sample_weight':\n+                step = self.steps[-1][0]  # the last step is the estimator\n+                fit_params_steps[step]['sample_weight'] = pval\n         for (step_idx,\n              name,\n              transformer) in self._iter(with_final=False,\n@@ -293,22 +297,18 @@ class Pipeline(_BaseComposition):\n                     cloned_transformer = transformer\n                 else:\n                     cloned_transformer = clone(transformer)\n-            elif hasattr(memory, 'cachedir'):\n-                # joblib < 0.11\n-                if memory.cachedir is None:\n-                    # we do not clone when caching is disabled to\n-                    # preserve backward compatibility\n-                    cloned_transformer = transformer\n-                else:\n-                    cloned_transformer = clone(transformer)\n             else:\n                 cloned_transformer = clone(transformer)\n             # Fit or load from cache the current transfomer\n-            X, fitted_transformer = fit_transform_one_cached(\n-                cloned_transformer, X, y, None,\n-                message_clsname='Pipeline',\n-                message=self._log_message(step_idx),\n-                **fit_params_steps[name])\n+            if transformer == 'passthrough' or transformer is None:\n+                fitted_transformer = None\n+            else:\n+                fit_result = fit_transform_one_cached(\n+                    cloned_transformer, X, y, **fit_params_steps[name])\n+                if fit_result is not None:\n+                    X, fitted_transformer = fit_result\n+                else:\n+                    fitted_transformer = None\n             # Replace the transformer of the step with the fitted\n             # transformer. This is necessary when loading the transformer\n             # from the cache.\n@@ -711,19 +711,16 @@ def _fit_transform_one(transformer,\n                        X,\n                        y,\n                        weight,\n-                       message_clsname='',\n-                       message=None,\n                        **fit_params):\n     \"\"\"\n     Fits ``transformer`` to ``X`` and ``y``. The transformed result is returned\n     with the fitted transformer. If ``weight`` is not ``None``, the result will\n     be multiplied by ``weight``.\n     \"\"\"\n-    with _print_elapsed_time(message_clsname, message):\n-        if hasattr(transformer, 'fit_transform'):\n-            res = transformer.fit_transform(X, y, **fit_params)\n-        else:\n-            res = transformer.fit(X, y, **fit_params).transform(X)\n+    if hasattr(transformer, 'fit_transform'):\n+        res = transformer.fit_transform(X, y, **fit_params)\n+    else:\n+        res = transformer.fit(X, y, **fit_params).transform(X)\n \n     if weight is None:\n         return res, transformer\n@@ -734,14 +731,11 @@ def _fit_one(transformer,\n              X,\n              y,\n              weight,\n-             message_clsname='',\n-             message=None,\n              **fit_params):\n     \"\"\"\n     Fits ``transformer`` to ``X`` and ``y``.\n     \"\"\"\n-    with _print_elapsed_time(message_clsname, message):\n-        return transformer.fit(X, y, **fit_params)\n+    return transformer.fit(X, y, **fit_params)\n \n \n class FeatureUnion(TransformerMixin, _BaseComposition):\n@@ -944,8 +938,6 @@ class FeatureUnion(TransformerMixin, _BaseComposition):\n \n         return Parallel(n_jobs=self.n_jobs)(delayed(func)(\n             transformer, X, y, weight,\n-            message_clsname='FeatureUnion',\n-            message=self._log_message(name, idx, len(transformers)),\n             **fit_params) for idx, (name, transformer,\n                                     weight) in enumerate(transformers, 1))\n \n@@ -972,6 +964,7 @@ class FeatureUnion(TransformerMixin, _BaseComposition):\n         if any(sparse.issparse(f) for f in Xs):\n             Xs = sparse.hstack(Xs).tocsr()\n         else:\n+            Xs = [f for f in Xs if f is not None]\n             Xs = np.hstack(Xs)\n         return Xs\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/pipeline.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "14f5302b7000e9096de93beef37dcdb08f55f128",
+  "patch": "diff --git a/sklearn/compose/_target.py b/sklearn/compose/_target.py\n--- a/sklearn/compose/_target.py\n+++ b/sklearn/compose/_target.py\n@@ -148,7 +148,7 @@ def _fit_transformer(self, y):\n                               \" you are sure you want to proceed regardless\"\n                               \", set 'check_inverse=False'\", UserWarning)\n \n-    def fit(self, X, y, sample_weight=None):\n+    def fit(self, X, y, **fit_params):\n         \"\"\"Fit the model according to the given training data.\n \n         Parameters\n@@ -160,9 +160,10 @@ def fit(self, X, y, sample_weight=None):\n         y : array-like, shape (n_samples,)\n             Target values.\n \n-        sample_weight : array-like, shape (n_samples,) optional\n-            Array of weights that are assigned to individual samples.\n-            If not provided, then each sample is given unit weight.\n+        **fit_params : dict of string -> object\n+            Parameters passed to the ``fit`` method of the underlying\n+            regressor.\n+\n \n         Returns\n         -------\n@@ -197,10 +198,7 @@ def fit(self, X, y, sample_weight=None):\n         else:\n             self.regressor_ = clone(self.regressor)\n \n-        if sample_weight is None:\n-            self.regressor_.fit(X, y_trans)\n-        else:\n-            self.regressor_.fit(X, y_trans, sample_weight=sample_weight)\n+        self.regressor_.fit(X, y_trans, **fit_params)\n \n         return self\n \n",
+  "test_patch": "diff --git a/sklearn/compose/tests/test_target.py b/sklearn/compose/tests/test_target.py\n--- a/sklearn/compose/tests/test_target.py\n+++ b/sklearn/compose/tests/test_target.py\n@@ -14,6 +14,8 @@\n from sklearn.preprocessing import FunctionTransformer\n from sklearn.preprocessing import StandardScaler\n \n+from sklearn.pipeline import Pipeline\n+\n from sklearn.linear_model import LinearRegression, Lasso\n \n from sklearn import datasets\n@@ -294,3 +296,39 @@ def test_transform_target_regressor_count_fit(check_inverse):\n     )\n     ttr.fit(X, y)\n     assert ttr.transformer_.fit_counter == 1\n+\n+\n+class DummyRegressorWithExtraFitParams(DummyRegressor):\n+    def fit(self, X, y, sample_weight=None, check_input=True):\n+        # on the test below we force this to false, we make sure this is\n+        # actually passed to the regressor\n+        assert not check_input\n+        return super().fit(X, y, sample_weight)\n+\n+\n+def test_transform_target_regressor_pass_fit_parameters():\n+    X, y = friedman\n+    regr = TransformedTargetRegressor(\n+        regressor=DummyRegressorWithExtraFitParams(),\n+        transformer=DummyTransformer()\n+    )\n+\n+    regr.fit(X, y, check_input=False)\n+    assert regr.transformer_.fit_counter == 1\n+\n+\n+def test_transform_target_regressor_route_pipeline():\n+    X, y = friedman\n+\n+    regr = TransformedTargetRegressor(\n+        regressor=DummyRegressorWithExtraFitParams(),\n+        transformer=DummyTransformer()\n+    )\n+    estimators = [\n+        ('normalize', StandardScaler()), ('est', regr)\n+    ]\n+\n+    pip = Pipeline(estimators)\n+    pip.fit(X, y, **{'est__check_input': False})\n+\n+    assert regr.transformer_.fit_counter == 1\n",
+  "problem_statement": "Fitting TransformedTargetRegressor with sample_weight in Pipeline\n#### Description\r\n\r\nCan't fit a `TransformedTargetRegressor` using `sample_weight`. May be link to #10945 ?\r\n\r\n#### Steps/Code to Reproduce\r\n\r\nExample:\r\n```python\r\nimport pandas as pd\r\nimport numpy as np\r\nfrom sklearn.pipeline import Pipeline\r\nfrom sklearn.preprocessing import RobustScaler, OneHotEncoder\r\nfrom sklearn.compose import TransformedTargetRegressor, ColumnTransformer, make_column_transformer\r\nfrom sklearn.ensemble import RandomForestRegressor\r\nfrom sklearn.datasets import make_regression\r\n\r\n# Create dataset\r\nX, y = make_regression(n_samples=10000, noise=100, n_features=10, random_state=2019)\r\ny = np.exp((y + abs(y.min())) / 200)\r\nw = np.random.randn(len(X))\r\ncat_list = ['AA', 'BB', 'CC', 'DD']\r\ncat = np.random.choice(cat_list, len(X), p=[0.3, 0.2, 0.2, 0.3])\r\n\r\ndf = pd.DataFrame(X, columns=[\"col_\" + str(i) for i in range(1, 11)])\r\ndf['sample_weight'] = w\r\ndf['my_caterogy'] = cat\r\ndf.head()\r\n```\r\n![image](https://user-images.githubusercontent.com/8374843/53635914-e169bf00-3c1e-11e9-8d91-e8f474de860c.png)\r\n\r\n```python\r\nuse_col = [col for col in df.columns if col not in ['sample_weight']]\r\n\r\n\r\nnumerical_features = df[use_col].dtypes == 'float'\r\ncategorical_features = ~numerical_features\r\n\r\ncategorical_transformer = Pipeline(steps=[\r\n    ('onehot', OneHotEncoder(handle_unknown='ignore'))])\r\n\r\npreprocess = make_column_transformer(\r\n                                    (RobustScaler(), numerical_features),\r\n                                    (OneHotEncoder(sparse=False), categorical_features)\r\n)\r\n\r\nrf = RandomForestRegressor(n_estimators=20)\r\n\r\nclf = Pipeline(steps=[\r\n                      ('preprocess', preprocess),\r\n                      ('model', rf)\r\n])\r\n\r\nclf_trans = TransformedTargetRegressor(regressor=clf,\r\n                                        func=np.log1p,\r\n                                        inverse_func=np.expm1)\r\n\r\n# Work\r\nclf_trans.fit(df[use_col], y)\r\n\r\n# Fail\r\nclf_trans.fit(df[use_col], y, sample_weight=df['sample_weight'])\r\n```\r\n\r\n#### Expected Results\r\nFitting with `sample_weight`\r\n\r\n#### Actual Results\r\n```python\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-7-366d815659ba> in <module>()\r\n----> 1 clf_trans.fit(df[use_col], y, sample_weight=df['sample_weight'])\r\n\r\n~/anaconda3/envs/test_env/lib/python3.5/site-packages/sklearn/compose/_target.py in fit(self, X, y, sample_weight)\r\n    194             self.regressor_.fit(X, y_trans)\r\n    195         else:\r\n--> 196             self.regressor_.fit(X, y_trans, sample_weight=sample_weight)\r\n    197 \r\n    198         return self\r\n\r\n~/anaconda3/envs/test_env/lib/python3.5/site-packages/sklearn/pipeline.py in fit(self, X, y, **fit_params)\r\n    263             This estimator\r\n    264         \"\"\"\r\n--> 265         Xt, fit_params = self._fit(X, y, **fit_params)\r\n    266         if self._final_estimator is not None:\r\n    267             self._final_estimator.fit(Xt, y, **fit_params)\r\n\r\n~/anaconda3/envs/test_env/lib/python3.5/site-packages/sklearn/pipeline.py in _fit(self, X, y, **fit_params)\r\n    200                                 if step is not None)\r\n    201         for pname, pval in six.iteritems(fit_params):\r\n--> 202             step, param = pname.split('__', 1)\r\n    203             fit_params_steps[step][param] = pval\r\n    204         Xt = X\r\n\r\nValueError: not enough values to unpack (expected 2, got 1)\r\n```\r\n\r\n#### Versions\r\n```python\r\nimport sklearn; sklearn.show_versions()\r\nSystem:\r\n   machine: Linux-4.4.0-127-generic-x86_64-with-debian-stretch-sid\r\nexecutable: /home/gillesa/anaconda3/envs/test_env/bin/python\r\n    python: 3.5.6 |Anaconda, Inc.| (default, Aug 26 2018, 21:41:56)  [GCC 7.3.0]\r\n\r\nBLAS:\r\ncblas_libs: cblas\r\n  lib_dirs: \r\n    macros: \r\n\r\nPython deps:\r\n   sklearn: 0.20.2\r\n    pandas: 0.24.1\r\n       pip: 19.0.1\r\nsetuptools: 40.2.0\r\n     numpy: 1.16.1\r\n    Cython: None\r\n     scipy: 1.2.0\r\n```\r\n\r\n<!-- Thanks for contributing! -->\r\n\n",
+  "hints_text": "This has nothing to do with TransformedTargetRegressor. Pipeline requires\nyou to pass model__sample_weight, not just sample_weight... But the error\nmessage is terrible! We should improve it.\n\nThank you for your prompt reply @jnothman \r\n\r\n### Second try : \r\n```python\r\nclf_trans.fit(X_train[use_col], y_train,\r\n              model__sample_weight=X_train['weight']\r\n             )\r\n\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-25-aa3242bb1603> in <module>()\r\n----> 1 clf_trans.fit(df[use_col], y, model__sample_weight=df['sample_weight'])\r\n\r\nTypeError: fit() got an unexpected keyword argument 'model__sample_weight'\r\n```\r\n\r\nDid i miss something or anything ?\r\n\r\nBy the way I used this kind of pipeline typo (don't know how to call it) in `GridSearchCV` and it work's well !\r\n\r\n```python\r\nfrom sklearn.model_selection import GridSearchCV\r\n\r\nparam_grid = { \r\n    'regressor__model__n_estimators': [20, 50, 100, 200]\r\n}\r\n\r\nGDCV = GridSearchCV(estimator=clf_trans, param_grid=param_grid, cv=5,\r\n                    n_jobs=-1, scoring='neg_mean_absolute_error',\r\n                    return_train_score=True, verbose=True)\r\nGDCV.fit(X[use_col], y)\r\n```\r\n\r\nPs : Fill free to rename title if it can help community\nYou're right. we don't yet seem to properly support fit parameters in TransformedTargetRegressor. And perhaps we should...\n> This has nothing to do with TransformedTargetRegressor. Pipeline requires you to pass model__sample_weight, not just sample_weight... But the error message is terrible! We should improve it.\r\n\r\nThat's true but what @armgilles asked in the first example was the sample_weight, a parameter that it's passed in the fit call. From my knowledge, specifying model__sample_weight just sets internal attributes of the model step in the pipeline but doesn't modify any parameters passed to the fit method\r\n\r\nShould we implement both parameters, meaning the parameter of the model (like we do in GridSearchCV) and parameter of the fit (eg. sample_weight, i don't know if there are more that could be passed in fit call) ?\nNo, the comment *is* about fit parameters. TransformedTargetRegressor\ncurrently accepts sample_weight, but to support pipelines it needs to\nsupport **fit_params\n\nCool, I'll give it a try then\nI am having the same problem here using the `Pipeline` along with `CatBoostRegressor`. The only hacky way I found so far to accomplish this is to do something like:\r\n```\r\npipeline.named_steps['reg'].regressor.set_params(**fit_params)\r\n# Or alternatively \r\npipeline.set_params({\"reg_regressor_param\": value})\r\n```\r\nAnd then call \r\n```\r\npipeline.fit(X, y)\r\n```\r\n\r\nWhere `reg` is the step containing the `TransformedTargetRegressor`. is there a cleaner way? \nThat's not about a fit parameter like sample_weight at all. For that you\nshould be able to set_params directly from the TransformedTargetRegressor\ninstance. Call its get_params to find the right key.\n\n@jnothman thanks for your response . Please let me know if I am doing something wrong. From what I understand there are 3 issues here:\r\n\r\n\r\n1.  `TransformedTargetRegressor` fit only passes sample_weight to the underlying regressor. Which you can argue that's what is has to do. Other estimators, (not sklearn based but compatible). might  support receiving other  prams in the `fit` method. \r\n\r\n2. `TransformedTargetRegressor` only support sample_weight as a parameter and d[oes not support passing arbitrary parameters](https://github.com/scikit-learn/scikit-learn/blob/1495f69242646d239d89a5713982946b8ffcf9d9/sklearn/compose/_target.py#L200-L205) to the underlying `regressor` fit method as `Pipeline` does (i.e. using `<component>__<parameter>` convention ). \r\n\r\n3. Now, when using a Pipeline  and I want to pass a parameter to the regressor inside a `TransformedTargetRegressor` at fit time this fails. \r\n\r\nSome examples:\r\n\r\n```python\r\nfrom sklearn.pipeline import Pipeline\r\nfrom sklearn.compose import TransformedTargetRegressor\r\nfrom catboost import CatBoostRegressor \r\nimport numpy as np\r\n\r\ntr_regressor = TransformedTargetRegressor(\r\n            CatBoostRegressor(),\r\n             func=np.log, inverse_func=np.exp\r\n)\r\n\r\npipeline = Pipeline(steps=[\r\n              ('reg', tr_regressor)\r\n])\r\n\r\nX = np.arange(4).reshape(-1, 1)\r\ny = np.exp(2 * X).ravel()\r\n\r\npipeline.fit(X, y, reg__regressor__verbose=False)\r\n---\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n     17 y = np.exp(2 * X).ravel()\r\n     18 \r\n---> 19 pipeline.fit(X, y, reg__regressor__verbose=False)\r\n\r\n~/development/order_prediction/ord_pred_env/lib/python3.6/site-packages/sklearn/pipeline.py in fit(self, X, y, **fit_params)\r\n    354                                  self._log_message(len(self.steps) - 1)):\r\n    355             if self._final_estimator != 'passthrough':\r\n--> 356                 self._final_estimator.fit(Xt, y, **fit_params)\r\n    357         return self\r\n    358 \r\n\r\nTypeError: fit() got an unexpected keyword argument 'regressor__verbose'\r\n```\r\n\r\nThis also fails:\r\n\r\n```python\r\npipeline.named_steps['reg'].fit(X, y, regressor__verbose=False)\r\n\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-19-fd09c06db732> in <module>\r\n----> 1 pipeline.named_steps['reg'].fit(X, y, regressor__verbose=False)\r\n\r\nTypeError: fit() got an unexpected keyword argument 'regressor__verbose'\r\n```\r\n\r\nThis actually works:\r\n\r\n```python\r\npipeline.named_steps['reg'].regressor.fit(X, y, verbose=False)\r\n```\r\nAnd this will also work:\r\n```python\r\npipeline.set_params(**{'reg__regressor__verbose': False})\r\npipeline.fit(X, y)\r\n```\r\n\r\nSo I have a question:\r\n\r\nShouldn't `TransformedTargetRegressor` `fit` method support `**fit_params` as the `Pipeline`does? i.e. passing parameters to the underlying regressor via the `<component>__<parameter>` syntax? \r\n\r\nMaybe I missing something or  expecting something from the API I should not be expecting here. Thanks in advance for the help :). \r\n\r\n\r\n\r\n\nI think the discussion started from the opposite way around: using a `Pipeline `as the `regressor `parameter of the `TransformedTargetRegressor`. The problem is the same: you cannot pass fit parameters to the underlying regressor apart from the `sample_weight`.\r\n\nAnother question is if there are cases where you would want to pass fit parameters to the transformer too because the current fit logic calls fit for the transformer too.\n>  The problem is the same: you cannot pass fit parameters to the\nunderlying regressor apart from the sample_weight.\n\nYes, let's fix this and assume all fit params should be passed to the\nregressor.\n\n> Another question is if there are cases where you would want to pass fit\nparameters to the transformer too because the current fit logic calls fit\nfor the transformer too.\n\nWe'll deal with this in the world where\nhttps://github.com/scikit-learn/enhancement_proposals/pull/16 eventually\ngets completed, approved, merged and implemented!!\n\nPull request welcome.\n\ni will start working ",
+  "created_at": "2019-09-05T13:19:06Z",
+  "version": "0.22",
+  "FAIL_TO_PASS": "[\"sklearn/compose/tests/test_target.py::test_transform_target_regressor_pass_fit_parameters\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_route_pipeline\"]",
+  "PASS_TO_PASS": "[\"sklearn/compose/tests/test_target.py::test_transform_target_regressor_1d_transformer[X0-y0]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_1d_transformer[X1-y1]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_2d_transformer[X0-y0]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_2d_transformer[X1-y1]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_2d_transformer_multioutput\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_count_fit[False]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_count_fit[True]\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_ensure_y_array\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_error\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_functions\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_functions_multioutput\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_invertible\", \"sklearn/compose/tests/test_target.py::test_transform_target_regressor_multi_to_single\"]",
+  "environment_setup_commit": "7e85a6d1f038bbb932b36f18d75df6be937ed00d",
+  "patch_files": [
+    "sklearn/compose/_target.py"
+  ],
+  "test_patch_files": [
+    "sklearn/compose/tests/test_target.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/compose/_target.py": {
+      "diffs": [
+        {
+          "start_line_old": 151,
+          "end_line_old": 151,
+          "file_pos": 2,
+          "file_context_length": 3778,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_warnings_TransformedTargetRegressor.1",
+          "closest_snippet_line_distance": 45,
+          "pos": 11,
+          "context_length": 6594
+        },
+        {
+          "start_line_old": 163,
+          "end_line_old": 165,
+          "file_pos": 2,
+          "file_context_length": 3778,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_warnings_TransformedTargetRegressor.1",
+          "closest_snippet_line_distance": 59,
+          "pos": 11,
+          "context_length": 6594
+        },
+        {
+          "start_line_old": 200,
+          "end_line_old": 203,
+          "file_pos": 2,
+          "file_context_length": 3778,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_warnings_TransformedTargetRegressor.1",
+          "closest_snippet_line_distance": 97,
+          "pos": 11,
+          "context_length": 6594
+        }
+      ]
+    }
+  },
+  "vectors": 3045,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_transformed_target.py_64_120",
+      "distance": 0.7717348337173462,
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "start_line": 99,
+      "end_line": 179,
+      "tokens": 749,
+      "context_length": 749
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_transformed_target.py_1_63",
+      "distance": 0.7895607948303223,
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 743,
+      "context_length": 1492
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_TransformedTargetRegressor.__init___TransformedTargetRegressor._fit_transformer.8.4.1",
+      "distance": 0.8232580423355103,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 107,
+      "end_line": 149,
+      "tokens": 441,
+      "context_length": 1933,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py__transform_one__fit_one.2.1.1",
+      "distance": 0.8372141122817993,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 702,
+      "end_line": 744,
+      "tokens": 285,
+      "context_length": 2218
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_transformed_target.py_121_",
+      "distance": 0.8479508757591248,
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "start_line": 180,
+      "end_line": 208,
+      "tokens": 312,
+      "context_length": 2530
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_1_",
+      "distance": 0.8483483195304871,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 797,
+      "context_length": 3327
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_warnings_TransformedTargetRegressor.1",
+      "distance": 0.8577938675880432,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 5,
+      "end_line": 106,
+      "tokens": 805,
+      "context_length": 4132,
+      "file_pos": 4
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_1_y_pred_grd.1",
+      "distance": 0.8859968781471252,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 761,
+      "context_length": 4893
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._fit_Pipeline._fit.self.steps.10.1",
+      "distance": 0.889918327331543,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 258,
+      "end_line": 318,
+      "tokens": 543,
+      "context_length": 5436
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_higgsboson.py_df_",
+      "distance": 0.9074469804763794,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "start_line": 59,
+      "end_line": 124,
+      "tokens": 700,
+      "context_length": 6136
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_TransformedTargetRegressor.fit_TransformedTargetRegressor.fit.18.1",
+      "distance": 0.9122990369796753,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 151,
+      "end_line": 205,
+      "tokens": 458,
+      "context_length": 6594,
+      "file_pos": 6
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_function_transformer.py_1_",
+      "distance": 0.912598729133606,
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 450,
+      "context_length": 7044
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer.py_pipeline_",
+      "distance": 0.9237885475158691,
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "start_line": 87,
+      "end_line": 136,
+      "tokens": 379,
+      "context_length": 7423
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.11.5.2.1",
+      "distance": 0.923828661441803,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1124,
+      "end_line": 1197,
+      "tokens": 650,
+      "context_length": 8073
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_42_122",
+      "distance": 0.9288219213485718,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 219,
+      "end_line": 310,
+      "tokens": 815,
+      "context_length": 8888
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.score_Pipeline._pairwise.2.1",
+      "distance": 0.930426299571991,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 587,
+      "end_line": 624,
+      "tokens": 278,
+      "context_length": 9166
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_1_55",
+      "distance": 0.9394415616989136,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 822,
+      "context_length": 9988
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_transform_Pipeline.fit_transform.4.2.2.1.1",
+      "distance": 0.9409151077270508,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 353,
+      "end_line": 389,
+      "tokens": 304,
+      "context_length": 10292
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PowerTransformer._fit_PowerTransformer._fit.7.1",
+      "distance": 0.9500726461410522,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2747,
+      "end_line": 2774,
+      "tokens": 294,
+      "context_length": 10586
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline_Pipeline.1",
+      "distance": 0.9559440016746521,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 29,
+      "end_line": 123,
+      "tokens": 993,
+      "context_length": 11579
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.score_samples_Pipeline.score_samples.4.1",
+      "distance": 0.9565309286117554,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 489,
+      "end_line": 506,
+      "tokens": 125,
+      "context_length": 11704
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_log_proba_Pipeline.predict_log_proba.4.1",
+      "distance": 0.9590705037117004,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 508,
+      "end_line": 525,
+      "tokens": 134,
+      "context_length": 11838
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.fit_transform_ColumnTransformer.fit_transform.15.1",
+      "distance": 0.9594005346298218,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 482,
+      "end_line": 535,
+      "tokens": 453,
+      "context_length": 12291
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_random_projections.py_19_",
+      "distance": 0.9600397348403931,
+      "file_path": "benchmarks/bench_random_projections.py",
+      "start_line": 85,
+      "end_line": 251,
+      "tokens": 1264,
+      "context_length": 13555
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_Pipeline.predict.4.1",
+      "distance": 0.9619379639625549,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 391,
+      "end_line": 416,
+      "tokens": 207,
+      "context_length": 13762
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_Pipeline.fit.4.1",
+      "distance": 0.9620943665504456,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 320,
+      "end_line": 351,
+      "tokens": 241,
+      "context_length": 14003
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer.fit_ColumnTransformer.fit.5.1",
+      "distance": 0.9649420380592346,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 459,
+      "end_line": 480,
+      "tokens": 151,
+      "context_length": 14154
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting.fit.17_BaseGradientBoosting.fit.30.1",
+      "distance": 0.9656140208244324,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1478,
+      "end_line": 1558,
+      "tokens": 757,
+      "context_length": 14911
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_1_31",
+      "distance": 0.9659626483917236,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 784,
+      "context_length": 15695
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 0.9686427712440491,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1096,
+      "end_line": 1121,
+      "tokens": 283,
+      "context_length": 15978
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.sample_weight_RANSACRegressor.fit.32",
+      "distance": 0.971383273601532,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 327,
+      "end_line": 423,
+      "tokens": 806,
+      "context_length": 16784
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_1_classifiers.1",
+      "distance": 0.9726482629776001,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 775,
+      "context_length": 17559
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_one_run_one_run.cat_score_duration.1",
+      "distance": 0.978173017501831,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 66,
+      "end_line": 139,
+      "tokens": 728,
+      "context_length": 18287
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sample_weights_pandas_series_check_sample_weights_pandas_series.estimator.2.1.8.1",
+      "distance": 0.9832216501235962,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 672,
+      "end_line": 695,
+      "tokens": 292,
+      "context_length": 18579
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.decision_function_Pipeline.decision_function.4.1",
+      "distance": 0.9836888313293457,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 470,
+      "end_line": 487,
+      "tokens": 131,
+      "context_length": 18710
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_partial_dependence.py_1_61",
+      "distance": 0.986361563205719,
+      "file_path": "examples/inspection/plot_partial_dependence.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 872,
+      "context_length": 19582
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_30",
+      "distance": 0.9870171546936035,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 754,
+      "context_length": 20336
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 0.9882713556289673,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 769,
+      "context_length": 21105
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_column_transformer.py_ColumnTransformer._log_message_ColumnTransformer._fit_transform.3.2.1.2.1",
+      "distance": 0.9908900260925293,
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "start_line": 427,
+      "end_line": 457,
+      "tokens": 284,
+      "context_length": 21389
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 0.9922217726707458,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1229,
+      "end_line": 1257,
+      "tokens": 306,
+      "context_length": 21695
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.fit.29__PLS.fit.29.41",
+      "distance": 0.9943126440048218,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 293,
+      "end_line": 355,
+      "tokens": 839,
+      "context_length": 22534
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._validate_steps_Pipeline._validate_steps.9.1",
+      "distance": 0.9959240555763245,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 162,
+      "end_line": 188,
+      "tokens": 248,
+      "context_length": 22782
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.33_RANSACRegressor.fit.38.1",
+      "distance": 0.9995408058166504,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 424,
+      "end_line": 453,
+      "tokens": 347,
+      "context_length": 23129
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.predict_proba_Pipeline.predict_proba.4.1",
+      "distance": 1.0025253295898438,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 451,
+      "end_line": 468,
+      "tokens": 131,
+      "context_length": 23260
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_123_",
+      "distance": 1.008600115776062,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 311,
+      "end_line": 356,
+      "tokens": 353,
+      "context_length": 23613
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sample_weights_list_check_sample_weights_list.3.8",
+      "distance": 1.008711338043213,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 698,
+      "end_line": 714,
+      "tokens": 189,
+      "context_length": 23802
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.fit__PLS.fit.Y_eps.1",
+      "distance": 1.0114694833755493,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 239,
+      "end_line": 292,
+      "tokens": 580,
+      "context_length": 24382
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1sample_check_fit2d_1sample.rnd.13.2.1.1",
+      "distance": 1.0115859508514404,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 992,
+      "end_line": 1023,
+      "tokens": 275,
+      "context_length": 24657
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/regression.py_KNeighborsRegressor.__init___KNeighborsRegressor.predict.10.1",
+      "distance": 1.0125975608825684,
+      "file_path": "sklearn/neighbors/regression.py",
+      "start_line": 138,
+      "end_line": 191,
+      "tokens": 452,
+      "context_length": 25109
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_GradientBoostingClassifier._validate_y_GradientBoostingClassifier._validate_y.6.1",
+      "distance": 1.0154012441635132,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 2103,
+      "end_line": 2113,
+      "tokens": 125,
+      "context_length": 25234
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.transform_Pipeline._transform.3.1",
+      "distance": 1.0160675048828125,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 527,
+      "end_line": 554,
+      "tokens": 190,
+      "context_length": 25424
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_1_x_plot.1",
+      "distance": 1.017746925354004,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 509,
+      "context_length": 25933
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_StandardScaler.partial_fit.10_StandardScaler.partial_fit.16.1",
+      "distance": 1.017917275428772,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 683,
+      "end_line": 747,
+      "tokens": 572,
+      "context_length": 26505
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_types_CROSS_DECOMPOSITION.1",
+      "distance": 1.0181210041046143,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 431,
+      "context_length": 26936
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit_RANSACRegressor.fit.15.1",
+      "distance": 1.0229612588882446,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 230,
+      "end_line": 326,
+      "tokens": 807,
+      "context_length": 27743
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_random_projections.py_bench_scikit_transformer_bench_scikit_transformer.15.1",
+      "distance": 1.0245637893676758,
+      "file_path": "benchmarks/bench_random_projections.py",
+      "start_line": 44,
+      "end_line": 63,
+      "tokens": 122,
+      "context_length": 27865
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/regression.py_r2_score.2_r2_score.17.1",
+      "distance": 1.0250645875930786,
+      "file_path": "sklearn/metrics/regression.py",
+      "start_line": 546,
+      "end_line": 593,
+      "tokens": 476,
+      "context_length": 28341
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sample_weights_invariance_check_sample_weights_invariance.3.estimator1.10.1.4",
+      "distance": 1.0253065824508667,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 717,
+      "end_line": 752,
+      "tokens": 468,
+      "context_length": 28809
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.0256927013397217,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1308,
+      "end_line": 1376,
+      "tokens": 597,
+      "context_length": 29406
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_digits_pipe.py_1_",
+      "distance": 1.0262272357940674,
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 559,
+      "context_length": 29965
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sample_without_replacement.py_13_",
+      "distance": 1.026643991470337,
+      "file_path": "benchmarks/bench_sample_without_replacement.py",
+      "start_line": 34,
+      "end_line": 202,
+      "tokens": 1229,
+      "context_length": 31194
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion.fit_transform_FeatureUnion.fit_transform.7.1",
+      "distance": 1.0267072916030884,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 903,
+      "end_line": 932,
+      "tokens": 245,
+      "context_length": 31439
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer.py_1_TextStats.transform.1.1",
+      "distance": 1.0271706581115723,
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 371,
+      "context_length": 31810
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_31_",
+      "distance": 1.0275403261184692,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 82,
+      "end_line": 134,
+      "tokens": 457,
+      "context_length": 32267
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/isotonic.py_IsotonicRegression.fit_IsotonicRegression.fit.16.1",
+      "distance": 1.0277403593063354,
+      "file_path": "sklearn/isotonic.py",
+      "start_line": 302,
+      "end_line": 345,
+      "tokens": 356,
+      "context_length": 32623
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion._log_message_FeatureUnion._parallel_func.5.1",
+      "distance": 1.028010606765747,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 934,
+      "end_line": 950,
+      "tokens": 178,
+      "context_length": 32801
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.0294712781906128,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 84,
+      "end_line": 105,
+      "tokens": 306,
+      "context_length": 33107
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/classification.py__check_targets__weighted_sum.1.3.1.1",
+      "distance": 1.0300498008728027,
+      "file_path": "sklearn/metrics/classification.py",
+      "start_line": 44,
+      "end_line": 112,
+      "tokens": 564,
+      "context_length": 33671
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_FeatureUnion.fit_FeatureUnion.fit.5.1",
+      "distance": 1.031844139099121,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 879,
+      "end_line": 901,
+      "tokens": 138,
+      "context_length": 33809
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_1_y_58.1",
+      "distance": 1.0326383113861084,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 772,
+      "context_length": 34581
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_46_",
+      "distance": 1.03299081325531,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 197,
+      "end_line": 239,
+      "tokens": 373,
+      "context_length": 34954
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline.fit_predict_Pipeline.fit_predict.4.1",
+      "distance": 1.0334718227386475,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 418,
+      "end_line": 449,
+      "tokens": 270,
+      "context_length": 35224
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.0352469682693481,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1026,
+      "end_line": 1057,
+      "tokens": 289,
+      "context_length": 35513
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_29_",
+      "distance": 1.0369415283203125,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 74,
+      "end_line": 98,
+      "tokens": 285,
+      "context_length": 35798
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py__CalibratedClassifier.fit__CalibratedClassifier.fit.9.1",
+      "distance": 1.0371618270874023,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 318,
+      "end_line": 361,
+      "tokens": 307,
+      "context_length": 36105
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/samples_generator.py_make_regression.4_make_regression.16.2.1.1",
+      "distance": 1.0386542081832886,
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "start_line": 534,
+      "end_line": 574,
+      "tokens": 372,
+      "context_length": 36477
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_regression_target_check_decision_proba_consistency.centers.5.7",
+      "distance": 1.0388882160186768,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2507,
+      "end_line": 2538,
+      "tokens": 340,
+      "context_length": 36817
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_1_x_36.1",
+      "distance": 1.0394446849822998,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 785,
+      "context_length": 37602
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_39__rescale_data.8.1",
+      "distance": 1.0400433540344238,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 177,
+      "end_line": 191,
+      "tokens": 155,
+      "context_length": 37757
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/compose/_target.py_TransformedTargetRegressor.predict_",
+      "distance": 1.040576696395874,
+      "file_path": "sklearn/compose/_target.py",
+      "start_line": 207,
+      "end_line": 239,
+      "tokens": 239,
+      "context_length": 37996,
+      "file_pos": 36
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingRegressor.fit_VotingRegressor.fit.3.1",
+      "distance": 1.0414702892303467,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 440,
+      "end_line": 462,
+      "tokens": 176,
+      "context_length": 38172
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py__PGNMF._fit_transform__PGNMF._fit_transform.13.1",
+      "distance": 1.0417265892028809,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 230,
+      "end_line": 278,
+      "tokens": 535,
+      "context_length": 38707
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/tree/plot_tree_regression_multioutput.py_1_",
+      "distance": 1.0427463054656982,
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 567,
+      "context_length": 39274
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_9___all__.1",
+      "distance": 1.0429840087890625,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 11,
+      "end_line": 60,
+      "tokens": 312,
+      "context_length": 39586
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 1.043204665184021,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 142,
+      "end_line": 194,
+      "tokens": 532,
+      "context_length": 40118
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PowerTransformer._check_input_PowerTransformer._more_tags.1.1",
+      "distance": 1.0436891317367554,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2941,
+      "end_line": 2984,
+      "tokens": 389,
+      "context_length": 40507
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 1.044018030166626,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1982,
+      "end_line": 2024,
+      "tokens": 462,
+      "context_length": 40969
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_approximation.py_RBFSampler.fit_RBFSampler.fit.7.1",
+      "distance": 1.0454535484313965,
+      "file_path": "sklearn/kernel_approximation.py",
+      "start_line": 77,
+      "end_line": 103,
+      "tokens": 191,
+      "context_length": 41160
+    }
+  ],
+  "files": [
+    {
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "position": 1,
+      "tokens": 1832,
+      "context_length": 1832
+    },
+    {
+      "file_path": "sklearn/compose/_target.py",
+      "position": 2,
+      "tokens": 1946,
+      "context_length": 3778
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 3,
+      "tokens": 7824,
+      "context_length": 11602
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 4,
+      "tokens": 819,
+      "context_length": 12421
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 5,
+      "tokens": 1148,
+      "context_length": 13569
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "position": 6,
+      "tokens": 1182,
+      "context_length": 14751
+    },
+    {
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "position": 7,
+      "tokens": 450,
+      "context_length": 15201
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer.py",
+      "position": 8,
+      "tokens": 996,
+      "context_length": 16197
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 9,
+      "tokens": 23172,
+      "context_length": 39369
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 10,
+      "tokens": 3108,
+      "context_length": 42477
+    },
+    {
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "position": 11,
+      "tokens": 1032,
+      "context_length": 43509
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 12,
+      "tokens": 25553,
+      "context_length": 69062
+    },
+    {
+      "file_path": "sklearn/compose/_column_transformer.py",
+      "position": 13,
+      "tokens": 6300,
+      "context_length": 75362
+    },
+    {
+      "file_path": "benchmarks/bench_random_projections.py",
+      "position": 14,
+      "tokens": 1735,
+      "context_length": 77097
+    },
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 15,
+      "tokens": 21967,
+      "context_length": 99064
+    },
+    {
+      "file_path": "sklearn/linear_model/ransac.py",
+      "position": 16,
+      "tokens": 4048,
+      "context_length": 103112
+    },
+    {
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "position": 17,
+      "tokens": 1820,
+      "context_length": 104932
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "position": 18,
+      "tokens": 2285,
+      "context_length": 107217
+    },
+    {
+      "file_path": "examples/inspection/plot_partial_dependence.py",
+      "position": 19,
+      "tokens": 1960,
+      "context_length": 109177
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 20,
+      "tokens": 1219,
+      "context_length": 110396
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 21,
+      "tokens": 1153,
+      "context_length": 111549
+    },
+    {
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "position": 22,
+      "tokens": 8211,
+      "context_length": 119760
+    },
+    {
+      "file_path": "sklearn/neighbors/regression.py",
+      "position": 23,
+      "tokens": 3021,
+      "context_length": 122781
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 24,
+      "tokens": 794,
+      "context_length": 123575
+    },
+    {
+      "file_path": "sklearn/metrics/regression.py",
+      "position": 25,
+      "tokens": 7034,
+      "context_length": 130609
+    },
+    {
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "position": 26,
+      "tokens": 567,
+      "context_length": 131176
+    },
+    {
+      "file_path": "benchmarks/bench_sample_without_replacement.py",
+      "position": 27,
+      "tokens": 1392,
+      "context_length": 132568
+    },
+    {
+      "file_path": "sklearn/isotonic.py",
+      "position": 28,
+      "tokens": 3406,
+      "context_length": 135974
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 29,
+      "tokens": 1711,
+      "context_length": 137685
+    },
+    {
+      "file_path": "sklearn/metrics/classification.py",
+      "position": 30,
+      "tokens": 21947,
+      "context_length": 159632
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "position": 31,
+      "tokens": 921,
+      "context_length": 160553
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 32,
+      "tokens": 1945,
+      "context_length": 162498
+    },
+    {
+      "file_path": "sklearn/calibration.py",
+      "position": 33,
+      "tokens": 4894,
+      "context_length": 167392
+    },
+    {
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "position": 34,
+      "tokens": 14010,
+      "context_length": 181402
+    },
+    {
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "position": 35,
+      "tokens": 1004,
+      "context_length": 182406
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 36,
+      "tokens": 4774,
+      "context_length": 187180
+    },
+    {
+      "file_path": "sklearn/ensemble/voting.py",
+      "position": 37,
+      "tokens": 3989,
+      "context_length": 191169
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 38,
+      "tokens": 3890,
+      "context_length": 195059
+    },
+    {
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "position": 39,
+      "tokens": 567,
+      "context_length": 195626
+    },
+    {
+      "file_path": "sklearn/kernel_approximation.py",
+      "position": 40,
+      "tokens": 4809,
+      "context_length": 200435
+    }
+  ]
+}

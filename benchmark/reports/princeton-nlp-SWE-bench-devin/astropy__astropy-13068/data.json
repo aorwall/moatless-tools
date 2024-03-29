@@ -1,0 +1,2139 @@
+{
+  "instance_id": "astropy__astropy-13068",
+  "model_patch": "diff --git a/astropy/time/formats.py b/astropy/time/formats.py\nindex b3e6ffb8a3..ff0fac848b 100644\n--- a/astropy/time/formats.py\n+++ b/astropy/time/formats.py\n@@ -487,6 +487,15 @@ class TimeJD(TimeNumeric):\n         self._check_scale(self._scale)  # Validate scale.\n         self.jd1, self.jd2 = day_frac(val1, val2)\n \n+    def to_value(self, jd1=None, jd2=None, parent=None, out_subfmt=None):\n+        if jd1 is None:\n+            jd1 = self.jd1\n+        if jd2 is None:\n+            jd2 = self.jd2\n+        return super().to_value(jd1=jd1, jd2=jd2, parent=parent, out_subfmt=out_subfmt)\n+\n+    value = property(to_value)\n+\n \n class TimeMJD(TimeNumeric):\n     \"\"\"\n@@ -502,10 +511,12 @@ class TimeMJD(TimeNumeric):\n         jd1 += erfa.DJM0  # erfa.DJM0=2400000.5 (from erfam.h).\n         self.jd1, self.jd2 = day_frac(jd1, jd2)\n \n-    def to_value(self, **kwargs):\n-        jd1 = self.jd1 - erfa.DJM0  # This cannot lose precision.\n-        jd2 = self.jd2\n-        return super().to_value(jd1=jd1, jd2=jd2, **kwargs)\n+    def to_value(self, jd1=None, jd2=None, parent=None, out_subfmt=None):\n+        if jd1 is None:\n+            jd1 = self.jd1 - erfa.DJM0  # This cannot lose precision.\n+        if jd2 is None:\n+            jd2 = self.jd2\n+        return super().to_value(jd1=jd1, jd2=jd2, parent=parent, out_subfmt=out_subfmt)\n \n     value = property(to_value)\n \n@@ -1841,13 +1852,19 @@ class TimeDeltaNumeric(TimeDeltaFormat, TimeNumeric):\n         self._check_scale(self._scale)  # Validate scale.\n         self.jd1, self.jd2 = day_frac(val1, val2, divisor=1. / self.unit)\n \n-    def to_value(self, **kwargs):\n+    def to_value(self, jd1=None, jd2=None, parent=None, out_subfmt=None):\n         # Note that 1/unit is always exactly representable, so the\n         # following multiplications are exact.\n         factor = 1. / self.unit\n         jd1 = self.jd1 * factor\n         jd2 = self.jd2 * factor\n-        return super().to_value(jd1=jd1, jd2=jd2, **kwargs)\n+        # If jd1 is a scalar, jd2 will be a scalar, and we can use the\n+        # optimized two_sum function.  Otherwise, we use the ufunc.\n+        if jd1.shape:\n+            jd1, jd2 = two_sum(jd1, jd2)\n+        else:\n+            jd1, jd2 = two_sum(jd1, jd2)\n+        return super().to_value(jd1=jd1, jd2=jd2, parent=parent, out_subfmt=out_subfmt)\n \n     value = property(to_value)\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "astropy/time/formats.py"
+  ],
+  "repo": "astropy/astropy",
+  "base_commit": "2288ecd4e9c4d3722d72b7f4a6555a34f4f04fc7",
+  "patch": "diff --git a/astropy/time/core.py b/astropy/time/core.py\n--- a/astropy/time/core.py\n+++ b/astropy/time/core.py\n@@ -655,9 +655,6 @@ def precision(self):\n     @precision.setter\n     def precision(self, val):\n         del self.cache\n-        if not isinstance(val, int) or val < 0 or val > 9:\n-            raise ValueError('precision attribute must be an int between '\n-                             '0 and 9')\n         self._time.precision = val\n \n     @property\ndiff --git a/astropy/time/formats.py b/astropy/time/formats.py\n--- a/astropy/time/formats.py\n+++ b/astropy/time/formats.py\n@@ -230,6 +230,18 @@ def masked(self):\n     def jd2_filled(self):\n         return np.nan_to_num(self.jd2) if self.masked else self.jd2\n \n+    @property\n+    def precision(self):\n+        return self._precision\n+\n+    @precision.setter\n+    def precision(self, val):\n+        #Verify precision is 0-9 (inclusive)\n+        if not isinstance(val, int) or val < 0 or val > 9:\n+            raise ValueError('precision attribute must be an int between '\n+                             '0 and 9')\n+        self._precision = val\n+\n     @lazyproperty\n     def cache(self):\n         \"\"\"\n",
+  "test_patch": "diff --git a/astropy/time/tests/test_basic.py b/astropy/time/tests/test_basic.py\n--- a/astropy/time/tests/test_basic.py\n+++ b/astropy/time/tests/test_basic.py\n@@ -259,6 +259,20 @@ def test_precision(self):\n         assert t.iso == '2010-01-01 00:00:00.000000000'\n         assert t.tai.utc.iso == '2010-01-01 00:00:00.000000000'\n \n+    def test_precision_input(self):\n+        \"\"\"Verifies that precision can only be 0-9 (inclusive). Any other\n+        value should raise a ValueError exception.\"\"\"\n+\n+        err_message = 'precision attribute must be an int'\n+\n+        with pytest.raises(ValueError, match=err_message):\n+            t = Time('2010-01-01 00:00:00', format='iso', scale='utc',\n+                     precision=10)\n+\n+        with pytest.raises(ValueError, match=err_message):\n+            t = Time('2010-01-01 00:00:00', format='iso', scale='utc')\n+            t.precision = -1\n+\n     def test_transforms(self):\n         \"\"\"Transform from UTC to all supported time scales (TAI, TCB, TCG,\n         TDB, TT, UT1, UTC).  This requires auxiliary information (latitude and\n",
+  "problem_statement": "Time from astropy.time not precise\nHello,\r\n\r\nI encounter difficulties with Time. I'm working on a package to perform photometry and occultation. \r\n\r\nFor this last case, data need times values accurately estimated. Of course, data coming from different camera will will have different time format in the header.\r\n\r\nto manage this without passing long time to build a time parser, i decided to use Time object which do exactly what i need. The problem is, i dont arrive to make accurate conversion between different format using Time.\r\n\r\nlet's do an exemple:\r\n\r\n```\r\nt1 = '2022-03-24T23:13:41.390999'\r\nt1 = Time(t1, format = 'isot', precision = len(t1.split('.')[-1]))\r\nt2 = t1.to_value('jd')\r\n# result is 2459663.4678401737\r\n```\r\nnow let's do reverse\r\n\r\n```\r\nt2 = Time(t2, format = 'jd', precision = len(str(t2).split('.')[-1]))\r\nt3 = t2.to_value('isot')\r\n# result is 2022-03-24T23:13:41.0551352177\r\n```\r\nas you can see i don't fall back on the same value and the difference is quite high. I would like to fall back on the original one.\r\n\r\nthank you in advance\r\n\n",
+  "hints_text": "Welcome to Astropy \ud83d\udc4b and thank you for your first issue!\n\nA project member will respond to you as soon as possible; in the meantime, please double-check the [guidelines for submitting issues](https://github.com/astropy/astropy/blob/main/CONTRIBUTING.md#reporting-issues) and make sure you've provided the requested details.\n\nGitHub issues in the Astropy repository are used to track bug reports and feature requests; If your issue poses a question about how to use Astropy, please instead raise your question in the [Astropy Discourse user forum](https://community.openastronomy.org/c/astropy/8) and close this issue.\n\nIf you feel that this issue has not been responded to in a timely manner, please leave a comment mentioning our software support engineer @embray, or send a message directly to the [development mailing list](http://groups.google.com/group/astropy-dev).  If the issue is urgent or sensitive in nature (e.g., a security vulnerability) please send an e-mail directly to the private e-mail feedback@astropy.org.\n@mhvk will have the answer I guess, but it seems the issue comes from the use of `precision`, which probably does not do what you expect. And should be <= 9 :\r\n\r\n> precision: int between 0 and 9 inclusive\r\n    Decimal precision when outputting seconds as floating point.\r\n\r\nThe interesting thing is that when precision is > 9 the results are incorrect:\r\n\r\n```\r\nIn [52]: for p in range(15):\r\n    ...:     print(f'{p:2d}', Time(t2, format = 'jd', precision = p).to_value('isot'))\r\n    ...: \r\n 0 2022-03-24T23:13:41\r\n 1 2022-03-24T23:13:41.4\r\n 2 2022-03-24T23:13:41.39\r\n 3 2022-03-24T23:13:41.391\r\n 4 2022-03-24T23:13:41.3910\r\n 5 2022-03-24T23:13:41.39101\r\n 6 2022-03-24T23:13:41.391012\r\n 7 2022-03-24T23:13:41.3910118\r\n 8 2022-03-24T23:13:41.39101177\r\n 9 2022-03-24T23:13:41.391011775\r\n10 2022-03-24T23:13:41.0551352177\r\n11 2022-03-24T23:13:41.00475373422\r\n12 2022-03-24T23:13:41.-00284414132\r\n13 2022-03-24T23:13:41.0000514624247\r\n14 2022-03-24T23:13:41.00000108094123\r\n```\r\n\r\nTo get a better precision you can use `.to_value('jd', 'long')`: (and the weird results with `precision > 9` remain)\r\n\r\n```\r\nIn [53]: t2 = t1.to_value('jd', 'long'); t2\r\nOut[53]: 2459663.4678401735996\r\n\r\nIn [54]: for p in range(15):\r\n    ...:     print(f'{p:2d}', Time(t2, format = 'jd', precision = p).to_value('isot'))\r\n    ...: \r\n 0 2022-03-24T23:13:41\r\n 1 2022-03-24T23:13:41.4\r\n 2 2022-03-24T23:13:41.39\r\n 3 2022-03-24T23:13:41.391\r\n 4 2022-03-24T23:13:41.3910\r\n 5 2022-03-24T23:13:41.39100\r\n 6 2022-03-24T23:13:41.390999\r\n 7 2022-03-24T23:13:41.3909990\r\n 8 2022-03-24T23:13:41.39099901\r\n 9 2022-03-24T23:13:41.390999005\r\n10 2022-03-24T23:13:41.0551334172\r\n11 2022-03-24T23:13:41.00475357898\r\n12 2022-03-24T23:13:41.-00284404844\r\n13 2022-03-24T23:13:41.0000514607441\r\n14 2022-03-24T23:13:41.00000108090593\r\n```\n`astropy.time.Time` uses two float 64 to obtain very high precision, from the docs:\r\n\r\n> All time manipulations and arithmetic operations are done internally using two 64-bit floats to represent time. Floating point algorithms from [1](https://docs.astropy.org/en/stable/time/index.html#id2) are used so that the [Time](https://docs.astropy.org/en/stable/api/astropy.time.Time.html#astropy.time.Time) object maintains sub-nanosecond precision over times spanning the age of the universe.\r\n\r\nhttps://docs.astropy.org/en/stable/time/index.html\r\n\r\nBy doing `t1.to_value('jd')` you combine the two floats into a single float, loosing precision. However, the difference should not be 2 seconds, rather in the microsecond range.\r\n\r\nWhen I leave out the precision argument or setting it to 9 for nanosecond precision, I get a difference of 12\u00b5s when going through the single jd float, which is expected:\r\n\r\n```\r\nfrom astropy.time import Time\r\nimport astropy.units as u\r\n\r\n\r\nisot = '2022-03-24T23:13:41.390999'\r\n\r\nt1 = Time(isot, format = 'isot', precision=9)\r\njd = t1.to_value('jd')\r\nt2 = Time(jd, format='jd', precision=9)\r\n\r\nprint(f\"Original:       {t1.isot}\")\r\nprint(f\"Converted back: {t2.isot}\")\r\nprint(f\"Difference:     {(t2 - t1).to(u.us):.2f}\")\r\n\r\nt3 = Time(t1.jd1, t1.jd2, format='jd', precision=9)\r\nprint(f\"Using jd1+jd2:  {t3.isot}\")\r\nprint(f\"Difference:     {(t3 - t1).to(u.ns):.2f}\")\r\n```\r\n\r\nprints:\r\n\r\n```\r\nOriginal:       2022-03-24T23:13:41.390999000\r\nConverted back: 2022-03-24T23:13:41.391011775\r\nDifference:     12.77 us\r\nUsing jd1+jd2:  2022-03-24T23:13:41.390999000\r\nDifference:     0.00 ns\r\n```\nThank you for your answers.\r\n\r\ndo they are a way to have access to this two floats? if i use jd tranformation it's because it's more easy for me to manipulate numbers. \n@antoinech13 See my example, it accesses `t1.jd1` and `t1.jd2`.\noh yes thank you.\nProbably we should keep this open to address the issue with precsion > 9 that @saimn found?\nsorry. yes indeed\nHello, I'm not familiar with this repository, but from my quick skimming it seems that using a precision outside of the range 0-9 (inclusive) is intended to trigger an exception. (see [here](https://github.com/astropy/astropy/blob/main/astropy/time/core.py#L610-L611), note that this line is part of the `TimeBase` class which `Time` inherits from). Though someone more familiar with the repository can correct me if I'm wrong.\r\n\r\nEdit:\r\nIt seems the exception was only written for the setter and not for the case where `Time()` is initialized with the precision. Thus:\r\n```\r\n>>> from astropy.time import Time\r\n>>> t1 = Time(123, fromat=\"jd\")\r\n>>> t1.precision = 10\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/brett/env/lib/python3.8/site-packages/astropy/time/core.py\", line 610, in precision\r\n    raise ValueError('precision attribute must be an int between '\r\nValueError: precision attribute must be an int between 0 and 9\r\n```\r\nproduces the exception, but \r\n```\r\n>>> t2 = Time(123, format=\"jd\", precision=10)\r\n>>> \r\n```\r\ndoes not.\r\n\n@saimn - good catch on the precision issue, this is not expected but seems to be the cause of the original problem.\r\n\r\nThis precision is just being passed straight through to ERFA, which clearly is not doing any validation on that value. It looks like giving a value > 9 actually causes a bug in the output, yikes.\nFYI @antoinech13 - the `precision` argument only impacts the precision of the seconds output in string formats like `isot`. So setting the precision for a `jd` format `Time` object is generally not necessary.\n@taldcroft - I looked and indeed there is no specific check in https://github.com/liberfa/erfa/blob/master/src/d2tf.c, though the comment notes:\r\n```\r\n**  2) The largest positive useful value for ndp is determined by the\r\n**     size of days, the format of double on the target platform, and\r\n**     the risk of overflowing ihmsf[3].  On a typical platform, for\r\n**     days up to 1.0, the available floating-point precision might\r\n**     correspond to ndp=12.  However, the practical limit is typically\r\n**     ndp=9, set by the capacity of a 32-bit int, or ndp=4 if int is\r\n**     only 16 bits.\r\n```\r\nThis is actually a bit misleading, since the fraction of the second is stored in a 32-bit int, so it cannot possibly store more than 9 digits. Indeed,\r\n```\r\nIn [31]: from erfa import d2tf\r\n\r\nIn [32]: d2tf(9, 1-2**-47)\r\nOut[32]: (b'+', (23, 59, 59, 999999999))\r\n\r\nIn [33]: d2tf(10, 1-2**-47)\r\nOut[33]: (b'+', (23, 59, 59, 1410065407))\r\n\r\nIn [34]: np.int32('9'*10)\r\nOut[34]: 1410065407\r\n\r\nIn [36]: np.int32('9'*9)\r\nOut[36]: 999999999\r\n```\nAs for how to fix this, right now we do check `precision` as a property, but not on input:\r\n```\r\nIn [42]: t = Time('J2000')\r\n\r\nIn [43]: t = Time('J2000', precision=10)\r\n\r\nIn [44]: t.precision\r\nOut[44]: 10\r\n\r\nIn [45]: t.precision = 10\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-45-59f84a57d617> in <module>\r\n----> 1 t.precision = 10\r\n\r\n/usr/lib/python3/dist-packages/astropy/time/core.py in precision(self, val)\r\n    608         del self.cache\r\n    609         if not isinstance(val, int) or val < 0 or val > 9:\r\n--> 610             raise ValueError('precision attribute must be an int between '\r\n    611                              '0 and 9')\r\n    612         self._time.precision = val\r\n\r\nValueError: precision attribute must be an int between 0 and 9\r\n```\r\nSeems reasonable to check on input as well.",
+  "created_at": "2022-04-05T19:35:35Z",
+  "version": "5.0",
+  "FAIL_TO_PASS": "[\"astropy/time/tests/test_basic.py::TestBasic::test_precision_input\"]",
+  "PASS_TO_PASS": "[\"astropy/time/tests/test_basic.py::TestBasic::test_all_scale_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_copy_time[2455197.5]\", \"astropy/time/tests/test_basic.py::TestBasic::test_copy_time[value1]\", \"astropy/time/tests/test_basic.py::TestBasic::test_creating_all_formats\", \"astropy/time/tests/test_basic.py::TestBasic::test_datetime\", \"astropy/time/tests/test_basic.py::TestBasic::test_datetime64\", \"astropy/time/tests/test_basic.py::TestBasic::test_different_dimensions\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[byear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[byear_str]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[cxcsec]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[datetime64]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[datetime]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[decimalyear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[fits]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[gps]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[iso]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[isot]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jd]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jyear]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[jyear_str]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[mjd]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[plot_date]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[stardate]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[unix]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[unix_tai]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[yday]\", \"astropy/time/tests/test_basic.py::TestBasic::test_empty_value[ymdhms]\", \"astropy/time/tests/test_basic.py::TestBasic::test_epoch_transform\", \"astropy/time/tests/test_basic.py::TestBasic::test_getitem\", \"astropy/time/tests/test_basic.py::TestBasic::test_init_from_time_objects\", \"astropy/time/tests/test_basic.py::TestBasic::test_input_validation\", \"astropy/time/tests/test_basic.py::TestBasic::test_local_format_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_location\", \"astropy/time/tests/test_basic.py::TestBasic::test_location_array\", \"astropy/time/tests/test_basic.py::TestBasic::test_precision\", \"astropy/time/tests/test_basic.py::TestBasic::test_properties\", \"astropy/time/tests/test_basic.py::TestBasic::test_transforms\", \"astropy/time/tests/test_basic.py::TestBasic::test_transforms_no_location\", \"astropy/time/tests/test_basic.py::TestBasic::test_utc_leap_sec\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_copy\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_immutable_input\", \"astropy/time/tests/test_basic.py::TestCopyReplicate::test_replicate\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_basic_subformat_cache_does_not_crash\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_basic_subformat_setting\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_caching\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[cxcsec]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[gps]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[jd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[jyear]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[mjd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_decimal_context_does_not_affect_string[unix]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_example\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_longdouble\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_longdouble_one_val\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[byear-1950.1-1950.1-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[cxcsec-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[decimalyear-2000.54321-2000.0-0.54321]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[gps-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[jd-2451544.5333981-2451544.5-0.0333981]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[jyear-2000.1-2000.1-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_explicit_string_other_formats[unix-100.0123456-100.0123456-None]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[cxcsec]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[mjd]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_longdouble_for_other_types[unix]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_need_format_argument\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_not_allowed_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_input\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_output[bytes]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_subformat_output[str]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_switch_to_format_with_no_out_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-decimal-Decimal]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-long-longdouble]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_timedelta_basic[sec-str-str]\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_wrong_in_subfmt\", \"astropy/time/tests/test_basic.py::TestNumericalSubFormat::test_wrong_subfmt\", \"astropy/time/tests/test_basic.py::TestSofaErrors::test_bad_time\", \"astropy/time/tests/test_basic.py::TestStardate::test_iso_to_stardate\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates0]\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates1]\", \"astropy/time/tests/test_basic.py::TestStardate::test_stardate_to_iso[dates2]\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_bad_input_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_epoch_times\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_fits_format\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_fits_scale\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_input_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_input_subformat_fail\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_output_subformat\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_plot_date\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_scale_default\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_scale_input\", \"astropy/time/tests/test_basic.py::TestSubFormat::test_yday_format\", \"astropy/time/tests/test_basic.py::TestVal2::test_broadcast_not_writable\", \"astropy/time/tests/test_basic.py::TestVal2::test_broadcast_one_not_writable\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d0]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d1]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d2]\", \"astropy/time/tests/test_basic.py::TestVal2::test_unused_val2_raises[d3]\", \"astropy/time/tests/test_basic.py::TestVal2::test_val2\", \"astropy/time/tests/test_basic.py::TestVal2::test_val_broadcasts_against_val2\", \"astropy/time/tests/test_basic.py::test_TimeFormat_scale\", \"astropy/time/tests/test_basic.py::test_bool\", \"astropy/time/tests/test_basic.py::test_broadcasting_writeable\", \"astropy/time/tests/test_basic.py::test_byteorder\", \"astropy/time/tests/test_basic.py::test_bytes_input\", \"astropy/time/tests/test_basic.py::test_cache\", \"astropy/time/tests/test_basic.py::test_datetime64_no_format\", \"astropy/time/tests/test_basic.py::test_datetime_tzinfo\", \"astropy/time/tests/test_basic.py::test_decimalyear\", \"astropy/time/tests/test_basic.py::test_dir\", \"astropy/time/tests/test_basic.py::test_epoch_date_jd_is_day_fraction\", \"astropy/time/tests/test_basic.py::test_fits_year0\", \"astropy/time/tests/test_basic.py::test_fits_year10000\", \"astropy/time/tests/test_basic.py::test_format_subformat_compatibility\", \"astropy/time/tests/test_basic.py::test_get_time_fmt_exception_messages\", \"astropy/time/tests/test_basic.py::test_hash_time\", \"astropy/time/tests/test_basic.py::test_hash_time_delta\", \"astropy/time/tests/test_basic.py::test_insert_exceptions\", \"astropy/time/tests/test_basic.py::test_insert_time\", \"astropy/time/tests/test_basic.py::test_isiterable\", \"astropy/time/tests/test_basic.py::test_len_size\", \"astropy/time/tests/test_basic.py::test_linspace\", \"astropy/time/tests/test_basic.py::test_linspace_fmts\", \"astropy/time/tests/test_basic.py::test_linspace_steps\", \"astropy/time/tests/test_basic.py::test_location_init[None]\", \"astropy/time/tests/test_basic.py::test_location_init[location1]\", \"astropy/time/tests/test_basic.py::test_location_init_fail\", \"astropy/time/tests/test_basic.py::test_now\", \"astropy/time/tests/test_basic.py::test_python_builtin_copy\", \"astropy/time/tests/test_basic.py::test_remove_astropy_time\", \"astropy/time/tests/test_basic.py::test_replicate_value_error\", \"astropy/time/tests/test_basic.py::test_set_format_basic\", \"astropy/time/tests/test_basic.py::test_set_format_does_not_share_subfmt\", \"astropy/time/tests/test_basic.py::test_set_format_shares_subfmt\", \"astropy/time/tests/test_basic.py::test_setitem_bad_item\", \"astropy/time/tests/test_basic.py::test_setitem_deltas\", \"astropy/time/tests/test_basic.py::test_setitem_from_python_objects\", \"astropy/time/tests/test_basic.py::test_setitem_from_time_objects\", \"astropy/time/tests/test_basic.py::test_setitem_location\", \"astropy/time/tests/test_basic.py::test_strftime_array\", \"astropy/time/tests/test_basic.py::test_strftime_array_2\", \"astropy/time/tests/test_basic.py::test_strftime_array_fracsec\", \"astropy/time/tests/test_basic.py::test_strftime_leapsecond\", \"astropy/time/tests/test_basic.py::test_strftime_scalar\", \"astropy/time/tests/test_basic.py::test_strftime_scalar_fracsec\", \"astropy/time/tests/test_basic.py::test_strftime_scalar_fracsec_precision\", \"astropy/time/tests/test_basic.py::test_string_valued_columns\", \"astropy/time/tests/test_basic.py::test_strptime_3_digit_year\", \"astropy/time/tests/test_basic.py::test_strptime_array\", \"astropy/time/tests/test_basic.py::test_strptime_badinput\", \"astropy/time/tests/test_basic.py::test_strptime_fracsec_array\", \"astropy/time/tests/test_basic.py::test_strptime_fracsec_scalar\", \"astropy/time/tests/test_basic.py::test_strptime_input_bytes_array\", \"astropy/time/tests/test_basic.py::test_strptime_input_bytes_scalar\", \"astropy/time/tests/test_basic.py::test_strptime_leapsecond\", \"astropy/time/tests/test_basic.py::test_strptime_scalar\", \"astropy/time/tests/test_basic.py::test_subclass\", \"astropy/time/tests/test_basic.py::test_subfmts_regex\", \"astropy/time/tests/test_basic.py::test_sum_is_equivalent\", \"astropy/time/tests/test_basic.py::test_time_from_epoch_jds\", \"astropy/time/tests/test_basic.py::test_to_datetime\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[byear-TimeBesselianEpoch]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[byear_str-TimeBesselianEpochString]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[cxcsec-TimeCxcSec]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[datetime-TimeDatetime]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[datetime64-TimeDatetime64]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[decimalyear-TimeDecimalYear]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[fits-TimeFITS]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[gps-TimeGPS]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[iso-TimeISO]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[isot-TimeISOT]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jd-TimeJD]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jyear-TimeJulianEpoch]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[jyear_str-TimeJulianEpochString]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[mjd-TimeMJD]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[plot_date-TimePlotDate]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[stardate-TimeStardate]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[unix-TimeUnix]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[unix_tai-TimeUnixTai]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[yday-TimeYearDayTime]\", \"astropy/time/tests/test_basic.py::test_to_value_with_subfmt_for_every_format[ymdhms-TimeYMDHMS]\", \"astropy/time/tests/test_basic.py::test_unix_tai_format\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[byear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[byear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[cxcsec]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[datetime64]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[datetime]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[decimalyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[fits]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[gps]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[iso]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[isot]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[jyear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[mjd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[plot_date]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[stardate]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[unix]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[unix_tai]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[yday]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_ecsv[ymdhms]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[byear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[byear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[cxcsec]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[datetime64]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[datetime]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[decimalyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[fits]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[gps]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[iso]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[isot]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jyear]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[jyear_str]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[mjd]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[plot_date]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[stardate]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[unix]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[unix_tai]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[yday]\", \"astropy/time/tests/test_basic.py::test_write_every_format_to_fits[ymdhms]\", \"astropy/time/tests/test_basic.py::test_writeable_flag\", \"astropy/time/tests/test_basic.py::test_ymdhms_defaults\", \"astropy/time/tests/test_basic.py::test_ymdhms_exceptions\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_array\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_scalar[kwargs0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_dict_scalar[kwargs1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs0-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[False-kwargs1-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs0-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-recarray]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-tm_input0]\", \"astropy/time/tests/test_basic.py::test_ymdhms_init_from_table_like[True-kwargs1-tm_input1]\", \"astropy/time/tests/test_basic.py::test_ymdhms_masked\", \"astropy/time/tests/test_basic.py::test_ymdhms_output\"]",
+  "environment_setup_commit": "cdf311e0714e611d48b0a31eb1f0e2cbffab7f23",
+  "patch_files": [
+    "astropy/time/core.py",
+    "astropy/time/formats.py"
+  ],
+  "test_patch_files": [
+    "astropy/time/tests/test_basic.py"
+  ],
+  "patch_diff_details": {
+    "astropy/time/core.py": {
+      "diffs": [
+        {
+          "start_line_old": 658,
+          "end_line_old": 660,
+          "file_pos": 2,
+          "file_context_length": 45811,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.format_14_TimeBase.format_14.self._format.1",
+          "closest_snippet_line_distance": 106,
+          "pos": 49,
+          "context_length": 17141
+        }
+      ]
+    },
+    "astropy/time/formats.py": {
+      "diffs": [
+        {
+          "start_line_old": 233,
+          "end_line_old": 233,
+          "file_pos": 1,
+          "file_context_length": 19170,
+          "closest_snippet_id": "/tmp/repos/astropy/astropy/time/formats.py_TimeNumeric_TimeNumeric.subfmts.1",
+          "closest_snippet_line_distance": 165,
+          "pos": 42,
+          "context_length": 14984
+        }
+      ]
+    }
+  },
+  "vectors": 4530,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFromEpoch.to_value_TimeFromEpoch._default_scale.1.1",
+      "distance": 0.7359380722045898,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 651,
+      "end_line": 681,
+      "tokens": 291,
+      "context_length": 291,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time._get_delta_tdb_tt_Time._get_delta_tdb_tt.2.1",
+      "distance": 0.7633410692214966,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2127,
+      "end_line": 2163,
+      "tokens": 454,
+      "context_length": 745,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDatetime64.set_jds_TimeDatetime64.value.5.1",
+      "distance": 0.796535849571228,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1601,
+      "end_line": 1630,
+      "tokens": 268,
+      "context_length": 1013,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.get_jds_fast_TimeString.get_jds_fast.10.1",
+      "distance": 0.8020867109298706,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1363,
+      "end_line": 1392,
+      "tokens": 356,
+      "context_length": 1369,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._get_time_fmt_TimeBase._get_time_fmt.5.2.1",
+      "distance": 0.8091318607330322,
+      "file_path": "astropy/time/core.py",
+      "start_line": 452,
+      "end_line": 509,
+      "tokens": 555,
+      "context_length": 1924,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.get_jds_python_TimeString.get_jds_python.12.1",
+      "distance": 0.8103665113449097,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1340,
+      "end_line": 1361,
+      "tokens": 302,
+      "context_length": 2226,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.__sub___Time.__sub__.other_is_delta.7.1",
+      "distance": 0.8124985694885254,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2177,
+      "end_line": 2233,
+      "tokens": 509,
+      "context_length": 2735,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.parse_string_TimeString.parse_string.9.5.1",
+      "distance": 0.8148287534713745,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1277,
+      "end_line": 1315,
+      "tokens": 359,
+      "context_length": 3094,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeYMDHMS.value_TimeYMDHMS.value.11.1",
+      "distance": 0.814835786819458,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1140,
+      "end_line": 1160,
+      "tokens": 213,
+      "context_length": 3307,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/time.py_TimeType.from_tree_",
+      "distance": 0.8165074586868286,
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "start_line": 95,
+      "end_line": 131,
+      "tokens": 330,
+      "context_length": 3637
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.__init___Time.__init__.3.1.3.1",
+      "distance": 0.8197534084320068,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1552,
+      "end_line": 1595,
+      "tokens": 381,
+      "context_length": 4018,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.to_value_TimeBase.to_value.key.1",
+      "distance": 0.8206518292427063,
+      "file_path": "astropy/time/core.py",
+      "start_line": 783,
+      "end_line": 824,
+      "tokens": 504,
+      "context_length": 4522,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.__init_subclass___TimeString._check_val_type.3.1",
+      "distance": 0.8232614994049072,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1255,
+      "end_line": 1275,
+      "tokens": 228,
+      "context_length": 4750,
+      "file_pos": 3
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_1_FITS_DEPRECATED_SCALES.1",
+      "distance": 0.8335874080657959,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 443,
+      "context_length": 5193,
+      "file_pos": 3
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.strptime_Time.strptime.10.1",
+      "distance": 0.8355884552001953,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1658,
+      "end_line": 1707,
+      "tokens": 459,
+      "context_length": 5652,
+      "file_pos": 3
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/astropy/astropy/visualization/time.py_time_support.AstropyTimeFormatter_time_support.AstropyTimeFormatter.format_ticks.2.7.1.1",
+      "distance": 0.8375972509384155,
+      "file_path": "astropy/visualization/time.py",
+      "start_line": 150,
+      "end_line": 185,
+      "tokens": 409,
+      "context_length": 6061
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDecimalYear.to_value_TimeDecimalYear.value.1",
+      "distance": 0.8386001586914062,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 552,
+      "end_line": 576,
+      "tokens": 333,
+      "context_length": 6394,
+      "file_pos": 4
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.to_value.8_TimeBase.mask.1.1",
+      "distance": 0.8398863077163696,
+      "file_path": "astropy/time/core.py",
+      "start_line": 825,
+      "end_line": 874,
+      "tokens": 470,
+      "context_length": 6864,
+      "file_pos": 4
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.to_value.4_TimeDelta._make_value_equivalent.3.1",
+      "distance": 0.8454685211181641,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2685,
+      "end_line": 2714,
+      "tokens": 320,
+      "context_length": 7184,
+      "file_pos": 4
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time_Time.__new__.2.1",
+      "distance": 0.8501148819923401,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1486,
+      "end_line": 1550,
+      "tokens": 684,
+      "context_length": 7868,
+      "file_pos": 4
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time._make_value_equivalent_Time._make_value_equivalent.6.1",
+      "distance": 0.8520119190216064,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1597,
+      "end_line": 1632,
+      "tokens": 310,
+      "context_length": 8178,
+      "file_pos": 4
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDeltaDatetime.value_TimeDeltaDatetime.value.3.1",
+      "distance": 0.8534247875213623,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1894,
+      "end_line": 1905,
+      "tokens": 128,
+      "context_length": 8306,
+      "file_pos": 4
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeYMDHMS.set_jds_TimeYMDHMS.set_jds.2",
+      "distance": 0.8538864254951477,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1123,
+      "end_line": 1138,
+      "tokens": 158,
+      "context_length": 8464,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDeltaNumeric_TimeDeltaJD.unit.1",
+      "distance": 0.8573112487792969,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1838,
+      "end_line": 1864,
+      "tokens": 228,
+      "context_length": 8692,
+      "file_pos": 4
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.set_jds_TimeString.set_jds.self.jd2.1",
+      "distance": 0.8581604361534119,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1317,
+      "end_line": 1338,
+      "tokens": 245,
+      "context_length": 8937,
+      "file_pos": 4
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/time.py_TimeType_TimeType.to_tree.11.1",
+      "distance": 0.8583877086639404,
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "start_line": 33,
+      "end_line": 93,
+      "tokens": 454,
+      "context_length": 9391
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/astropy/astropy/visualization/time.py_time_support.MplTimeConverter_",
+      "distance": 0.8609032034873962,
+      "file_path": "astropy/visualization/time.py",
+      "start_line": 187,
+      "end_line": 256,
+      "tokens": 473,
+      "context_length": 9864
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.__add___Time.__add__.3.16.1",
+      "distance": 0.8614630699157715,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2235,
+      "end_line": 2277,
+      "tokens": 365,
+      "context_length": 10229,
+      "file_pos": 4
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_LocaleTime.__calc_date_time_LocaleTime.__calc_date_time.time_tuple.self.LC_time.1",
+      "distance": 0.862312912940979,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 127,
+      "end_line": 170,
+      "tokens": 642,
+      "context_length": 10871
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDatetime64_TimeDatetime64._check_val_type.3.1",
+      "distance": 0.8623291850090027,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1585,
+      "end_line": 1599,
+      "tokens": 124,
+      "context_length": 10995,
+      "file_pos": 5
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFITS.value_TimeFITS.value.3.1",
+      "distance": 0.8633179068565369,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1708,
+      "end_line": 1717,
+      "tokens": 140,
+      "context_length": 11135,
+      "file_pos": 5
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeISOT_TimeISOT.fast_parser_pars.1",
+      "distance": 0.8656920790672302,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1502,
+      "end_line": 1535,
+      "tokens": 414,
+      "context_length": 11549,
+      "file_pos": 5
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.strftime_Time.strftime.4.2.1.1",
+      "distance": 0.8716254234313965,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1709,
+      "end_line": 1743,
+      "tokens": 283,
+      "context_length": 11832,
+      "file_pos": 5
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDatetime.set_jds_TimeDatetime.set_jds.6",
+      "distance": 0.8744498491287231,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 946,
+      "end_line": 967,
+      "tokens": 262,
+      "context_length": 12094,
+      "file_pos": 5
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeISO_TimeISO.parse_string.2.3.1",
+      "distance": 0.8748506307601929,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1451,
+      "end_line": 1499,
+      "tokens": 593,
+      "context_length": 12687,
+      "file_pos": 5
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDecimalYear_TimeDecimalYear.set_jds.22",
+      "distance": 0.878250241279602,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 513,
+      "end_line": 550,
+      "tokens": 419,
+      "context_length": 13106,
+      "file_pos": 5
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py__convert_time_key__convert_time_key.3.6.1",
+      "distance": 0.8808379769325256,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 331,
+      "end_line": 362,
+      "tokens": 208,
+      "context_length": 13314
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeInfo._construct_from_dict_TimeInfo._construct_from_dict.4.9.1",
+      "distance": 0.8809343576431274,
+      "file_path": "astropy/time/core.py",
+      "start_line": 299,
+      "end_line": 323,
+      "tokens": 247,
+      "context_length": 13561,
+      "file_pos": 6
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeNumeric_TimeNumeric.subfmts.1",
+      "distance": 0.8826877474784851,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 398,
+      "end_line": 407,
+      "tokens": 110,
+      "context_length": 13671,
+      "file_pos": 6
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._apply.19_TimeBase._apply.24.1",
+      "distance": 0.8831189870834351,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1158,
+      "end_line": 1173,
+      "tokens": 171,
+      "context_length": 13842,
+      "file_pos": 6
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py__convert_time_column__convert_time_column.3.3.2.1",
+      "distance": 0.8834994435310364,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 365,
+      "end_line": 423,
+      "tokens": 573,
+      "context_length": 14415
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat.in_subfmt_TimeFormat.cache.2.1",
+      "distance": 0.8848767280578613,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 157,
+      "end_line": 238,
+      "tokens": 569,
+      "context_length": 14984,
+      "file_pos": 6
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimePlotDate.epoch_TimePlotDate.epoch.3.1",
+      "distance": 0.8851653933525085,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 817,
+      "end_line": 836,
+      "tokens": 183,
+      "context_length": 15167,
+      "file_pos": 6
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeAstropyTime_TimeAstropyTime.__new__.11.1",
+      "distance": 0.8879804015159607,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 861,
+      "end_line": 918,
+      "tokens": 519,
+      "context_length": 15686,
+      "file_pos": 6
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.light_travel_time.10_Time.light_travel_time.17.1",
+      "distance": 0.8914159536361694,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1815,
+      "end_line": 1825,
+      "tokens": 158,
+      "context_length": 15844,
+      "file_pos": 6
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFromEpoch.set_jds_TimeFromEpoch.set_jds.28",
+      "distance": 0.8946006298065186,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 599,
+      "end_line": 649,
+      "tokens": 672,
+      "context_length": 16516,
+      "file_pos": 6
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_LocaleTime.__calc_timezone_LocaleTime.__calc_timezone.4.self.timezone.1",
+      "distance": 0.8955775499343872,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 172,
+      "end_line": 187,
+      "tokens": 168,
+      "context_length": 16684
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.format_14_TimeBase.format_14.self._format.1",
+      "distance": 0.8966331481933594,
+      "file_path": "astropy/time/core.py",
+      "start_line": 537,
+      "end_line": 554,
+      "tokens": 188,
+      "context_length": 16872,
+      "file_pos": 6
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.precision_TimeBase.out_subfmt_25.self._time.out_subfmt.2",
+      "distance": 0.9035851359367371,
+      "file_path": "astropy/time/core.py",
+      "start_line": 647,
+      "end_line": 687,
+      "tokens": 269,
+      "context_length": 17141,
+      "file_pos": 6
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._set_scale_TimeBase._set_scale.self._time.1",
+      "distance": 0.9060776829719543,
+      "file_path": "astropy/time/core.py",
+      "start_line": 588,
+      "end_line": 645,
+      "tokens": 604,
+      "context_length": 17745,
+      "file_pos": 6
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat.__init_subclass___TimeFormat.__init_subclass__.4.9.1",
+      "distance": 0.9103575348854065,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 122,
+      "end_line": 141,
+      "tokens": 247,
+      "context_length": 17992,
+      "file_pos": 6
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase_TimeBase._init_from_vals.23.4",
+      "distance": 0.9103723168373108,
+      "file_path": "astropy/time/core.py",
+      "start_line": 381,
+      "end_line": 450,
+      "tokens": 657,
+      "context_length": 18649,
+      "file_pos": 6
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.writeable_TimeBase.format.2.1",
+      "distance": 0.9112296104431152,
+      "file_path": "astropy/time/core.py",
+      "start_line": 511,
+      "end_line": 535,
+      "tokens": 261,
+      "context_length": 18910,
+      "file_pos": 6
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time._set_delta_tdb_tt_Time.33",
+      "distance": 0.913902997970581,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2165,
+      "end_line": 2175,
+      "tokens": 130,
+      "context_length": 19040,
+      "file_pos": 6
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time._set_delta_ut1_utc_Time.27",
+      "distance": 0.9167575836181641,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2114,
+      "end_line": 2126,
+      "tokens": 144,
+      "context_length": 19184,
+      "file_pos": 6
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFITS.parse_string_TimeFITS.parse_string.8.1",
+      "distance": 0.9192618727684021,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1672,
+      "end_line": 1706,
+      "tokens": 405,
+      "context_length": 19589,
+      "file_pos": 6
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.__init___TimeDelta.to_datetime.3.1",
+      "distance": 0.9222679138183594,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2393,
+      "end_line": 2425,
+      "tokens": 250,
+      "context_length": 19839,
+      "file_pos": 6
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._shaped_like_input_TimeBase._shaped_like_input.1.2.2.2.1.1",
+      "distance": 0.9228622913360596,
+      "file_path": "astropy/time/core.py",
+      "start_line": 742,
+      "end_line": 765,
+      "tokens": 197,
+      "context_length": 20036,
+      "file_pos": 6
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDeltaDatetime_TimeDeltaDatetime.set_jds.6",
+      "distance": 0.9279890060424805,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1867,
+      "end_line": 1892,
+      "tokens": 252,
+      "context_length": 20288,
+      "file_pos": 6
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeInfoBase.new_like_TimeInfoBase.new_like.20.1",
+      "distance": 0.9294406175613403,
+      "file_path": "astropy/time/core.py",
+      "start_line": 208,
+      "end_line": 267,
+      "tokens": 570,
+      "context_length": 20858,
+      "file_pos": 6
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeInfoBase._construct_from_dict_TimeInfoBase._construct_from_dict.2.1",
+      "distance": 0.9295392036437988,
+      "file_path": "astropy/time/core.py",
+      "start_line": 189,
+      "end_line": 206,
+      "tokens": 170,
+      "context_length": 21028,
+      "file_pos": 6
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat._check_val_type_TimeFormat._check_val_type.11.1",
+      "distance": 0.9316626787185669,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 240,
+      "end_line": 296,
+      "tokens": 644,
+      "context_length": 21672,
+      "file_pos": 6
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat_TimeFormat.__init__.7.3.2",
+      "distance": 0.9332286715507507,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 79,
+      "end_line": 120,
+      "tokens": 350,
+      "context_length": 22022,
+      "file_pos": 6
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/timedelta.py_functools_allclose_sec.1",
+      "distance": 0.9345358610153198,
+      "file_path": "astropy/io/misc/asdf/tags/time/timedelta.py",
+      "start_line": 3,
+      "end_line": 16,
+      "tokens": 134,
+      "context_length": 22156
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/astropy/astropy/visualization/time.py_time_support.AstropyTimeLocator_time_support.AstropyTimeLocator.__call__.2.1",
+      "distance": 0.9355106353759766,
+      "file_path": "astropy/visualization/time.py",
+      "start_line": 52,
+      "end_line": 148,
+      "tokens": 825,
+      "context_length": 22981
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeNumeric.to_value_TimeNumeric.value.1",
+      "distance": 0.9356732368469238,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 448,
+      "end_line": 474,
+      "tokens": 270,
+      "context_length": 23251,
+      "file_pos": 7
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py_time_to_fits.19_",
+      "distance": 0.9381588697433472,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 549,
+      "end_line": 605,
+      "tokens": 612,
+      "context_length": 23863
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.36_TimeDeltaMissingUnitWarning.2",
+      "distance": 0.9397091865539551,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2279,
+      "end_line": 2321,
+      "tokens": 350,
+      "context_length": 24213,
+      "file_pos": 7
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/astropy/astropy/time/utils.py_decimal_to_twoval1_",
+      "distance": 0.9407747983932495,
+      "file_path": "astropy/time/utils.py",
+      "start_line": 203,
+      "end_line": 247,
+      "tokens": 375,
+      "context_length": 24588
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.format_string_TimeString.value.subfmts.9.1",
+      "distance": 0.9421429634094238,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1423,
+      "end_line": 1448,
+      "tokens": 241,
+      "context_length": 24829,
+      "file_pos": 8
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_LocaleTime.__calc_am_pm_LocaleTime.__calc_am_pm.am_pm.self.am_pm.1",
+      "distance": 0.9422781467437744,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 115,
+      "end_line": 125,
+      "tokens": 140,
+      "context_length": 24969
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time._call_erfa_Time.get_delta_ut1_utc.3.1",
+      "distance": 0.9441741704940796,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2017,
+      "end_line": 2076,
+      "tokens": 579,
+      "context_length": 25548,
+      "file_pos": 8
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeMJD_TimeMJD.value.1",
+      "distance": 0.9468370676040649,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 491,
+      "end_line": 510,
+      "tokens": 220,
+      "context_length": 25768,
+      "file_pos": 8
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__setitem___TimeBase.__setitem__.11",
+      "distance": 0.9487106800079346,
+      "file_path": "astropy/time/core.py",
+      "start_line": 950,
+      "end_line": 978,
+      "tokens": 258,
+      "context_length": 26026,
+      "file_pos": 8
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__repr___TimeBase.scale.2.1",
+      "distance": 0.9498447775840759,
+      "file_path": "astropy/time/core.py",
+      "start_line": 556,
+      "end_line": 586,
+      "tokens": 224,
+      "context_length": 26250,
+      "file_pos": 8
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/timedelta.py_12_",
+      "distance": 0.9514846801757812,
+      "file_path": "astropy/io/misc/asdf/tags/time/timedelta.py",
+      "start_line": 16,
+      "end_line": 37,
+      "tokens": 141,
+      "context_length": 26391
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.20_Time._get_delta_ut1_utc.5.1",
+      "distance": 0.9518805742263794,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2078,
+      "end_line": 2112,
+      "tokens": 438,
+      "context_length": 26829,
+      "file_pos": 8
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__getattr___TimeBase.__getattr__.2.6.2.1",
+      "distance": 0.954282283782959,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1374,
+      "end_line": 1407,
+      "tokens": 255,
+      "context_length": 27084,
+      "file_pos": 8
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py__strptime__strptime.found_dict.1",
+      "distance": 0.9543154239654541,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 310,
+      "end_line": 368,
+      "tokens": 572,
+      "context_length": 27656
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeUnixTai_TimeUnixTai.epoch_scale.1",
+      "distance": 0.9554752111434937,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 704,
+      "end_line": 753,
+      "tokens": 576,
+      "context_length": 28232,
+      "file_pos": 8
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDatetime_TimeDatetime._check_val_type.3.1",
+      "distance": 0.9570614099502563,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 921,
+      "end_line": 944,
+      "tokens": 222,
+      "context_length": 28454,
+      "file_pos": 8
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py__strptime_time_",
+      "distance": 0.9571149349212646,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 509,
+      "end_line": 530,
+      "tokens": 213,
+      "context_length": 28667
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_1_47",
+      "distance": 0.9573078155517578,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 956,
+      "context_length": 29623,
+      "file_pos": 8
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/astropy/astropy/time/utils.py_13_longdouble_to_twoval.5.1",
+      "distance": 0.959498405456543,
+      "file_path": "astropy/time/utils.py",
+      "start_line": 186,
+      "end_line": 200,
+      "tokens": 138,
+      "context_length": 29761
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeStardate_TimeUnique.1",
+      "distance": 0.9608755707740784,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 839,
+      "end_line": 858,
+      "tokens": 211,
+      "context_length": 29972,
+      "file_pos": 8
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/astropy/astropy/visualization/time.py_1_STR_FORMATS.1",
+      "distance": 0.9618045091629028,
+      "file_path": "astropy/visualization/time.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 109,
+      "context_length": 30081
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFromEpoch_TimeFromEpoch.epoch.2.1",
+      "distance": 0.9618575572967529,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 579,
+      "end_line": 597,
+      "tokens": 163,
+      "context_length": 30244,
+      "file_pos": 8
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/astropy/astropy/time/time_helper/__init__.py__",
+      "distance": 0.9636690616607666,
+      "file_path": "astropy/time/time_helper/__init__.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 12,
+      "context_length": 30256
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeNumeric._check_val_type_TimeNumeric._check_val_type.12.1",
+      "distance": 0.965104341506958,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 409,
+      "end_line": 446,
+      "tokens": 396,
+      "context_length": 30652,
+      "file_pos": 9
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat._check_scale_TimeFormat.set_jds.2",
+      "distance": 0.966374397277832,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 298,
+      "end_line": 326,
+      "tokens": 213,
+      "context_length": 30865,
+      "file_pos": 9
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeJD_TimeJD.set_jds.3",
+      "distance": 0.9684406518936157,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 477,
+      "end_line": 488,
+      "tokens": 106,
+      "context_length": 30971,
+      "file_pos": 9
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeBesselianEpoch_TimeJulianEpoch.jd_to_epoch.1",
+      "distance": 0.9692553281784058,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1740,
+      "end_line": 1761,
+      "tokens": 251,
+      "context_length": 31222,
+      "file_pos": 9
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.copy_TimeBase.copy.2.1",
+      "distance": 0.970878005027771,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1019,
+      "end_line": 1042,
+      "tokens": 166,
+      "context_length": 31388,
+      "file_pos": 9
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py__strptime.leap_year_fix__strptime.36.1",
+      "distance": 0.9749962687492371,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 461,
+      "end_line": 507,
+      "tokens": 563,
+      "context_length": 31951
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeDatetime.to_value_TimeDatetime.value.1",
+      "distance": 0.976127564907074,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 969,
+      "end_line": 1022,
+      "tokens": 555,
+      "context_length": 32506,
+      "file_pos": 9
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta._set_scale_TimeDelta._set_scale.7.2.self._time.1",
+      "distance": 0.9806079864501953,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2427,
+      "end_line": 2450,
+      "tokens": 246,
+      "context_length": 32752,
+      "file_pos": 9
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeGPS_TimeGPS.epoch_format.1",
+      "distance": 0.9809722304344177,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 769,
+      "end_line": 788,
+      "tokens": 250,
+      "context_length": 33002,
+      "file_pos": 9
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimePlotDate_TimePlotDate.epoch_format.1",
+      "distance": 0.9814844131469727,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 791,
+      "end_line": 815,
+      "tokens": 273,
+      "context_length": 33275,
+      "file_pos": 9
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/astropy/astropy/coordinates/attributes.py_TimeAttribute_TimeAttribute.convert_input.8.1",
+      "distance": 0.9827112555503845,
+      "file_path": "astropy/coordinates/attributes.py",
+      "start_line": 134,
+      "end_line": 191,
+      "tokens": 330,
+      "context_length": 33605
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeEpochDate_TimeEpochDate.value.1",
+      "distance": 0.9904736280441284,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1720,
+      "end_line": 1737,
+      "tokens": 198,
+      "context_length": 33803,
+      "file_pos": 10
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_TimeSys.timeorigin_8_TimeSys.refposition_15.self._refposition.1",
+      "distance": 0.9925435781478882,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 1807,
+      "end_line": 1853,
+      "tokens": 337,
+      "context_length": 34140
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta_TimeDelta.__new__.2.1",
+      "distance": 0.9945876598358154,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2324,
+      "end_line": 2391,
+      "tokens": 699,
+      "context_length": 34839,
+      "file_pos": 11
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.replicate_TimeBase.replicate.2.1",
+      "distance": 0.9954759478569031,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1044,
+      "end_line": 1073,
+      "tokens": 256,
+      "context_length": 35095,
+      "file_pos": 11
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/astropy/astropy/wcs/docstrings.py_timesys_",
+      "distance": 0.9990664124488831,
+      "file_path": "astropy/wcs/docstrings.py",
+      "start_line": 2823,
+      "end_line": 2960,
+      "tokens": 735,
+      "context_length": 35830
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/astropy/astropy/io/votable/tree.py_TimeSys.timeorigin_TimeSys.timeorigin.2.1",
+      "distance": 0.9995260238647461,
+      "file_path": "astropy/io/votable/tree.py",
+      "start_line": 1787,
+      "end_line": 1805,
+      "tokens": 196,
+      "context_length": 36026
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.to_value_TimeDelta.to_value.3",
+      "distance": 1.0007151365280151,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2616,
+      "end_line": 2684,
+      "tokens": 747,
+      "context_length": 36773,
+      "file_pos": 12
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeYearDayTime_TimeYearDayTime.fast_parser_pars.1",
+      "distance": 1.003868818283081,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1538,
+      "end_line": 1582,
+      "tokens": 544,
+      "context_length": 37317,
+      "file_pos": 12
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/astropy/astropy/io/misc/asdf/tags/time/time.py_np__assert_earthlocation_equal.5",
+      "distance": 1.0054659843444824,
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "start_line": 3,
+      "end_line": 30,
+      "tokens": 194,
+      "context_length": 37511
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat.to_value_TimeFormat.to_value.4.1",
+      "distance": 1.0057612657546997,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 328,
+      "end_line": 364,
+      "tokens": 319,
+      "context_length": 37830,
+      "file_pos": 12
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.shape_27_TimeBase.shape_27.11.2.1.3.1",
+      "distance": 1.00896418094635,
+      "file_path": "astropy/time/core.py",
+      "start_line": 712,
+      "end_line": 740,
+      "tokens": 254,
+      "context_length": 38084,
+      "file_pos": 12
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py__get_info_if_time_column__get_info_if_time_column.5.1",
+      "distance": 1.0140540599822998,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 279,
+      "end_line": 306,
+      "tokens": 251,
+      "context_length": 38335
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__lt___TimeBase.__ge__.1.1",
+      "distance": 1.0165623426437378,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1457,
+      "end_line": 1483,
+      "tokens": 206,
+      "context_length": 38541,
+      "file_pos": 12
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py__strptime.21__strptime.21.6.22.found_zone.2.1.4.2.2",
+      "distance": 1.0174808502197266,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 369,
+      "end_line": 460,
+      "tokens": 933,
+      "context_length": 39474
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/astropy/astropy/timeseries/sampled.py_TimeSeries.__init___TimeSeries.time.2.1",
+      "distance": 1.0222899913787842,
+      "file_path": "astropy/timeseries/sampled.py",
+      "start_line": 61,
+      "end_line": 142,
+      "tokens": 701,
+      "context_length": 40175
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeYMDHMS._check_val_type_TimeYMDHMS._check_val_type.12.1",
+      "distance": 1.0223268270492554,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1058,
+      "end_line": 1121,
+      "tokens": 559,
+      "context_length": 40734,
+      "file_pos": 13
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeUnix_TimeUnix.epoch_format.1",
+      "distance": 1.02498197555542,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 684,
+      "end_line": 701,
+      "tokens": 205,
+      "context_length": 40939,
+      "file_pos": 13
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.jd1_TimeBase.jd2.3.1",
+      "distance": 1.0287261009216309,
+      "file_path": "astropy/time/core.py",
+      "start_line": 767,
+      "end_line": 781,
+      "tokens": 126,
+      "context_length": 41065,
+      "file_pos": 13
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.__rtruediv___TimeDelta.to.2.1",
+      "distance": 1.0322833061218262,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2584,
+      "end_line": 2614,
+      "tokens": 250,
+      "context_length": 41315,
+      "file_pos": 13
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._apply_TimeBase._apply.18",
+      "distance": 1.0323700904846191,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1075,
+      "end_line": 1157,
+      "tokens": 793,
+      "context_length": 42108,
+      "file_pos": 13
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.now_Time.info.1",
+      "distance": 1.0329339504241943,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1634,
+      "end_line": 1656,
+      "tokens": 180,
+      "context_length": 42288,
+      "file_pos": 13
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.__add___TimeDelta.__abs__.7.1",
+      "distance": 1.035454273223877,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2482,
+      "end_line": 2517,
+      "tokens": 302,
+      "context_length": 42590,
+      "file_pos": 13
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__dir___TimeBase._match_shape.5.1",
+      "distance": 1.035728931427002,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1409,
+      "end_line": 1431,
+      "tokens": 204,
+      "context_length": 42794,
+      "file_pos": 13
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_TimeRE_TimeRE.__init__.8",
+      "distance": 1.038984775543213,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 190,
+      "end_line": 234,
+      "tokens": 671,
+      "context_length": 43465
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.argsort_TimeBase.argsort.6.2.1.1",
+      "distance": 1.0393139123916626,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1279,
+      "end_line": 1295,
+      "tokens": 188,
+      "context_length": 43653,
+      "file_pos": 13
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.16_Time._sid_time_or_earth_rot_ang.9.1",
+      "distance": 1.040247917175293,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1954,
+      "end_line": 2015,
+      "tokens": 628,
+      "context_length": 44281,
+      "file_pos": 13
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py_fits_to_time_fits_to_time.18.1",
+      "distance": 1.042409062385559,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 426,
+      "end_line": 498,
+      "tokens": 603,
+      "context_length": 44884
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeEpochDateString_TimeEpochDateString.value.6.1",
+      "distance": 1.0428709983825684,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1764,
+      "end_line": 1802,
+      "tokens": 426,
+      "context_length": 45310,
+      "file_pos": 13
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeCxcSec_TimeCxcSec.epoch_format.1",
+      "distance": 1.0439283847808838,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 756,
+      "end_line": 766,
+      "tokens": 129,
+      "context_length": 45439,
+      "file_pos": 13
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/intermediate_rotation_transforms.py_15_teme_to_itrs_mat.gst.11.1",
+      "distance": 1.0448429584503174,
+      "file_path": "astropy/coordinates/builtin_frames/intermediate_rotation_transforms.py",
+      "start_line": 23,
+      "end_line": 42,
+      "tokens": 254,
+      "context_length": 45693
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/astropy/astropy/visualization/time.py_time_support_time_support.4",
+      "distance": 1.0452537536621094,
+      "file_path": "astropy/visualization/time.py",
+      "start_line": 20,
+      "end_line": 50,
+      "tokens": 319,
+      "context_length": 46012
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString_TimeString.1",
+      "distance": 1.0455511808395386,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1214,
+      "end_line": 1253,
+      "tokens": 426,
+      "context_length": 46438,
+      "file_pos": 14
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_SCALE_OFFSETS__LEAP_SECONDS_LOCK.1",
+      "distance": 1.0465009212493896,
+      "file_path": "astropy/time/core.py",
+      "start_line": 80,
+      "end_line": 111,
+      "tokens": 467,
+      "context_length": 46905,
+      "file_pos": 14
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py__convert_global_time__convert_global_time.3.2.1.2.1",
+      "distance": 1.0477185249328613,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 309,
+      "end_line": 328,
+      "tokens": 139,
+      "context_length": 47044
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.shape_TimeBase.shape.2.1",
+      "distance": 1.0493546724319458,
+      "file_path": "astropy/time/core.py",
+      "start_line": 689,
+      "end_line": 710,
+      "tokens": 212,
+      "context_length": 47256,
+      "file_pos": 14
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeString.str_kwargs_TimeString.str_kwargs.12.2",
+      "distance": 1.051093339920044,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1394,
+      "end_line": 1421,
+      "tokens": 317,
+      "context_length": 47573,
+      "file_pos": 14
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/astropy/astropy/time/time_helper/function_helpers.py_1_",
+      "distance": 1.0542006492614746,
+      "file_path": "astropy/time/time_helper/function_helpers.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 235,
+      "context_length": 47808
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/utils.py_get_jd12_pav2pv.5.1",
+      "distance": 1.0556761026382446,
+      "file_path": "astropy/coordinates/builtin_frames/utils.py",
+      "start_line": 98,
+      "end_line": 140,
+      "tokens": 258,
+      "context_length": 48066
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.__rmul___TimeDelta.__truediv__.10.1",
+      "distance": 1.057908058166504,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2551,
+      "end_line": 2582,
+      "tokens": 309,
+      "context_length": 48375,
+      "file_pos": 16
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_1__getlang.2.1",
+      "distance": 1.0583573579788208,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 205,
+      "context_length": 48580
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/astropy/astropy/timeseries/periodograms/bls/core.py_BoxLeastSquares._as_absolute_time_if_needed_BoxLeastSquares._as_absolute_time_if_needed.3.1",
+      "distance": 1.0650582313537598,
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "start_line": 359,
+      "end_line": 373,
+      "tokens": 169,
+      "context_length": 48749
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFITS_TimeFITS.subfmts_7.1",
+      "distance": 1.0684092044830322,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1633,
+      "end_line": 1670,
+      "tokens": 580,
+      "context_length": 49329,
+      "file_pos": 17
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py__validate_jd_for_storage__validate_jd_for_storage.2.3.1",
+      "distance": 1.070664405822754,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1908,
+      "end_line": 1922,
+      "tokens": 158,
+      "context_length": 49487,
+      "file_pos": 17
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py__broadcast_writeable_",
+      "distance": 1.0743862390518188,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1925,
+      "end_line": 1949,
+      "tokens": 248,
+      "context_length": 49735,
+      "file_pos": 17
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/astropy/astropy/timeseries/periodograms/lombscargle/core.py_LombScargle._as_relative_time_LombScargle._as_relative_time.4.1",
+      "distance": 1.076702356338501,
+      "file_path": "astropy/timeseries/periodograms/lombscargle/core.py",
+      "start_line": 363,
+      "end_line": 386,
+      "tokens": 196,
+      "context_length": 49931
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeBesselianEpochString_TimeDeltaFormat._check_scale.3.1",
+      "distance": 1.0771384239196777,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1805,
+      "end_line": 1835,
+      "tokens": 238,
+      "context_length": 50169,
+      "file_pos": 18
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.sidereal_time_Time.sidereal_time.8.1",
+      "distance": 1.0797231197357178,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1878,
+      "end_line": 1952,
+      "tokens": 753,
+      "context_length": 50922,
+      "file_pos": 18
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/astropy/astropy/io/votable/exceptions.py_E23_E23.default_args.1",
+      "distance": 1.081586241722107,
+      "file_path": "astropy/io/votable/exceptions.py",
+      "start_line": 1460,
+      "end_line": 1472,
+      "tokens": 145,
+      "context_length": 51067
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/astropy/astropy/timeseries/sampled.py_TimeSeries.fold.7_TimeSeries.fold.12.1",
+      "distance": 1.0816538333892822,
+      "file_path": "astropy/timeseries/sampled.py",
+      "start_line": 208,
+      "end_line": 245,
+      "tokens": 384,
+      "context_length": 51451
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py_time_to_fits_time_to_fits.location.1",
+      "distance": 1.0825685262680054,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 501,
+      "end_line": 547,
+      "tokens": 431,
+      "context_length": 51882
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase._time_comparison_TimeBase._time_comparison.5.1",
+      "distance": 1.0833314657211304,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1433,
+      "end_line": 1455,
+      "tokens": 236,
+      "context_length": 52118,
+      "file_pos": 19
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimezoneInfo_TimezoneInfo.dst.1.1",
+      "distance": 1.0851655006408691,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1163,
+      "end_line": 1211,
+      "tokens": 476,
+      "context_length": 52594,
+      "file_pos": 19
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/astropy/astropy/coordinates/angle_formats.py_sexagesimal_to_string_sexagesimal_to_string.25.1",
+      "distance": 1.0894877910614014,
+      "file_path": "astropy/coordinates/angle_formats.py",
+      "start_line": 562,
+      "end_line": 649,
+      "tokens": 832,
+      "context_length": 53426
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/astropy/astropy/timeseries/__init__.py__",
+      "distance": 1.0916075706481934,
+      "file_path": "astropy/timeseries/__init__.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 106,
+      "context_length": 53532
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/utils.py_1__DEFAULT_PM.1",
+      "distance": 1.0974136590957642,
+      "file_path": "astropy/coordinates/builtin_frames/utils.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 322,
+      "context_length": 53854
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/astropy/astropy/timeseries/sampled.py_TimeSeries.from_pandas_TimeSeries.to_pandas.2.1",
+      "distance": 1.0975096225738525,
+      "file_path": "astropy/timeseries/sampled.py",
+      "start_line": 278,
+      "end_line": 316,
+      "tokens": 283,
+      "context_length": 54137
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.ptp_TimeBase.ptp.3.1",
+      "distance": 1.098409652709961,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1329,
+      "end_line": 1344,
+      "tokens": 193,
+      "context_length": 54330,
+      "file_pos": 21
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeYMDHMS_TimeYMDHMS.name.1",
+      "distance": 1.100311040878296,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 1025,
+      "end_line": 1056,
+      "tokens": 348,
+      "context_length": 54678,
+      "file_pos": 21
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDelta.__mul___TimeDelta.__mul__.11.1",
+      "distance": 1.1016197204589844,
+      "file_path": "astropy/time/core.py",
+      "start_line": 2519,
+      "end_line": 2549,
+      "tokens": 301,
+      "context_length": 54979,
+      "file_pos": 21
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/astropy/astropy/time/formats.py_TimeFormat._get_allowed_subfmt_TimeFormat._get_allowed_subfmt.3.1",
+      "distance": 1.1029486656188965,
+      "file_path": "astropy/time/formats.py",
+      "start_line": 143,
+      "end_line": 155,
+      "tokens": 131,
+      "context_length": 55110,
+      "file_pos": 21
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.insert_TimeBase.insert.23.1",
+      "distance": 1.1034877300262451,
+      "file_path": "astropy/time/core.py",
+      "start_line": 876,
+      "end_line": 948,
+      "tokens": 685,
+      "context_length": 55795,
+      "file_pos": 21
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeBase.__copy___TimeBase.__deepcopy__.2.1",
+      "distance": 1.1042656898498535,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1175,
+      "end_line": 1189,
+      "tokens": 128,
+      "context_length": 55923,
+      "file_pos": 21
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/astropy/astropy/timeseries/core.py_BaseTimeSeries_",
+      "distance": 1.10599684715271,
+      "file_path": "astropy/timeseries/core.py",
+      "start_line": 46,
+      "end_line": 101,
+      "tokens": 443,
+      "context_length": 56366
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/equatorial.py_1_doc_footer_tete.1",
+      "distance": 1.106858730316162,
+      "file_path": "astropy/coordinates/builtin_frames/equatorial.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 271,
+      "context_length": 56637
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/astropy/astropy/utils/iers/iers.py_re_INTERPOLATE_ERROR.1",
+      "distance": 1.1075947284698486,
+      "file_path": "astropy/utils/iers/iers.py",
+      "start_line": 12,
+      "end_line": 78,
+      "tokens": 762,
+      "context_length": 57399
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/astropy/astropy/io/fits/fitstime.py_re_GLOBAL_TIME_INFO.1",
+      "distance": 1.1088778972625732,
+      "file_path": "astropy/io/fits/fitstime.py",
+      "start_line": 3,
+      "end_line": 66,
+      "tokens": 581,
+      "context_length": 57980
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/altaz.py_doc_footer_doc_footer.1",
+      "distance": 1.1092681884765625,
+      "file_path": "astropy/coordinates/builtin_frames/altaz.py",
+      "start_line": 38,
+      "end_line": 73,
+      "tokens": 428,
+      "context_length": 58408
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/utils.py_prepare_earth_position_vel_prepare_earth_position_vel.12.1",
+      "distance": 1.110084891319275,
+      "file_path": "astropy/coordinates/builtin_frames/utils.py",
+      "start_line": 334,
+      "end_line": 385,
+      "tokens": 501,
+      "context_length": 58909
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/astropy/astropy/time/utils.py_quantity_day_frac_quantity_day_frac.5.2.2.1",
+      "distance": 1.1118366718292236,
+      "file_path": "astropy/time/utils.py",
+      "start_line": 75,
+      "end_line": 115,
+      "tokens": 471,
+      "context_length": 59380
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/astropy/astropy/coordinates/sky_coordinate.py_SkyCoord.apply_space_motion.10_SkyCoord.apply_space_motion.33.1",
+      "distance": 1.1121623516082764,
+      "file_path": "astropy/coordinates/sky_coordinate.py",
+      "start_line": 752,
+      "end_line": 820,
+      "tokens": 779,
+      "context_length": 60159
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/astropy/astropy/coordinates/angle_formats.py_hours_to_hms_hours_to_hms.8.1",
+      "distance": 1.1138683557510376,
+      "file_path": "astropy/coordinates/angle_formats.py",
+      "start_line": 514,
+      "end_line": 526,
+      "tokens": 123,
+      "context_length": 60282
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.light_travel_time_Time.light_travel_time.9.1.3.gcrs_coo.cpos.1",
+      "distance": 1.1182730197906494,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1745,
+      "end_line": 1813,
+      "tokens": 787,
+      "context_length": 61069,
+      "file_pos": 26
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/astropy/astropy/timeseries/io/__init__.py__",
+      "distance": 1.1187074184417725,
+      "file_path": "astropy/timeseries/io/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 23,
+      "context_length": 61092
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_TimeDeltaInfo_TimeDeltaInfo.new_like.15.1",
+      "distance": 1.1200063228607178,
+      "file_path": "astropy/time/core.py",
+      "start_line": 326,
+      "end_line": 378,
+      "tokens": 447,
+      "context_length": 61539,
+      "file_pos": 27
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/astropy/astropy/time/core.py_Time.earth_rotation_angle_Time.earth_rotation_angle.4.1",
+      "distance": 1.1202352046966553,
+      "file_path": "astropy/time/core.py",
+      "start_line": 1827,
+      "end_line": 1876,
+      "tokens": 465,
+      "context_length": 62004,
+      "file_pos": 27
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/astropy/astropy/timeseries/periodograms/bls/core.py_BoxLeastSquares._as_relative_time_BoxLeastSquares._as_relative_time.5.1",
+      "distance": 1.121506929397583,
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "start_line": 332,
+      "end_line": 357,
+      "tokens": 210,
+      "context_length": 62214
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/astropy/astropy/utils/iers/iers.py_IERS._interpolate_IERS._interpolate.17.3.2.1",
+      "distance": 1.123056411743164,
+      "file_path": "astropy/utils/iers/iers.py",
+      "start_line": 391,
+      "end_line": 449,
+      "tokens": 661,
+      "context_length": 62875
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/astropy/astropy/extern/_strptime.py_TimeRE.pattern__regex_cache.1",
+      "distance": 1.1251256465911865,
+      "file_path": "astropy/extern/_strptime.py",
+      "start_line": 255,
+      "end_line": 287,
+      "tokens": 311,
+      "context_length": 63186
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/astropy/astropy/coordinates/builtin_frames/intermediate_rotation_transforms.py_gcrs_to_cirs_mat_cirs_to_itrs_mat.2",
+      "distance": 1.1331517696380615,
+      "file_path": "astropy/coordinates/builtin_frames/intermediate_rotation_transforms.py",
+      "start_line": 45,
+      "end_line": 62,
+      "tokens": 205,
+      "context_length": 63391
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/astropy/astropy/wcs/wcsapi/fitswcs.py_56_CTYPE_TO_UCD1_CUSTOM.1",
+      "distance": 1.1363856792449951,
+      "file_path": "astropy/wcs/wcsapi/fitswcs.py",
+      "start_line": 82,
+      "end_line": 149,
+      "tokens": 764,
+      "context_length": 64155
+    }
+  ],
+  "files": [
+    {
+      "file_path": "astropy/time/formats.py",
+      "position": 1,
+      "tokens": 19170,
+      "context_length": 19170
+    },
+    {
+      "file_path": "astropy/time/core.py",
+      "position": 2,
+      "tokens": 26641,
+      "context_length": 45811
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/time/time.py",
+      "position": 3,
+      "tokens": 994,
+      "context_length": 46805
+    },
+    {
+      "file_path": "astropy/visualization/time.py",
+      "position": 4,
+      "tokens": 2077,
+      "context_length": 48882
+    },
+    {
+      "file_path": "astropy/extern/_strptime.py",
+      "position": 5,
+      "tokens": 5521,
+      "context_length": 54403
+    },
+    {
+      "file_path": "astropy/io/fits/fitstime.py",
+      "position": 6,
+      "tokens": 5369,
+      "context_length": 59772
+    },
+    {
+      "file_path": "astropy/io/misc/asdf/tags/time/timedelta.py",
+      "position": 7,
+      "tokens": 301,
+      "context_length": 60073
+    },
+    {
+      "file_path": "astropy/time/utils.py",
+      "position": 8,
+      "tokens": 2206,
+      "context_length": 62279
+    },
+    {
+      "file_path": "astropy/time/time_helper/__init__.py",
+      "position": 9,
+      "tokens": 13,
+      "context_length": 62292
+    },
+    {
+      "file_path": "astropy/coordinates/attributes.py",
+      "position": 10,
+      "tokens": 3524,
+      "context_length": 65816
+    },
+    {
+      "file_path": "astropy/io/votable/tree.py",
+      "position": 11,
+      "tokens": 29143,
+      "context_length": 94959
+    },
+    {
+      "file_path": "astropy/wcs/docstrings.py",
+      "position": 12,
+      "tokens": 21453,
+      "context_length": 116412
+    },
+    {
+      "file_path": "astropy/timeseries/sampled.py",
+      "position": 13,
+      "tokens": 3399,
+      "context_length": 119811
+    },
+    {
+      "file_path": "astropy/coordinates/builtin_frames/intermediate_rotation_transforms.py",
+      "position": 14,
+      "tokens": 3379,
+      "context_length": 123190
+    },
+    {
+      "file_path": "astropy/time/time_helper/function_helpers.py",
+      "position": 15,
+      "tokens": 236,
+      "context_length": 123426
+    },
+    {
+      "file_path": "astropy/coordinates/builtin_frames/utils.py",
+      "position": 16,
+      "tokens": 3832,
+      "context_length": 127258
+    },
+    {
+      "file_path": "astropy/timeseries/periodograms/bls/core.py",
+      "position": 17,
+      "tokens": 7604,
+      "context_length": 134862
+    },
+    {
+      "file_path": "astropy/timeseries/periodograms/lombscargle/core.py",
+      "position": 18,
+      "tokens": 5933,
+      "context_length": 140795
+    },
+    {
+      "file_path": "astropy/io/votable/exceptions.py",
+      "position": 19,
+      "tokens": 13332,
+      "context_length": 154127
+    },
+    {
+      "file_path": "astropy/coordinates/angle_formats.py",
+      "position": 20,
+      "tokens": 5203,
+      "context_length": 159330
+    },
+    {
+      "file_path": "astropy/timeseries/__init__.py",
+      "position": 21,
+      "tokens": 107,
+      "context_length": 159437
+    },
+    {
+      "file_path": "astropy/timeseries/core.py",
+      "position": 22,
+      "tokens": 714,
+      "context_length": 160151
+    },
+    {
+      "file_path": "astropy/coordinates/builtin_frames/equatorial.py",
+      "position": 23,
+      "tokens": 1066,
+      "context_length": 161217
+    },
+    {
+      "file_path": "astropy/utils/iers/iers.py",
+      "position": 24,
+      "tokens": 11613,
+      "context_length": 172830
+    },
+    {
+      "file_path": "astropy/coordinates/builtin_frames/altaz.py",
+      "position": 25,
+      "tokens": 1201,
+      "context_length": 174031
+    },
+    {
+      "file_path": "astropy/coordinates/sky_coordinate.py",
+      "position": 26,
+      "tokens": 19610,
+      "context_length": 193641
+    },
+    {
+      "file_path": "astropy/timeseries/io/__init__.py",
+      "position": 27,
+      "tokens": 23,
+      "context_length": 193664
+    },
+    {
+      "file_path": "astropy/wcs/wcsapi/fitswcs.py",
+      "position": 28,
+      "tokens": 6197,
+      "context_length": 199861
+    }
+  ]
+}

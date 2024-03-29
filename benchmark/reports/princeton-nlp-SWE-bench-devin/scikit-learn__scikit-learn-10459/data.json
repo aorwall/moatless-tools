@@ -1,0 +1,1037 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-10459",
+  "model_patch": "diff --git a/sklearn/utils/validation.py b/sklearn/utils/validation.py\nindex b3538a792..6a47bebe8 100644\n--- a/sklearn/utils/validation.py\n+++ b/sklearn/utils/validation.py\n@@ -80,9 +80,7 @@ def as_float_array(X, copy=True, force_all_finite=True):\n     \"\"\"\n     if isinstance(X, np.matrix) or (not isinstance(X, np.ndarray)\n                                     and not sp.issparse(X)):\n-        return check_array(X, ['csr', 'csc', 'coo'], dtype=np.float64,\n-                           copy=copy, force_all_finite=force_all_finite,\n-                           ensure_2d=False)\n+        return check_array(X, accept_sparse=True, dtype='float64', copy=copy, force_all_finite=force_all_finite, ensure_2d=False)\n     elif sp.issparse(X) and X.dtype in [np.float32, np.float64]:\n         return X.copy() if copy else X\n     elif X.dtype in [np.float32, np.float64]:  # is numpy array\n@@ -359,8 +357,12 @@ def check_array(array, accept_sparse=False, dtype=\"numeric\", order=None,\n         Whether a forced copy will be triggered. If copy=False, a copy might\n         be triggered by a conversion.\n \n-    force_all_finite : boolean (default=True)\n-        Whether to raise an error on np.inf and np.nan in X.\n+    force_all_finite : boolean or string (default=True)\n+        Whether to raise an error on np.inf and np.nan in X. This parameter\n+        does not influence whether y can have np.inf or np.nan values.\n+        If set to 'allow-nan', NaN values are allowed but Infs are not.\n+        If set to 'allow-inf', Inf values are allowed but NaNs are not.\n+        If set to 'allow-none', neither NaN nor Inf values are allowed.\n \n     ensure_2d : boolean (default=True)\n         Whether to raise a value error if X is not 2d.\n@@ -482,8 +484,22 @@ def check_array(array, accept_sparse=False, dtype=\"numeric\", order=None,\n         if not allow_nd and array.ndim >= 3:\n             raise ValueError(\"Found array with dim %d. %s expected <= 2.\"\n                              % (array.ndim, estimator_name))\n-        if force_all_finite:\n-            _assert_all_finite(array)\n+        if force_all_finite not in [True, False]:\n+            # new type of check for finiteness\n+            if force_all_finite == 'allow-nan':\n+                if np.isinf(array).any():\n+                    raise ValueError(\"Input contains infinity\"\n+                                     \" or a value too large for %r.\" % array.dtype)\n+            elif force_all_finite == 'allow-inf':\n+                if np.isnan(array).any():\n+                    raise ValueError(\"Input contains NaN\")\n+            elif force_all_finite == 'allow-none':\n+                if np.isnan(array).any() or np.isinf(array).any():\n+                    raise ValueError(\"Input contains NaN or infinity\"\n+                                     \" or a value too large for %r.\" % array.dtype)\n+        else:\n+            if force_all_finite:\n+                _assert_all_finite(array)\n \n     shape_repr = _shape_repr(array.shape)\n     if ensure_min_samples > 0:\n@@ -605,8 +621,7 @@ def check_X_y(X, y, accept_sparse=False, dtype=\"numeric\", order=None,\n                     ensure_2d, allow_nd, ensure_min_samples,\n                     ensure_min_features, warn_on_dtype, estimator)\n     if multi_output:\n-        y = check_array(y, 'csr', force_all_finite=True, ensure_2d=False,\n-                        dtype=None)\n+        y = check_array(y, accept_sparse=True, force_all_finite=True, ensure_2d=False)\n     else:\n         y = column_or_1d(y, warn=True)\n         _assert_all_finite(y)\n@@ -659,13 +674,10 @@ def check_random_state(seed):\n         Otherwise raise ValueError.\n     \"\"\"\n     if seed is None or seed is np.random:\n-        return np.random.mtrand._rand\n+        return np.random.RandomState()\n     if isinstance(seed, (numbers.Integral, np.integer)):\n-        return np.random.RandomState(seed)\n-    if isinstance(seed, np.random.RandomState):\n-        return seed\n-    raise ValueError('%r cannot be used to seed a numpy.random.RandomState'\n-                     ' instance' % seed)\n+        seed = int(seed)\n+    return np.random.RandomState(seed)\n \n \n def has_fit_parameter(estimator, parameter):\n@@ -708,10 +720,13 @@ def check_symmetric(array, tol=1E-10, raise_warning=True,\n     array : nd-array or sparse matrix\n         Input object to check / convert. Must be two-dimensional and square,\n         otherwise a ValueError will be raised.\n+\n     tol : float\n         Absolute tolerance for equivalence of arrays. Default = 1E-10.\n+\n     raise_warning : boolean (default=True)\n         If True then raise a warning if conversion is required.\n+\n     raise_exception : boolean (default=False)\n         If True then raise an exception if array is not symmetric.\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/utils/validation.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "2e85c8608c93ad0e3290414c4e5e650b87d44b27",
+  "patch": "diff --git a/sklearn/utils/validation.py b/sklearn/utils/validation.py\n--- a/sklearn/utils/validation.py\n+++ b/sklearn/utils/validation.py\n@@ -31,7 +31,7 @@\n warnings.simplefilter('ignore', NonBLASDotWarning)\n \n \n-def _assert_all_finite(X):\n+def _assert_all_finite(X, allow_nan=False):\n     \"\"\"Like assert_all_finite, but only for ndarray.\"\"\"\n     if _get_config()['assume_finite']:\n         return\n@@ -39,20 +39,27 @@ def _assert_all_finite(X):\n     # First try an O(n) time, O(1) space solution for the common case that\n     # everything is finite; fall back to O(n) space np.isfinite to prevent\n     # false positives from overflow in sum method.\n-    if (X.dtype.char in np.typecodes['AllFloat'] and not np.isfinite(X.sum())\n-            and not np.isfinite(X).all()):\n-        raise ValueError(\"Input contains NaN, infinity\"\n-                         \" or a value too large for %r.\" % X.dtype)\n-\n-\n-def assert_all_finite(X):\n+    is_float = X.dtype.kind in 'fc'\n+    if is_float and np.isfinite(X.sum()):\n+        pass\n+    elif is_float:\n+        msg_err = \"Input contains {} or a value too large for {!r}.\"\n+        if (allow_nan and np.isinf(X).any() or\n+                not allow_nan and not np.isfinite(X).all()):\n+            type_err = 'infinity' if allow_nan else 'NaN, infinity'\n+            raise ValueError(msg_err.format(type_err, X.dtype))\n+\n+\n+def assert_all_finite(X, allow_nan=False):\n     \"\"\"Throw a ValueError if X contains NaN or infinity.\n \n     Parameters\n     ----------\n     X : array or sparse matrix\n+\n+    allow_nan : bool\n     \"\"\"\n-    _assert_all_finite(X.data if sp.issparse(X) else X)\n+    _assert_all_finite(X.data if sp.issparse(X) else X, allow_nan)\n \n \n def as_float_array(X, copy=True, force_all_finite=True):\n@@ -70,8 +77,17 @@ def as_float_array(X, copy=True, force_all_finite=True):\n         If True, a copy of X will be created. If False, a copy may still be\n         returned if X's dtype is not a floating point type.\n \n-    force_all_finite : boolean (default=True)\n-        Whether to raise an error on np.inf and np.nan in X.\n+    force_all_finite : boolean or 'allow-nan', (default=True)\n+        Whether to raise an error on np.inf and np.nan in X. The possibilities\n+        are:\n+\n+        - True: Force all values of X to be finite.\n+        - False: accept both np.inf and np.nan in X.\n+        - 'allow-nan':  accept  only  np.nan  values in  X.  Values  cannot  be\n+          infinite.\n+\n+        .. versionadded:: 0.20\n+           ``force_all_finite`` accepts the string ``'allow-nan'``.\n \n     Returns\n     -------\n@@ -256,8 +272,17 @@ def _ensure_sparse_format(spmatrix, accept_sparse, dtype, copy,\n         Whether a forced copy will be triggered. If copy=False, a copy might\n         be triggered by a conversion.\n \n-    force_all_finite : boolean\n-        Whether to raise an error on np.inf and np.nan in X.\n+    force_all_finite : boolean or 'allow-nan', (default=True)\n+        Whether to raise an error on np.inf and np.nan in X. The possibilities\n+        are:\n+\n+        - True: Force all values of X to be finite.\n+        - False: accept both np.inf and np.nan in X.\n+        - 'allow-nan':  accept  only  np.nan  values in  X.  Values  cannot  be\n+          infinite.\n+\n+        .. versionadded:: 0.20\n+           ``force_all_finite`` accepts the string ``'allow-nan'``.\n \n     Returns\n     -------\n@@ -304,7 +329,9 @@ def _ensure_sparse_format(spmatrix, accept_sparse, dtype, copy,\n             warnings.warn(\"Can't check %s sparse matrix for nan or inf.\"\n                           % spmatrix.format)\n         else:\n-            _assert_all_finite(spmatrix.data)\n+            _assert_all_finite(spmatrix.data,\n+                               allow_nan=force_all_finite == 'allow-nan')\n+\n     return spmatrix\n \n \n@@ -359,8 +386,17 @@ def check_array(array, accept_sparse=False, dtype=\"numeric\", order=None,\n         Whether a forced copy will be triggered. If copy=False, a copy might\n         be triggered by a conversion.\n \n-    force_all_finite : boolean (default=True)\n-        Whether to raise an error on np.inf and np.nan in X.\n+    force_all_finite : boolean or 'allow-nan', (default=True)\n+        Whether to raise an error on np.inf and np.nan in X. The possibilities\n+        are:\n+\n+        - True: Force all values of X to be finite.\n+        - False: accept both np.inf and np.nan in X.\n+        - 'allow-nan':  accept  only  np.nan  values in  X.  Values  cannot  be\n+          infinite.\n+\n+        .. versionadded:: 0.20\n+           ``force_all_finite`` accepts the string ``'allow-nan'``.\n \n     ensure_2d : boolean (default=True)\n         Whether to raise a value error if X is not 2d.\n@@ -425,6 +461,10 @@ def check_array(array, accept_sparse=False, dtype=\"numeric\", order=None,\n             # list of accepted types.\n             dtype = dtype[0]\n \n+    if force_all_finite not in (True, False, 'allow-nan'):\n+        raise ValueError('force_all_finite should be a bool or \"allow-nan\"'\n+                         '. Got {!r} instead'.format(force_all_finite))\n+\n     if estimator is not None:\n         if isinstance(estimator, six.string_types):\n             estimator_name = estimator\n@@ -483,7 +523,8 @@ def check_array(array, accept_sparse=False, dtype=\"numeric\", order=None,\n             raise ValueError(\"Found array with dim %d. %s expected <= 2.\"\n                              % (array.ndim, estimator_name))\n         if force_all_finite:\n-            _assert_all_finite(array)\n+            _assert_all_finite(array,\n+                               allow_nan=force_all_finite == 'allow-nan')\n \n     shape_repr = _shape_repr(array.shape)\n     if ensure_min_samples > 0:\n@@ -555,9 +596,18 @@ def check_X_y(X, y, accept_sparse=False, dtype=\"numeric\", order=None,\n         Whether a forced copy will be triggered. If copy=False, a copy might\n         be triggered by a conversion.\n \n-    force_all_finite : boolean (default=True)\n+    force_all_finite : boolean or 'allow-nan', (default=True)\n         Whether to raise an error on np.inf and np.nan in X. This parameter\n         does not influence whether y can have np.inf or np.nan values.\n+        The possibilities are:\n+\n+        - True: Force all values of X to be finite.\n+        - False: accept both np.inf and np.nan in X.\n+        - 'allow-nan':  accept  only  np.nan  values in  X.  Values  cannot  be\n+          infinite.\n+\n+        .. versionadded:: 0.20\n+           ``force_all_finite`` accepts the string ``'allow-nan'``.\n \n     ensure_2d : boolean (default=True)\n         Whether to make X at least 2d.\n",
+  "test_patch": "diff --git a/sklearn/utils/tests/test_validation.py b/sklearn/utils/tests/test_validation.py\n--- a/sklearn/utils/tests/test_validation.py\n+++ b/sklearn/utils/tests/test_validation.py\n@@ -6,8 +6,8 @@\n from tempfile import NamedTemporaryFile\n from itertools import product\n \n+import pytest\n import numpy as np\n-from numpy.testing import assert_array_equal\n import scipy.sparse as sp\n \n from sklearn.utils.testing import assert_true, assert_false, assert_equal\n@@ -18,6 +18,8 @@\n from sklearn.utils.testing import assert_warns\n from sklearn.utils.testing import ignore_warnings\n from sklearn.utils.testing import SkipTest\n+from sklearn.utils.testing import assert_array_equal\n+from sklearn.utils.testing import assert_allclose_dense_sparse\n from sklearn.utils import as_float_array, check_array, check_symmetric\n from sklearn.utils import check_X_y\n from sklearn.utils.mocking import MockDataFrame\n@@ -88,6 +90,17 @@ def test_as_float_array():\n         assert_false(np.isnan(M).any())\n \n \n+@pytest.mark.parametrize(\n+    \"X\",\n+    [(np.random.random((10, 2))),\n+     (sp.rand(10, 2).tocsr())])\n+def test_as_float_array_nan(X):\n+    X[5, 0] = np.nan\n+    X[6, 1] = np.nan\n+    X_converted = as_float_array(X, force_all_finite='allow-nan')\n+    assert_allclose_dense_sparse(X_converted, X)\n+\n+\n def test_np_matrix():\n     # Confirm that input validation code does not return np.matrix\n     X = np.arange(12).reshape(3, 4)\n@@ -132,6 +145,43 @@ def test_ordering():\n     assert_false(X.data.flags['C_CONTIGUOUS'])\n \n \n+@pytest.mark.parametrize(\n+    \"value, force_all_finite\",\n+    [(np.inf, False), (np.nan, 'allow-nan'), (np.nan, False)]\n+)\n+@pytest.mark.parametrize(\n+    \"retype\",\n+    [np.asarray, sp.csr_matrix]\n+)\n+def test_check_array_force_all_finite_valid(value, force_all_finite, retype):\n+    X = retype(np.arange(4).reshape(2, 2).astype(np.float))\n+    X[0, 0] = value\n+    X_checked = check_array(X, force_all_finite=force_all_finite,\n+                            accept_sparse=True)\n+    assert_allclose_dense_sparse(X, X_checked)\n+\n+\n+@pytest.mark.parametrize(\n+    \"value, force_all_finite, match_msg\",\n+    [(np.inf, True, 'Input contains NaN, infinity'),\n+     (np.inf, 'allow-nan', 'Input contains infinity'),\n+     (np.nan, True, 'Input contains NaN, infinity'),\n+     (np.nan, 'allow-inf', 'force_all_finite should be a bool or \"allow-nan\"'),\n+     (np.nan, 1, 'force_all_finite should be a bool or \"allow-nan\"')]\n+)\n+@pytest.mark.parametrize(\n+    \"retype\",\n+    [np.asarray, sp.csr_matrix]\n+)\n+def test_check_array_force_all_finiteinvalid(value, force_all_finite,\n+                                             match_msg, retype):\n+    X = retype(np.arange(4).reshape(2, 2).astype(np.float))\n+    X[0, 0] = value\n+    with pytest.raises(ValueError, message=match_msg):\n+        check_array(X, force_all_finite=force_all_finite,\n+                    accept_sparse=True)\n+\n+\n @ignore_warnings\n def test_check_array():\n     # accept_sparse == None\n@@ -153,16 +203,6 @@ def test_check_array():\n     X_ndim = np.arange(8).reshape(2, 2, 2)\n     assert_raises(ValueError, check_array, X_ndim)\n     check_array(X_ndim, allow_nd=True)  # doesn't raise\n-    # force_all_finite\n-    X_inf = np.arange(4).reshape(2, 2).astype(np.float)\n-    X_inf[0, 0] = np.inf\n-    assert_raises(ValueError, check_array, X_inf)\n-    check_array(X_inf, force_all_finite=False)  # no raise\n-    # nan check\n-    X_nan = np.arange(4).reshape(2, 2).astype(np.float)\n-    X_nan[0, 0] = np.nan\n-    assert_raises(ValueError, check_array, X_nan)\n-    check_array(X_inf, force_all_finite=False)  # no raise\n \n     # dtype and order enforcement.\n     X_C = np.arange(4).reshape(2, 2).copy(\"C\")\n",
+  "problem_statement": "[RFC] Dissociate NaN and Inf when considering force_all_finite in check_array\nDue to changes proposed in #10404, it seems that `check_array` as currently a main limitation. `force_all_finite` will force both `NaN` and `inf`to be rejected. If preprocessing methods (whenever this is possible) should let pass `NaN`, this argument is not enough permissive.\r\n\r\nBefore to implement anything, I think it could be good to have some feedback on the way to go. I see the following solutions:\r\n\r\n1. `force_all_finite` could still accept a bool to preserve the behaviour. Additionally, it could accept an `str` to filter only `inf`.\r\n2. #7892 proposes to have an additional argument `allow_nan`. @amueller was worried that it makes `check_array` to complex.\r\n3. make a private function `_assert_finite_or_nan` (similarly to [this proposal](https://github.com/scikit-learn/scikit-learn/pull/10437/files#diff-5ebddebc20987b6125fffc893f5abc4cR2379) removing the numpy version checking) in the `data.py` which can be shared between the preprocessing methods.\r\n\r\nThey are the solutions that I have in mind for the moment but anything else is welcomed.\r\n@jnothman @agramfort @amueller @lesteve @ogrisel @GaelVaroquaux I would be grateful for any insight.\n",
+  "hints_text": "Unsurprisingly, @raghavrv's PR was forgotten in recent discussion of this. I think we want `force_all_finite='allow-nan'` or =`'-nan'` or similar  \nNote: solving #10438 depends on this decision.\nOops! Had not noticed that @glemaitre had started this issue, so was tinkering around with the \"allow_nan\" and \"allow_inf\" arguments for check_array() based on a discussion with @jnothman a few months ago. In any case, [here](https://github.com/scikit-learn/scikit-learn/compare/master...ashimb9:checkarray?expand=1) is what I have so far, which might or might not be useful when the discussion here concludes.\nOh sorry about that. I just have ping you on the issue as well.\r\nI will submit what I did yesterday and you can review with what you have in head.",
+  "created_at": "2018-01-12T09:47:57Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[asarray-nan-allow-nan]\", \"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[csr_matrix-nan-allow-nan]\"]",
+  "PASS_TO_PASS": "[\"sklearn/utils/tests/test_validation.py::test_as_float_array\", \"sklearn/utils/tests/test_validation.py::test_as_float_array_nan[X0]\", \"sklearn/utils/tests/test_validation.py::test_as_float_array_nan[X1]\", \"sklearn/utils/tests/test_validation.py::test_check_array\", \"sklearn/utils/tests/test_validation.py::test_check_array_accept_sparse_no_exception\", \"sklearn/utils/tests/test_validation.py::test_check_array_accept_sparse_type_exception\", \"sklearn/utils/tests/test_validation.py::test_check_array_complex_data_error\", \"sklearn/utils/tests/test_validation.py::test_check_array_dtype_stability\", \"sklearn/utils/tests/test_validation.py::test_check_array_dtype_warning\", \"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[asarray-inf-False]\", \"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[asarray-nan-False]\", \"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[csr_matrix-inf-False]\", \"sklearn/utils/tests/test_validation.py::test_check_array_force_all_finite_valid[csr_matrix-nan-False]\", \"sklearn/utils/tests/test_validation.py::test_check_array_min_samples_and_features_messages\", \"sklearn/utils/tests/test_validation.py::test_check_array_on_mock_dataframe\", \"sklearn/utils/tests/test_validation.py::test_check_array_pandas_dtype_object_conversion\", \"sklearn/utils/tests/test_validation.py::test_check_consistent_length\", \"sklearn/utils/tests/test_validation.py::test_check_dataframe_fit_attribute\", \"sklearn/utils/tests/test_validation.py::test_check_is_fitted\", \"sklearn/utils/tests/test_validation.py::test_check_memory\", \"sklearn/utils/tests/test_validation.py::test_check_symmetric\", \"sklearn/utils/tests/test_validation.py::test_has_fit_parameter\", \"sklearn/utils/tests/test_validation.py::test_memmap\", \"sklearn/utils/tests/test_validation.py::test_np_matrix\", \"sklearn/utils/tests/test_validation.py::test_ordering\", \"sklearn/utils/tests/test_validation.py::test_suppress_validation\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/utils/validation.py"
+  ],
+  "test_patch_files": [
+    "sklearn/utils/tests/test_validation.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/utils/validation.py": {
+      "diffs": [
+        {
+          "start_line_old": 34,
+          "end_line_old": 34,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "pos": 1,
+          "context_length": 203
+        },
+        {
+          "start_line_old": 42,
+          "end_line_old": 55,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "pos": 1,
+          "context_length": 203
+        },
+        {
+          "start_line_old": 73,
+          "end_line_old": 74,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y.X_check_X_y.6.1",
+          "closest_snippet_line_distance": 531,
+          "pos": 10,
+          "context_length": 4168
+        },
+        {
+          "start_line_old": 259,
+          "end_line_old": 260,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_consistent_length_check_consistent_length.4.1",
+          "closest_snippet_line_distance": 55,
+          "pos": 21,
+          "context_length": 7558
+        },
+        {
+          "start_line_old": 307,
+          "end_line_old": 307,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_consistent_length_check_consistent_length.4.1",
+          "closest_snippet_line_distance": 102,
+          "pos": 21,
+          "context_length": 7558
+        },
+        {
+          "start_line_old": 362,
+          "end_line_old": 363,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array.12_check_array.17.1",
+          "closest_snippet_line_distance": 75,
+          "pos": 6,
+          "context_length": 2988
+        },
+        {
+          "start_line_old": 428,
+          "end_line_old": 428,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py__assert_all_finite_assert_all_finite.2",
+          "closest_snippet_line_distance": 373,
+          "pos": 2,
+          "context_length": 607
+        },
+        {
+          "start_line_old": 486,
+          "end_line_old": 486,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array.2_check_array.context.1",
+          "closest_snippet_line_distance": 51,
+          "pos": 4,
+          "context_length": 2033
+        },
+        {
+          "start_line_old": 558,
+          "end_line_old": 558,
+          "file_pos": 1,
+          "file_context_length": 6731,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_1_24",
+          "closest_snippet_line_distance": 527,
+          "pos": 64,
+          "context_length": 24855
+        }
+      ]
+    }
+  },
+  "vectors": 2883,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py__assert_all_finite_assert_all_finite.2",
+      "distance": 0.9153457880020142,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 34,
+      "end_line": 55,
+      "tokens": 203,
+      "context_length": 203,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array.2_check_array.context.1",
+      "distance": 0.9833041429519653,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 395,
+      "end_line": 435,
+      "tokens": 404,
+      "context_length": 607,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.0031318664550781,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1008,
+      "end_line": 1076,
+      "tokens": 601,
+      "context_length": 1208
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array.12_check_array.17.1",
+      "distance": 1.0215473175048828,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 437,
+      "end_line": 509,
+      "tokens": 825,
+      "context_length": 2033,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_supervised_y_no_nan_check_supervised_y_no_nan.estimator.7.3.1",
+      "distance": 1.1456197500228882,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 141,
+      "end_line": 161,
+      "tokens": 203,
+      "context_length": 2236
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_array_check_array.1",
+      "distance": 1.1570841073989868,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 318,
+      "end_line": 394,
+      "tokens": 752,
+      "context_length": 2988,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_69_assert_no_warnings.2",
+      "distance": 1.169523000717163,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 231,
+      "end_line": 248,
+      "tokens": 164,
+      "context_length": 3152
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y.X_check_X_y.6.1",
+      "distance": 1.191994309425354,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 604,
+      "end_line": 618,
+      "tokens": 205,
+      "context_length": 3357,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_1_20.3.divide.6.1",
+      "distance": 1.1951417922973633,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 443,
+      "context_length": 3800
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_as_float_array_as_float_array.2.4.2.1",
+      "distance": 1.2339026927947998,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 58,
+      "end_line": 95,
+      "tokens": 368,
+      "context_length": 4168,
+      "file_pos": 4
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_methods_subset_invariance_check_methods_subset_invariance.rnd.11.4.2",
+      "distance": 1.2354416847229004,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 661,
+      "end_line": 696,
+      "tokens": 341,
+      "context_length": 4509
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dtype_object_check_complex_data.X.5",
+      "distance": 1.2404112815856934,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 489,
+      "end_line": 524,
+      "tokens": 328,
+      "context_length": 4837
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_consistent_length_check_consistent_length.4.1",
+      "distance": 1.2501115798950195,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 190,
+      "end_line": 205,
+      "tokens": 127,
+      "context_length": 4964,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_warnings__get_mask.2.2.1.1",
+      "distance": 1.2530953884124756,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 4,
+      "end_line": 32,
+      "tokens": 154,
+      "context_length": 5118
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_21_23.3.2",
+      "distance": 1.2609028816223145,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 74,
+      "end_line": 150,
+      "tokens": 753,
+      "context_length": 5871
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifier_data_not_an_array_check_regressor_data_not_an_array.4",
+      "distance": 1.2622474431991577,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1765,
+      "end_line": 1779,
+      "tokens": 211,
+      "context_length": 6082
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py__most_frequent__most_frequent.5.4.2.2.1.1",
+      "distance": 1.2712489366531372,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 35,
+      "end_line": 60,
+      "tokens": 240,
+      "context_length": 6322
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/univariate_selection.py_1__clean_nans.6.1",
+      "distance": 1.272169589996338,
+      "file_path": "sklearn/feature_selection/univariate_selection.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 197,
+      "context_length": 6519
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 1.2729500532150269,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 792,
+      "end_line": 814,
+      "tokens": 248,
+      "context_length": 6767
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py__handle_zeros_in_scale__handle_zeros_in_scale.3.3.3.1",
+      "distance": 1.2734553813934326,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 68,
+      "end_line": 83,
+      "tokens": 129,
+      "context_length": 6896
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py__ensure_sparse_format__ensure_no_complex_data.1.1",
+      "distance": 1.2764235734939575,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 234,
+      "end_line": 315,
+      "tokens": 662,
+      "context_length": 7558,
+      "file_pos": 7
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sparsify_coefficients_check_sparsify_coefficients.15",
+      "distance": 1.280747890472412,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1742,
+      "end_line": 1762,
+      "tokens": 233,
+      "context_length": 7791
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_9___all__.1",
+      "distance": 1.2872134447097778,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 10,
+      "end_line": 65,
+      "tokens": 335,
+      "context_length": 8126
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_43_132",
+      "distance": 1.2983989715576172,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 219,
+      "end_line": 320,
+      "tokens": 895,
+      "context_length": 9021
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator_sparse_data_check_estimator_sparse_data.10.5.5.2",
+      "distance": 1.3034414052963257,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 406,
+      "end_line": 447,
+      "tokens": 427,
+      "context_length": 9448
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_class_weight_classifiers_check_class_weight_classifiers.3.2",
+      "distance": 1.3051340579986572,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1576,
+      "end_line": 1618,
+      "tokens": 449,
+      "context_length": 9897
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_inputs_QuantileTransformer._check_inputs.8.1",
+      "distance": 1.30589759349823,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2386,
+      "end_line": 2403,
+      "tokens": 192,
+      "context_length": 10089
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_NotAnArray_pairwise_estimator_convert_X.3.1",
+      "distance": 1.308610439300537,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 347,
+      "end_line": 403,
+      "tokens": 300,
+      "context_length": 10389
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_assert_allclose_dense_sparse_assert_allclose_dense_sparse.2.9.1",
+      "distance": 1.3088738918304443,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 388,
+      "end_line": 426,
+      "tokens": 348,
+      "context_length": 10737
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/externals/joblib/numpy_pickle.py_28_NumpyPickler._create_array_wrapper.5.1",
+      "distance": 1.3097584247589111,
+      "file_path": "sklearn/externals/joblib/numpy_pickle.py",
+      "start_line": 197,
+      "end_line": 246,
+      "tokens": 360,
+      "context_length": 11097
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_data_not_an_array_check_estimators_data_not_an_array.14",
+      "distance": 1.310543417930603,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1782,
+      "end_line": 1802,
+      "tokens": 200,
+      "context_length": 11297
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_classes_check_classifiers_classes.9.11.1",
+      "distance": 1.3110172748565674,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1446,
+      "end_line": 1480,
+      "tokens": 336,
+      "context_length": 11633
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_1_30",
+      "distance": 1.3115136623382568,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 951,
+      "context_length": 12584
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/nmf.py__check_string_param__check_string_param.9.1",
+      "distance": 1.3127095699310303,
+      "file_path": "sklearn/decomposition/nmf.py",
+      "start_line": 189,
+      "end_line": 216,
+      "tokens": 295,
+      "context_length": 12879
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_24_parallel_helper.2.1",
+      "distance": 1.3130701780319214,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 153,
+      "end_line": 257,
+      "tokens": 776,
+      "context_length": 13655
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__yield_non_meta_checks__yield_non_meta_checks.18",
+      "distance": 1.3136184215545654,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 75,
+      "end_line": 109,
+      "tokens": 264,
+      "context_length": 13919
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/conftest.py_1_",
+      "distance": 1.3152015209197998,
+      "file_path": "conftest.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 133,
+      "context_length": 14052
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/gaussian_mixture.py__check_precision_positivity__check_precisions_full.2.1",
+      "distance": 1.32480788230896,
+      "file_path": "sklearn/mixture/gaussian_mixture.py",
+      "start_line": 77,
+      "end_line": 95,
+      "tokens": 180,
+      "context_length": 14232
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/mocking.py_np_MockDataFrame.__ne__.1.1",
+      "distance": 1.3253941535949707,
+      "file_path": "sklearn/utils/mocking.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 246,
+      "context_length": 14478
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/label.py_8___all__.1",
+      "distance": 1.3259446620941162,
+      "file_path": "sklearn/preprocessing/label.py",
+      "start_line": 9,
+      "end_line": 36,
+      "tokens": 151,
+      "context_length": 14629
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/nmf.py_1__check_init.4.1",
+      "distance": 1.3262436389923096,
+      "file_path": "sklearn/decomposition/nmf.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 320,
+      "context_length": 14949
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_binarize_binarize.4.1",
+      "distance": 1.3264343738555908,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1568,
+      "end_line": 1609,
+      "tokens": 386,
+      "context_length": 15335
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/random_projection.py__check_density__check_input_size.3.1",
+      "distance": 1.3270199298858643,
+      "file_path": "sklearn/random_projection.py",
+      "start_line": 135,
+      "end_line": 153,
+      "tokens": 157,
+      "context_length": 15492
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/fastica_.py_fastica.random_state_fastica.18",
+      "distance": 1.3280072212219238,
+      "file_path": "sklearn/decomposition/fastica_.py",
+      "start_line": 266,
+      "end_line": 347,
+      "tokens": 788,
+      "context_length": 16280
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_symmetric_check_symmetric.5.1",
+      "distance": 1.3288590908050537,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 698,
+      "end_line": 750,
+      "tokens": 469,
+      "context_length": 16749,
+      "file_pos": 17
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_indexable_indexable.5.1",
+      "distance": 1.3311710357666016,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 208,
+      "end_line": 231,
+      "tokens": 163,
+      "context_length": 16912,
+      "file_pos": 17
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_1_24",
+      "distance": 1.3312666416168213,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 141,
+      "context_length": 17053,
+      "file_pos": 17
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/multiclass.py__is_integral_float_is_multilabel.4.3.2.1",
+      "distance": 1.3313010931015015,
+      "file_path": "sklearn/utils/multiclass.py",
+      "start_line": 108,
+      "end_line": 155,
+      "tokens": 403,
+      "context_length": 17456
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py_1_norm.2.1",
+      "distance": 1.3325541019439697,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 211,
+      "context_length": 17667
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/bayesian_mixture.py_BayesianGaussianMixture._checkcovariance_prior_parameter_BayesianGaussianMixture._checkcovariance_prior_parameter.3.6.1",
+      "distance": 1.3350129127502441,
+      "file_path": "sklearn/mixture/bayesian_mixture.py",
+      "start_line": 412,
+      "end_line": 451,
+      "tokens": 419,
+      "context_length": 18086
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/rfe.py_np_SelectorMixin",
+      "distance": 1.335062026977539,
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "start_line": 9,
+      "end_line": 21,
+      "tokens": 119,
+      "context_length": 18205
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/base.py__check_X__check_X.5.1",
+      "distance": 1.3351123332977295,
+      "file_path": "sklearn/mixture/base.py",
+      "start_line": 41,
+      "end_line": 64,
+      "tokens": 208,
+      "context_length": 18413
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/variance_threshold.py_np_VarianceThreshold.__init__.self.threshold.1",
+      "distance": 1.3364133834838867,
+      "file_path": "sklearn/feature_selection/variance_threshold.py",
+      "start_line": 4,
+      "end_line": 46,
+      "tokens": 331,
+      "context_length": 18744
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/fastica_.py_20__cube.1.1",
+      "distance": 1.3365797996520996,
+      "file_path": "sklearn/decomposition/fastica_.py",
+      "start_line": 124,
+      "end_line": 146,
+      "tokens": 228,
+      "context_length": 18972
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLars.method__check_copy_and_writeable.2.1",
+      "distance": 1.3369150161743164,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 839,
+      "end_line": 863,
+      "tokens": 183,
+      "context_length": 19155
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_kmeans_assumptions.py_1_",
+      "distance": 1.3373863697052002,
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 511,
+      "context_length": 19666
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train_check_classifiers_train.7.22.y_prob.8.y_log_prob.3",
+      "distance": 1.3382775783538818,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1253,
+      "end_line": 1360,
+      "tokens": 1123,
+      "context_length": 20789
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/doc/conf.py_1_79",
+      "distance": 1.3386321067810059,
+      "file_path": "doc/conf.py",
+      "start_line": 1,
+      "end_line": 113,
+      "tokens": 843,
+      "context_length": 21632
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/covariance/robust_covariance.py_fast_mcd.12_fast_mcd.13.1",
+      "distance": 1.338953971862793,
+      "file_path": "sklearn/covariance/robust_covariance.py",
+      "start_line": 409,
+      "end_line": 505,
+      "tokens": 1054,
+      "context_length": 22686
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.3436837196350098,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 727,
+      "end_line": 758,
+      "tokens": 297,
+      "context_length": 22983
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_split.py__validate_shuffle_split__validate_shuffle_split.9.1",
+      "distance": 1.3445597887039185,
+      "file_path": "sklearn/model_selection/_split.py",
+      "start_line": 1671,
+      "end_line": 1712,
+      "tokens": 373,
+      "context_length": 23356
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/gaussian_mixture.py__check_precisions__check_precisions.7.1",
+      "distance": 1.3456907272338867,
+      "file_path": "sklearn/mixture/gaussian_mixture.py",
+      "start_line": 98,
+      "end_line": 137,
+      "tokens": 318,
+      "context_length": 23674
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_1__norm.2.1",
+      "distance": 1.3476316928863525,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 298,
+      "context_length": 23972
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y_check_X_y.1",
+      "distance": 1.3478639125823975,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 512,
+      "end_line": 603,
+      "tokens": 883,
+      "context_length": 24855,
+      "file_pos": 29
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/__init__.py_resample.11_resample.15.3.1.1",
+      "distance": 1.3525713682174683,
+      "file_path": "sklearn/utils/__init__.py",
+      "start_line": 260,
+      "end_line": 274,
+      "tokens": 152,
+      "context_length": 25007
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_scipy_sparse_lsqr_backport.py_lsqr.51_lsqr.51.92.1",
+      "distance": 1.3529517650604248,
+      "file_path": "sklearn/utils/_scipy_sparse_lsqr_backport.py",
+      "start_line": 349,
+      "end_line": 491,
+      "tokens": 1496,
+      "context_length": 26503
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/mixture/bayesian_mixture.py_BayesianGaussianMixture._check_parameters_BayesianGaussianMixture._check_parameters.7",
+      "distance": 1.3531492948532104,
+      "file_path": "sklearn/mixture/bayesian_mixture.py",
+      "start_line": 330,
+      "end_line": 354,
+      "tokens": 236,
+      "context_length": 26739
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_split.py_train_test_split.n_arrays_train_test_split.14.1",
+      "distance": 1.35430908203125,
+      "file_path": "sklearn/model_selection/_split.py",
+      "start_line": 2008,
+      "end_line": 2059,
+      "tokens": 393,
+      "context_length": 27132
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dict_unchanged_is_public_parameter.1.1",
+      "distance": 1.3556783199310303,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 527,
+      "end_line": 568,
+      "tokens": 334,
+      "context_length": 27466
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit1d_check_fit1d.rnd.9",
+      "distance": 1.3563828468322754,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 761,
+      "end_line": 776,
+      "tokens": 139,
+      "context_length": 27605
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGD._validate_params_BaseSGD._validate_params.self._max_iter.1",
+      "distance": 1.3583624362945557,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 85,
+      "end_line": 136,
+      "tokens": 595,
+      "context_length": 28200
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 1,
+      "tokens": 6731,
+      "context_length": 6731
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 2,
+      "tokens": 17917,
+      "context_length": 24648
+    },
+    {
+      "file_path": "sklearn/utils/testing.py",
+      "position": 3,
+      "tokens": 6788,
+      "context_length": 31436
+    },
+    {
+      "file_path": "sklearn/utils/fixes.py",
+      "position": 4,
+      "tokens": 2396,
+      "context_length": 33832
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 5,
+      "tokens": 2980,
+      "context_length": 36812
+    },
+    {
+      "file_path": "sklearn/feature_selection/univariate_selection.py",
+      "position": 6,
+      "tokens": 6103,
+      "context_length": 42915
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 7,
+      "tokens": 25894,
+      "context_length": 68809
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 8,
+      "tokens": 3102,
+      "context_length": 71911
+    },
+    {
+      "file_path": "sklearn/externals/joblib/numpy_pickle.py",
+      "position": 9,
+      "tokens": 4851,
+      "context_length": 76762
+    },
+    {
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "position": 10,
+      "tokens": 4384,
+      "context_length": 81146
+    },
+    {
+      "file_path": "sklearn/decomposition/nmf.py",
+      "position": 11,
+      "tokens": 11681,
+      "context_length": 92827
+    },
+    {
+      "file_path": "conftest.py",
+      "position": 12,
+      "tokens": 134,
+      "context_length": 92961
+    },
+    {
+      "file_path": "sklearn/mixture/gaussian_mixture.py",
+      "position": 13,
+      "tokens": 6248,
+      "context_length": 99209
+    },
+    {
+      "file_path": "sklearn/utils/mocking.py",
+      "position": 14,
+      "tokens": 628,
+      "context_length": 99837
+    },
+    {
+      "file_path": "sklearn/preprocessing/label.py",
+      "position": 15,
+      "tokens": 6520,
+      "context_length": 106357
+    },
+    {
+      "file_path": "sklearn/random_projection.py",
+      "position": 16,
+      "tokens": 4973,
+      "context_length": 111330
+    },
+    {
+      "file_path": "sklearn/decomposition/fastica_.py",
+      "position": 17,
+      "tokens": 4700,
+      "context_length": 116030
+    },
+    {
+      "file_path": "sklearn/utils/multiclass.py",
+      "position": 18,
+      "tokens": 3866,
+      "context_length": 119896
+    },
+    {
+      "file_path": "sklearn/utils/extmath.py",
+      "position": 19,
+      "tokens": 6236,
+      "context_length": 126132
+    },
+    {
+      "file_path": "sklearn/mixture/bayesian_mixture.py",
+      "position": 20,
+      "tokens": 7259,
+      "context_length": 133391
+    },
+    {
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "position": 21,
+      "tokens": 3989,
+      "context_length": 137380
+    },
+    {
+      "file_path": "sklearn/mixture/base.py",
+      "position": 22,
+      "tokens": 3565,
+      "context_length": 140945
+    },
+    {
+      "file_path": "sklearn/feature_selection/variance_threshold.py",
+      "position": 23,
+      "tokens": 595,
+      "context_length": 141540
+    },
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 24,
+      "tokens": 13807,
+      "context_length": 155347
+    },
+    {
+      "file_path": "examples/cluster/plot_kmeans_assumptions.py",
+      "position": 25,
+      "tokens": 533,
+      "context_length": 155880
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 26,
+      "tokens": 2411,
+      "context_length": 158291
+    },
+    {
+      "file_path": "sklearn/covariance/robust_covariance.py",
+      "position": 27,
+      "tokens": 6859,
+      "context_length": 165150
+    },
+    {
+      "file_path": "sklearn/model_selection/_split.py",
+      "position": 28,
+      "tokens": 18001,
+      "context_length": 183151
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 29,
+      "tokens": 3913,
+      "context_length": 187064
+    },
+    {
+      "file_path": "sklearn/utils/__init__.py",
+      "position": 30,
+      "tokens": 3835,
+      "context_length": 190899
+    },
+    {
+      "file_path": "sklearn/utils/_scipy_sparse_lsqr_backport.py",
+      "position": 31,
+      "tokens": 5159,
+      "context_length": 196058
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 32,
+      "tokens": 12141,
+      "context_length": 208199
+    }
+  ]
+}

@@ -1,0 +1,1328 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-15084",
+  "model_patch": "diff --git a/sklearn/ensemble/voting.py b/sklearn/ensemble/voting.py\nindex 9189600cf..dbbb72b26 100644\n--- a/sklearn/ensemble/voting.py\n+++ b/sklearn/ensemble/voting.py\n@@ -291,7 +291,7 @@ class VotingClassifier(ClassifierMixin, _BaseVoting):\n             maj = np.argmax(self.predict_proba(X), axis=1)\n \n         else:  # 'hard' voting\n-            predictions = self._predict(X)\n+            predictions = self._predict(X).astype(int)\n             maj = np.apply_along_axis(\n                 lambda x: np.argmax(\n                     np.bincount(x, weights=self._weights_not_none)),\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/ensemble/voting.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "5e4b2757d61563889672e395d9e92d9372d357f6",
+  "patch": "diff --git a/sklearn/ensemble/_stacking.py b/sklearn/ensemble/_stacking.py\n--- a/sklearn/ensemble/_stacking.py\n+++ b/sklearn/ensemble/_stacking.py\n@@ -15,6 +15,7 @@\n from ..base import MetaEstimatorMixin\n \n from .base import _parallel_fit_estimator\n+from .base import _BaseHeterogeneousEnsemble\n \n from ..linear_model import LogisticRegression\n from ..linear_model import RidgeCV\n@@ -32,80 +33,26 @@\n from ..utils.validation import column_or_1d\n \n \n-class _BaseStacking(TransformerMixin, MetaEstimatorMixin, _BaseComposition,\n+class _BaseStacking(TransformerMixin, _BaseHeterogeneousEnsemble,\n                     metaclass=ABCMeta):\n     \"\"\"Base class for stacking method.\"\"\"\n-    _required_parameters = ['estimators']\n \n     @abstractmethod\n     def __init__(self, estimators, final_estimator=None, cv=None,\n                  stack_method='auto', n_jobs=None, verbose=0):\n-        self.estimators = estimators\n+        super().__init__(estimators=estimators)\n         self.final_estimator = final_estimator\n         self.cv = cv\n         self.stack_method = stack_method\n         self.n_jobs = n_jobs\n         self.verbose = verbose\n \n-    @abstractmethod\n-    def _validate_estimators(self):\n-        if self.estimators is None or len(self.estimators) == 0:\n-            raise ValueError(\n-                \"Invalid 'estimators' attribute, 'estimators' should be a list\"\n-                \" of (string, estimator) tuples.\"\n-            )\n-        names, estimators = zip(*self.estimators)\n-        self._validate_names(names)\n-        return names, estimators\n-\n     def _clone_final_estimator(self, default):\n         if self.final_estimator is not None:\n             self.final_estimator_ = clone(self.final_estimator)\n         else:\n             self.final_estimator_ = clone(default)\n \n-    def set_params(self, **params):\n-        \"\"\"Set the parameters for the stacking estimator.\n-\n-        Valid parameter keys can be listed with `get_params()`.\n-\n-        Parameters\n-        ----------\n-        params : keyword arguments\n-            Specific parameters using e.g.\n-            `set_params(parameter_name=new_value)`. In addition, to setting the\n-            parameters of the stacking estimator, the individual estimator of\n-            the stacking estimators can also be set, or can be removed by\n-            setting them to 'drop'.\n-\n-        Examples\n-        --------\n-        In this example, the RandomForestClassifier is removed.\n-\n-        >>> from sklearn.linear_model import LogisticRegression\n-        >>> from sklearn.ensemble import RandomForestClassifier\n-        >>> from sklearn.ensemble import VotingClassifier\n-        >>> clf1 = LogisticRegression()\n-        >>> clf2 = RandomForestClassifier()\n-        >>> eclf = StackingClassifier(estimators=[('lr', clf1), ('rf', clf2)])\n-        >>> eclf.set_params(rf='drop')\n-        StackingClassifier(estimators=[('lr', LogisticRegression()),\n-                                        ('rf', 'drop')])\n-        \"\"\"\n-        super()._set_params('estimators', **params)\n-        return self\n-\n-    def get_params(self, deep=True):\n-        \"\"\"Get the parameters of the stacking estimator.\n-\n-        Parameters\n-        ----------\n-        deep : bool\n-            Setting it to True gets the various classifiers and the parameters\n-            of the classifiers as well.\n-        \"\"\"\n-        return super()._get_params('estimators', deep=deep)\n-\n     def _concatenate_predictions(self, predictions):\n         \"\"\"Concatenate the predictions of each first layer learner.\n \n@@ -172,13 +119,6 @@ def fit(self, X, y, sample_weight=None):\n         names, all_estimators = self._validate_estimators()\n         self._validate_final_estimator()\n \n-        has_estimator = any(est != 'drop' for est in all_estimators)\n-        if not has_estimator:\n-            raise ValueError(\n-                \"All estimators are dropped. At least one is required \"\n-                \"to be an estimator.\"\n-            )\n-\n         stack_method = [self.stack_method] * len(all_estimators)\n \n         # Fit the base estimators on the whole training data. Those\n@@ -416,16 +356,6 @@ def __init__(self, estimators, final_estimator=None, cv=None,\n             verbose=verbose\n         )\n \n-    def _validate_estimators(self):\n-        names, estimators = super()._validate_estimators()\n-        for est in estimators:\n-            if est != 'drop' and not is_classifier(est):\n-                raise ValueError(\n-                    \"The estimator {} should be a classifier.\"\n-                    .format(est.__class__.__name__)\n-                )\n-        return names, estimators\n-\n     def _validate_final_estimator(self):\n         self._clone_final_estimator(default=LogisticRegression())\n         if not is_classifier(self.final_estimator_):\n@@ -651,16 +581,6 @@ def __init__(self, estimators, final_estimator=None, cv=None, n_jobs=None,\n             verbose=verbose\n         )\n \n-    def _validate_estimators(self):\n-        names, estimators = super()._validate_estimators()\n-        for est in estimators:\n-            if est != 'drop' and not is_regressor(est):\n-                raise ValueError(\n-                    \"The estimator {} should be a regressor.\"\n-                    .format(est.__class__.__name__)\n-                )\n-        return names, estimators\n-\n     def _validate_final_estimator(self):\n         self._clone_final_estimator(default=RidgeCV())\n         if not is_regressor(self.final_estimator_):\ndiff --git a/sklearn/ensemble/base.py b/sklearn/ensemble/base.py\n--- a/sklearn/ensemble/base.py\n+++ b/sklearn/ensemble/base.py\n@@ -5,16 +5,20 @@\n # Authors: Gilles Louppe\n # License: BSD 3 clause\n \n-import numpy as np\n+from abc import ABCMeta, abstractmethod\n import numbers\n \n+import numpy as np\n+\n from joblib import effective_n_jobs\n \n from ..base import clone\n+from ..base import is_classifier, is_regressor\n from ..base import BaseEstimator\n from ..base import MetaEstimatorMixin\n+from ..utils import Bunch\n from ..utils import check_random_state\n-from abc import ABCMeta, abstractmethod\n+from ..utils.metaestimators import _BaseComposition\n \n MAX_RAND_SEED = np.iinfo(np.int32).max\n \n@@ -178,3 +182,92 @@ def _partition_estimators(n_estimators, n_jobs):\n     starts = np.cumsum(n_estimators_per_job)\n \n     return n_jobs, n_estimators_per_job.tolist(), [0] + starts.tolist()\n+\n+\n+class _BaseHeterogeneousEnsemble(MetaEstimatorMixin, _BaseComposition,\n+                                 metaclass=ABCMeta):\n+    \"\"\"Base class for heterogeneous ensemble of learners.\n+\n+    Parameters\n+    ----------\n+    estimators : list of (str, estimator) tuples\n+        The ensemble of estimators to use in the ensemble. Each element of the\n+        list is defined as a tuple of string (i.e. name of the estimator) and\n+        an estimator instance. An estimator can be set to `'drop'` using\n+        `set_params`.\n+\n+    Attributes\n+    ----------\n+    estimators_ : list of estimators\n+        The elements of the estimators parameter, having been fitted on the\n+        training data. If an estimator has been set to `'drop'`, it will not\n+        appear in `estimators_`.\n+    \"\"\"\n+    _required_parameters = ['estimators']\n+\n+    @property\n+    def named_estimators(self):\n+        return Bunch(**dict(self.estimators))\n+\n+    @abstractmethod\n+    def __init__(self, estimators):\n+        self.estimators = estimators\n+\n+    def _validate_estimators(self):\n+        if self.estimators is None or len(self.estimators) == 0:\n+            raise ValueError(\n+                \"Invalid 'estimators' attribute, 'estimators' should be a list\"\n+                \" of (string, estimator) tuples.\"\n+            )\n+        names, estimators = zip(*self.estimators)\n+        # defined by MetaEstimatorMixin\n+        self._validate_names(names)\n+\n+        has_estimator = any(est not in (None, 'drop') for est in estimators)\n+        if not has_estimator:\n+            raise ValueError(\n+                \"All estimators are dropped. At least one is required \"\n+                \"to be an estimator.\"\n+            )\n+\n+        is_estimator_type = (is_classifier if is_classifier(self)\n+                             else is_regressor)\n+\n+        for est in estimators:\n+            if est not in (None, 'drop') and not is_estimator_type(est):\n+                raise ValueError(\n+                    \"The estimator {} should be a {}.\"\n+                    .format(\n+                        est.__class__.__name__, is_estimator_type.__name__[3:]\n+                    )\n+                )\n+\n+        return names, estimators\n+\n+    def set_params(self, **params):\n+        \"\"\"Set the parameters of an estimator from the ensemble.\n+\n+        Valid parameter keys can be listed with `get_params()`.\n+\n+        Parameters\n+        ----------\n+        **params : keyword arguments\n+            Specific parameters using e.g.\n+            `set_params(parameter_name=new_value)`. In addition, to setting the\n+            parameters of the stacking estimator, the individual estimator of\n+            the stacking estimators can also be set, or can be removed by\n+            setting them to 'drop'.\n+        \"\"\"\n+        super()._set_params('estimators', **params)\n+        return self\n+\n+    def get_params(self, deep=True):\n+        \"\"\"Get the parameters of an estimator from the ensemble.\n+\n+        Parameters\n+        ----------\n+        deep : bool\n+            Setting it to True gets the various classifiers and the parameters\n+            of the classifiers as well.\n+        \"\"\"\n+        return super()._get_params('estimators', deep=deep)\ndiff --git a/sklearn/ensemble/voting.py b/sklearn/ensemble/voting.py\n--- a/sklearn/ensemble/voting.py\n+++ b/sklearn/ensemble/voting.py\n@@ -24,25 +24,20 @@\n from ..base import TransformerMixin\n from ..base import clone\n from .base import _parallel_fit_estimator\n+from .base import _BaseHeterogeneousEnsemble\n from ..preprocessing import LabelEncoder\n from ..utils import Bunch\n from ..utils.validation import check_is_fitted\n-from ..utils.metaestimators import _BaseComposition\n from ..utils.multiclass import check_classification_targets\n from ..utils.validation import column_or_1d\n \n \n-class _BaseVoting(TransformerMixin, _BaseComposition):\n+class _BaseVoting(TransformerMixin, _BaseHeterogeneousEnsemble):\n     \"\"\"Base class for voting.\n \n     Warning: This class should not be used directly. Use derived classes\n     instead.\n     \"\"\"\n-    _required_parameters = ['estimators']\n-\n-    @property\n-    def named_estimators(self):\n-        return Bunch(**dict(self.estimators))\n \n     @property\n     def _weights_not_none(self):\n@@ -61,10 +56,7 @@ def fit(self, X, y, sample_weight=None):\n         \"\"\"\n         common fit operations.\n         \"\"\"\n-        if self.estimators is None or len(self.estimators) == 0:\n-            raise AttributeError('Invalid `estimators` attribute, `estimators`'\n-                                 ' should be a list of (string, estimator)'\n-                                 ' tuples')\n+        names, clfs = self._validate_estimators()\n \n         if (self.weights is not None and\n                 len(self.weights) != len(self.estimators)):\n@@ -72,17 +64,6 @@ def fit(self, X, y, sample_weight=None):\n                              '; got %d weights, %d estimators'\n                              % (len(self.weights), len(self.estimators)))\n \n-        names, clfs = zip(*self.estimators)\n-        self._validate_names(names)\n-\n-        n_isnone = np.sum(\n-            [clf in (None, 'drop') for _, clf in self.estimators]\n-        )\n-        if n_isnone == len(self.estimators):\n-            raise ValueError(\n-                'All estimators are None or \"drop\". At least one is required!'\n-            )\n-\n         self.estimators_ = Parallel(n_jobs=self.n_jobs)(\n                 delayed(_parallel_fit_estimator)(clone(clf), X, y,\n                                                  sample_weight=sample_weight)\n@@ -94,46 +75,6 @@ def fit(self, X, y, sample_weight=None):\n             self.named_estimators_[k[0]] = e\n         return self\n \n-    def set_params(self, **params):\n-        \"\"\" Setting the parameters for the ensemble estimator\n-\n-        Valid parameter keys can be listed with get_params().\n-\n-        Parameters\n-        ----------\n-        **params : keyword arguments\n-            Specific parameters using e.g. set_params(parameter_name=new_value)\n-            In addition, to setting the parameters of the ensemble estimator,\n-            the individual estimators of the ensemble estimator can also be\n-            set or replaced by setting them to None.\n-\n-        Examples\n-        --------\n-        In this example, the RandomForestClassifier is removed.\n-\n-        >>> from sklearn.linear_model import LogisticRegression\n-        >>> from sklearn.ensemble import RandomForestClassifier\n-        >>> from sklearn.ensemble import VotingClassifier\n-        >>> clf1 = LogisticRegression()\n-        >>> clf2 = RandomForestClassifier()\n-        >>> eclf = VotingClassifier(estimators=[('lr', clf1), ('rf', clf2)])\n-        >>> eclf.set_params(rf=None)\n-        VotingClassifier(estimators=[('lr', LogisticRegression()),\n-                                     ('rf', None)])\n-        \"\"\"\n-        return self._set_params('estimators', **params)\n-\n-    def get_params(self, deep=True):\n-        \"\"\" Get the parameters of the ensemble estimator\n-\n-        Parameters\n-        ----------\n-        deep : bool\n-            Setting it to True gets the various estimators and the parameters\n-            of the estimators as well\n-        \"\"\"\n-        return self._get_params('estimators', deep=deep)\n-\n \n class VotingClassifier(ClassifierMixin, _BaseVoting):\n     \"\"\"Soft Voting/Majority Rule classifier for unfitted estimators.\n@@ -230,7 +171,7 @@ class VotingClassifier(ClassifierMixin, _BaseVoting):\n \n     def __init__(self, estimators, voting='hard', weights=None, n_jobs=None,\n                  flatten_transform=True):\n-        self.estimators = estimators\n+        super().__init__(estimators=estimators)\n         self.voting = voting\n         self.weights = weights\n         self.n_jobs = n_jobs\n@@ -423,7 +364,7 @@ class VotingRegressor(RegressorMixin, _BaseVoting):\n     \"\"\"\n \n     def __init__(self, estimators, weights=None, n_jobs=None):\n-        self.estimators = estimators\n+        super().__init__(estimators=estimators)\n         self.weights = weights\n         self.n_jobs = n_jobs\n \n",
+  "test_patch": "diff --git a/sklearn/ensemble/tests/test_voting.py b/sklearn/ensemble/tests/test_voting.py\n--- a/sklearn/ensemble/tests/test_voting.py\n+++ b/sklearn/ensemble/tests/test_voting.py\n@@ -37,9 +37,9 @@\n \n def test_estimator_init():\n     eclf = VotingClassifier(estimators=[])\n-    msg = ('Invalid `estimators` attribute, `estimators` should be'\n-           ' a list of (string, estimator) tuples')\n-    assert_raise_message(AttributeError, msg, eclf.fit, X, y)\n+    msg = (\"Invalid 'estimators' attribute, 'estimators' should be\"\n+           \" a list of (string, estimator) tuples.\")\n+    assert_raise_message(ValueError, msg, eclf.fit, X, y)\n \n     clf = LogisticRegression(random_state=1)\n \n@@ -417,7 +417,7 @@ def test_set_estimator_none(drop):\n     eclf2.set_params(voting='soft').fit(X, y)\n     assert_array_equal(eclf1.predict(X), eclf2.predict(X))\n     assert_array_almost_equal(eclf1.predict_proba(X), eclf2.predict_proba(X))\n-    msg = 'All estimators are None or \"drop\". At least one is required!'\n+    msg = 'All estimators are dropped. At least one is required'\n     assert_raise_message(\n         ValueError, msg, eclf2.set_params(lr=drop, rf=drop, nb=drop).fit, X, y)\n \n",
+  "problem_statement": "VotingClassifier and roc_auc TypeError: Cannot cast array data from dtype('float64') to dtype('int64') according to the rule 'safe' and\n#### Description\r\nVotingClassifier\r\nTypeError: Cannot cast array data from dtype('float64') to dtype('int64') according to the rule 'safe'\r\n\r\n#### Steps/Code to Reproduce\r\n```python\r\nfrom sklearn.model_selection import train_test_split\r\nfrom sklearn.preprocessing import StandardScaler, Normalizer\r\nfrom sklearn.pipeline import Pipeline\r\nfrom sklearn.impute import SimpleImputer\r\nfrom sklearn.ensemble import VotingClassifier\r\nfrom sklearn.linear_model import LinearRegression\r\nfrom sklearn.linear_model import Ridge\r\nfrom sklearn.linear_model import LogisticRegression\r\nfrom sklearn.metrics import roc_auc_score\r\n\r\npipePre = Pipeline([\r\n    ('simpleimputer', SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0)),\r\n    ('standardscaler', StandardScaler()),\r\n    ('normalizer', Normalizer())\r\n     ])\r\n\r\ndf_train_x = pipePre.fit_transform(df_train_x)\r\n\r\nX_train, X_test, y_train, y_test = train_test_split(df_train_x, df_train_y, test_size = 0.25, random_state=42)\r\n\r\nlrg = LinearRegression().fit(X_train, y_train)\r\n\r\nrig = Ridge().fit(X_train, y_train)\r\n\r\nlreg = LogisticRegression().fit(X_train, y_train)\r\n\r\nvoting = VotingClassifier(estimators=[('lrg_v', lrg), ('rig_v', rig), \r\n                                      ('lreg_v', lreg)], voting='hard')\r\nvoting_fit = voting.fit(X_train, y_train)\r\n\r\ny_pred = voting_fit.predict(X_test)\r\nroc_auc_score(y_test, y_pred)\r\n\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\n<ipython-input-50-506a80086b81> in <module>\r\n----> 1 val_error(voting_fit, X_test, y_test)\r\n\r\n<ipython-input-6-0fa46ec754f8> in val_error(model, tested, prediction)\r\n     14         Data, prepaired as tested labels\r\n     15     \"\"\"\r\n---> 16     y_pred = model.predict(tested)\r\n     17     err = roc_auc_score(prediction, y_pred)\r\n     18     return err\r\n\r\n~\\Anaconda3\\lib\\site-packages\\sklearn\\ensemble\\voting.py in predict(self, X)\r\n    302                 lambda x: np.argmax(\r\n    303                     np.bincount(x, weights=self._weights_not_none)),\r\n--> 304                 axis=1, arr=predictions)\r\n    305 \r\n    306         maj = self.le_.inverse_transform(maj)\r\n\r\n~\\Anaconda3\\lib\\site-packages\\numpy\\lib\\shape_base.py in apply_along_axis(func1d, axis, arr, *args, **kwargs)\r\n    378     except StopIteration:\r\n    379         raise ValueError('Cannot apply_along_axis when any iteration dimensions are 0')\r\n--> 380     res = asanyarray(func1d(inarr_view[ind0], *args, **kwargs))\r\n    381 \r\n    382     # build a buffer for storing evaluations of func1d.\r\n\r\n~\\Anaconda3\\lib\\site-packages\\sklearn\\ensemble\\voting.py in <lambda>(x)\r\n    301             maj = np.apply_along_axis(\r\n    302                 lambda x: np.argmax(\r\n--> 303                     np.bincount(x, weights=self._weights_not_none)),\r\n    304                 axis=1, arr=predictions)\r\n    305 \r\n\r\nTypeError: Cannot cast array data from dtype('float64') to dtype('int64') according to the rule 'safe'\r\n\r\n```\r\n\r\nscikit-learn  0.21.2  anaconda\r\n\r\n\r\n<!-- Thanks for contributing! -->\r\n\n",
+  "hints_text": "`Ridge` and `LinearRegression` are not classifiers, which makes them incompatible with `VotingClassifier`.\n> Ridge and LinearRegression are not classifiers, which makes them incompatible with VotingClassifier.\r\n\r\n+1 though maybe we should return a better error message.\nShall we check the base estimators with `sklearn.base.is_classifier` in the `VotingClassifier.__init__` or `fit` and raise a `ValueError`? \n> Shall we check the base estimators with sklearn.base.is_classifier in the VotingClassifier.__init__ or fit and raise a ValueError?\r\n\r\nWe have something similar for the StackingClassifier and StackingRegressor.\r\n\r\nActually, these 2 classes shared something in common by having `estimators` parameters. In some way they are an ensemble of \"heterogeneous\" estimators (i.e. multiple estimators) while bagging, RF, GBDT is an ensemble of \"homogeneous\" estimator (i.e. single \"base_estimator\").\r\n\r\nWe could have a separate base class for each type. Not sure about the naming but it will reduce code redundancy and make checking easier and consistent.",
+  "created_at": "2019-09-24T17:25:41Z",
+  "version": "0.22",
+  "FAIL_TO_PASS": "[\"sklearn/ensemble/tests/test_voting.py::test_estimator_init\", \"sklearn/ensemble/tests/test_voting.py::test_set_estimator_none[None]\", \"sklearn/ensemble/tests/test_voting.py::test_set_estimator_none[drop]\"]",
+  "PASS_TO_PASS": "[\"sklearn/ensemble/tests/test_voting.py::test_check_estimators_voting_estimator[VotingClassifier]\", \"sklearn/ensemble/tests/test_voting.py::test_check_estimators_voting_estimator[VotingRegressor]\", \"sklearn/ensemble/tests/test_voting.py::test_estimator_weights_format\", \"sklearn/ensemble/tests/test_voting.py::test_gridsearch\", \"sklearn/ensemble/tests/test_voting.py::test_majority_label_iris\", \"sklearn/ensemble/tests/test_voting.py::test_multilabel\", \"sklearn/ensemble/tests/test_voting.py::test_none_estimator_with_weights[None-X0-y0-voter0]\", \"sklearn/ensemble/tests/test_voting.py::test_none_estimator_with_weights[None-X1-y1-voter1]\", \"sklearn/ensemble/tests/test_voting.py::test_none_estimator_with_weights[drop-X0-y0-voter0]\", \"sklearn/ensemble/tests/test_voting.py::test_none_estimator_with_weights[drop-X1-y1-voter1]\", \"sklearn/ensemble/tests/test_voting.py::test_notfitted\", \"sklearn/ensemble/tests/test_voting.py::test_parallel_fit\", \"sklearn/ensemble/tests/test_voting.py::test_predict_on_toy_problem\", \"sklearn/ensemble/tests/test_voting.py::test_predict_proba_on_toy_problem\", \"sklearn/ensemble/tests/test_voting.py::test_predictproba_hardvoting\", \"sklearn/ensemble/tests/test_voting.py::test_sample_weight\", \"sklearn/ensemble/tests/test_voting.py::test_sample_weight_kwargs\", \"sklearn/ensemble/tests/test_voting.py::test_set_params\", \"sklearn/ensemble/tests/test_voting.py::test_tie_situation\", \"sklearn/ensemble/tests/test_voting.py::test_transform\", \"sklearn/ensemble/tests/test_voting.py::test_weights_iris\", \"sklearn/ensemble/tests/test_voting.py::test_weights_regressor\"]",
+  "environment_setup_commit": "7e85a6d1f038bbb932b36f18d75df6be937ed00d",
+  "patch_files": [
+    "sklearn/ensemble/_stacking.py",
+    "sklearn/ensemble/base.py",
+    "sklearn/ensemble/voting.py"
+  ],
+  "test_patch_files": [
+    "sklearn/ensemble/tests/test_voting.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/ensemble/_stacking.py": {
+      "diffs": [
+        {
+          "start_line_old": 18,
+          "end_line_old": 18
+        },
+        {
+          "start_line_old": 35,
+          "end_line_old": 108
+        },
+        {
+          "start_line_old": 175,
+          "end_line_old": 181
+        },
+        {
+          "start_line_old": 419,
+          "end_line_old": 428
+        },
+        {
+          "start_line_old": 654,
+          "end_line_old": 663
+        }
+      ]
+    },
+    "sklearn/ensemble/base.py": {
+      "diffs": [
+        {
+          "start_line_old": 8,
+          "end_line_old": 17
+        },
+        {
+          "start_line_old": 181,
+          "end_line_old": 181
+        }
+      ]
+    },
+    "sklearn/ensemble/voting.py": {
+      "diffs": [
+        {
+          "start_line_old": 27,
+          "end_line_old": 42,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py__BaseVoting.fit__BaseVoting.fit.11.1",
+          "closest_snippet_line_distance": 32
+        },
+        {
+          "start_line_old": 64,
+          "end_line_old": 67,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_1_column_or_1d",
+          "closest_snippet_line_distance": 35,
+          "pos": 69,
+          "context_length": 37923
+        },
+        {
+          "start_line_old": 75,
+          "end_line_old": 85,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_1_column_or_1d",
+          "closest_snippet_line_distance": 53,
+          "pos": 69,
+          "context_length": 37923
+        },
+        {
+          "start_line_old": 97,
+          "end_line_old": 136,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py__BaseVoting.fit__BaseVoting.fit.11.1",
+          "closest_snippet_line_distance": 38
+        },
+        {
+          "start_line_old": 233,
+          "end_line_old": 233,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "pos": 3,
+          "context_length": 1180
+        },
+        {
+          "start_line_old": 426,
+          "end_line_old": 426,
+          "file_pos": 3,
+          "file_context_length": 5521,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingClassifier.__init___VotingClassifier.fit.8.1",
+          "closest_snippet_line_distance": 153,
+          "pos": 9,
+          "context_length": 4802
+        }
+      ]
+    }
+  },
+  "vectors": 3118,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_31_",
+      "distance": 0.8339065313339233,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 82,
+      "end_line": 134,
+      "tokens": 457,
+      "context_length": 457
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_voting_regressor.py_1_",
+      "distance": 0.8601990938186646,
+      "file_path": "examples/ensemble/plot_voting_regressor.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 374,
+      "context_length": 831
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingClassifier.__init___VotingClassifier.fit.8.1",
+      "distance": 0.8677797913551331,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 231,
+      "end_line": 273,
+      "tokens": 349,
+      "context_length": 1180,
+      "file_pos": 3
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_higgsboson.py_df_",
+      "distance": 0.8787344098091125,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "start_line": 59,
+      "end_line": 124,
+      "tokens": 700,
+      "context_length": 1880
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_roc_crossval.py_1_36",
+      "distance": 0.8798937797546387,
+      "file_path": "examples/model_selection/plot_roc_crossval.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 759,
+      "context_length": 2639
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/ranking.py_roc_auc_score.y_type_roc_auc_score.5.4.2.1",
+      "distance": 0.879974901676178,
+      "file_path": "sklearn/metrics/ranking.py",
+      "start_line": 347,
+      "end_line": 375,
+      "tokens": 366,
+      "context_length": 3005
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_predictions_check_classifiers_predictions.10",
+      "distance": 0.8844371438026428,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1988,
+      "end_line": 2029,
+      "tokens": 417,
+      "context_length": 3422
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_roc.py_1_42",
+      "distance": 0.8913335800170898,
+      "file_path": "examples/model_selection/plot_roc.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 769,
+      "context_length": 4191
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingRegressor_VotingRegressor.__init__.self.n_jobs.1",
+      "distance": 0.8926933407783508,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 368,
+      "end_line": 428,
+      "tokens": 611,
+      "context_length": 4802,
+      "file_pos": 8
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_voting_probas.py_1_",
+      "distance": 0.8952990770339966,
+      "file_path": "examples/ensemble/plot_voting_probas.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 809,
+      "context_length": 5611
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_1_classifiers.1",
+      "distance": 0.8967859745025635,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 775,
+      "context_length": 6386
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_roc.py_43_",
+      "distance": 0.8969992995262146,
+      "file_path": "examples/model_selection/plot_roc.py",
+      "start_line": 92,
+      "end_line": 173,
+      "tokens": 800,
+      "context_length": 7186
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_types_CROSS_DECOMPOSITION.1",
+      "distance": 0.8975479602813721,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 447,
+      "context_length": 7633
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_50_",
+      "distance": 0.9001476764678955,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 88,
+      "end_line": 121,
+      "tokens": 366,
+      "context_length": 7999
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingRegressor.fit_VotingRegressor.fit.3.1",
+      "distance": 0.9071986675262451,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 430,
+      "end_line": 452,
+      "tokens": 176,
+      "context_length": 8175,
+      "file_pos": 11
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train.12_check_classifiers_train.12.24.y_prob.7.y_log_prob.3",
+      "distance": 0.9076093435287476,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1712,
+      "end_line": 1811,
+      "tokens": 918,
+      "context_length": 9093
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_precision_recall.py_10_81",
+      "distance": 0.911684513092041,
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "start_line": 101,
+      "end_line": 205,
+      "tokens": 770,
+      "context_length": 9863
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingClassifier_VotingClassifier.1",
+      "distance": 0.9131584167480469,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 138,
+      "end_line": 229,
+      "tokens": 980,
+      "context_length": 10843,
+      "file_pos": 12
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingClassifier._collect_probas_VotingClassifier.predict_proba.3.1",
+      "distance": 0.9133282899856567,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 304,
+      "end_line": 332,
+      "tokens": 226,
+      "context_length": 11069,
+      "file_pos": 12
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_voting_decision_regions.py_1_",
+      "distance": 0.9145908951759338,
+      "file_path": "examples/ensemble/plot_voting_decision_regions.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 677,
+      "context_length": 11746
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/scorer.py_33_fowlkes_mallows_scorer.1",
+      "distance": 0.9163146018981934,
+      "file_path": "sklearn/metrics/scorer.py",
+      "start_line": 613,
+      "end_line": 680,
+      "tokens": 735,
+      "context_length": 12481
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_saga.py__predict_proba_exp.9.1",
+      "distance": 0.9175437092781067,
+      "file_path": "benchmarks/bench_saga.py",
+      "start_line": 107,
+      "end_line": 188,
+      "tokens": 632,
+      "context_length": 13113
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingClassifier.predict_VotingClassifier.predict.5.1",
+      "distance": 0.9178768992424011,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 275,
+      "end_line": 302,
+      "tokens": 180,
+      "context_length": 13293,
+      "file_pos": 15
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py_cross_val_predict.2_cross_val_predict.19.2.1.1",
+      "distance": 0.9206807017326355,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 723,
+      "end_line": 780,
+      "tokens": 592,
+      "context_length": 13885
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_lof.py_15_",
+      "distance": 0.9226887822151184,
+      "file_path": "benchmarks/bench_lof.py",
+      "start_line": 36,
+      "end_line": 107,
+      "tokens": 650,
+      "context_length": 14535
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/__init__.py_1_RocCurveDisplay",
+      "distance": 0.9271422028541565,
+      "file_path": "sklearn/metrics/__init__.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 631,
+      "context_length": 15166
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/ranking.py_roc_auc_score_roc_auc_score.1",
+      "distance": 0.9292175769805908,
+      "file_path": "sklearn/metrics/ranking.py",
+      "start_line": 246,
+      "end_line": 345,
+      "tokens": 966,
+      "context_length": 16132
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__fit_and_score.train_scores__fit_and_score.19.1",
+      "distance": 0.9360784292221069,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 495,
+      "end_line": 569,
+      "tokens": 699,
+      "context_length": 16831
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_29_",
+      "distance": 0.9370511770248413,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 74,
+      "end_line": 98,
+      "tokens": 285,
+      "context_length": 17116
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_30",
+      "distance": 0.940198540687561,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 754,
+      "context_length": 17870
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_16_",
+      "distance": 0.9436322450637817,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 78,
+      "end_line": 140,
+      "tokens": 524,
+      "context_length": 18394
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_grid_search_refit_callable.py_pipe_",
+      "distance": 0.9447614550590515,
+      "file_path": "examples/model_selection/plot_grid_search_refit_callable.py",
+      "start_line": 78,
+      "end_line": 117,
+      "tokens": 336,
+      "context_length": 18730
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_results_",
+      "distance": 0.9450153112411499,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 249,
+      "end_line": 329,
+      "tokens": 673,
+      "context_length": 19403
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_VotingRegressor.predict_",
+      "distance": 0.9477208852767944,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 454,
+      "end_line": 490,
+      "tokens": 225,
+      "context_length": 19628,
+      "file_pos": 22
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py_sys_",
+      "distance": 0.9484751224517822,
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 80,
+      "tokens": 633,
+      "context_length": 20261
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y.2_check_X_y.7.1",
+      "distance": 0.9501659274101257,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 724,
+      "end_line": 747,
+      "tokens": 276,
+      "context_length": 20537
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_stack_predictors.py_10_",
+      "distance": 0.9517682790756226,
+      "file_path": "examples/ensemble/plot_stack_predictors.py",
+      "start_line": 52,
+      "end_line": 124,
+      "tokens": 610,
+      "context_length": 21147
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 0.9586693048477173,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 769,
+      "context_length": 21916
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/rfe.py_np_SelectorMixin",
+      "distance": 0.9597470164299011,
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "start_line": 9,
+      "end_line": 23,
+      "tokens": 127,
+      "context_length": 22043
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifier_multioutput_check_classifier_multioutput.11.1.3",
+      "distance": 0.9611530303955078,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1501,
+      "end_line": 1556,
+      "tokens": 545,
+      "context_length": 22588
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_oob.py_1_37",
+      "distance": 0.9625322222709656,
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 793,
+      "context_length": 23381
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/scorer.py_SCORERS_",
+      "distance": 0.9625720977783203,
+      "file_path": "sklearn/metrics/scorer.py",
+      "start_line": 683,
+      "end_line": 721,
+      "tokens": 489,
+      "context_length": 23870
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/__init__.py___all___",
+      "distance": 0.9631565809249878,
+      "file_path": "sklearn/metrics/__init__.py",
+      "start_line": 84,
+      "end_line": 154,
+      "tokens": 466,
+      "context_length": 24336
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_29_",
+      "distance": 0.9636818170547485,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 94,
+      "end_line": 158,
+      "tokens": 513,
+      "context_length": 24849
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/__init__.py_BaseCrossValidator_",
+      "distance": 0.9651271104812622,
+      "file_path": "sklearn/model_selection/__init__.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 405,
+      "context_length": 25254
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py_1_column_or_1d",
+      "distance": 0.9652140736579895,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 155,
+      "context_length": 25409,
+      "file_pos": 30
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/ranking.py__multiclass_roc_auc_score__multiclass_roc_auc_score.9.7.2.1",
+      "distance": 0.9663872718811035,
+      "file_path": "sklearn/metrics/ranking.py",
+      "start_line": 378,
+      "end_line": 458,
+      "tokens": 729,
+      "context_length": 26138
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/regression.py_r2_score.2_r2_score.17.1",
+      "distance": 0.9677686095237732,
+      "file_path": "sklearn/metrics/regression.py",
+      "start_line": 546,
+      "end_line": 593,
+      "tokens": 476,
+      "context_length": 26614
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ols_ridge_variance.py_1_",
+      "distance": 0.9683018922805786,
+      "file_path": "examples/linear_model/plot_ols_ridge_variance.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 484,
+      "context_length": 27098
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/decomposition/plot_pca_vs_fa_model_selection.py_1_lw_score.1.1",
+      "distance": 0.9703139066696167,
+      "file_path": "examples/decomposition/plot_pca_vs_fa_model_selection.py",
+      "start_line": 1,
+      "end_line": 85,
+      "tokens": 641,
+      "context_length": 27739
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py_HistGradientBoostingRegressor._VALID_LOSSES_HistGradientBoostingClassifier",
+      "distance": 0.9707300662994385,
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "start_line": 776,
+      "end_line": 1057,
+      "tokens": 406,
+      "context_length": 28145
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_1_models.1",
+      "distance": 0.9711769223213196,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 494,
+      "context_length": 28639
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_117_check_classifiers_classes.21",
+      "distance": 0.9716632962226868,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2032,
+      "end_line": 2077,
+      "tokens": 493,
+      "context_length": 29132
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_1_31",
+      "distance": 0.972152829170227,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 784,
+      "context_length": 29916
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/ranking.py__multiclass_roc_auc_score.10__multiclass_roc_auc_score.10.5.y_true_multilabel.2.1",
+      "distance": 0.9727804064750671,
+      "file_path": "sklearn/metrics/ranking.py",
+      "start_line": 460,
+      "end_line": 475,
+      "tokens": 204,
+      "context_length": 30120
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_cv_predict.py_1_",
+      "distance": 0.9736230373382568,
+      "file_path": "examples/model_selection/plot_cv_predict.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 193,
+      "context_length": 30313
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_digits_pipe.py_1_",
+      "distance": 0.9740144610404968,
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 559,
+      "context_length": 30872
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py_sys_",
+      "distance": 0.9753344058990479,
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 64,
+      "tokens": 441,
+      "context_length": 31313
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 0.9757325649261475,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 142,
+      "end_line": 194,
+      "tokens": 532,
+      "context_length": 31845
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_train_check_outliers_train.33.expected_outliers.14.2",
+      "distance": 0.9766433238983154,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1834,
+      "end_line": 1906,
+      "tokens": 655,
+      "context_length": 32500
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/ranking.py_roc_curve.2_roc_curve.20.1",
+      "distance": 0.9767566323280334,
+      "file_path": "sklearn/metrics/ranking.py",
+      "start_line": 741,
+      "end_line": 784,
+      "tokens": 498,
+      "context_length": 32998
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/classification.py_RadiusNeighborsClassifier.fit_RadiusNeighborsClassifier.fit.8.1",
+      "distance": 0.9783440232276917,
+      "file_path": "sklearn/neighbors/classification.py",
+      "start_line": 391,
+      "end_line": 450,
+      "tokens": 530,
+      "context_length": 33528
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_isolation_forest.py_19_",
+      "distance": 0.9794944524765015,
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "start_line": 54,
+      "end_line": 160,
+      "tokens": 1025,
+      "context_length": 34553
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_regression_target_check_decision_proba_consistency.centers.5.7",
+      "distance": 0.9820905923843384,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2641,
+      "end_line": 2672,
+      "tokens": 340,
+      "context_length": 34893
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_compare_calibration.py_1_lr.1",
+      "distance": 0.983272910118103,
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 761,
+      "context_length": 35654
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_class_weight_classifiers_check_class_weight_classifiers.4.2",
+      "distance": 0.9833672046661377,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2179,
+      "end_line": 2228,
+      "tokens": 498,
+      "context_length": 36152
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/calibration.py_CalibratedClassifierCV.__init___CalibratedClassifierCV.fit.13.1",
+      "distance": 0.9857519865036011,
+      "file_path": "sklearn/calibration.py",
+      "start_line": 109,
+      "end_line": 201,
+      "tokens": 784,
+      "context_length": 36936
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_permutation_importance.py_61_",
+      "distance": 0.9861217737197876,
+      "file_path": "examples/inspection/plot_permutation_importance.py",
+      "start_line": 106,
+      "end_line": 179,
+      "tokens": 664,
+      "context_length": 37600
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/voting.py__BaseVoting.fit__BaseVoting.fit.11.1",
+      "distance": 0.9877302646636963,
+      "file_path": "sklearn/ensemble/voting.py",
+      "start_line": 59,
+      "end_line": 95,
+      "tokens": 323,
+      "context_length": 37923,
+      "file_pos": 45
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_46_",
+      "distance": 0.987773597240448,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 197,
+      "end_line": 239,
+      "tokens": 373,
+      "context_length": 38296
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/classification.py_classification_report.2_classification_report.15",
+      "distance": 0.9888224601745605,
+      "file_path": "sklearn/metrics/classification.py",
+      "start_line": 1845,
+      "end_line": 1904,
+      "tokens": 597,
+      "context_length": 38893
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_ridge_regression.py_31_kr_70.1",
+      "distance": 0.9891724586486816,
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "start_line": 80,
+      "end_line": 153,
+      "tokens": 738,
+      "context_length": 39631
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.sample_weight_RANSACRegressor.fit.31",
+      "distance": 0.989626407623291,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 327,
+      "end_line": 421,
+      "tokens": 797,
+      "context_length": 40428
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ransac.py_1_",
+      "distance": 0.9904030561447144,
+      "file_path": "examples/linear_model/plot_ransac.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 455,
+      "context_length": 40883
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py_OrthogonalMatchingPursuitCV.__init___",
+      "distance": 0.9912881255149841,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 856,
+      "end_line": 908,
+      "tokens": 508,
+      "context_length": 41391
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_saga.py_json_fit_single.16.1",
+      "distance": 0.991666316986084,
+      "file_path": "benchmarks/bench_saga.py",
+      "start_line": 6,
+      "end_line": 104,
+      "tokens": 835,
+      "context_length": 42226
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifier_data_not_an_array_check_regressor_data_not_an_array.4",
+      "distance": 0.9923074245452881,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2386,
+      "end_line": 2401,
+      "tokens": 266,
+      "context_length": 42492
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py_cross_validate.2_cross_validate.19.1",
+      "distance": 0.9945389032363892,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 220,
+      "end_line": 259,
+      "tokens": 405,
+      "context_length": 42897
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/tree.py_BaseDecisionTree._validate_X_predict_BaseDecisionTree._validate_X_predict.5.1",
+      "distance": 0.995418131351471,
+      "file_path": "sklearn/tree/tree.py",
+      "start_line": 376,
+      "end_line": 392,
+      "tokens": 181,
+      "context_length": 43078
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/classification.py_classification_report.16_classification_report.17.3.1.1",
+      "distance": 0.9963719844818115,
+      "file_path": "sklearn/metrics/classification.py",
+      "start_line": 1905,
+      "end_line": 1937,
+      "tokens": 316,
+      "context_length": 43394
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_compare_calibration.py_gnb_",
+      "distance": 0.9964703321456909,
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "start_line": 79,
+      "end_line": 123,
+      "tokens": 392,
+      "context_length": 43786
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_24_",
+      "distance": 0.9967131018638611,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 112,
+      "end_line": 190,
+      "tokens": 757,
+      "context_length": 44543
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/plot_anomaly_comparison.py_anomaly_algorithms_",
+      "distance": 0.9967215061187744,
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "start_line": 81,
+      "end_line": 152,
+      "tokens": 757,
+      "context_length": 45300
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train_check_classifiers_train.11.1",
+      "distance": 0.9972875118255615,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1690,
+      "end_line": 1710,
+      "tokens": 237,
+      "context_length": 45537
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_cv_indices.py_41_",
+      "distance": 0.9974647760391235,
+      "file_path": "examples/model_selection/plot_cv_indices.py",
+      "start_line": 105,
+      "end_line": 151,
+      "tokens": 388,
+      "context_length": 45925
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_rbf_parameters.py_np_59",
+      "distance": 0.9979427456855774,
+      "file_path": "examples/svm/plot_rbf_parameters.py",
+      "start_line": 74,
+      "end_line": 160,
+      "tokens": 732,
+      "context_length": 46657
+    }
+  ],
+  "files": [
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 1,
+      "tokens": 1219,
+      "context_length": 1219
+    },
+    {
+      "file_path": "examples/ensemble/plot_voting_regressor.py",
+      "position": 2,
+      "tokens": 374,
+      "context_length": 1593
+    },
+    {
+      "file_path": "sklearn/ensemble/voting.py",
+      "position": 3,
+      "tokens": 3928,
+      "context_length": 5521
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "position": 4,
+      "tokens": 1182,
+      "context_length": 6703
+    },
+    {
+      "file_path": "examples/model_selection/plot_roc_crossval.py",
+      "position": 5,
+      "tokens": 887,
+      "context_length": 7590
+    },
+    {
+      "file_path": "sklearn/metrics/ranking.py",
+      "position": 6,
+      "tokens": 12915,
+      "context_length": 20505
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 7,
+      "tokens": 24533,
+      "context_length": 45038
+    },
+    {
+      "file_path": "examples/model_selection/plot_roc.py",
+      "position": 8,
+      "tokens": 1569,
+      "context_length": 46607
+    },
+    {
+      "file_path": "examples/ensemble/plot_voting_probas.py",
+      "position": 9,
+      "tokens": 809,
+      "context_length": 47416
+    },
+    {
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "position": 10,
+      "tokens": 1820,
+      "context_length": 49236
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 11,
+      "tokens": 1148,
+      "context_length": 50384
+    },
+    {
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "position": 12,
+      "tokens": 2342,
+      "context_length": 52726
+    },
+    {
+      "file_path": "examples/ensemble/plot_voting_decision_regions.py",
+      "position": 13,
+      "tokens": 677,
+      "context_length": 53403
+    },
+    {
+      "file_path": "sklearn/metrics/scorer.py",
+      "position": 14,
+      "tokens": 6075,
+      "context_length": 59478
+    },
+    {
+      "file_path": "benchmarks/bench_saga.py",
+      "position": 15,
+      "tokens": 2459,
+      "context_length": 61937
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 16,
+      "tokens": 13420,
+      "context_length": 75357
+    },
+    {
+      "file_path": "benchmarks/bench_lof.py",
+      "position": 17,
+      "tokens": 916,
+      "context_length": 76273
+    },
+    {
+      "file_path": "sklearn/metrics/__init__.py",
+      "position": 18,
+      "tokens": 1098,
+      "context_length": 77371
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 19,
+      "tokens": 794,
+      "context_length": 78165
+    },
+    {
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "position": 20,
+      "tokens": 1125,
+      "context_length": 79290
+    },
+    {
+      "file_path": "examples/model_selection/plot_grid_search_refit_callable.py",
+      "position": 21,
+      "tokens": 845,
+      "context_length": 80135
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 22,
+      "tokens": 2600,
+      "context_length": 82735
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "position": 23,
+      "tokens": 726,
+      "context_length": 83461
+    },
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 24,
+      "tokens": 9240,
+      "context_length": 92701
+    },
+    {
+      "file_path": "examples/ensemble/plot_stack_predictors.py",
+      "position": 25,
+      "tokens": 1044,
+      "context_length": 93745
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 26,
+      "tokens": 1153,
+      "context_length": 94898
+    },
+    {
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "position": 27,
+      "tokens": 4593,
+      "context_length": 99491
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "position": 28,
+      "tokens": 1245,
+      "context_length": 100736
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "position": 29,
+      "tokens": 1365,
+      "context_length": 102101
+    },
+    {
+      "file_path": "sklearn/model_selection/__init__.py",
+      "position": 30,
+      "tokens": 405,
+      "context_length": 102506
+    },
+    {
+      "file_path": "sklearn/metrics/regression.py",
+      "position": 31,
+      "tokens": 7054,
+      "context_length": 109560
+    },
+    {
+      "file_path": "examples/linear_model/plot_ols_ridge_variance.py",
+      "position": 32,
+      "tokens": 492,
+      "context_length": 110052
+    },
+    {
+      "file_path": "examples/decomposition/plot_pca_vs_fa_model_selection.py",
+      "position": 33,
+      "tokens": 1101,
+      "context_length": 111153
+    },
+    {
+      "file_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+      "position": 34,
+      "tokens": 9832,
+      "context_length": 120985
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "position": 35,
+      "tokens": 1015,
+      "context_length": 122000
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 36,
+      "tokens": 3108,
+      "context_length": 125108
+    },
+    {
+      "file_path": "examples/model_selection/plot_cv_predict.py",
+      "position": 37,
+      "tokens": 193,
+      "context_length": 125301
+    },
+    {
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "position": 38,
+      "tokens": 567,
+      "context_length": 125868
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "position": 39,
+      "tokens": 534,
+      "context_length": 126402
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 40,
+      "tokens": 1945,
+      "context_length": 128347
+    },
+    {
+      "file_path": "sklearn/neighbors/classification.py",
+      "position": 41,
+      "tokens": 5005,
+      "context_length": 133352
+    },
+    {
+      "file_path": "benchmarks/bench_isolation_forest.py",
+      "position": 42,
+      "tokens": 1461,
+      "context_length": 134813
+    },
+    {
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "position": 43,
+      "tokens": 1179,
+      "context_length": 135992
+    },
+    {
+      "file_path": "sklearn/calibration.py",
+      "position": 44,
+      "tokens": 4894,
+      "context_length": 140886
+    },
+    {
+      "file_path": "examples/inspection/plot_permutation_importance.py",
+      "position": 45,
+      "tokens": 1586,
+      "context_length": 142472
+    },
+    {
+      "file_path": "sklearn/metrics/classification.py",
+      "position": 46,
+      "tokens": 21950,
+      "context_length": 164422
+    },
+    {
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "position": 47,
+      "tokens": 1712,
+      "context_length": 166134
+    },
+    {
+      "file_path": "sklearn/linear_model/ransac.py",
+      "position": 48,
+      "tokens": 4039,
+      "context_length": 170173
+    },
+    {
+      "file_path": "examples/linear_model/plot_ransac.py",
+      "position": 49,
+      "tokens": 455,
+      "context_length": 170628
+    },
+    {
+      "file_path": "sklearn/linear_model/omp.py",
+      "position": 50,
+      "tokens": 8056,
+      "context_length": 178684
+    },
+    {
+      "file_path": "sklearn/tree/tree.py",
+      "position": 51,
+      "tokens": 14762,
+      "context_length": 193446
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 52,
+      "tokens": 1878,
+      "context_length": 195324
+    },
+    {
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "position": 53,
+      "tokens": 1518,
+      "context_length": 196842
+    },
+    {
+      "file_path": "examples/model_selection/plot_cv_indices.py",
+      "position": 54,
+      "tokens": 1322,
+      "context_length": 198164
+    },
+    {
+      "file_path": "examples/svm/plot_rbf_parameters.py",
+      "position": 55,
+      "tokens": 1982,
+      "context_length": 200146
+    }
+  ]
+}

@@ -1,0 +1,926 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-12973",
+  "model_patch": "diff --git a/sklearn/linear_model/least_angle.py b/sklearn/linear_model/least_angle.py\nindex 03b34a0dc..dafb105fe 100644\n--- a/sklearn/linear_model/least_angle.py\n+++ b/sklearn/linear_model/least_angle.py\n@@ -1479,7 +1479,7 @@ class LassoLarsIC(LassoLars):\n         self.eps = eps\n         self.fit_path = True\n \n-    def fit(self, X, y, copy_X=True):\n+    def fit(self, X, y, copy_X=None):\n         \"\"\"Fit the model using X, y as training data.\n \n         Parameters\n@@ -1498,10 +1498,13 @@ class LassoLarsIC(LassoLars):\n         self : object\n             returns an instance of self.\n         \"\"\"\n+        if copy_X is None:\n+            copy_X = self.copy_X\n+\n         X, y = check_X_y(X, y, y_numeric=True)\n \n         X, y, Xmean, ymean, Xstd = LinearModel._preprocess_data(\n-            X, y, self.fit_intercept, self.normalize, self.copy_X)\n+            X, y, self.fit_intercept, self.normalize, copy_X)\n         max_iter = self.max_iter\n \n         Gram = self.precompute\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "sklearn/linear_model/least_angle.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "a7b8b9e9e16d4e15fabda5ae615086c2e1c47d8a",
+  "patch": "diff --git a/sklearn/linear_model/least_angle.py b/sklearn/linear_model/least_angle.py\n--- a/sklearn/linear_model/least_angle.py\n+++ b/sklearn/linear_model/least_angle.py\n@@ -1479,7 +1479,7 @@ def __init__(self, criterion='aic', fit_intercept=True, verbose=False,\n         self.eps = eps\n         self.fit_path = True\n \n-    def fit(self, X, y, copy_X=True):\n+    def fit(self, X, y, copy_X=None):\n         \"\"\"Fit the model using X, y as training data.\n \n         Parameters\n@@ -1490,7 +1490,9 @@ def fit(self, X, y, copy_X=True):\n         y : array-like, shape (n_samples,)\n             target values. Will be cast to X's dtype if necessary\n \n-        copy_X : boolean, optional, default True\n+        copy_X : boolean, optional, default None\n+            If provided, this parameter will override the choice\n+            of copy_X made at instance creation.\n             If ``True``, X will be copied; else, it may be overwritten.\n \n         Returns\n@@ -1498,10 +1500,12 @@ def fit(self, X, y, copy_X=True):\n         self : object\n             returns an instance of self.\n         \"\"\"\n+        if copy_X is None:\n+            copy_X = self.copy_X\n         X, y = check_X_y(X, y, y_numeric=True)\n \n         X, y, Xmean, ymean, Xstd = LinearModel._preprocess_data(\n-            X, y, self.fit_intercept, self.normalize, self.copy_X)\n+            X, y, self.fit_intercept, self.normalize, copy_X)\n         max_iter = self.max_iter\n \n         Gram = self.precompute\n",
+  "test_patch": "diff --git a/sklearn/linear_model/tests/test_least_angle.py b/sklearn/linear_model/tests/test_least_angle.py\n--- a/sklearn/linear_model/tests/test_least_angle.py\n+++ b/sklearn/linear_model/tests/test_least_angle.py\n@@ -18,7 +18,7 @@\n from sklearn.utils.testing import TempMemmap\n from sklearn.exceptions import ConvergenceWarning\n from sklearn import linear_model, datasets\n-from sklearn.linear_model.least_angle import _lars_path_residues\n+from sklearn.linear_model.least_angle import _lars_path_residues, LassoLarsIC\n \n diabetes = datasets.load_diabetes()\n X, y = diabetes.data, diabetes.target\n@@ -686,3 +686,34 @@ def test_lasso_lars_vs_R_implementation():\n \n     assert_array_almost_equal(r2, skl_betas2, decimal=12)\n     ###########################################################################\n+\n+\n+@pytest.mark.parametrize('copy_X', [True, False])\n+def test_lasso_lars_copyX_behaviour(copy_X):\n+    \"\"\"\n+    Test that user input regarding copy_X is not being overridden (it was until\n+    at least version 0.21)\n+\n+    \"\"\"\n+    lasso_lars = LassoLarsIC(copy_X=copy_X, precompute=False)\n+    rng = np.random.RandomState(0)\n+    X = rng.normal(0, 1, (100, 5))\n+    X_copy = X.copy()\n+    y = X[:, 2]\n+    lasso_lars.fit(X, y)\n+    assert copy_X == np.array_equal(X, X_copy)\n+\n+\n+@pytest.mark.parametrize('copy_X', [True, False])\n+def test_lasso_lars_fit_copyX_behaviour(copy_X):\n+    \"\"\"\n+    Test that user input to .fit for copy_X overrides default __init__ value\n+\n+    \"\"\"\n+    lasso_lars = LassoLarsIC(precompute=False)\n+    rng = np.random.RandomState(0)\n+    X = rng.normal(0, 1, (100, 5))\n+    X_copy = X.copy()\n+    y = X[:, 2]\n+    lasso_lars.fit(X, y, copy_X=copy_X)\n+    assert copy_X == np.array_equal(X, X_copy)\n",
+  "problem_statement": "LassoLarsIC: unintuitive copy_X behaviour\nHi, I would like to report what seems to be a bug in the treatment of the `copy_X` parameter of the `LassoLarsIC` class. Because it's a simple bug, it's much easier to see in the code directly than in the execution, so I am not posting steps to reproduce it.\r\n\r\nAs you can see here, LassoLarsIC accepts a copy_X parameter.\r\nhttps://github.com/scikit-learn/scikit-learn/blob/7389dbac82d362f296dc2746f10e43ffa1615660/sklearn/linear_model/least_angle.py#L1487\r\n\r\nHowever, it also takes a copy_X parameter a few lines below, in the definition of ```fit```.\r\n    ```def fit(self, X, y, copy_X=True):```\r\n\r\nNow there are two values (potentially contradicting each other) for copy_X and each one is used once. Therefore ```fit``` can have a mixed behaviour. Even worse, this can be completely invisible to the user, since copy_X has a default value of True. Let's assume that I'd like it to be False, and have set it to False in the initialization, `my_lasso = LassoLarsIC(copy_X=False)`. I then call ```my_lasso.fit(X, y)``` and my choice will be silently overwritten. \r\n\r\nIdeally I think that copy_X should be removed as an argument in ```fit```. No other estimator seems to have a duplication in class parameters and fit arguments (I've checked more than ten in the linear models module). However, this would break existing code. Therefore I propose that ```fit``` takes a default value of `None` and only overwrites the existing value if the user has explicitly passed it as an argument to ```fit```. I will submit a PR to that effect.\n",
+  "hints_text": "",
+  "created_at": "2019-01-13T16:19:52Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_fit_copyX_behaviour[False]\"]",
+  "PASS_TO_PASS": "[\"sklearn/linear_model/tests/test_least_angle.py::test_all_precomputed\", \"sklearn/linear_model/tests/test_least_angle.py::test_collinearity\", \"sklearn/linear_model/tests/test_least_angle.py::test_estimatorclasses_positive_constraint\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_add_features\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_cv\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_cv_max_iter\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_lstsq\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_n_nonzero_coefs\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_path_positive_constraint\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_path_readonly_data\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_precompute[LarsCV]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_precompute[Lars]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lars_precompute[LassoLarsIC]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_gives_lstsq_solution\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_copyX_behaviour[False]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_copyX_behaviour[True]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_fit_copyX_behaviour[True]\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_ic\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_path_length\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_R_implementation\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_lasso_cd\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_lasso_cd_early_stopping\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_lasso_cd_ill_conditioned\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_lasso_cd_ill_conditioned2\", \"sklearn/linear_model/tests/test_least_angle.py::test_lasso_lars_vs_lasso_cd_positive\", \"sklearn/linear_model/tests/test_least_angle.py::test_multitarget\", \"sklearn/linear_model/tests/test_least_angle.py::test_no_path\", \"sklearn/linear_model/tests/test_least_angle.py::test_no_path_all_precomputed\", \"sklearn/linear_model/tests/test_least_angle.py::test_no_path_precomputed\", \"sklearn/linear_model/tests/test_least_angle.py::test_rank_deficient_design\", \"sklearn/linear_model/tests/test_least_angle.py::test_simple\", \"sklearn/linear_model/tests/test_least_angle.py::test_simple_precomputed\", \"sklearn/linear_model/tests/test_least_angle.py::test_singular_matrix\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/linear_model/least_angle.py"
+  ],
+  "test_patch_files": [
+    "sklearn/linear_model/tests/test_least_angle.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/linear_model/least_angle.py": {
+      "diffs": [
+        {
+          "start_line_old": 1482,
+          "end_line_old": 1482,
+          "file_pos": 1,
+          "file_context_length": 13972,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars._fit_Lars._fit.12.1",
+          "closest_snippet_line_distance": 810,
+          "pos": 4,
+          "context_length": 1786
+        },
+        {
+          "start_line_old": 1493,
+          "end_line_old": 1493,
+          "file_pos": 1,
+          "file_context_length": 13972,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars._fit_Lars._fit.12.1",
+          "closest_snippet_line_distance": 821,
+          "pos": 4,
+          "context_length": 1786
+        },
+        {
+          "start_line_old": 1501,
+          "end_line_old": 1501,
+          "file_pos": 1,
+          "file_context_length": 13972,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars._fit_Lars._fit.12.1",
+          "closest_snippet_line_distance": 829,
+          "pos": 4,
+          "context_length": 1786
+        }
+      ]
+    }
+  },
+  "vectors": 3156,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLars.method__check_copy_and_writeable.2.1",
+      "distance": 1.0019595623016357,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 829,
+      "end_line": 853,
+      "tokens": 183,
+      "context_length": 183,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_residues.X_train__lars_path_residues.11.1",
+      "distance": 1.0323587656021118,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 939,
+      "end_line": 966,
+      "tokens": 362,
+      "context_length": 545,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars._fit_Lars._fit.12.1",
+      "distance": 1.0613718032836914,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 616,
+      "end_line": 672,
+      "tokens": 608,
+      "context_length": 1153,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLarsIC.fit_",
+      "distance": 1.0696585178375244,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1482,
+      "end_line": 1547,
+      "tokens": 633,
+      "context_length": 1786,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dont_overwrite_parameters_check_dont_overwrite_parameters.2.21",
+      "distance": 1.0702085494995117,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 687,
+      "end_line": 737,
+      "tokens": 443,
+      "context_length": 2229
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLarsIC.__init___LassoLarsIC.__init__.self.fit_path.1",
+      "distance": 1.0807052850723267,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1468,
+      "end_line": 1480,
+      "tokens": 133,
+      "context_length": 2362,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_lars_path.2_lars_path.equality_tolerance.1",
+      "distance": 1.0917011499404907,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 145,
+      "end_line": 203,
+      "tokens": 602,
+      "context_length": 2964,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars.method_Lars._get_gram.2.1",
+      "distance": 1.1145744323730469,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 590,
+      "end_line": 614,
+      "tokens": 239,
+      "context_length": 3203,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_lars_path.23_lars_path.23.10.3.AA.3",
+      "distance": 1.1202380657196045,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 205,
+      "end_line": 363,
+      "tokens": 1584,
+      "context_length": 4787,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_lars_path.23.11_lars_path.24.3.1.2.1.1",
+      "distance": 1.1218222379684448,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 365,
+      "end_line": 486,
+      "tokens": 1218,
+      "context_length": 6005,
+      "file_pos": 2
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py__pre_fit_",
+      "distance": 1.1272437572479248,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 491,
+      "end_line": 547,
+      "tokens": 615,
+      "context_length": 6620
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLarsCV.method_LassoLarsCV.__init__.13",
+      "distance": 1.1282334327697754,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1330,
+      "end_line": 1348,
+      "tokens": 187,
+      "context_length": 6807,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLarsIC_LassoLarsIC.1",
+      "distance": 1.1388810873031616,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1351,
+      "end_line": 1467,
+      "tokens": 1104,
+      "context_length": 7911,
+      "file_pos": 3
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_idempotent_",
+      "distance": 1.1430656909942627,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2337,
+      "end_line": 2381,
+      "tokens": 423,
+      "context_length": 8334
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py__omp_path_residues__omp_path_residues.8.1",
+      "distance": 1.146888017654419,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 679,
+      "end_line": 753,
+      "tokens": 634,
+      "context_length": 8968
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LarsCV.fit_LarsCV.fit.33.1",
+      "distance": 1.147693157196045,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1107,
+      "end_line": 1185,
+      "tokens": 767,
+      "context_length": 9735,
+      "file_pos": 4
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.1488280296325684,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1124,
+      "end_line": 1192,
+      "tokens": 601,
+      "context_length": 10336
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/multioutput.py__partial_fit_estimator__partial_fit_estimator.3.1",
+      "distance": 1.1509218215942383,
+      "file_path": "sklearn/multioutput.py",
+      "start_line": 43,
+      "end_line": 59,
+      "tokens": 123,
+      "context_length": 10459
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py_OrthogonalMatchingPursuitCV.__init___",
+      "distance": 1.15126371383667,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 857,
+      "end_line": 909,
+      "tokens": 511,
+      "context_length": 10970
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LarsCV.method_LarsCV.__init__.5",
+      "distance": 1.1523377895355225,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1090,
+      "end_line": 1105,
+      "tokens": 167,
+      "context_length": 11137,
+      "file_pos": 5
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_LinearModelCV.fit.16_LinearModelCV.fit.45",
+      "distance": 1.1573747396469116,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1157,
+      "end_line": 1226,
+      "tokens": 802,
+      "context_length": 11939
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/lof.py_LocalOutlierFactor.fit_LocalOutlierFactor.fit.14.1",
+      "distance": 1.158841848373413,
+      "file_path": "sklearn/neighbors/lof.py",
+      "start_line": 216,
+      "end_line": 275,
+      "tokens": 546,
+      "context_length": 12485
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_overwrite_params_check_estimators_overwrite_params.15.8",
+      "distance": 1.1589391231536865,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1928,
+      "end_line": 1960,
+      "tokens": 332,
+      "context_length": 12817
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.33_RANSACRegressor.fit.38.1",
+      "distance": 1.1660319566726685,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 423,
+      "end_line": 452,
+      "tokens": 341,
+      "context_length": 13158
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/lof.py_LocalOutlierFactor._fit_predict_LocalOutlierFactor._fit_predict.4.1",
+      "distance": 1.168168306350708,
+      "file_path": "sklearn/neighbors/lof.py",
+      "start_line": 193,
+      "end_line": 214,
+      "tokens": 198,
+      "context_length": 13356
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/incremental_pca.py_IncrementalPCA.partial_fit_",
+      "distance": 1.172577142715454,
+      "file_path": "sklearn/decomposition/incremental_pca.py",
+      "start_line": 205,
+      "end_line": 298,
+      "tokens": 869,
+      "context_length": 14225
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation._check_non_neg_array_LatentDirichletAllocation.partial_fit.11.1",
+      "distance": 1.1747993230819702,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 458,
+      "end_line": 511,
+      "tokens": 354,
+      "context_length": 14579
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OneVsOneClassifier.partial_fit_OneVsOneClassifier.partial_fit.9.1",
+      "distance": 1.1757404804229736,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 514,
+      "end_line": 564,
+      "tokens": 424,
+      "context_length": 15003
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train.9_check_classifiers_train.9.21.y_prob.8.y_log_prob.3",
+      "distance": 1.1758856773376465,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1398,
+      "end_line": 1495,
+      "tokens": 1019,
+      "context_length": 16022
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_normalize.6_normalize.8.2.1.1",
+      "distance": 1.1759557723999023,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1583,
+      "end_line": 1613,
+      "tokens": 278,
+      "context_length": 16300
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit1d_check_fit1d.rnd.9",
+      "distance": 1.176870346069336,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 882,
+      "end_line": 897,
+      "tokens": 139,
+      "context_length": 16439
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.fit.14_LogisticRegression.fit.36.1",
+      "distance": 1.1792733669281006,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1538,
+      "end_line": 1620,
+      "tokens": 823,
+      "context_length": 17262
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/lof.py_LocalOutlierFactor.fit_predict_LocalOutlierFactor.fit_predict.5.1",
+      "distance": 1.1803309917449951,
+      "file_path": "sklearn/neighbors/lof.py",
+      "start_line": 161,
+      "end_line": 191,
+      "tokens": 254,
+      "context_length": 17516
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.16_RANSACRegressor.fit.32",
+      "distance": 1.1804536581039429,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 325,
+      "end_line": 422,
+      "tokens": 804,
+      "context_length": 18320
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py__sparse_encode.7__sparse_encode.9.1",
+      "distance": 1.1828100681304932,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 111,
+      "end_line": 179,
+      "tokens": 692,
+      "context_length": 19012
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_fit_returns_self_check_estimators_fit_returns_self.10",
+      "distance": 1.183354377746582,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1566,
+      "end_line": 1582,
+      "tokens": 153,
+      "context_length": 19165
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 1.1847351789474487,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1050,
+      "end_line": 1075,
+      "tokens": 282,
+      "context_length": 19447
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 1.185112714767456,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1760,
+      "end_line": 1802,
+      "tokens": 474,
+      "context_length": 19921
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py__ConstantPredictor__ConstantPredictor.predict_proba.2.1",
+      "distance": 1.1857726573944092,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 109,
+      "end_line": 129,
+      "tokens": 137,
+      "context_length": 20058
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_29_",
+      "distance": 1.1859142780303955,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 92,
+      "end_line": 156,
+      "tokens": 503,
+      "context_length": 20561
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.1875965595245361,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 848,
+      "end_line": 879,
+      "tokens": 297,
+      "context_length": 20858
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OneVsRestClassifier.partial_fit_OneVsRestClassifier.partial_fit.8.1",
+      "distance": 1.188761830329895,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 218,
+      "end_line": 272,
+      "tokens": 508,
+      "context_length": 21366
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_SparseCoder_SparseCoder.fit.2.1",
+      "distance": 1.1901336908340454,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 906,
+      "end_line": 1009,
+      "tokens": 820,
+      "context_length": 22186
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/covariance/graph_lasso_.py_GraphicalLassoCV.fit.13_GraphicalLassoCV.fit.18",
+      "distance": 1.1908221244812012,
+      "file_path": "sklearn/covariance/graph_lasso_.py",
+      "start_line": 628,
+      "end_line": 706,
+      "tokens": 820,
+      "context_length": 23006
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py__handle_zeros_in_scale__handle_zeros_in_scale.3.3.3.1",
+      "distance": 1.191858172416687,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 63,
+      "end_line": 78,
+      "tokens": 129,
+      "context_length": 23135
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_Normalizer_Normalizer.fit.3.1",
+      "distance": 1.1949560642242432,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1616,
+      "end_line": 1689,
+      "tokens": 620,
+      "context_length": 23755
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_1_alpha_aic_.1",
+      "distance": 1.1957316398620605,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 691,
+      "context_length": 24446
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py__cholesky_omp.15__cholesky_omp.16.2.1.1",
+      "distance": 1.1964473724365234,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 92,
+      "end_line": 136,
+      "tokens": 508,
+      "context_length": 24954
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_Lasso.path_Lasso.__init__.1",
+      "distance": 1.1978017091751099,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 929,
+      "end_line": 940,
+      "tokens": 151,
+      "context_length": 25105
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLars_LassoLars.1",
+      "distance": 1.198482871055603,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 710,
+      "end_line": 828,
+      "tokens": 1160,
+      "context_length": 26265,
+      "file_pos": 16
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_data_not_an_array_check_estimators_data_not_an_array.14",
+      "distance": 1.1999526023864746,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2038,
+      "end_line": 2058,
+      "tokens": 200,
+      "context_length": 26465
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_partial_fit_n_features_check_estimators_partial_fit_n_features.2.6.1",
+      "distance": 1.2010071277618408,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1244,
+      "end_line": 1267,
+      "tokens": 185,
+      "context_length": 26650
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path_logistic_regression_path",
+      "distance": 1.2013139724731445,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 487,
+      "end_line": 656,
+      "tokens": 133,
+      "context_length": 26783
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_22_Lars.1",
+      "distance": 1.202385425567627,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 489,
+      "end_line": 589,
+      "tokens": 930,
+      "context_length": 27713,
+      "file_pos": 16
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_train_check_outliers_train.37.contamination.7.2",
+      "distance": 1.202386736869812,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1498,
+      "end_line": 1563,
+      "tokens": 567,
+      "context_length": 28280
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars.fit_Lars.fit.6.1",
+      "distance": 1.2036097049713135,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 674,
+      "end_line": 707,
+      "tokens": 274,
+      "context_length": 28554,
+      "file_pos": 16
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer.fit_Imputer.fit.10.1",
+      "distance": 1.2037498950958252,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 125,
+      "end_line": 167,
+      "tokens": 382,
+      "context_length": 28936
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskLassoCV.path_",
+      "distance": 1.2093193531036377,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 2279,
+      "end_line": 2291,
+      "tokens": 173,
+      "context_length": 29109
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/lof.py_LocalOutlierFactor._predict_LocalOutlierFactor._predict.4.1",
+      "distance": 1.2105625867843628,
+      "file_path": "sklearn/neighbors/lof.py",
+      "start_line": 305,
+      "end_line": 333,
+      "tokens": 294,
+      "context_length": 29403
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidge__BaseRidge.fit.7.1",
+      "distance": 1.2109253406524658,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 466,
+      "end_line": 516,
+      "tokens": 502,
+      "context_length": 29905
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OneVsOneClassifier.fit_OneVsOneClassifier.fit.10.1",
+      "distance": 1.2113192081451416,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 477,
+      "end_line": 512,
+      "tokens": 283,
+      "context_length": 30188
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_lasso_path.py_1_compute_bench.5.1",
+      "distance": 1.2113279104232788,
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 625,
+      "context_length": 30813
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_dict_learning.2_dict_learning.21.2.1.1",
+      "distance": 1.2118643522262573,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 520,
+      "end_line": 601,
+      "tokens": 734,
+      "context_length": 31547
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1sample_check_fit2d_1sample.rnd.10.2.1.1",
+      "distance": 1.2122931480407715,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 820,
+      "end_line": 845,
+      "tokens": 234,
+      "context_length": 31781
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y.2_check_X_y.7.1",
+      "distance": 1.2131867408752441,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 736,
+      "end_line": 759,
+      "tokens": 276,
+      "context_length": 32057
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_LinearModelCV.fit_LinearModelCV.fit.path_params.1",
+      "distance": 1.213727593421936,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1075,
+      "end_line": 1156,
+      "tokens": 768,
+      "context_length": 32825
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OutputCodeClassifier.fit_OutputCodeClassifier.fit.18.1",
+      "distance": 1.2138639688491821,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 707,
+      "end_line": 754,
+      "tokens": 384,
+      "context_length": 33209
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_residues__lars_path_residues.1",
+      "distance": 1.214091420173645,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 856,
+      "end_line": 938,
+      "tokens": 746,
+      "context_length": 33955,
+      "file_pos": 20
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_ARDRegression.fit.update_sigma_ARDRegression.fit.update_sigma.5.1",
+      "distance": 1.2142117023468018,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 538,
+      "end_line": 548,
+      "tokens": 197,
+      "context_length": 34152
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.57_LogisticRegressionCV.fit.57.3.5.2.1",
+      "distance": 1.2157421112060547,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 2133,
+      "end_line": 2209,
+      "tokens": 820,
+      "context_length": 34972
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/theil_sen.py_TheilSenRegressor.__init___TheilSenRegressor.__init__.self.verbose.1",
+      "distance": 1.2160753011703491,
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "start_line": 297,
+      "end_line": 308,
+      "tokens": 143,
+      "context_length": 35115
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 1,
+      "tokens": 13972,
+      "context_length": 13972
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 2,
+      "tokens": 21398,
+      "context_length": 35370
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 3,
+      "tokens": 4608,
+      "context_length": 39978
+    },
+    {
+      "file_path": "sklearn/linear_model/omp.py",
+      "position": 4,
+      "tokens": 8080,
+      "context_length": 48058
+    },
+    {
+      "file_path": "sklearn/multioutput.py",
+      "position": 5,
+      "tokens": 5433,
+      "context_length": 53491
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 6,
+      "tokens": 21133,
+      "context_length": 74624
+    },
+    {
+      "file_path": "sklearn/neighbors/lof.py",
+      "position": 7,
+      "tokens": 4502,
+      "context_length": 79126
+    },
+    {
+      "file_path": "sklearn/linear_model/ransac.py",
+      "position": 8,
+      "tokens": 4052,
+      "context_length": 83178
+    },
+    {
+      "file_path": "sklearn/decomposition/incremental_pca.py",
+      "position": 9,
+      "tokens": 2712,
+      "context_length": 85890
+    },
+    {
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "position": 10,
+      "tokens": 6560,
+      "context_length": 92450
+    },
+    {
+      "file_path": "sklearn/multiclass.py",
+      "position": 11,
+      "tokens": 6401,
+      "context_length": 98851
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 12,
+      "tokens": 24226,
+      "context_length": 123077
+    },
+    {
+      "file_path": "sklearn/linear_model/logistic.py",
+      "position": 13,
+      "tokens": 22053,
+      "context_length": 145130
+    },
+    {
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "position": 14,
+      "tokens": 11562,
+      "context_length": 156692
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "position": 15,
+      "tokens": 1329,
+      "context_length": 158021
+    },
+    {
+      "file_path": "sklearn/covariance/graph_lasso_.py",
+      "position": 16,
+      "tokens": 8373,
+      "context_length": 166394
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 17,
+      "tokens": 2923,
+      "context_length": 169317
+    },
+    {
+      "file_path": "sklearn/linear_model/ridge.py",
+      "position": 18,
+      "tokens": 12986,
+      "context_length": 182303
+    },
+    {
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "position": 19,
+      "tokens": 973,
+      "context_length": 183276
+    },
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 20,
+      "tokens": 8146,
+      "context_length": 191422
+    },
+    {
+      "file_path": "sklearn/linear_model/bayes.py",
+      "position": 21,
+      "tokens": 5612,
+      "context_length": 197034
+    },
+    {
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "position": 22,
+      "tokens": 3438,
+      "context_length": 200472
+    }
+  ]
+}

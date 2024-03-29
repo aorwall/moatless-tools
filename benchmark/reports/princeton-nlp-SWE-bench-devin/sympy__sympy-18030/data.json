@@ -1,0 +1,610 @@
+{
+  "instance_id": "sympy__sympy-18030",
+  "model_patch": "diff --git a/sympy/polys/polyfuncs.py b/sympy/polys/polyfuncs.py\nindex d69a292388..418a4f836b 100644\n--- a/sympy/polys/polyfuncs.py\n+++ b/sympy/polys/polyfuncs.py\n@@ -246,6 +246,9 @@ def interpolate(data, x):\n         else:\n             Y = list(data)\n \n+            if x == n:\n+                return Y[-1]\n+\n             numert = Mul(*[(x - i) for i in range(1, n + 1)])\n             denom = -factorial(n - 1) if n%2 == 0 else factorial(n - 1)\n             coeffs = []\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/polys/polyfuncs.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "7501960ea18912f9055a32be50bda30805fc0c95",
+  "patch": "diff --git a/sympy/polys/polyfuncs.py b/sympy/polys/polyfuncs.py\n--- a/sympy/polys/polyfuncs.py\n+++ b/sympy/polys/polyfuncs.py\n@@ -2,7 +2,7 @@\n \n from __future__ import print_function, division\n \n-from sympy.core import S, Basic, Add, Mul, symbols\n+from sympy.core import S, Basic, Add, Mul, symbols, Dummy\n from sympy.core.compatibility import range\n from sympy.functions.combinatorial.factorials import factorial\n from sympy.polys.polyerrors import (\n@@ -205,13 +205,14 @@ def horner(f, *gens, **args):\n @public\n def interpolate(data, x):\n     \"\"\"\n-    Construct an interpolating polynomial for the data points.\n+    Construct an interpolating polynomial for the data points\n+    evaluated at point x (which can be symbolic or numeric).\n \n     Examples\n     ========\n \n     >>> from sympy.polys.polyfuncs import interpolate\n-    >>> from sympy.abc import x\n+    >>> from sympy.abc import a, b, x\n \n     A list is interpreted as though it were paired with a range starting\n     from 1:\n@@ -232,30 +233,39 @@ def interpolate(data, x):\n     >>> interpolate({-1: 2, 1: 2, 2: 5}, x)\n     x**2 + 1\n \n+    If the interpolation is going to be used only once then the\n+    value of interest can be passed instead of passing a symbol:\n+\n+    >>> interpolate([1, 4, 9], 5)\n+    25\n+\n+    Symbolic coordinates are also supported:\n+\n+    >>> [(i,interpolate((a, b), i)) for i in range(1, 4)]\n+    [(1, a), (2, b), (3, -a + 2*b)]\n     \"\"\"\n     n = len(data)\n-    poly = None\n \n     if isinstance(data, dict):\n+        if x in data:\n+            return S(data[x])\n         X, Y = list(zip(*data.items()))\n-        poly = interpolating_poly(n, x, X, Y)\n     else:\n         if isinstance(data[0], tuple):\n             X, Y = list(zip(*data))\n-            poly = interpolating_poly(n, x, X, Y)\n+            if x in X:\n+                return S(Y[X.index(x)])\n         else:\n+            if x in range(1, n + 1):\n+                return S(data[x - 1])\n             Y = list(data)\n+            X = list(range(1, n + 1))\n \n-            numert = Mul(*[(x - i) for i in range(1, n + 1)])\n-            denom = -factorial(n - 1) if n%2 == 0 else factorial(n - 1)\n-            coeffs = []\n-            for i in range(1, n + 1):\n-                coeffs.append(numert/(x - i)/denom)\n-                denom = denom/(i - n)*i\n-\n-            poly = Add(*[coeff*y for coeff, y in zip(coeffs, Y)])\n-\n-    return poly.expand()\n+    try:\n+        return interpolating_poly(n, x, X, Y).expand()\n+    except ValueError:\n+        d = Dummy()\n+        return interpolating_poly(n, d, X, Y).expand().subs(d, x)\n \n \n @public\ndiff --git a/sympy/polys/specialpolys.py b/sympy/polys/specialpolys.py\n--- a/sympy/polys/specialpolys.py\n+++ b/sympy/polys/specialpolys.py\n@@ -4,6 +4,7 @@\n \n from sympy.core import Add, Mul, Symbol, sympify, Dummy, symbols\n from sympy.core.compatibility import range, string_types\n+from sympy.core.containers import Tuple\n from sympy.core.singleton import S\n from sympy.functions.elementary.miscellaneous import sqrt\n from sympy.ntheory import nextprime\n@@ -19,7 +20,7 @@\n from sympy.polys.polyclasses import DMP\n from sympy.polys.polytools import Poly, PurePoly\n from sympy.polys.polyutils import _analyze_gens\n-from sympy.utilities import subsets, public\n+from sympy.utilities import subsets, public, filldedent\n \n \n @public\n@@ -142,15 +143,29 @@ def random_poly(x, n, inf, sup, domain=ZZ, polys=False):\n \n @public\n def interpolating_poly(n, x, X='x', Y='y'):\n-    \"\"\"Construct Lagrange interpolating polynomial for ``n`` data points. \"\"\"\n+    \"\"\"Construct Lagrange interpolating polynomial for ``n``\n+    data points. If a sequence of values are given for ``X`` and ``Y``\n+    then the first ``n`` values will be used.\n+    \"\"\"\n+    ok = getattr(x, 'free_symbols', None)\n+\n     if isinstance(X, string_types):\n         X = symbols(\"%s:%s\" % (X, n))\n+    elif ok and ok & Tuple(*X).free_symbols:\n+        ok = False\n \n     if isinstance(Y, string_types):\n         Y = symbols(\"%s:%s\" % (Y, n))\n+    elif ok and ok & Tuple(*Y).free_symbols:\n+        ok = False\n+\n+    if not ok:\n+        raise ValueError(filldedent('''\n+            Expecting symbol for x that does not appear in X or Y.\n+            Use `interpolate(list(zip(X, Y)), x)` instead.'''))\n \n     coeffs = []\n-    numert = Mul(*[(x - u) for u in X])\n+    numert = Mul(*[x - X[i] for i in range(n)])\n \n     for i in range(n):\n         numer = numert/(x - X[i])\n",
+  "test_patch": "diff --git a/sympy/polys/tests/test_polyfuncs.py b/sympy/polys/tests/test_polyfuncs.py\n--- a/sympy/polys/tests/test_polyfuncs.py\n+++ b/sympy/polys/tests/test_polyfuncs.py\n@@ -84,6 +84,11 @@ def test_interpolate():\n         -S(13)*x**3/24 + S(12)*x**2 - S(2003)*x/24 + 187\n     assert interpolate([(1, 3), (0, 6), (2, 5), (5, 7), (-2, 4)], x) == \\\n         S(-61)*x**4/280 + S(247)*x**3/210 + S(139)*x**2/280 - S(1871)*x/420 + 6\n+    assert interpolate((9, 4, 9), 3) == 9\n+    assert interpolate((1, 9, 16), 1) is S.One\n+    assert interpolate(((x, 1), (2, 3)), x) is S.One\n+    assert interpolate(dict([(x, 1), (2, 3)]), x) is S.One\n+    assert interpolate(((2, x), (1, 3)), x) == x**2 - 4*x + 6\n \n \n def test_rational_interpolate():\ndiff --git a/sympy/polys/tests/test_specialpolys.py b/sympy/polys/tests/test_specialpolys.py\n--- a/sympy/polys/tests/test_specialpolys.py\n+++ b/sympy/polys/tests/test_specialpolys.py\n@@ -1,6 +1,6 @@\n \"\"\"Tests for functions for generating interesting polynomials. \"\"\"\n \n-from sympy import Poly, ZZ, symbols, sqrt, prime, Add\n+from sympy import Poly, ZZ, symbols, sqrt, prime, Add, S\n from sympy.utilities.iterables import permute_signs\n from sympy.utilities.pytest import raises\n \n@@ -96,6 +96,20 @@ def test_interpolating_poly():\n         y2*(x - x0)*(x - x1)*(x - x3)/((x2 - x0)*(x2 - x1)*(x2 - x3)) + \\\n         y3*(x - x0)*(x - x1)*(x - x2)/((x3 - x0)*(x3 - x1)*(x3 - x2))\n \n+    raises(ValueError, lambda:\n+        interpolating_poly(2, x, (x, 2), (1, 3)))\n+    raises(ValueError, lambda:\n+        interpolating_poly(2, x, (x + y, 2), (1, 3)))\n+    raises(ValueError, lambda:\n+        interpolating_poly(2, x + y, (x, 2), (1, 3)))\n+    raises(ValueError, lambda:\n+        interpolating_poly(2, 3, (4, 5), (6, 7)))\n+    raises(ValueError, lambda:\n+        interpolating_poly(2, 3, (4, 5), (6, 7, 8)))\n+    assert interpolating_poly(0, x, (1, 2), (3, 4)) == 0\n+    assert interpolating_poly(1, x, (1, 2), (3, 4)) == 3\n+    assert interpolating_poly(2, x, (1, 2), (3, 4)) == x + 2\n+\n \n def test_fateman_poly_F_1():\n     f, g, h = fateman_poly_F_1(1)\n",
+  "problem_statement": "interpolate could provide value instead of nan\n```python\r\n>>> y = (18,25,43,70,115)\r\n>>> interpolate(y,5)\r\nnan\r\n```\r\nSince the default x value for interpolation is `range(1, len(y)+1)` the interpolation at 5 could just return 115 instead of nan.\n",
+  "hints_text": "The simplest fix is to have the function check to see if x is not a symbol:\r\n```python\r\n>>> interpolate((1,2,3),1)\r\nnan\r\n>>> interpolate((1,2,3),x).subs(x,1)\r\n1\r\n```\r\nSo in the function a check at the top would be like\r\n```python\r\nif not isinstance(x, Symbol):\r\n    d = Dummy()\r\n    return interpolate(data, d).subs(d, x)\r\n```\r\nOr the docstring could be annotated to say that `x` should be a Symbol.\nThere now exist two functions, `interpolate` and `interpolating_poly`, that construct an interpolating polynomial, only their parameters are slightly different. It is reasonable that `interpolating_poly` would return a polynomial (expression) in the given symbol. However, `interpolate` could return the *value* of the polynomial at the given *point*. So I am +1 for this change.",
+  "created_at": "2019-12-09T15:00:53Z",
+  "version": "1.6",
+  "FAIL_TO_PASS": "[\"test_interpolate\", \"test_interpolating_poly\"]",
+  "PASS_TO_PASS": "[\"test_cyclotomic_poly\", \"test_fateman_poly_F_1\", \"test_fateman_poly_F_2\", \"test_horner\", \"test_random_poly\", \"test_rational_interpolate\", \"test_swinnerton_dyer_poly\", \"test_symmetric_poly\", \"test_symmetrize\"]",
+  "environment_setup_commit": "28b41c73c12b70d6ad9f6e45109a80649c4456da",
+  "patch_files": [
+    "sympy/polys/polyfuncs.py",
+    "sympy/polys/specialpolys.py"
+  ],
+  "test_patch_files": [
+    "sympy/polys/tests/test_polyfuncs.py",
+    "sympy/polys/tests/test_specialpolys.py"
+  ],
+  "patch_diff_details": {
+    "sympy/polys/polyfuncs.py": {
+      "diffs": [
+        {
+          "start_line_old": 5,
+          "end_line_old": 5,
+          "file_pos": 1,
+          "file_context_length": 2996,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/polys/polyfuncs.py_rational_interpolate_rational_interpolate.10.1",
+          "closest_snippet_line_distance": 256
+        },
+        {
+          "start_line_old": 208,
+          "end_line_old": 214,
+          "file_pos": 1,
+          "file_context_length": 2996,
+          "pos": 1,
+          "context_length": 432
+        },
+        {
+          "start_line_old": 235,
+          "end_line_old": 256,
+          "file_pos": 1,
+          "file_context_length": 2996,
+          "pos": 1,
+          "context_length": 432
+        }
+      ]
+    },
+    "sympy/polys/specialpolys.py": {
+      "diffs": [
+        {
+          "start_line_old": 7,
+          "end_line_old": 7,
+          "file_pos": 2,
+          "file_context_length": 7354,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/polys/specialpolys.py_interpolating_poly_interpolating_poly.7.1",
+          "closest_snippet_line_distance": 136
+        },
+        {
+          "start_line_old": 22,
+          "end_line_old": 22,
+          "file_pos": 2,
+          "file_context_length": 7354,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/polys/specialpolys.py_interpolating_poly_interpolating_poly.7.1",
+          "closest_snippet_line_distance": 121
+        },
+        {
+          "start_line_old": 145,
+          "end_line_old": 153,
+          "file_pos": 2,
+          "file_context_length": 7354,
+          "pos": 2,
+          "context_length": 601
+        }
+      ]
+    }
+  },
+  "vectors": 8455,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/polys/polyfuncs.py_interpolate_interpolate.5.1",
+      "distance": 1.0644316673278809,
+      "file_path": "sympy/polys/polyfuncs.py",
+      "start_line": 205,
+      "end_line": 258,
+      "tokens": 432,
+      "context_length": 432,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/polys/specialpolys.py_interpolating_poly_interpolating_poly.7.1",
+      "distance": 1.1126843690872192,
+      "file_path": "sympy/polys/specialpolys.py",
+      "start_line": 143,
+      "end_line": 160,
+      "tokens": 169,
+      "context_length": 601,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/functions/special/bsplines.py_interpolating_spline.ival_",
+      "distance": 1.1151186227798462,
+      "file_path": "sympy/functions/special/bsplines.py",
+      "start_line": 285,
+      "end_line": 299,
+      "tokens": 172,
+      "context_length": 773
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/polys/polyfuncs.py_rational_interpolate_rational_interpolate.10.1",
+      "distance": 1.1191908121109009,
+      "file_path": "sympy/polys/polyfuncs.py",
+      "start_line": 261,
+      "end_line": 318,
+      "tokens": 597,
+      "context_length": 1370,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/plotting/pygletplot/plot_interval.py_PlotInterval.vrange2_",
+      "distance": 1.2036484479904175,
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "start_line": 167,
+      "end_line": 183,
+      "tokens": 143,
+      "context_length": 1513
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_ceil_ceil.3.3.1.1",
+      "distance": 1.231510043144226,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 310,
+      "end_line": 328,
+      "tokens": 142,
+      "context_length": 1655
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.round.26_Expr._eval_derivative_matrix_lines.2.1",
+      "distance": 1.2324155569076538,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 3682,
+      "end_line": 3757,
+      "tokens": 907,
+      "context_length": 2562
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_floor_floor.3.3.1.1",
+      "distance": 1.2346006631851196,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 331,
+      "end_line": 349,
+      "tokens": 142,
+      "context_length": 2704
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/functions/special/bsplines.py_interpolating_spline_interpolating_spline.20",
+      "distance": 1.2475916147232056,
+      "file_path": "sympy/functions/special/bsplines.py",
+      "start_line": 216,
+      "end_line": 284,
+      "tokens": 776,
+      "context_length": 3480
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py__pow_float_",
+      "distance": 1.2567155361175537,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 372,
+      "end_line": 417,
+      "tokens": 360,
+      "context_length": 3840
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/polys/euclidtools.py__dmp_zz_gcd_interpolate__dmp_zz_gcd_interpolate.4.2.1.1",
+      "distance": 1.2590467929840088,
+      "file_path": "sympy/polys/euclidtools.py",
+      "start_line": 1253,
+      "end_line": 1267,
+      "tokens": 139,
+      "context_length": 3979
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/calculus/finite_diff.py_apply_finite_diff_apply_finite_diff.10.1",
+      "distance": 1.265970230102539,
+      "file_path": "sympy/calculus/finite_diff.py",
+      "start_line": 201,
+      "end_line": 286,
+      "tokens": 770,
+      "context_length": 4749
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/plotting/textplot.py_1_linspace.1.1",
+      "distance": 1.2709465026855469,
+      "file_path": "sympy/plotting/textplot.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 338,
+      "context_length": 5087
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/polys/heuristicgcd.py__gcd_interpolate_",
+      "distance": 1.2802259922027588,
+      "file_path": "sympy/polys/heuristicgcd.py",
+      "start_line": 122,
+      "end_line": 152,
+      "tokens": 210,
+      "context_length": 5297
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot_implicit.py_ImplicitSeries._get_raster_interval.22_ImplicitSeries._get_raster_interval.28.1",
+      "distance": 1.2803077697753906,
+      "file_path": "sympy/plotting/plot_implicit.py",
+      "start_line": 154,
+      "end_line": 169,
+      "tokens": 190,
+      "context_length": 5487
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot_implicit.py_ImplicitSeries._get_raster_interval_ImplicitSeries._get_raster_interval.20",
+      "distance": 1.2808806896209717,
+      "file_path": "sympy/plotting/plot_implicit.py",
+      "start_line": 95,
+      "end_line": 122,
+      "tokens": 353,
+      "context_length": 5840
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/utilities/iterables.py_rotate_right_rotate_right.4.1",
+      "distance": 1.2820608615875244,
+      "file_path": "sympy/utilities/iterables.py",
+      "start_line": 1216,
+      "end_line": 1232,
+      "tokens": 113,
+      "context_length": 5953
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/plotting/pygletplot/util.py_create_bounds_scale_value_list.3.1",
+      "distance": 1.2864645719528198,
+      "file_path": "sympy/plotting/pygletplot/util.py",
+      "start_line": 105,
+      "end_line": 141,
+      "tokens": 294,
+      "context_length": 6247
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_integer_nthroot_integer_nthroot.18",
+      "distance": 1.2873380184173584,
+      "file_path": "sympy/core/power.py",
+      "start_line": 42,
+      "end_line": 112,
+      "tokens": 541,
+      "context_length": 6788
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/utilities/iterables.py_rotate_left_rotate_left.4.1",
+      "distance": 1.289926290512085,
+      "file_path": "sympy/utilities/iterables.py",
+      "start_line": 1197,
+      "end_line": 1213,
+      "tokens": 109,
+      "context_length": 6897
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__div___interval.__div__.2.3.3.1.1",
+      "distance": 1.2993664741516113,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 281,
+      "end_line": 320,
+      "tokens": 341,
+      "context_length": 7238
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_Pow_Pow.1",
+      "distance": 1.3048466444015503,
+      "file_path": "sympy/core/power.py",
+      "start_line": 170,
+      "end_line": 252,
+      "tokens": 1060,
+      "context_length": 8298
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/mul.py_1__set_mul_9.8.1",
+      "distance": 1.3051002025604248,
+      "file_path": "sympy/sets/handlers/mul.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 299,
+      "context_length": 8597
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__meijerint_indefinite_1__meijerint_indefinite_1.9.24",
+      "distance": 1.3079299926757812,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1641,
+      "end_line": 1691,
+      "tokens": 616,
+      "context_length": 9213
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot_implicit.py_ImplicitSeries.get_raster_ImplicitSeries.get_raster.5.2.1.1",
+      "distance": 1.3081316947937012,
+      "file_path": "sympy/plotting/plot_implicit.py",
+      "start_line": 74,
+      "end_line": 93,
+      "tokens": 181,
+      "context_length": 9394
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__mul___interval.__rdiv__.1.4.1.1",
+      "distance": 1.3125488758087158,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 244,
+      "end_line": 279,
+      "tokens": 292,
+      "context_length": 9686
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_9_log.3.3.1",
+      "distance": 1.3158059120178223,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 35,
+      "end_line": 54,
+      "tokens": 163,
+      "context_length": 9849
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/holonomic/holonomic.py_HolonomicFunction.__mul__.36_HolonomicFunction.__truediv__.1.1",
+      "distance": 1.319000244140625,
+      "file_path": "sympy/holonomic/holonomic.py",
+      "start_line": 1099,
+      "end_line": 1129,
+      "tokens": 264,
+      "context_length": 10113
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/holonomic/holonomic.py__extend_y0__extend_y0.10.2.4.1",
+      "distance": 1.3194390535354614,
+      "file_path": "sympy/holonomic/holonomic.py",
+      "start_line": 2589,
+      "end_line": 2632,
+      "tokens": 356,
+      "context_length": 10469
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_atanh_atanh.3.4.1.1",
+      "distance": 1.3225079774856567,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 390,
+      "end_line": 411,
+      "tokens": 204,
+      "context_length": 10673
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__rpow___interval.__hash__.1.1",
+      "distance": 1.3241243362426758,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 343,
+      "end_line": 369,
+      "tokens": 210,
+      "context_length": 10883
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/polys/numberfields.py_IntervalPrinter_IntervalPrinter._print_Pow.1.1",
+      "distance": 1.328307867050171,
+      "file_path": "sympy/polys/numberfields.py",
+      "start_line": 1071,
+      "end_line": 1084,
+      "tokens": 147,
+      "context_length": 11030
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/solvers/recurr.py_rsolve.10_",
+      "distance": 1.3284111022949219,
+      "file_path": "sympy/solvers/recurr.py",
+      "start_line": 726,
+      "end_line": 830,
+      "tokens": 715,
+      "context_length": 11745
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/plotting/pygletplot/plot_interval.py_PlotInterval.fill_from_PlotInterval.vrange.3.2",
+      "distance": 1.3301162719726562,
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "start_line": 113,
+      "end_line": 165,
+      "tokens": 355,
+      "context_length": 12100
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_1_intervalMembership",
+      "distance": 1.3314319849014282,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 332,
+      "context_length": 12432
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/lib_interval.py_11_atan.3.3.1",
+      "distance": 1.3319741487503052,
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "start_line": 57,
+      "end_line": 89,
+      "tokens": 265,
+      "context_length": 12697
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/plotting/pygletplot/plot_interval.py_1_PlotInterval.v_len.1",
+      "distance": 1.333037257194519,
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "start_line": 1,
+      "end_line": 111,
+      "tokens": 838,
+      "context_length": 13535
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/plotting/plot_implicit.py_ImplicitSeries._get_raster_interval.refine_pixels_ImplicitSeries._get_raster_interval.refine_pixels.5.1",
+      "distance": 1.3361446857452393,
+      "file_path": "sympy/plotting/plot_implicit.py",
+      "start_line": 123,
+      "end_line": 152,
+      "tokens": 309,
+      "context_length": 13844
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_31__as_integer_ratio.4.1",
+      "distance": 1.3450509309768677,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 180,
+      "end_line": 204,
+      "tokens": 184,
+      "context_length": 14028
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/polys/polyfuncs.py",
+      "position": 1,
+      "tokens": 2996,
+      "context_length": 2996
+    },
+    {
+      "file_path": "sympy/polys/specialpolys.py",
+      "position": 2,
+      "tokens": 4358,
+      "context_length": 7354
+    },
+    {
+      "file_path": "sympy/functions/special/bsplines.py",
+      "position": 3,
+      "tokens": 2841,
+      "context_length": 10195
+    },
+    {
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "position": 4,
+      "tokens": 1327,
+      "context_length": 11522
+    },
+    {
+      "file_path": "sympy/plotting/intervalmath/lib_interval.py",
+      "position": 5,
+      "tokens": 3651,
+      "context_length": 15173
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 6,
+      "tokens": 33127,
+      "context_length": 48300
+    },
+    {
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "position": 7,
+      "tokens": 3193,
+      "context_length": 51493
+    },
+    {
+      "file_path": "sympy/polys/euclidtools.py",
+      "position": 8,
+      "tokens": 14851,
+      "context_length": 66344
+    },
+    {
+      "file_path": "sympy/calculus/finite_diff.py",
+      "position": 9,
+      "tokens": 5252,
+      "context_length": 71596
+    },
+    {
+      "file_path": "sympy/plotting/textplot.py",
+      "position": 10,
+      "tokens": 1236,
+      "context_length": 72832
+    },
+    {
+      "file_path": "sympy/polys/heuristicgcd.py",
+      "position": 11,
+      "tokens": 1091,
+      "context_length": 73923
+    },
+    {
+      "file_path": "sympy/plotting/plot_implicit.py",
+      "position": 12,
+      "tokens": 3465,
+      "context_length": 77388
+    },
+    {
+      "file_path": "sympy/utilities/iterables.py",
+      "position": 13,
+      "tokens": 21874,
+      "context_length": 99262
+    },
+    {
+      "file_path": "sympy/plotting/pygletplot/util.py",
+      "position": 14,
+      "tokens": 1492,
+      "context_length": 100754
+    },
+    {
+      "file_path": "sympy/core/power.py",
+      "position": 15,
+      "tokens": 15462,
+      "context_length": 116216
+    },
+    {
+      "file_path": "sympy/sets/handlers/mul.py",
+      "position": 16,
+      "tokens": 506,
+      "context_length": 116722
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 17,
+      "tokens": 24287,
+      "context_length": 141009
+    },
+    {
+      "file_path": "sympy/holonomic/holonomic.py",
+      "position": 18,
+      "tokens": 24674,
+      "context_length": 165683
+    },
+    {
+      "file_path": "sympy/polys/numberfields.py",
+      "position": 19,
+      "tokens": 9166,
+      "context_length": 174849
+    },
+    {
+      "file_path": "sympy/solvers/recurr.py",
+      "position": 20,
+      "tokens": 6710,
+      "context_length": 181559
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 21,
+      "tokens": 29731,
+      "context_length": 211290
+    }
+  ]
+}

@@ -1,0 +1,696 @@
+{
+  "instance_id": "sympy__sympy-21208",
+  "model_patch": "diff --git a/sympy/matrices/matrices.py b/sympy/matrices/matrices.py\nindex f7b4aeebf3..ca8e905b08 100644\n--- a/sympy/matrices/matrices.py\n+++ b/sympy/matrices/matrices.py\n@@ -440,7 +440,7 @@ class MatrixCalculus(MatrixCommon):\n \n     def diff(self, *args, **kwargs):\n         \"\"\"Calculate the derivative of each element in the matrix.\n-        ``args`` will be passed to the ``integrate`` function.\n+        ``args`` will be passed to the ``diff`` function.\n \n         Examples\n         ========\n@@ -459,125 +459,7 @@ def diff(self, *args, **kwargs):\n         integrate\n         limit\n         \"\"\"\n-        # XXX this should be handled here rather than in Derivative\n-        from sympy.tensor.array.array_derivatives import ArrayDerivative\n-        kwargs.setdefault('evaluate', True)\n-        deriv = ArrayDerivative(self, *args, evaluate=True)\n-        if not isinstance(self, Basic):\n-            return deriv.as_mutable()\n-        else:\n-            return deriv\n-\n-    def _eval_derivative(self, arg):\n-        return self.applyfunc(lambda x: x.diff(arg))\n-\n-    def integrate(self, *args, **kwargs):\n-        \"\"\"Integrate each element of the matrix.  ``args`` will\n-        be passed to the ``integrate`` function.\n-\n-        Examples\n-        ========\n-\n-        >>> from sympy.matrices import Matrix\n-        >>> from sympy.abc import x, y\n-        >>> M = Matrix([[x, y], [1, 0]])\n-        >>> M.integrate((x, ))\n-        Matrix([\n-        [x**2/2, x*y],\n-        [     x,   0]])\n-        >>> M.integrate((x, 0, 2))\n-        Matrix([\n-        [2, 2*y],\n-        [2,   0]])\n-\n-        See Also\n-        ========\n-\n-        limit\n-        diff\n-        \"\"\"\n-        return self.applyfunc(lambda x: x.integrate(*args, **kwargs))\n-\n-    def jacobian(self, X):\n-        \"\"\"Calculates the Jacobian matrix (derivative of a vector-valued function).\n-\n-        Parameters\n-        ==========\n-\n-        ``self`` : vector of expressions representing functions f_i(x_1, ..., x_n).\n-        X : set of x_i's in order, it can be a list or a Matrix\n-\n-        Both ``self`` and X can be a row or a column matrix in any order\n-        (i.e., jacobian() should always work).\n-\n-        Examples\n-        ========\n-\n-        >>> from sympy import sin, cos, Matrix\n-        >>> from sympy.abc import rho, phi\n-        >>> X = Matrix([rho*cos(phi), rho*sin(phi), rho**2])\n-        >>> Y = Matrix([rho, phi])\n-        >>> X.jacobian(Y)\n-        Matrix([\n-        [cos(phi), -rho*sin(phi)],\n-        [sin(phi),  rho*cos(phi)],\n-        [   2*rho,             0]])\n-        >>> X = Matrix([rho*cos(phi), rho*sin(phi)])\n-        >>> X.jacobian(Y)\n-        Matrix([\n-        [cos(phi), -rho*sin(phi)],\n-        [sin(phi),  rho*cos(phi)]])\n-\n-        See Also\n-        ========\n-\n-        hessian\n-        wronskian\n-        \"\"\"\n-        if not isinstance(X, MatrixBase):\n-            X = self._new(X)\n-        # Both X and ``self`` can be a row or a column matrix, so we need to make\n-        # sure all valid combinations work, but everything else fails:\n-        if self.shape[0] == 1:\n-            m = self.shape[1]\n-        elif self.shape[1] == 1:\n-            m = self.shape[0]\n-        else:\n-            raise TypeError(\"``self`` must be a row or a column matrix\")\n-        if X.shape[0] == 1:\n-            n = X.shape[1]\n-        elif X.shape[1] == 1:\n-            n = X.shape[0]\n-        else:\n-            raise TypeError(\"X must be a row or a column matrix\")\n-\n-        # m is the number of functions and n is the number of variables\n-        # computing the Jacobian is now easy:\n-        return self._new(m, n, lambda j, i: self[j].diff(X[i]))\n-\n-    def limit(self, *args):\n-        \"\"\"Calculate the limit of each element in the matrix.\n-        ``args`` will be passed to the ``limit`` function.\n-\n-        Examples\n-        ========\n-\n-        >>> from sympy.matrices import Matrix\n-        >>> from sympy.abc import x, y\n-        >>> M = Matrix([[x, y], [1, 0]])\n-        >>> M.limit(x, 2)\n-        Matrix([\n-        [2, y],\n-        [1, 0]])\n-\n-        See Also\n-        ========\n-\n-        integrate\n-        diff\n-        \"\"\"\n-        return self.applyfunc(lambda x: x.limit(*args))\n-\n+        return self.applyfunc(lambda x: x.diff(*args, **kwargs))\n \n # https://github.com/sympy/sympy/pull/12854\n class MatrixDeprecated(MatrixCommon):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "sympy/matrices/matrices.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "f9badb21b01f4f52ce4d545d071086ee650cd282",
+  "patch": "diff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py\n--- a/sympy/matrices/expressions/matexpr.py\n+++ b/sympy/matrices/expressions/matexpr.py\n@@ -653,7 +653,7 @@ def _matrix_derivative(expr, x):\n \n     from sympy.tensor.array.expressions.conv_array_to_matrix import convert_array_to_matrix\n \n-    parts = [[convert_array_to_matrix(j).doit() for j in i] for i in parts]\n+    parts = [[convert_array_to_matrix(j) for j in i] for i in parts]\n \n     def _get_shape(elem):\n         if isinstance(elem, MatrixExpr):\n@@ -897,7 +897,7 @@ def build(self):\n         data = [self._build(i) for i in self._lines]\n         if self.higher != 1:\n             data += [self._build(self.higher)]\n-        data = [i.doit() for i in data]\n+        data = [i for i in data]\n         return data\n \n     def matrix_form(self):\n",
+  "test_patch": "diff --git a/sympy/matrices/expressions/tests/test_matexpr.py b/sympy/matrices/expressions/tests/test_matexpr.py\n--- a/sympy/matrices/expressions/tests/test_matexpr.py\n+++ b/sympy/matrices/expressions/tests/test_matexpr.py\n@@ -1,8 +1,9 @@\n from sympy import (KroneckerDelta, diff, Sum, Dummy, factor,\n                    expand, zeros, gcd_terms, Eq, Symbol)\n \n-from sympy.core import S, symbols, Add, Mul, SympifyError, Rational\n-from sympy.functions import sin, cos, sqrt, cbrt, exp\n+from sympy.core import (S, symbols, Add, Mul, SympifyError, Rational,\n+                    Function)\n+from sympy.functions import sin, cos, tan, sqrt, cbrt, exp\n from sympy.simplify import simplify\n from sympy.matrices import (ImmutableMatrix, Inverse, MatAdd, MatMul,\n         MatPow, Matrix, MatrixExpr, MatrixSymbol, ShapeError,\n@@ -340,6 +341,18 @@ def test_issue_7842():\n     assert Eq(A, B) == True\n \n \n+def test_issue_21195():\n+    t = symbols('t')\n+    x = Function('x')(t)\n+    dx = x.diff(t)\n+    exp1 = cos(x) + cos(x)*dx\n+    exp2 = sin(x) + tan(x)*(dx.diff(t))\n+    exp3 = sin(x)*sin(t)*(dx.diff(t)).diff(t)\n+    A = Matrix([[exp1], [exp2], [exp3]])\n+    B = Matrix([[exp1.diff(x)], [exp2.diff(x)], [exp3.diff(x)]])\n+    assert A.diff(x) == B\n+\n+\n def test_MatMul_postprocessor():\n     z = zeros(2)\n     z1 = ZeroMatrix(2, 2)\n",
+  "problem_statement": "Results diverge when use `diff` on a matrix or its elemetns\ncreate a one-element matrix A as below:\r\n```python\r\n>>> from sympy import *\r\n>>> t = symbols('t')\r\n>>> x = Function('x')(t)\r\n>>> dx = x.diff(t)\r\n>>> A = Matrix([cos(x) + cos(x) * dx])\r\n```\r\nwhen use `diff` on matrix A:\r\n```python\r\n>>> (A.diff(x))[0,0]\r\n-sin(x(t))\r\n```\r\nwhen use `diff` on the single element of A: \r\n```python\r\n>>> A[0,0].diff(x)\r\n-sin(x(t))*Derivative(x(t), t) - sin(x(t))\r\n```\r\nbut if use `applyfunc` method on A, the result is the same as above:\r\n```python\r\n>>> A.applyfunc(lambda ij: ij.diff(x))[0,0]\r\n-sin(x(t))*Derivative(x(t), t) - sin(x(t))\r\n```\r\nis this a bug or supposed behavior of matrix calculus?\n",
+  "hints_text": "`.diff()` is running this internally:\r\n\r\n```ipython\r\nIn [1]: import sympy as sm\r\n\r\nIn [2]: t = sm.symbols('t')\r\n\r\nIn [3]: x = sm.Function('x')(t)\r\n\r\nIn [4]: dx = x.diff(t)\r\n\r\nIn [19]: from sympy.tensor.array.array_derivatives import ArrayDerivative\r\n\r\nIn [26]: ArrayDerivative(sm.Matrix([sm.cos(x) + sm.cos(x)*dx]), x, evaluate=True)\r\nOut[26]: Matrix([[-sin(x(t))]])\r\n\r\nIn [27]: ArrayDerivative(sm.cos(x) + sm.cos(x)*dx, x, evaluate=True)\r\nOut[27]: -sin(x(t))*Derivative(x(t), t) - sin(x(t))\r\n```\r\n\nI tried this in SymPy 1.0 at it works as expected. The code for `Matrix.diff()` is:\r\n\r\n```\r\nSignature: A.diff(*args)\r\nSource:   \r\n    def diff(self, *args):\r\n        \"\"\"Calculate the derivative of each element in the matrix.\r\n\r\n        Examples\r\n        ========\r\n\r\n        >>> from sympy.matrices import Matrix\r\n        >>> from sympy.abc import x, y\r\n        >>> M = Matrix([[x, y], [1, 0]])\r\n        >>> M.diff(x)\r\n        Matrix([\r\n        [1, 0],\r\n        [0, 0]])\r\n\r\n        See Also\r\n        ========\r\n\r\n        integrate\r\n        limit\r\n        \"\"\"\r\n        return self._new(self.rows, self.cols,\r\n                lambda i, j: self[i, j].diff(*args))\r\nFile:      ~/src/sympy/sympy/matrices/matrices.py\r\nType:      method\r\n\r\n```\r\n\r\nSo I think that ArrayDerivative change has introduced this bug.\n@Upabjojr This seems like a bug tied to the introduction of tensor code into the diff() of Matrix. I'm guessing that is something you added.\nI'll assign this issue to myself for now. Will look into it when I have some time.\nA quick fix it to switch back to the simple .diff of each element. I couldn't make heads or tails of the ArrayDerivative code with a quick look.\nSwitching it back causes A.diff(A) to fail:\r\n\r\n```\r\n________________________________________ sympy/matrices/tests/test_matrices.py:test_diff_by_matrix _________________________________________\r\nTraceback (most recent call last):\r\n  File \"/home/moorepants/src/sympy/sympy/matrices/tests/test_matrices.py\", line 1919, in test_diff_by_matrix\r\n    assert A.diff(A) == Array([[[[1, 0], [0, 0]], [[0, 1], [0, 0]]], [[[0, 0], [1, 0]], [[0, 0], [0, 1]]]])\r\nAssertionError\r\n\r\n```\nThe problem lies in the expressions submodule of the matrices. Matrix expressions are handled differently from actual expressions.\r\n\r\nhttps://github.com/sympy/sympy/blob/f9badb21b01f4f52ce4d545d071086ee650cd282/sympy/core/function.py#L1456-L1462\r\n\r\nEvery derivative requested expression passes through this point. The old variable is replaced with a new dummy variable (`xi`). Due to this some of the properties of the old symbol are lost. `is_Functon` being one of them. In the `old_v` (`x(t)`) this property is `True` but for `v` it is False. That is **not** an issue here as the old variable is substituted back after the computation of derivative. All the expressions pass through this point. The problem starts when we apply `doit()` on such dummy value expressions. Instead of treating the dummy variable as a `Function`, it is treated as regular `sympy.core.symbol.Symbol`. \r\n\r\nThe best way to avoid this is to not use `doit()` on such expressions until the derivative is calculated and the old variable is substituted back. It is therefore nowhere used in the core expression module. However, in the matexpr module it is used twice and this is where the results deviate. \r\n\r\n```python\r\nIn [1]: from sympy import *\r\n        from sympy import __version__ as ver\r\n        t = symbols('t')\r\n        x = Function('x')(t)\r\n        ver\r\nOut[1]: '1.8.dev'\r\n\r\nIn [2]: xi = Dummy(\"xi\")\r\n        new = x.xreplace({x: xi})\r\n        print(Derivative(x, t).doit())\r\n        print(Derivative(new, t).doit())\r\nOut[2]: Derivative(x(t), t)\r\n        0\r\n```\r\n\r\nhttps://github.com/sympy/sympy/blob/f9badb21b01f4f52ce4d545d071086ee650cd282/sympy/matrices/expressions/matexpr.py#L656\r\n\r\nand \r\n\r\nhttps://github.com/sympy/sympy/blob/f9badb21b01f4f52ce4d545d071086ee650cd282/sympy/matrices/expressions/matexpr.py#L900\r\n\r\nThese two `doit()` reduce the `-sin(_xi)*Derivative(_xi, t)` part of the derivative computed to `0` (treating `_xi` as a symbol).\r\n\r\nI removed the `.doit()` part from both the lines and it worked. My diff-\r\n\r\n```diff\r\n$ git diff\r\ndiff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py\r\nindex 6dc87b5754..e11946015c 100644\r\n--- a/sympy/matrices/expressions/matexpr.py\r\n+++ b/sympy/matrices/expressions/matexpr.py\r\n@@ -653,7 +653,7 @@ def _matrix_derivative(expr, x):\r\n\r\n     from sympy.tensor.array.expressions.conv_array_to_matrix import convert_array_to_matrix\r\n\r\n-    parts = [[convert_array_to_matrix(j).doit() for j in i] for i in parts]\r\n+    parts = [[convert_array_to_matrix(j) for j in i] for i in parts]\r\n\r\n     def _get_shape(elem):\r\n         if isinstance(elem, MatrixExpr):\r\n@@ -897,7 +897,7 @@ def build(self):\r\n         data = [self._build(i) for i in self._lines]\r\n         if self.higher != 1:\r\n             data += [self._build(self.higher)]\r\n-        data = [i.doit() for i in data]\r\n+        data = [i for i in data]\r\n         return data\r\n\r\n     def matrix_form(self):\r\n```\r\n\r\nI also ran all the tests and all the tests passed. Just to check that I was not anything wrong or ignoring some important purpose of that `.doit()` part. I tried with some of my own examples using both `expr.diff(x)` and `matrix.diff(x)` and the results were the same for both every single time. If `doit()` has some important purpose then please let me know. Also if everything is fine then should I open a PR?\n> Also if everything is fine then should I open a PR?\r\n\r\nOf course! It's easier to discuss edits in PRs because you can put comments on the code there.",
+  "created_at": "2021-03-31T16:28:48Z",
+  "version": "1.8",
+  "FAIL_TO_PASS": "[\"test_issue_21195\"]",
+  "PASS_TO_PASS": "[\"test_MatAdd_postprocessor\", \"test_MatMul_postprocessor\", \"test_MatPow\", \"test_MatrixElement_commutative\", \"test_MatrixElement_diff\", \"test_MatrixElement_doit\", \"test_MatrixElement_with_values\", \"test_MatrixSet\", \"test_MatrixSymbol\", \"test_MatrixSymbol_determinant\", \"test_Zero_power\", \"test_addition\", \"test_as_explicit\", \"test_dense_conversion\", \"test_exp\", \"test_free_symbols\", \"test_identity_powers\", \"test_indexing\", \"test_inv\", \"test_invalid_args\", \"test_invariants\", \"test_issue_2749\", \"test_issue_2750\", \"test_issue_7842\", \"test_matadd_simplify\", \"test_matexpr\", \"test_matmul_simplify\", \"test_matrix_symbol_creation\", \"test_matrixelement_diff\", \"test_matrixsymbol_from_symbol\", \"test_multiplication\", \"test_shape\", \"test_simplify_matrix_expressions\", \"test_single_indexing\", \"test_subs\", \"test_zero_matmul\"]",
+  "environment_setup_commit": "3ac1464b8840d5f8b618a654f9fbf09c452fe969",
+  "patch_files": [
+    "sympy/matrices/expressions/matexpr.py"
+  ],
+  "test_patch_files": [
+    "sympy/matrices/expressions/tests/test_matexpr.py"
+  ],
+  "patch_diff_details": {
+    "sympy/matrices/expressions/matexpr.py": {
+      "diffs": [
+        {
+          "start_line_old": 656,
+          "end_line_old": 656,
+          "file_pos": 3,
+          "file_context_length": 28104,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py__matrix_derivative.contract_one_dims__matrix_derivative.12.1",
+          "closest_snippet_line_distance": 13,
+          "pos": 23,
+          "context_length": 8368
+        },
+        {
+          "start_line_old": 900,
+          "end_line_old": 900,
+          "file_pos": 3,
+          "file_context_length": 28104,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixExpr.__rpow___MatrixExpr.I.1.1",
+          "closest_snippet_line_distance": 632
+        }
+      ]
+    }
+  },
+  "vectors": 9255,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/applyfunc.py_ElementwiseApplyFunction._entry_ElementwiseApplyFunction._eval_derivative.4.1",
+      "distance": 0.7150993943214417,
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "start_line": 104,
+      "end_line": 124,
+      "tokens": 164,
+      "context_length": 164
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/applyfunc.py_ElementwiseApplyFunction._eval_derivative_matrix_lines_",
+      "distance": 0.741477370262146,
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "start_line": 126,
+      "end_line": 192,
+      "tokens": 519,
+      "context_length": 683
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/matrices/matrices.py_MatrixCalculus_MatrixCalculus.diff.6.2.1.1",
+      "distance": 0.8180174827575684,
+      "file_path": "sympy/matrices/matrices.py",
+      "start_line": 438,
+      "end_line": 469,
+      "tokens": 208,
+      "context_length": 891
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixElement._eval_derivative_MatrixElement._eval_derivative.8.1",
+      "distance": 0.8897349238395691,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 727,
+      "end_line": 754,
+      "tokens": 265,
+      "context_length": 1156,
+      "file_pos": 3
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode/systems.py__is_commutative_anti_derivative__is_commutative_anti_derivative.5.1",
+      "distance": 0.8900473117828369,
+      "file_path": "sympy/solvers/ode/systems.py",
+      "start_line": 1087,
+      "end_line": 1135,
+      "tokens": 354,
+      "context_length": 1510
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py__matrix_derivative.contract_one_dims__matrix_derivative.12.1",
+      "distance": 0.8904027938842773,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 669,
+      "end_line": 692,
+      "tokens": 191,
+      "context_length": 1701,
+      "file_pos": 4
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/arrayexpr_derivatives.py___17___17.8.1",
+      "distance": 0.9080561399459839,
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "start_line": 113,
+      "end_line": 125,
+      "tokens": 128,
+      "context_length": 1829
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/applyfunc.py_ElementwiseApplyFunction.function_ElementwiseApplyFunction.doit.6.3.1.1",
+      "distance": 0.9081562161445618,
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "start_line": 73,
+      "end_line": 102,
+      "tokens": 183,
+      "context_length": 2012
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/applyfunc.py_1_ElementwiseApplyFunction.1",
+      "distance": 0.921104371547699,
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 330,
+      "context_length": 2342
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/applyfunc.py_ElementwiseApplyFunction.__new___ElementwiseApplyFunction.__new__.9.1",
+      "distance": 0.9276456832885742,
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "start_line": 47,
+      "end_line": 71,
+      "tokens": 184,
+      "context_length": 2526
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/arrayexpr_derivatives.py___16___16.7.1",
+      "distance": 0.9360005855560303,
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "start_line": 97,
+      "end_line": 110,
+      "tokens": 117,
+      "context_length": 2643
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Derivative.__new___Derivative.__new__.27",
+      "distance": 0.9363259077072144,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1268,
+      "end_line": 1368,
+      "tokens": 832,
+      "context_length": 3475
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/calculus/finite_diff.py__as_finite_diff.2_as_finite_diff.__doc__.1",
+      "distance": 0.9440425634384155,
+      "file_path": "sympy/calculus/finite_diff.py",
+      "start_line": 367,
+      "end_line": 421,
+      "tokens": 492,
+      "context_length": 3967
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/core/function.py__derivative_dispatch__derivative_dispatch.6.1",
+      "distance": 0.9487758874893188,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1939,
+      "end_line": 1947,
+      "tokens": 142,
+      "context_length": 4109
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_diff_expand",
+      "distance": 0.9504143595695496,
+      "file_path": "sympy/core/function.py",
+      "start_line": 2438,
+      "end_line": 2837,
+      "tokens": 571,
+      "context_length": 4680
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/arrayop.py_derive_by_array_derive_by_array.6.3.2.2.2.1",
+      "distance": 0.9547995328903198,
+      "file_path": "sympy/tensor/array/arrayop.py",
+      "start_line": 267,
+      "end_line": 326,
+      "tokens": 570,
+      "context_length": 5250
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/matrices/matrices.py_MatrixCalculus.jacobian_MatrixCalculus.jacobian.9.1",
+      "distance": 0.9556350708007812,
+      "file_path": "sympy/matrices/matrices.py",
+      "start_line": 501,
+      "end_line": 556,
+      "tokens": 488,
+      "context_length": 5738
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode/systems.py_matrix_exp_matrix_exp.3.1",
+      "distance": 0.9637086391448975,
+      "file_path": "sympy/solvers/ode/systems.py",
+      "start_line": 498,
+      "end_line": 570,
+      "tokens": 548,
+      "context_length": 6286
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/matrices/matrices.py_MatrixBase.analytic_func_MatrixBase.analytic_func.22.1",
+      "distance": 0.9642421007156372,
+      "file_path": "sympy/matrices/matrices.py",
+      "start_line": 1503,
+      "end_line": 1596,
+      "tokens": 752,
+      "context_length": 7038
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/matrices/common.py_MatrixOperations.applyfunc_MatrixOperations.as_real_imag.3.1",
+      "distance": 0.9722439646720886,
+      "file_path": "sympy/matrices/common.py",
+      "start_line": 2005,
+      "end_line": 2031,
+      "tokens": 187,
+      "context_length": 7225
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matmul.py_MatMul._eval_derivative_matrix_lines_MatMul._eval_derivative_matrix_lines.5.1",
+      "distance": 0.9739277958869934,
+      "file_path": "sympy/matrices/expressions/matmul.py",
+      "start_line": 186,
+      "end_line": 209,
+      "tokens": 195,
+      "context_length": 7420
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/functions/special/hyper.py_meijerg._diff_wrt_parameter_meijerg._diff_wrt_parameter.an.13.1",
+      "distance": 0.9750857949256897,
+      "file_path": "sympy/functions/special/hyper.py",
+      "start_line": 527,
+      "end_line": 611,
+      "tokens": 744,
+      "context_length": 8164
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_22__matrix_derivative.rank.1",
+      "distance": 0.979126513004303,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 642,
+      "end_line": 667,
+      "tokens": 204,
+      "context_length": 8368,
+      "file_pos": 11
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixElement_MatrixElement.indices.1.1",
+      "distance": 0.9799907207489014,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 695,
+      "end_line": 725,
+      "tokens": 246,
+      "context_length": 8614,
+      "file_pos": 11
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_CovarDerivativeOp_CovarDerivativeOp.1",
+      "distance": 0.98412024974823,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1429,
+      "end_line": 1452,
+      "tokens": 218,
+      "context_length": 8832
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/geometry/util.py_idiff_idiff.7.dydx.1",
+      "distance": 0.9843688011169434,
+      "file_path": "sympy/geometry/util.py",
+      "start_line": 538,
+      "end_line": 604,
+      "tokens": 527,
+      "context_length": 9359
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_1_19",
+      "distance": 0.9846591949462891,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 209,
+      "context_length": 9568
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/arrayexpr_derivatives.py___14___15.6.1",
+      "distance": 0.9856200814247131,
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "start_line": 79,
+      "end_line": 94,
+      "tokens": 200,
+      "context_length": 9768
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixExpr.from_index_summation.recurse_expr_MatrixExpr.applyfunc.2.1",
+      "distance": 0.9900902509689331,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 468,
+      "end_line": 590,
+      "tokens": 1188,
+      "context_length": 10956,
+      "file_pos": 13
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode/systems.py_matrix_exp_jordan_form.eigenchains_linodesolve",
+      "distance": 0.9973179697990417,
+      "file_path": "sympy/solvers/ode/systems.py",
+      "start_line": 650,
+      "end_line": 1007,
+      "tokens": 432,
+      "context_length": 11388
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Derivative_Derivative.1",
+      "distance": 0.9977701902389526,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1053,
+      "end_line": 1230,
+      "tokens": 1482,
+      "context_length": 12870
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/__init__.py_1_DenseNDimArray",
+      "distance": 1.0014493465423584,
+      "file_path": "sympy/tensor/array/__init__.py",
+      "start_line": 1,
+      "end_line": 228,
+      "tokens": 2451,
+      "context_length": 15321
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/holonomic/holonomic.py_HolonomicFunction.diff_HolonomicFunction.__eq__.1.2.1.1",
+      "distance": 1.003697395324707,
+      "file_path": "sympy/holonomic/holonomic.py",
+      "start_line": 842,
+      "end_line": 932,
+      "tokens": 744,
+      "context_length": 16065
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_Commutator.__new___Commutator.__call__.2.1",
+      "distance": 1.003702163696289,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 973,
+      "end_line": 1013,
+      "tokens": 446,
+      "context_length": 16511
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/matrices/common.py_MatrixArithmetic.__truediv___MatrixArithmetic.__mod__.1.1",
+      "distance": 1.004685640335083,
+      "file_path": "sympy/matrices/common.py",
+      "start_line": 2698,
+      "end_line": 2711,
+      "tokens": 128,
+      "context_length": 16639
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Derivative.is_Derivative_Derivative._diff_wrt.2.1",
+      "distance": 1.0075243711471558,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1232,
+      "end_line": 1266,
+      "tokens": 267,
+      "context_length": 16906
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_Differential.__call___Differential.__call__.4.3.f.5.1",
+      "distance": 1.010591983795166,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1075,
+      "end_line": 1123,
+      "tokens": 540,
+      "context_length": 17446
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_CovarDerivativeOp.wrt_CovarDerivativeOp.__call__.3.1",
+      "distance": 1.011552333831787,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1467,
+      "end_line": 1479,
+      "tokens": 120,
+      "context_length": 17566
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/arrayexpr_derivatives.py_operator__.1.1",
+      "distance": 1.0116639137268066,
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 192,
+      "context_length": 17758
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/arrayexpr_derivatives.py___18_",
+      "distance": 1.0141658782958984,
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "start_line": 128,
+      "end_line": 173,
+      "tokens": 392,
+      "context_length": 18150
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/calculus/finite_diff.py_differentiate_finite_differentiate_finite.Dexpr.1",
+      "distance": 1.014572262763977,
+      "file_path": "sympy/calculus/finite_diff.py",
+      "start_line": 424,
+      "end_line": 473,
+      "tokens": 660,
+      "context_length": 18810
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_Differential_Differential.form_field.1.1",
+      "distance": 1.0151803493499756,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1016,
+      "end_line": 1073,
+      "tokens": 395,
+      "context_length": 19205
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/solvers/ode/systems.py_matrix_exp_jordan_form_matrix_exp_jordan_form.3.2.1",
+      "distance": 1.0177929401397705,
+      "file_path": "sympy/solvers/ode/systems.py",
+      "start_line": 573,
+      "end_line": 629,
+      "tokens": 417,
+      "context_length": 19622
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_Derivative.as_finite_difference_Derivative._dispatch_eval_derivative_n_times.5.1",
+      "distance": 1.0179979801177979,
+      "file_path": "sympy/core/function.py",
+      "start_line": 1837,
+      "end_line": 1936,
+      "tokens": 1048,
+      "context_length": 20670
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixSymbol._eval_derivative_matrix_lines_matrix_symbols.1.1",
+      "distance": 1.018204689025879,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 811,
+      "end_line": 827,
+      "tokens": 177,
+      "context_length": 20847,
+      "file_pos": 15
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/diffgeom/diffgeom.py_CovarDerivativeOp.__new___CovarDerivativeOp.__new__.7.1",
+      "distance": 1.0191102027893066,
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "start_line": 1454,
+      "end_line": 1465,
+      "tokens": 147,
+      "context_length": 20994
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_transpose_transpose._eval_transpose.1.1",
+      "distance": 1.0191550254821777,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 847,
+      "end_line": 903,
+      "tokens": 312,
+      "context_length": 21306
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/calculus/finite_diff.py_differentiate_finite.4_",
+      "distance": 1.0194945335388184,
+      "file_path": "sympy/calculus/finite_diff.py",
+      "start_line": 474,
+      "end_line": 487,
+      "tokens": 180,
+      "context_length": 21486
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matexpr.py_MatrixExpr.__rpow___MatrixExpr.I.1.1",
+      "distance": 1.0214464664459229,
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "start_line": 150,
+      "end_line": 268,
+      "tokens": 832,
+      "context_length": 22318,
+      "file_pos": 16
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/series/limitseq.py_difference_delta_difference_delta.7.1",
+      "distance": 1.0215497016906738,
+      "file_path": "sympy/series/limitseq.py",
+      "start_line": 18,
+      "end_line": 63,
+      "tokens": 314,
+      "context_length": 22632
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/tensor/array/expressions/array_expressions.py_ArrayElementwiseApplyFunc_ArrayElementwiseApplyFunc._get_function_fdiff.5.1",
+      "distance": 1.0216279029846191,
+      "file_path": "sympy/tensor/array/expressions/array_expressions.py",
+      "start_line": 722,
+      "end_line": 754,
+      "tokens": 193,
+      "context_length": 22825
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/transpose.py_1_Transpose._eval_derivative_matrix_lines.2.1",
+      "distance": 1.0218313932418823,
+      "file_path": "sympy/matrices/expressions/transpose.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 533,
+      "context_length": 23358
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/matrices/expressions/applyfunc.py",
+      "position": 1,
+      "tokens": 1351,
+      "context_length": 1351
+    },
+    {
+      "file_path": "sympy/matrices/matrices.py",
+      "position": 2,
+      "tokens": 19228,
+      "context_length": 20579
+    },
+    {
+      "file_path": "sympy/matrices/expressions/matexpr.py",
+      "position": 3,
+      "tokens": 7525,
+      "context_length": 28104
+    },
+    {
+      "file_path": "sympy/solvers/ode/systems.py",
+      "position": 4,
+      "tokens": 18926,
+      "context_length": 47030
+    },
+    {
+      "file_path": "sympy/tensor/array/expressions/arrayexpr_derivatives.py",
+      "position": 5,
+      "tokens": 1528,
+      "context_length": 48558
+    },
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 6,
+      "tokens": 28225,
+      "context_length": 76783
+    },
+    {
+      "file_path": "sympy/calculus/finite_diff.py",
+      "position": 7,
+      "tokens": 5399,
+      "context_length": 82182
+    },
+    {
+      "file_path": "sympy/tensor/array/arrayop.py",
+      "position": 8,
+      "tokens": 4497,
+      "context_length": 86679
+    },
+    {
+      "file_path": "sympy/matrices/common.py",
+      "position": 9,
+      "tokens": 24665,
+      "context_length": 111344
+    },
+    {
+      "file_path": "sympy/matrices/expressions/matmul.py",
+      "position": 10,
+      "tokens": 3596,
+      "context_length": 114940
+    },
+    {
+      "file_path": "sympy/functions/special/hyper.py",
+      "position": 11,
+      "tokens": 10766,
+      "context_length": 125706
+    },
+    {
+      "file_path": "sympy/diffgeom/diffgeom.py",
+      "position": 12,
+      "tokens": 16597,
+      "context_length": 142303
+    },
+    {
+      "file_path": "sympy/geometry/util.py",
+      "position": 13,
+      "tokens": 5413,
+      "context_length": 147716
+    },
+    {
+      "file_path": "sympy/tensor/array/__init__.py",
+      "position": 14,
+      "tokens": 2647,
+      "context_length": 150363
+    },
+    {
+      "file_path": "sympy/holonomic/holonomic.py",
+      "position": 15,
+      "tokens": 24655,
+      "context_length": 175018
+    },
+    {
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "position": 16,
+      "tokens": 10454,
+      "context_length": 185472
+    },
+    {
+      "file_path": "sympy/series/limitseq.py",
+      "position": 17,
+      "tokens": 1993,
+      "context_length": 187465
+    },
+    {
+      "file_path": "sympy/tensor/array/expressions/array_expressions.py",
+      "position": 18,
+      "tokens": 11799,
+      "context_length": 199264
+    },
+    {
+      "file_path": "sympy/matrices/expressions/transpose.py",
+      "position": 19,
+      "tokens": 679,
+      "context_length": 199943
+    }
+  ]
+}

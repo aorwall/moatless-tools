@@ -1,0 +1,1700 @@
+{
+  "instance_id": "django__django-11399",
+  "model_patch": "diff --git a/django/utils/functional.py b/django/utils/functional.py\nindex ab0be502ce..24d0a6b6d0 100644\n--- a/django/utils/functional.py\n+++ b/django/utils/functional.py\n@@ -79,7 +79,7 @@ def lazy(func, *resultclasses):\n             self.__kw = kw\n             if not self.__prepared:\n                 self.__prepare_class__()\n-            self.__prepared = True\n+            type(self).__prepared = True\n \n         def __reduce__(self):\n             return (\n@@ -143,12 +143,12 @@ def lazy(func, *resultclasses):\n             return str(self.__cast())\n \n         def __eq__(self, other):\n-            if isinstance(other, Promise):\n+            if isinstance(other, __proxy__):\n                 other = other.__cast()\n             return self.__cast() == other\n \n         def __lt__(self, other):\n-            if isinstance(other, Promise):\n+            if isinstance(other, __proxy__):\n                 other = other.__cast()\n             return self.__cast() < other\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/utils/functional.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "b711eafd2aabdf22e1d529bfb76dd8d3356d7000",
+  "patch": "diff --git a/django/utils/functional.py b/django/utils/functional.py\n--- a/django/utils/functional.py\n+++ b/django/utils/functional.py\n@@ -79,7 +79,7 @@ def __init__(self, args, kw):\n             self.__kw = kw\n             if not self.__prepared:\n                 self.__prepare_class__()\n-            self.__prepared = True\n+            self.__class__.__prepared = True\n \n         def __reduce__(self):\n             return (\n",
+  "test_patch": "diff --git a/tests/utils_tests/test_functional.py b/tests/utils_tests/test_functional.py\n--- a/tests/utils_tests/test_functional.py\n+++ b/tests/utils_tests/test_functional.py\n@@ -1,3 +1,5 @@\n+from unittest import mock\n+\n from django.test import SimpleTestCase\n from django.utils.functional import cached_property, lazy\n \n@@ -207,3 +209,12 @@ def test_lazy_repr_bytes(self):\n         original_object = b'J\\xc3\\xbcst a str\\xc3\\xadng'\n         lazy_obj = lazy(lambda: original_object, bytes)\n         self.assertEqual(repr(original_object), repr(lazy_obj()))\n+\n+    def test_lazy_class_preparation_caching(self):\n+        # lazy() should prepare the proxy class only once i.e. the first time\n+        # it's used.\n+        lazified = lazy(lambda: 0, int)\n+        __proxy__ = lazified().__class__\n+        with mock.patch.object(__proxy__, '__prepare_class__') as mocked:\n+            lazified()\n+            mocked.assert_not_called()\n",
+  "problem_statement": "lazy() class preparation is not being cached correctly.\nDescription\n\t\nDoing self.__prepared = True changes the instance, but the intention is to change the class variable: \u200bhttps://github.com/django/django/blob/888fdf182e164fa4b24aa82fa833c90a2b9bee7a/django/utils/functional.py#L82\nThis makes functions like gettext_lazy, format_lazy and reverse_lazy a lot slower than they ought to be.\nRegressed in Django 1.8 (b4e76f30d12bfa8a53cc297c60055c6f4629cc4c).\nUsing this micro-benchmark on Python 3.7:\nimport cProfile\nfrom django.utils.functional import lazy\ndef identity(x): return x\nlazy_identity = lazy(identity, int)\ncProfile.run(\"for i in range(10000): str(lazy_identity(1))\")\nBefore:\n\t\t 910049 function calls in 0.208 seconds\n\tOrdered by: standard name\n\tncalls tottime percall cumtime percall filename:lineno(function)\n\t\t 1\t0.010\t0.010\t0.208\t0.208 <string>:1(<module>)\n\t 10000\t0.001\t0.000\t0.001\t0.000 bench.py:4(identity)\n\t 10000\t0.005\t0.000\t0.010\t0.000 functional.py:105(__str__)\n\t 10000\t0.004\t0.000\t0.188\t0.000 functional.py:159(__wrapper__)\n\t 10000\t0.007\t0.000\t0.185\t0.000 functional.py:76(__init__)\n\t 10000\t0.089\t0.000\t0.178\t0.000 functional.py:83(__prepare_class__)\n\t 10000\t0.004\t0.000\t0.005\t0.000 functional.py:99(__cast)\n\t\t 1\t0.000\t0.000\t0.208\t0.208 {built-in method builtins.exec}\n\t840000\t0.087\t0.000\t0.087\t0.000 {built-in method builtins.hasattr}\n\t\t46\t0.000\t0.000\t0.000\t0.000 {built-in method builtins.setattr}\n\t\t 1\t0.000\t0.000\t0.000\t0.000 {method 'disable' of '_lsprof.Profiler' objects}\n\t 10000\t0.002\t0.000\t0.002\t0.000 {method 'mro' of 'type' objects}\nAfter:\n\t\t 50135 function calls in 0.025 seconds\n\tOrdered by: standard name\n\tncalls tottime percall cumtime percall filename:lineno(function)\n\t\t 1\t0.008\t0.008\t0.025\t0.025 <string>:1(<module>)\n\t 10000\t0.001\t0.000\t0.001\t0.000 bench.py:4(identity)\n\t 10000\t0.005\t0.000\t0.009\t0.000 functional.py:105(__str__)\n\t 10000\t0.003\t0.000\t0.008\t0.000 functional.py:159(__wrapper__)\n\t 10000\t0.005\t0.000\t0.005\t0.000 functional.py:76(__init__)\n\t\t 1\t0.000\t0.000\t0.000\t0.000 functional.py:83(__prepare_class__)\n\t 10000\t0.004\t0.000\t0.005\t0.000 functional.py:99(__cast)\n\t\t 1\t0.000\t0.000\t0.025\t0.025 {built-in method builtins.exec}\n\t\t84\t0.000\t0.000\t0.000\t0.000 {built-in method builtins.hasattr}\n\t\t46\t0.000\t0.000\t0.000\t0.000 {built-in method builtins.setattr}\n\t\t 1\t0.000\t0.000\t0.000\t0.000 {method 'disable' of '_lsprof.Profiler' objects}\n\t\t 1\t0.000\t0.000\t0.000\t0.000 {method 'mro' of 'type' objects}\n",
+  "hints_text": "",
+  "created_at": "2019-05-22T09:09:50Z",
+  "version": "3.0",
+  "FAIL_TO_PASS": "[\"test_lazy_class_preparation_caching (utils_tests.test_functional.FunctionalTests)\"]",
+  "PASS_TO_PASS": "[\"Disallow this case because the decorated function wouldn't be cached.\", \"cached_property caches its value and behaves like a property.\", \"lazy also finds base class methods in the proxy object\", \"lazy finds the correct (overridden) method implementation\", \"test_cached_property_auto_name (utils_tests.test_functional.FunctionalTests)\", \"test_cached_property_reuse_same_name (utils_tests.test_functional.FunctionalTests)\", \"test_cached_property_set_name_not_called (utils_tests.test_functional.FunctionalTests)\", \"test_lazy (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_equality (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_object_to_string (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_bytes (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_int (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_text (utils_tests.test_functional.FunctionalTests)\"]",
+  "environment_setup_commit": "419a78300f7cd27611196e1e464d50fd0385ff27",
+  "patch_files": [
+    "django/utils/functional.py"
+  ],
+  "test_patch_files": [
+    "tests/utils_tests/test_functional.py"
+  ],
+  "patch_diff_details": {
+    "django/utils/functional.py": {
+      "diffs": [
+        {
+          "start_line_old": 82,
+          "end_line_old": 82,
+          "file_pos": 1,
+          "file_context_length": 2966,
+          "closest_snippet_id": "/tmp/repos/django/django/utils/functional.py_copy_cached_property.__get__.4.1",
+          "closest_snippet_line_distance": 33,
+          "pos": 15,
+          "context_length": 6794
+        }
+      ]
+    }
+  },
+  "vectors": 3368,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__prepare_class___lazy.__proxy__.__prepare_class__.5.2.cls.__bytes__.1",
+      "distance": 0.82001131772995,
+      "file_path": "django/utils/functional.py",
+      "start_line": 93,
+      "end_line": 111,
+      "tokens": 208,
+      "context_length": 208,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/utils/functional.py_LazyObject_LazyObject.__contains__.1",
+      "distance": 0.831021785736084,
+      "file_path": "django/utils/functional.py",
+      "start_line": 229,
+      "end_line": 329,
+      "tokens": 905,
+      "context_length": 1113,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__promise___lazy.4.1",
+      "distance": 0.8433902263641357,
+      "file_path": "django/utils/functional.py",
+      "start_line": 113,
+      "end_line": 175,
+      "tokens": 484,
+      "context_length": 1597,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/utils/functional.py__lazy_proxy_unpickle_new_method_proxy",
+      "distance": 0.9790486097335815,
+      "file_path": "django/utils/functional.py",
+      "start_line": 178,
+      "end_line": 226,
+      "tokens": 299,
+      "context_length": 1896,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py_lazy_number_lazy_number.2.1",
+      "distance": 0.9792149066925049,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 149,
+      "end_line": 193,
+      "tokens": 335,
+      "context_length": 2231
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/utils/functional.py_unpickle_lazyobject_",
+      "distance": 0.9832069873809814,
+      "file_path": "django/utils/functional.py",
+      "start_line": 332,
+      "end_line": 402,
+      "tokens": 513,
+      "context_length": 2744,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/conf/__init__.py_LazySettings.__repr___LazySettings.__delattr__.3",
+      "distance": 0.9940630197525024,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 65,
+      "end_line": 95,
+      "tokens": 260,
+      "context_length": 3004
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py__trans_ugettext_lazy.3.1",
+      "distance": 1.019673228263855,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 67,
+      "end_line": 146,
+      "tokens": 489,
+      "context_length": 3493
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py__lazy_number_unpickle_to_language.3.2.1.1",
+      "distance": 1.071569800376892,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 196,
+      "end_line": 268,
+      "tokens": 440,
+      "context_length": 3933
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_related_objects.13_prefetch_related_objects.13.7.2.16.8.new_obj_list.obj_list.1",
+      "distance": 1.0799486637115479,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1556,
+      "end_line": 1662,
+      "tokens": 1063,
+      "context_length": 4996
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/conf/__init__.py_LazySettings.configured_LazySettings.FILE_CHARSET.6.1",
+      "distance": 1.0924403667449951,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 112,
+      "end_line": 129,
+      "tokens": 150,
+      "context_length": 5146
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/views/i18n.py_js_catalog_template_js_catalog_template.1",
+      "distance": 1.0966012477874756,
+      "file_path": "django/views/i18n.py",
+      "start_line": 77,
+      "end_line": 180,
+      "tokens": 711,
+      "context_length": 5857
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/utils/functional.py_copy_cached_property.__get__.4.1",
+      "distance": 1.0975589752197266,
+      "file_path": "django/utils/functional.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 336,
+      "context_length": 6193,
+      "file_pos": 5
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.default_error_",
+      "distance": 1.1063822507858276,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 166,
+      "end_line": 199,
+      "tokens": 332,
+      "context_length": 6525
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/utils/functional.py_Promise_lazy.__proxy__.__repr__.1.1",
+      "distance": 1.1086320877075195,
+      "file_path": "django/utils/functional.py",
+      "start_line": 52,
+      "end_line": 91,
+      "tokens": 269,
+      "context_length": 6794,
+      "file_pos": 6
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/migrations/recorder.py_MigrationRecorder.Migration_MigrationRecorder.Migration.3.1",
+      "distance": 1.1195400953292847,
+      "file_path": "django/db/migrations/recorder.py",
+      "start_line": 24,
+      "end_line": 45,
+      "tokens": 145,
+      "context_length": 6939
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/template/loaders/cached.py_1_Loader.get_template.6.1",
+      "distance": 1.1254092454910278,
+      "file_path": "django/template/loaders/cached.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 467,
+      "context_length": 7406
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/models/functions/__init__.py_NullIf_",
+      "distance": 1.1262120008468628,
+      "file_path": "django/db/models/functions/__init__.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 668,
+      "context_length": 8074
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/conf/__init__.py_LazySettings_LazySettings._setup.self._wrapped.1",
+      "distance": 1.1269416809082031,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 42,
+      "end_line": 63,
+      "tokens": 199,
+      "context_length": 8273
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model_Model.__init__.cls.19",
+      "distance": 1.1272028684616089,
+      "file_path": "django/db/models/base.py",
+      "start_line": 399,
+      "end_line": 503,
+      "tokens": 903,
+      "context_length": 9176
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_lazy_related_operation_lazy_related_operation.5.1",
+      "distance": 1.130419135093689,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 62,
+      "end_line": 80,
+      "tokens": 223,
+      "context_length": 9399
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/utils/translation/trans_null.py_1_",
+      "distance": 1.1328790187835693,
+      "file_path": "django/utils/translation/trans_null.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 269,
+      "context_length": 9668
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol._base_set_DatabaseCache.pickle_protocol._base_set.6.12.7.1.1",
+      "distance": 1.1336743831634521,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 112,
+      "end_line": 197,
+      "tokens": 794,
+      "context_length": 10462
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/utils/encoding.py_force_str_force_str.6.1",
+      "distance": 1.1344976425170898,
+      "file_path": "django/utils/encoding.py",
+      "start_line": 48,
+      "end_line": 67,
+      "tokens": 156,
+      "context_length": 10618
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_one_level_prefetch_one_level.leaf.1",
+      "distance": 1.1358633041381836,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1712,
+      "end_line": 1775,
+      "tokens": 658,
+      "context_length": 11276
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.app_model_error__check_lazy_references.field_error.3.1",
+      "distance": 1.137343168258667,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 117,
+      "end_line": 141,
+      "tokens": 268,
+      "context_length": 11544
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet_QuerySet.__getstate__.2",
+      "distance": 1.1377015113830566,
+      "file_path": "django/db/models/query.py",
+      "start_line": 188,
+      "end_line": 231,
+      "tokens": 352,
+      "context_length": 11896
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references__check_lazy_references.model_signals.1",
+      "distance": 1.1428165435791016,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 77,
+      "end_line": 98,
+      "tokens": 168,
+      "context_length": 12064
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/models/base.py_32_",
+      "distance": 1.1433148384094238,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1814,
+      "end_line": 1865,
+      "tokens": 351,
+      "context_length": 12415
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_StatReloader_WatchmanUnavailable.1",
+      "distance": 1.144317865371704,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 323,
+      "end_line": 362,
+      "tokens": 266,
+      "context_length": 12681
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/models/query.py_normalize_prefetch_lookups_prefetch_related_objects.all_lookups.1",
+      "distance": 1.1448290348052979,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1527,
+      "end_line": 1555,
+      "tokens": 246,
+      "context_length": 12927
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.extract_operation__check_lazy_references.extract_operation.4.1",
+      "distance": 1.1467422246932983,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 100,
+      "end_line": 115,
+      "tokens": 176,
+      "context_length": 13103
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/core/cache/backends/dummy.py_1_",
+      "distance": 1.149420976638794,
+      "file_path": "django/core/cache/backends/dummy.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 251,
+      "context_length": 13354
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_inspect_warn_about_renamed_method.__call__",
+      "distance": 1.1497280597686768,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 195,
+      "context_length": 13549
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py_1_14",
+      "distance": 1.1531026363372803,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 281,
+      "context_length": 13830
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_one_level.29_prefetch_one_level.30.1",
+      "distance": 1.1531685590744019,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1777,
+      "end_line": 1809,
+      "tokens": 314,
+      "context_length": 14144
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_DeprecationInstanceCheck_",
+      "distance": 1.1536723375320435,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 76,
+      "end_line": 98,
+      "tokens": 158,
+      "context_length": 14302
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/core/cache/backends/locmem.py_1_LocMemCache.touch.2.3.1",
+      "distance": 1.154782772064209,
+      "file_path": "django/core/cache/backends/locmem.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 505,
+      "context_length": 14807
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py_Trans.__getattr___Trans.__getattr__.4.1",
+      "distance": 1.1576991081237793,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 54,
+      "end_line": 64,
+      "tokens": 127,
+      "context_length": 14934
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/models/query.py_Prefetch_Prefetch.__hash__.1.1",
+      "distance": 1.1585692167282104,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1478,
+      "end_line": 1524,
+      "tokens": 433,
+      "context_length": 15367
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/db/models/options.py_copy_DEFAULT_NAMES.1",
+      "distance": 1.1614822149276733,
+      "file_path": "django/db/models/options.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 304,
+      "context_length": 15671
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/apps/registry.py_Apps.lazy_model_operation_",
+      "distance": 1.1632444858551025,
+      "file_path": "django/apps/registry.py",
+      "start_line": 378,
+      "end_line": 428,
+      "tokens": 465,
+      "context_length": 16136
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py_15_Trans.1",
+      "distance": 1.1641571521759033,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 37,
+      "end_line": 52,
+      "tokens": 154,
+      "context_length": 16290
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.1658756732940674,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 548,
+      "context_length": 16838
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/conf/__init__.py_LazySettings.configure_LazySettings.configure.self._wrapped.1",
+      "distance": 1.1661268472671509,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 97,
+      "end_line": 110,
+      "tokens": 131,
+      "context_length": 16969
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/db/models/base.py_ModelBase.add_to_class_ModelBase._default_manager.1.1",
+      "distance": 1.1725817918777466,
+      "file_path": "django/db/models/base.py",
+      "start_line": 319,
+      "end_line": 377,
+      "tokens": 525,
+      "context_length": 17494
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/utils/formats.py_datetime_reset_format_cache._format_modules_cache.1",
+      "distance": 1.173379898071289,
+      "file_path": "django/utils/formats.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 377,
+      "context_length": 17871
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/prototypes/prepared.py_1_",
+      "distance": 1.1763033866882324,
+      "file_path": "django/contrib/gis/geos/prototypes/prepared.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 282,
+      "context_length": 18153
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/template/engine.py_functools_Engine.__init__.self.template_builtins.1",
+      "distance": 1.1767301559448242,
+      "file_path": "django/template/engine.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 388,
+      "context_length": 18541
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/utils/translation/trans_real.py_1_reset_cache.2.3",
+      "distance": 1.1783398389816284,
+      "file_path": "django/utils/translation/trans_real.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 482,
+      "context_length": 19023
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_operator_DatabaseFeatures.needs_explain_extended.2.1",
+      "distance": 1.1795375347137451,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 843,
+      "context_length": 19866
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol._cull_",
+      "distance": 1.1810764074325562,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 253,
+      "end_line": 278,
+      "tokens": 308,
+      "context_length": 20174
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_RegisterLookupMixin_RegisterLookupMixin._unregister_lookup.3",
+      "distance": 1.1816967725753784,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 154,
+      "end_line": 218,
+      "tokens": 492,
+      "context_length": 20666
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/libgeos.py_GEOSFuncFactory_",
+      "distance": 1.1837468147277832,
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "start_line": 134,
+      "end_line": 175,
+      "tokens": 293,
+      "context_length": 20959
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream.__next___LazyStream.unget.self._leftover.1",
+      "distance": 1.183938980102539,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 365,
+      "end_line": 404,
+      "tokens": 258,
+      "context_length": 21217
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedLookupMixin_RelatedLookupMixin.get_prep_lookup.2.1",
+      "distance": 1.1889104843139648,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 102,
+      "end_line": 117,
+      "tokens": 212,
+      "context_length": 21429
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/core/cache/backends/base.py_1_get_key_func.3.1",
+      "distance": 1.1896265745162964,
+      "file_path": "django/core/cache/backends/base.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 245,
+      "context_length": 21674
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/models/functions/window.py_LagLeadFunction_LagLeadFunction._resolve_output_field.2.1",
+      "distance": 1.1902252435684204,
+      "file_path": "django/db/models/functions/window.py",
+      "start_line": 28,
+      "end_line": 49,
+      "tokens": 154,
+      "context_length": 21828
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/sessions/backends/base.py_SessionBase.update_SessionBase.get_session_cookie_age.1.1",
+      "distance": 1.1915814876556396,
+      "file_path": "django/contrib/sessions/backends/base.py",
+      "start_line": 127,
+      "end_line": 210,
+      "tokens": 563,
+      "context_length": 22391
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/utils/deprecation.py_RenameMethodsBase_RenameMethodsBase.__new__.3.1",
+      "distance": 1.1917729377746582,
+      "file_path": "django/utils/deprecation.py",
+      "start_line": 33,
+      "end_line": 73,
+      "tokens": 336,
+      "context_length": 22727
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_FieldGetDbPrepValueMixin_FieldGetDbPrepValueMixin.get_db_prep_lookup.field.3.1",
+      "distance": 1.1918103694915771,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 171,
+      "end_line": 187,
+      "tokens": 170,
+      "context_length": 22897
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol.has_key_DatabaseCache.pickle_protocol.has_key.8.2.1",
+      "distance": 1.1920044422149658,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 228,
+      "end_line": 251,
+      "tokens": 259,
+      "context_length": 23156
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.192136526107788,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 289,
+      "context_length": 23445
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.contribute_to_class_Options.contribute_to_class.16.self.db_table_2.1",
+      "distance": 1.1926345825195312,
+      "file_path": "django/db/models/options.py",
+      "start_line": 149,
+      "end_line": 202,
+      "tokens": 518,
+      "context_length": 23963
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/models/functions/window.py_Lag_NthValue._resolve_output_field.2.1",
+      "distance": 1.19367516040802,
+      "file_path": "django/db/models/functions/window.py",
+      "start_line": 52,
+      "end_line": 79,
+      "tokens": 182,
+      "context_length": 24145
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_BaseReloader.run_loop_BaseReloader.stop.1",
+      "distance": 1.1951483488082886,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 285,
+      "end_line": 320,
+      "tokens": 259,
+      "context_length": 24404
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol.set_DatabaseCache.pickle_protocol.touch.3.1",
+      "distance": 1.2022148370742798,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 97,
+      "end_line": 110,
+      "tokens": 234,
+      "context_length": 24638
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_FieldGetDbPrepValueIterableMixin_FieldGetDbPrepValueIterableMixin.resolve_expression_parameter.4.1",
+      "distance": 1.2026163339614868,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 190,
+      "end_line": 225,
+      "tokens": 308,
+      "context_length": 24946
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/template/backends/dummy.py_string_",
+      "distance": 1.2037612199783325,
+      "file_path": "django/template/backends/dummy.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 330,
+      "context_length": 25276
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.loaddata_Command.loaddata.24.1.2.1",
+      "distance": 1.2040997743606567,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 81,
+      "end_line": 148,
+      "tokens": 593,
+      "context_length": 25869
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/db/migrations/optimizer.py_MigrationOptimizer.optimize_inner_",
+      "distance": 1.2042369842529297,
+      "file_path": "django/db/migrations/optimizer.py",
+      "start_line": 41,
+      "end_line": 71,
+      "tokens": 249,
+      "context_length": 26118
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache_DatabaseCache.pickle_protocol.get_many.15.1",
+      "distance": 1.204986810684204,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 40,
+      "end_line": 95,
+      "tokens": 431,
+      "context_length": 26549
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/core/checks/model_checks.py__check_lazy_references.signal_connect_error__check_lazy_references.signal_connect_error.8.1",
+      "distance": 1.205251932144165,
+      "file_path": "django/core/checks/model_checks.py",
+      "start_line": 143,
+      "end_line": 164,
+      "tokens": 263,
+      "context_length": 26812
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/core/cache/backends/memcached.py_BaseMemcachedCache.incr_BaseMemcachedCache.incr.6.1",
+      "distance": 1.2057678699493408,
+      "file_path": "django/core/cache/backends/memcached.py",
+      "start_line": 92,
+      "end_line": 108,
+      "tokens": 167,
+      "context_length": 26979
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/storage.py_HashedFilesMixin._post_process_HashedFilesMixin._post_process.path_level.2.5.15",
+      "distance": 1.2068818807601929,
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "start_line": 256,
+      "end_line": 325,
+      "tokens": 569,
+      "context_length": 27548
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/core/cache/backends/locmem.py_LocMemCache.has_key_",
+      "distance": 1.2104313373565674,
+      "file_path": "django/core/cache/backends/locmem.py",
+      "start_line": 83,
+      "end_line": 123,
+      "tokens": 270,
+      "context_length": 27818
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_BaseReloader.run_BaseReloader.run.9",
+      "distance": 1.2140111923217773,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 269,
+      "end_line": 283,
+      "tokens": 146,
+      "context_length": 27964
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/core/cache/backends/memcached.py_BaseMemcachedCache.decr_BaseMemcachedCache.decr.6.1",
+      "distance": 1.214111566543579,
+      "file_path": "django/core/cache/backends/memcached.py",
+      "start_line": 110,
+      "end_line": 126,
+      "tokens": 168,
+      "context_length": 28132
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options._prepare_Options._prepare.2.1.4.2",
+      "distance": 1.2144005298614502,
+      "file_path": "django/db/models/options.py",
+      "start_line": 204,
+      "end_line": 242,
+      "tokens": 362,
+      "context_length": 28494
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Lookup.get_source_expressions_Lookup.process_lhs.3.1",
+      "distance": 1.2147164344787598,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 55,
+      "end_line": 80,
+      "tokens": 218,
+      "context_length": 28712
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/contrib/humanize/templatetags/humanize.py_NaturalTimeFormatter_NaturalTimeFormatter.future_substrings.1",
+      "distance": 1.2147436141967773,
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "start_line": 218,
+      "end_line": 261,
+      "tokens": 731,
+      "context_length": 29443
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage.delete_",
+      "distance": 1.2153528928756714,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 289,
+      "end_line": 361,
+      "tokens": 483,
+      "context_length": 29926
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/conf/__init__.py_Settings_Settings.__repr__.1.1",
+      "distance": 1.218889594078064,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 132,
+      "end_line": 185,
+      "tokens": 472,
+      "context_length": 30398
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedIn_RelatedIn.get_prep_lookup.2.1",
+      "distance": 1.2193706035614014,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 46,
+      "end_line": 60,
+      "tokens": 224,
+      "context_length": 30622
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/core/cache/backends/locmem.py_LocMemCache.incr_LocMemCache.incr.4.1",
+      "distance": 1.219771146774292,
+      "file_path": "django/core/cache/backends/locmem.py",
+      "start_line": 68,
+      "end_line": 81,
+      "tokens": 138,
+      "context_length": 30760
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/utils/timesince.py_calendar_TIMESINCE_CHUNKS.1",
+      "distance": 1.2201651334762573,
+      "file_path": "django/utils/timesince.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 220,
+      "context_length": 30980
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_1_BaseDatabaseFeatures.83",
+      "distance": 1.225454330444336,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 900,
+      "context_length": 31880
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream._update_unget_history_LazyStream._update_unget_history.4.1",
+      "distance": 1.2269837856292725,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 406,
+      "end_line": 425,
+      "tokens": 205,
+      "context_length": 32085
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/contrib/humanize/templatetags/humanize.py_NaturalTimeFormatter.string_for_",
+      "distance": 1.227654218673706,
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "start_line": 263,
+      "end_line": 301,
+      "tokens": 370,
+      "context_length": 32455
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options._relation_tree_Options._expire_cache.3.self._get_fields_cache.1",
+      "distance": 1.227811574935913,
+      "file_path": "django/db/models/options.py",
+      "start_line": 703,
+      "end_line": 718,
+      "tokens": 144,
+      "context_length": 32599
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/models/query.py_get_prefetcher_get_prefetcher.9.1",
+      "distance": 1.2284072637557983,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1665,
+      "end_line": 1709,
+      "tokens": 439,
+      "context_length": 33038
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Transform_Transform.get_bilateral_transforms.3.1",
+      "distance": 1.2293004989624023,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 128,
+      "end_line": 147,
+      "tokens": 134,
+      "context_length": 33172
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._optimize_migrations_MigrationAutodetector._optimize_migrations.2.5.1.migration.operations.1",
+      "distance": 1.229310393333435,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 358,
+      "end_line": 372,
+      "tokens": 141,
+      "context_length": 33313
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/core/files/base.py_os_File.__len__.1.1",
+      "distance": 1.2300782203674316,
+      "file_path": "django/core/files/base.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 174,
+      "context_length": 33487
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/urls/base.py_reverse_lazy_is_valid_path.2.3.1.1",
+      "distance": 1.2305799722671509,
+      "file_path": "django/urls/base.py",
+      "start_line": 93,
+      "end_line": 160,
+      "tokens": 381,
+      "context_length": 33868
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_BIDI_127",
+      "distance": 1.2318179607391357,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 145,
+      "end_line": 263,
+      "tokens": 876,
+      "context_length": 34744
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/db/models/base.py_ModelBase.__new__.45_ModelBase.__new__.52.1",
+      "distance": 1.2320425510406494,
+      "file_path": "django/db/models/base.py",
+      "start_line": 207,
+      "end_line": 317,
+      "tokens": 866,
+      "context_length": 35610
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/core/checks/messages.py_Debug_",
+      "distance": 1.2328588962554932,
+      "file_path": "django/core/checks/messages.py",
+      "start_line": 53,
+      "end_line": 76,
+      "tokens": 161,
+      "context_length": 35771
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Lookup.rhs_is_direct_value_Lookup.is_summary.1.1",
+      "distance": 1.2335081100463867,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 96,
+      "end_line": 125,
+      "tokens": 243,
+      "context_length": 36014
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_SHORT_DATE_FORMAT_213",
+      "distance": 1.2337220907211304,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 347,
+      "end_line": 397,
+      "tokens": 826,
+      "context_length": 36840
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/core/cache/backends/memcached.py_1_BaseMemcachedCache._cache.3.1",
+      "distance": 1.2339508533477783,
+      "file_path": "django/core/cache/backends/memcached.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 248,
+      "context_length": 37088
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_itertools_Lookup.apply_bilateral_transforms.2.1",
+      "distance": 1.2349225282669067,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 283,
+      "context_length": 37371
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/utils/cache.py__not_modified__not_modified.3.1",
+      "distance": 1.2351176738739014,
+      "file_path": "django/utils/cache.py",
+      "start_line": 116,
+      "end_line": 131,
+      "tokens": 188,
+      "context_length": 37559
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/utils/encoding.py_smart_text_force_text.2.1",
+      "distance": 1.2363009452819824,
+      "file_path": "django/utils/encoding.py",
+      "start_line": 102,
+      "end_line": 115,
+      "tokens": 130,
+      "context_length": 37689
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_re_NotRegistered.1",
+      "distance": 1.236846685409546,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 175,
+      "context_length": 37864
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/sessions/backends/cached_db.py_1_SessionStore.load.3.1",
+      "distance": 1.236983299255371,
+      "file_path": "django/contrib/sessions/backends/cached_db.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 253,
+      "context_length": 38117
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/template/loaders/cached.py_Loader.get_template_sources_",
+      "distance": 1.2372748851776123,
+      "file_path": "django/template/loaders/cached.py",
+      "start_line": 62,
+      "end_line": 93,
+      "tokens": 225,
+      "context_length": 38342
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.pre_sql_setup_SQLCompiler.pre_sql_setup.8.1",
+      "distance": 1.2386558055877686,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 45,
+      "end_line": 57,
+      "tokens": 139,
+      "context_length": 38481
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/template/engine.py_Engine.template_context_processors_Engine.get_template.4.1",
+      "distance": 1.2388660907745361,
+      "file_path": "django/template/engine.py",
+      "start_line": 81,
+      "end_line": 147,
+      "tokens": 457,
+      "context_length": 38938
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_ReverseOneToOneDescriptor.get_prefetch_queryset_ReverseOneToOneDescriptor.get_prefetch_queryset.11.1",
+      "distance": 1.239180564880371,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 356,
+      "end_line": 372,
+      "tokens": 184,
+      "context_length": 39122
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/utils/dates.py_1_",
+      "distance": 1.2394111156463623,
+      "file_path": "django/utils/dates.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 679,
+      "context_length": 39801
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Lookup.process_rhs_Lookup.process_rhs.3.2.1.1",
+      "distance": 1.2397550344467163,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 82,
+      "end_line": 94,
+      "tokens": 126,
+      "context_length": 39927
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.managers_Options.managers_map.1.1",
+      "distance": 1.2404953241348267,
+      "file_path": "django/db/models/options.py",
+      "start_line": 345,
+      "end_line": 367,
+      "tokens": 164,
+      "context_length": 40091
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/storage.py_hashlib_15",
+      "distance": 1.2416644096374512,
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 129,
+      "context_length": 40220
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/template/base.py_43_filter_re.1",
+      "distance": 1.2429921627044678,
+      "file_path": "django/template/base.py",
+      "start_line": 571,
+      "end_line": 606,
+      "tokens": 359,
+      "context_length": 40579
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/views/debug.py_get_default_exception_reporter_filter_ExceptionReporterFilter.get_traceback_frame_variables.1.1",
+      "distance": 1.2431488037109375,
+      "file_path": "django/views/debug.py",
+      "start_line": 98,
+      "end_line": 122,
+      "tokens": 155,
+      "context_length": 40734
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/template/base.py_Origin_Origin.loader_name.1.1.1",
+      "distance": 1.2434635162353516,
+      "file_path": "django/template/base.py",
+      "start_line": 117,
+      "end_line": 138,
+      "tokens": 127,
+      "context_length": 40861
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream.read_LazyStream.read",
+      "distance": 1.2443535327911377,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 339,
+      "end_line": 363,
+      "tokens": 169,
+      "context_length": 41030
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._build_migration_list.5_MigrationAutodetector._build_migration_list.5.7.num_ops.1",
+      "distance": 1.2449209690093994,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 264,
+      "end_line": 335,
+      "tokens": 748,
+      "context_length": 41778
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/utils/itercompat.py__",
+      "distance": 1.2463195323944092,
+      "file_path": "django/utils/itercompat.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 41778
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_DeferredAttribute_DeferredAttribute._check_parent_chain.6.1",
+      "distance": 1.2471928596496582,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 114,
+      "end_line": 151,
+      "tokens": 320,
+      "context_length": 42098
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/core/cache/utils.py__",
+      "distance": 1.2471966743469238,
+      "file_path": "django/core/cache/utils.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 42098
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/utils/encoding.py_smart_bytes_force_bytes.6.1",
+      "distance": 1.2479124069213867,
+      "file_path": "django/utils/encoding.py",
+      "start_line": 70,
+      "end_line": 99,
+      "tokens": 250,
+      "context_length": 42348
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.11.3.seen_from.5.1",
+      "distance": 1.2484357357025146,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1202,
+      "end_line": 1325,
+      "tokens": 1010,
+      "context_length": 43358
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/conf/locale/id/formats.py_DATE_FORMAT_",
+      "distance": 1.249462366104126,
+      "file_path": "django/conf/locale/id/formats.py",
+      "start_line": 5,
+      "end_line": 50,
+      "tokens": 708,
+      "context_length": 44066
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 1.24956476688385,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1235,
+      "end_line": 1264,
+      "tokens": 242,
+      "context_length": 44308
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/core/validators.py_ipaddress__lazy_re_compile.3.1",
+      "distance": 1.2505035400390625,
+      "file_path": "django/core/validators.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 190,
+      "context_length": 44498
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py_NestedObjects.related_objects_NestedObjects.can_fast_delete.2.1",
+      "distance": 1.2505409717559814,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 185,
+      "end_line": 219,
+      "tokens": 233,
+      "context_length": 44731
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/utils/functional.py",
+      "position": 1,
+      "tokens": 2966,
+      "context_length": 2966
+    },
+    {
+      "file_path": "django/utils/translation/__init__.py",
+      "position": 2,
+      "tokens": 2284,
+      "context_length": 5250
+    },
+    {
+      "file_path": "django/conf/__init__.py",
+      "position": 3,
+      "tokens": 1786,
+      "context_length": 7036
+    },
+    {
+      "file_path": "django/db/models/query.py",
+      "position": 4,
+      "tokens": 16471,
+      "context_length": 23507
+    },
+    {
+      "file_path": "django/views/i18n.py",
+      "position": 5,
+      "tokens": 2507,
+      "context_length": 26014
+    },
+    {
+      "file_path": "django/core/checks/model_checks.py",
+      "position": 6,
+      "tokens": 1681,
+      "context_length": 27695
+    },
+    {
+      "file_path": "django/db/migrations/recorder.py",
+      "position": 7,
+      "tokens": 670,
+      "context_length": 28365
+    },
+    {
+      "file_path": "django/template/loaders/cached.py",
+      "position": 8,
+      "tokens": 688,
+      "context_length": 29053
+    },
+    {
+      "file_path": "django/db/models/functions/__init__.py",
+      "position": 9,
+      "tokens": 668,
+      "context_length": 29721
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 10,
+      "tokens": 14958,
+      "context_length": 44679
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 11,
+      "tokens": 13571,
+      "context_length": 58250
+    },
+    {
+      "file_path": "django/utils/translation/trans_null.py",
+      "position": 12,
+      "tokens": 269,
+      "context_length": 58519
+    },
+    {
+      "file_path": "django/core/cache/backends/db.py",
+      "position": 13,
+      "tokens": 2086,
+      "context_length": 60605
+    },
+    {
+      "file_path": "django/utils/encoding.py",
+      "position": 14,
+      "tokens": 2296,
+      "context_length": 62901
+    },
+    {
+      "file_path": "django/utils/autoreload.py",
+      "position": 15,
+      "tokens": 4594,
+      "context_length": 67495
+    },
+    {
+      "file_path": "django/core/cache/backends/dummy.py",
+      "position": 16,
+      "tokens": 252,
+      "context_length": 67747
+    },
+    {
+      "file_path": "django/utils/deprecation.py",
+      "position": 17,
+      "tokens": 692,
+      "context_length": 68439
+    },
+    {
+      "file_path": "django/core/cache/backends/locmem.py",
+      "position": 18,
+      "tokens": 901,
+      "context_length": 69340
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 19,
+      "tokens": 6866,
+      "context_length": 76206
+    },
+    {
+      "file_path": "django/apps/registry.py",
+      "position": 20,
+      "tokens": 3407,
+      "context_length": 79613
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 21,
+      "tokens": 548,
+      "context_length": 80161
+    },
+    {
+      "file_path": "django/utils/formats.py",
+      "position": 22,
+      "tokens": 2092,
+      "context_length": 82253
+    },
+    {
+      "file_path": "django/contrib/gis/geos/prototypes/prepared.py",
+      "position": 23,
+      "tokens": 282,
+      "context_length": 82535
+    },
+    {
+      "file_path": "django/template/engine.py",
+      "position": 24,
+      "tokens": 1310,
+      "context_length": 83845
+    },
+    {
+      "file_path": "django/utils/translation/trans_real.py",
+      "position": 25,
+      "tokens": 3825,
+      "context_length": 87670
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 26,
+      "tokens": 980,
+      "context_length": 88650
+    },
+    {
+      "file_path": "django/db/models/query_utils.py",
+      "position": 27,
+      "tokens": 2631,
+      "context_length": 91281
+    },
+    {
+      "file_path": "django/contrib/gis/geos/libgeos.py",
+      "position": 28,
+      "tokens": 1284,
+      "context_length": 92565
+    },
+    {
+      "file_path": "django/http/multipartparser.py",
+      "position": 29,
+      "tokens": 5027,
+      "context_length": 97592
+    },
+    {
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "position": 30,
+      "tokens": 1446,
+      "context_length": 99038
+    },
+    {
+      "file_path": "django/core/cache/backends/base.py",
+      "position": 31,
+      "tokens": 2150,
+      "context_length": 101188
+    },
+    {
+      "file_path": "django/db/models/functions/window.py",
+      "position": 32,
+      "tokens": 643,
+      "context_length": 101831
+    },
+    {
+      "file_path": "django/contrib/sessions/backends/base.py",
+      "position": 33,
+      "tokens": 2531,
+      "context_length": 104362
+    },
+    {
+      "file_path": "django/db/models/lookups.py",
+      "position": 34,
+      "tokens": 4154,
+      "context_length": 108516
+    },
+    {
+      "file_path": "django/template/backends/dummy.py",
+      "position": 35,
+      "tokens": 330,
+      "context_length": 108846
+    },
+    {
+      "file_path": "django/core/management/commands/loaddata.py",
+      "position": 36,
+      "tokens": 2868,
+      "context_length": 111714
+    },
+    {
+      "file_path": "django/db/migrations/optimizer.py",
+      "position": 37,
+      "tokens": 596,
+      "context_length": 112310
+    },
+    {
+      "file_path": "django/core/cache/backends/memcached.py",
+      "position": 38,
+      "tokens": 1718,
+      "context_length": 114028
+    },
+    {
+      "file_path": "django/contrib/staticfiles/storage.py",
+      "position": 39,
+      "tokens": 3895,
+      "context_length": 117923
+    },
+    {
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "position": 40,
+      "tokens": 3141,
+      "context_length": 121064
+    },
+    {
+      "file_path": "django/core/files/storage.py",
+      "position": 41,
+      "tokens": 2836,
+      "context_length": 123900
+    },
+    {
+      "file_path": "django/utils/timesince.py",
+      "position": 42,
+      "tokens": 854,
+      "context_length": 124754
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 43,
+      "tokens": 2453,
+      "context_length": 127207
+    },
+    {
+      "file_path": "django/db/migrations/autodetector.py",
+      "position": 44,
+      "tokens": 11671,
+      "context_length": 138878
+    },
+    {
+      "file_path": "django/core/files/base.py",
+      "position": 45,
+      "tokens": 1052,
+      "context_length": 139930
+    },
+    {
+      "file_path": "django/urls/base.py",
+      "position": 46,
+      "tokens": 1194,
+      "context_length": 141124
+    },
+    {
+      "file_path": "django/conf/global_settings.py",
+      "position": 47,
+      "tokens": 5604,
+      "context_length": 146728
+    },
+    {
+      "file_path": "django/core/checks/messages.py",
+      "position": 48,
+      "tokens": 573,
+      "context_length": 147301
+    },
+    {
+      "file_path": "django/utils/cache.py",
+      "position": 49,
+      "tokens": 3549,
+      "context_length": 150850
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 50,
+      "tokens": 4191,
+      "context_length": 155041
+    },
+    {
+      "file_path": "django/contrib/sessions/backends/cached_db.py",
+      "position": 51,
+      "tokens": 421,
+      "context_length": 155462
+    },
+    {
+      "file_path": "django/db/models/sql/compiler.py",
+      "position": 52,
+      "tokens": 13519,
+      "context_length": 168981
+    },
+    {
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "position": 53,
+      "tokens": 10285,
+      "context_length": 179266
+    },
+    {
+      "file_path": "django/utils/dates.py",
+      "position": 54,
+      "tokens": 679,
+      "context_length": 179945
+    },
+    {
+      "file_path": "django/template/base.py",
+      "position": 55,
+      "tokens": 7861,
+      "context_length": 187806
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 56,
+      "tokens": 4218,
+      "context_length": 192024
+    },
+    {
+      "file_path": "django/utils/itercompat.py",
+      "position": 57,
+      "tokens": 40,
+      "context_length": 192064
+    },
+    {
+      "file_path": "django/core/cache/utils.py",
+      "position": 58,
+      "tokens": 87,
+      "context_length": 192151
+    },
+    {
+      "file_path": "django/conf/locale/id/formats.py",
+      "position": 59,
+      "tokens": 753,
+      "context_length": 192904
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 60,
+      "tokens": 4320,
+      "context_length": 197224
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 61,
+      "tokens": 3868,
+      "context_length": 201092
+    }
+  ]
+}

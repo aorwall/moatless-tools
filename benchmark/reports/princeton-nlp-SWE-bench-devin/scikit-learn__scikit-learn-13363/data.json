@@ -1,0 +1,1825 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-13363",
+  "model_patch": "diff --git a/sklearn/linear_model/ridge.py b/sklearn/linear_model/ridge.py\nindex e1fc9b424..b7048bd82 100644\n--- a/sklearn/linear_model/ridge.py\n+++ b/sklearn/linear_model/ridge.py\n@@ -436,6 +436,8 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n         raise ValueError('Solver %s not understood' % solver)\n \n     n_iter = None\n+    # Initialize intercept as a one-dimensional array for single target or array of zeros for multi-target\n+    intercept = np.zeros(y.shape[1] if y.ndim > 1 else 1, dtype=X.dtype)\n     if solver == 'sparse_cg':\n         coef = _solve_sparse_cg(X, y, alpha,\n                                 max_iter=max_iter,\n@@ -471,7 +473,9 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n \n         coef = np.empty((y.shape[1], n_features))\n         n_iter = np.empty(y.shape[1], dtype=np.int32)\n-        intercept = np.zeros((y.shape[1], ))\n+        if return_intercept:\n+            # Initialize intercept as a one-dimensional array for single target or array of zeros for multi-target\n+            intercept = np.zeros(y.shape[1] if y.ndim > 1 else 1)\n         for i, (alpha_i, target) in enumerate(zip(alpha, y.T)):\n             init = {'coef': np.zeros((n_features + int(return_intercept), 1))}\n             coef_, n_iter_, _ = sag_solver(\n@@ -486,7 +490,7 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n                 coef[i] = coef_\n             n_iter[i] = n_iter_\n \n-        if intercept.shape[0] == 1:\n+        if ravel and intercept.shape[0] == 1:\n             intercept = intercept[0]\n         coef = np.asarray(coef)\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/linear_model/ridge.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "eda99f3cec70ba90303de0ef3ab7f988657fadb9",
+  "patch": "diff --git a/sklearn/linear_model/ridge.py b/sklearn/linear_model/ridge.py\n--- a/sklearn/linear_model/ridge.py\n+++ b/sklearn/linear_model/ridge.py\n@@ -368,12 +368,25 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n                       return_n_iter=False, return_intercept=False,\n                       X_scale=None, X_offset=None):\n \n-    if return_intercept and sparse.issparse(X) and solver != 'sag':\n-        if solver != 'auto':\n-            warnings.warn(\"In Ridge, only 'sag' solver can currently fit the \"\n-                          \"intercept when X is sparse. Solver has been \"\n-                          \"automatically changed into 'sag'.\")\n-        solver = 'sag'\n+    has_sw = sample_weight is not None\n+\n+    if solver == 'auto':\n+        if return_intercept:\n+            # only sag supports fitting intercept directly\n+            solver = \"sag\"\n+        elif not sparse.issparse(X):\n+            solver = \"cholesky\"\n+        else:\n+            solver = \"sparse_cg\"\n+\n+    if solver not in ('sparse_cg', 'cholesky', 'svd', 'lsqr', 'sag', 'saga'):\n+        raise ValueError(\"Known solvers are 'sparse_cg', 'cholesky', 'svd'\"\n+                         \" 'lsqr', 'sag' or 'saga'. Got %s.\" % solver)\n+\n+    if return_intercept and solver != 'sag':\n+        raise ValueError(\"In Ridge, only 'sag' solver can directly fit the \"\n+                         \"intercept. Please change solver to 'sag' or set \"\n+                         \"return_intercept=False.\")\n \n     _dtype = [np.float64, np.float32]\n \n@@ -404,14 +417,7 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n         raise ValueError(\"Number of samples in X and y does not correspond:\"\n                          \" %d != %d\" % (n_samples, n_samples_))\n \n-    has_sw = sample_weight is not None\n \n-    if solver == 'auto':\n-        # cholesky if it's a dense array and cg in any other case\n-        if not sparse.issparse(X) or has_sw:\n-            solver = 'cholesky'\n-        else:\n-            solver = 'sparse_cg'\n \n     if has_sw:\n         if np.atleast_1d(sample_weight).ndim > 1:\n@@ -432,8 +438,6 @@ def _ridge_regression(X, y, alpha, sample_weight=None, solver='auto',\n     if alpha.size == 1 and n_targets > 1:\n         alpha = np.repeat(alpha, n_targets)\n \n-    if solver not in ('sparse_cg', 'cholesky', 'svd', 'lsqr', 'sag', 'saga'):\n-        raise ValueError('Solver %s not understood' % solver)\n \n     n_iter = None\n     if solver == 'sparse_cg':\n@@ -555,7 +559,7 @@ def fit(self, X, y, sample_weight=None):\n             # add the offset which was subtracted by _preprocess_data\n             self.intercept_ += y_offset\n         else:\n-            if sparse.issparse(X):\n+            if sparse.issparse(X) and self.solver == 'sparse_cg':\n                 # required to fit intercept with sparse_cg solver\n                 params = {'X_offset': X_offset, 'X_scale': X_scale}\n             else:\n",
+  "test_patch": "diff --git a/sklearn/linear_model/tests/test_ridge.py b/sklearn/linear_model/tests/test_ridge.py\n--- a/sklearn/linear_model/tests/test_ridge.py\n+++ b/sklearn/linear_model/tests/test_ridge.py\n@@ -7,6 +7,7 @@\n \n from sklearn.utils.testing import assert_almost_equal\n from sklearn.utils.testing import assert_array_almost_equal\n+from sklearn.utils.testing import assert_allclose\n from sklearn.utils.testing import assert_equal\n from sklearn.utils.testing import assert_array_equal\n from sklearn.utils.testing import assert_greater\n@@ -778,7 +779,8 @@ def test_raises_value_error_if_solver_not_supported():\n     wrong_solver = \"This is not a solver (MagritteSolveCV QuantumBitcoin)\"\n \n     exception = ValueError\n-    message = \"Solver %s not understood\" % wrong_solver\n+    message = (\"Known solvers are 'sparse_cg', 'cholesky', 'svd'\"\n+               \" 'lsqr', 'sag' or 'saga'. Got %s.\" % wrong_solver)\n \n     def func():\n         X = np.eye(3)\n@@ -832,9 +834,57 @@ def test_ridge_fit_intercept_sparse():\n     # test the solver switch and the corresponding warning\n     for solver in ['saga', 'lsqr']:\n         sparse = Ridge(alpha=1., tol=1.e-15, solver=solver, fit_intercept=True)\n-        assert_warns(UserWarning, sparse.fit, X_csr, y)\n-        assert_almost_equal(dense.intercept_, sparse.intercept_)\n-        assert_array_almost_equal(dense.coef_, sparse.coef_)\n+        assert_raises_regex(ValueError, \"In Ridge,\", sparse.fit, X_csr, y)\n+\n+\n+@pytest.mark.parametrize('return_intercept', [False, True])\n+@pytest.mark.parametrize('sample_weight', [None, np.ones(1000)])\n+@pytest.mark.parametrize('arr_type', [np.array, sp.csr_matrix])\n+@pytest.mark.parametrize('solver', ['auto', 'sparse_cg', 'cholesky', 'lsqr',\n+                                    'sag', 'saga'])\n+def test_ridge_regression_check_arguments_validity(return_intercept,\n+                                                   sample_weight, arr_type,\n+                                                   solver):\n+    \"\"\"check if all combinations of arguments give valid estimations\"\"\"\n+\n+    # test excludes 'svd' solver because it raises exception for sparse inputs\n+\n+    rng = check_random_state(42)\n+    X = rng.rand(1000, 3)\n+    true_coefs = [1, 2, 0.1]\n+    y = np.dot(X, true_coefs)\n+    true_intercept = 0.\n+    if return_intercept:\n+        true_intercept = 10000.\n+    y += true_intercept\n+    X_testing = arr_type(X)\n+\n+    alpha, atol, tol = 1e-3, 1e-4, 1e-6\n+\n+    if solver not in ['sag', 'auto'] and return_intercept:\n+        assert_raises_regex(ValueError,\n+                            \"In Ridge, only 'sag' solver\",\n+                            ridge_regression, X_testing, y,\n+                            alpha=alpha,\n+                            solver=solver,\n+                            sample_weight=sample_weight,\n+                            return_intercept=return_intercept,\n+                            tol=tol)\n+        return\n+\n+    out = ridge_regression(X_testing, y, alpha=alpha,\n+                           solver=solver,\n+                           sample_weight=sample_weight,\n+                           return_intercept=return_intercept,\n+                           tol=tol,\n+                           )\n+\n+    if return_intercept:\n+        coef, intercept = out\n+        assert_allclose(coef, true_coefs, rtol=0, atol=atol)\n+        assert_allclose(intercept, true_intercept, rtol=0, atol=atol)\n+    else:\n+        assert_allclose(out, true_coefs, rtol=0, atol=atol)\n \n \n def test_errors_and_values_helper():\n",
+  "problem_statement": "return_intercept==True in ridge_regression raises an exception\n<!--\r\nIf your issue is a usage question, submit it here instead:\r\n- StackOverflow with the scikit-learn tag: https://stackoverflow.com/questions/tagged/scikit-learn\r\n- Mailing List: https://mail.python.org/mailman/listinfo/scikit-learn\r\nFor more information, see User Questions: http://scikit-learn.org/stable/support.html#user-questions\r\n-->\r\n\r\n<!-- Instructions For Filing a Bug: https://github.com/scikit-learn/scikit-learn/blob/master/CONTRIBUTING.md#filing-bugs -->\r\n\r\n#### Description\r\n<!-- Example: Joblib Error thrown when calling fit on LatentDirichletAllocation with evaluate_every > 0-->\r\n\r\n#### Steps/Code to Reproduce\r\n\r\n```python\r\nfrom sklearn.linear_model import ridge_regression\r\nridge_regression([[0], [1], [3]], [0, 1, 3], 1, solver='auto', return_intercept=True)\r\n```\r\n\r\n#### Expected Results\r\n<!-- Example: No error is thrown. Please paste or describe the expected results.-->\r\n\r\n`(array([1]), 0)` (the values can differ, but at least no exception should be raised)\r\n\r\n#### Actual Results\r\n<!-- Please paste or specifically describe the actual output or traceback. -->\r\n\r\n```\r\n---------------------------------------------------------------------------\r\nUnboundLocalError                         Traceback (most recent call last)\r\n<ipython-input-5-84df44249e86> in <module>\r\n----> 1 ridge_regression([[0], [1], [3]], [1, 2, 3], 1, solver='auto', return_intercept=True)\r\n\r\n~/.pyenv/versions/3.7.2/envs/kaggle-3.7.2/lib/python3.7/site-packages/sklearn/linear_model/ridge.py in ridge_regression(X, y, alpha, sample_weight, solver, max_iter, tol, verbose, random_state, return_n_iter, return_intercept)\r\n    450         return coef, n_iter, intercept\r\n    451     elif return_intercept:\r\n--> 452         return coef, intercept\r\n    453     elif return_n_iter:\r\n    454         return coef, n_iter\r\n\r\nUnboundLocalError: local variable 'intercept' referenced before assignment\r\n```\r\n\r\n#### Versions\r\n<!--\r\nPlease run the following snippet and paste the output below.\r\nFor scikit-learn >= 0.20:\r\nimport sklearn; sklearn.show_versions()\r\nFor scikit-learn < 0.20:\r\nimport platform; print(platform.platform())\r\nimport sys; print(\"Python\", sys.version)\r\nimport numpy; print(\"NumPy\", numpy.__version__)\r\nimport scipy; print(\"SciPy\", scipy.__version__)\r\nimport sklearn; print(\"Scikit-Learn\", sklearn.__version__)\r\n-->\r\n\r\n```\r\nLinux-4.20.8-arch1-1-ARCH-x86_64-with-arch\r\nPython 3.7.2 (default, Feb 22 2019, 18:13:04) \r\n[GCC 8.2.1 20181127]\r\nNumPy 1.16.1\r\nSciPy 1.2.1\r\nScikit-Learn 0.21.dev0\r\n```\r\n\r\n\r\n\r\n<!-- Thanks for contributing! -->\r\n\n",
+  "hints_text": "",
+  "created_at": "2019-03-01T16:25:10Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/linear_model/tests/test_ridge.py::test_raises_value_error_if_solver_not_supported\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_fit_intercept_sparse\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-csr_matrix-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-csr_matrix-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-csr_matrix-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-csr_matrix-sample_weight1-True]\"]",
+  "PASS_TO_PASS": "[\"sklearn/linear_model/tests/test_ridge.py::test_class_weight_vs_sample_weight[RidgeClassifierCV]\", \"sklearn/linear_model/tests/test_ridge.py::test_class_weight_vs_sample_weight[RidgeClassifier]\", \"sklearn/linear_model/tests/test_ridge.py::test_class_weights\", \"sklearn/linear_model/tests/test_ridge.py::test_class_weights_cv\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_multi_ridge_diabetes]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_ridge_classifiers]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_ridge_cv]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_ridge_cv_normalize]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_ridge_diabetes]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_ridge_loo]\", \"sklearn/linear_model/tests/test_ridge.py::test_dense_sparse[_test_tolerance]\", \"sklearn/linear_model/tests/test_ridge.py::test_dtype_match\", \"sklearn/linear_model/tests/test_ridge.py::test_dtype_match_cholesky\", \"sklearn/linear_model/tests/test_ridge.py::test_errors_and_values_helper\", \"sklearn/linear_model/tests/test_ridge.py::test_errors_and_values_svd_helper\", \"sklearn/linear_model/tests/test_ridge.py::test_n_iter\", \"sklearn/linear_model/tests/test_ridge.py::test_primal_dual_relationship\", \"sklearn/linear_model/tests/test_ridge.py::test_raises_value_error_if_sample_weights_greater_than_1d\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge[cholesky]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge[lsqr]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge[sag]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge[sparse_cg]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge[svd]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_classifier_cv_store_cv_values\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_classifier_no_support_multilabel\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_cv_sparse_svd\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_individual_penalties\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_intercept\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[auto-csr_matrix-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[cholesky-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[lsqr-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-array-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-array-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-csr_matrix-None-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sag-csr_matrix-sample_weight1-True]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[saga-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-array-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-array-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-csr_matrix-None-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_check_arguments_validity[sparse_cg-csr_matrix-sample_weight1-False]\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_convergence_fail\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_regression_sample_weights\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_sample_weights\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_shapes\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_singular\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_sparse_svd\", \"sklearn/linear_model/tests/test_ridge.py::test_ridge_vs_lstsq\", \"sklearn/linear_model/tests/test_ridge.py::test_ridgecv_int_alphas\", \"sklearn/linear_model/tests/test_ridge.py::test_ridgecv_negative_alphas\", \"sklearn/linear_model/tests/test_ridge.py::test_ridgecv_sample_weight\", \"sklearn/linear_model/tests/test_ridge.py::test_ridgecv_store_cv_values\", \"sklearn/linear_model/tests/test_ridge.py::test_sparse_cg_max_iter\", \"sklearn/linear_model/tests/test_ridge.py::test_sparse_design_with_sample_weights\", \"sklearn/linear_model/tests/test_ridge.py::test_toy_ridge_object\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/linear_model/ridge.py"
+  ],
+  "test_patch_files": [
+    "sklearn/linear_model/tests/test_ridge.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/linear_model/ridge.py": {
+      "diffs": [
+        {
+          "start_line_old": 371,
+          "end_line_old": 376,
+          "file_pos": 1,
+          "file_context_length": 13388,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidge__BaseRidge.fit.8.1",
+          "closest_snippet_line_distance": 142,
+          "pos": 2,
+          "context_length": 1312
+        },
+        {
+          "start_line_old": 407,
+          "end_line_old": 414,
+          "file_pos": 1,
+          "file_context_length": 13388,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidge__BaseRidge.fit.8.1",
+          "closest_snippet_line_distance": 106,
+          "pos": 2,
+          "context_length": 1312
+        },
+        {
+          "start_line_old": 435,
+          "end_line_old": 436,
+          "file_pos": 1,
+          "file_context_length": 13388,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidge__BaseRidge.fit.8.1",
+          "closest_snippet_line_distance": 78,
+          "pos": 2,
+          "context_length": 1312
+        },
+        {
+          "start_line_old": 558,
+          "end_line_old": 558,
+          "file_pos": 1,
+          "file_context_length": 13388,
+          "pos": 1,
+          "context_length": 611
+        }
+      ]
+    }
+  },
+  "vectors": 3231,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidge__BaseRidge.fit.8.1",
+      "distance": 0.6596955060958862,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 513,
+      "end_line": 573,
+      "tokens": 611,
+      "context_length": 611,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__ridge_regression__ridge_regression.n_iter.1",
+      "distance": 0.6777319312095642,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 366,
+      "end_line": 438,
+      "tokens": 701,
+      "context_length": 1312,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_Ridge.__init___Ridge.fit.2.1",
+      "distance": 0.6779395341873169,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 710,
+      "end_line": 737,
+      "tokens": 231,
+      "context_length": 1543,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeClassifier.__init___RidgeClassifier.__init__.self.class_weight.1",
+      "distance": 0.6788020730018616,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 860,
+      "end_line": 867,
+      "tokens": 118,
+      "context_length": 1661,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__ridge_regression.21__ridge_regression.24.4.1.1",
+      "distance": 0.7076842784881592,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 439,
+      "end_line": 510,
+      "tokens": 662,
+      "context_length": 2323,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeClassifier_RidgeClassifier.1",
+      "distance": 0.7243478298187256,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 740,
+      "end_line": 858,
+      "tokens": 1109,
+      "context_length": 3432,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_ridge_regression_ridge_regression.2.1",
+      "distance": 0.7393984198570251,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 229,
+      "end_line": 363,
+      "tokens": 1215,
+      "context_length": 4647,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_1_BayesianRidge.1",
+      "distance": 0.7451226711273193,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 1,
+      "end_line": 142,
+      "tokens": 1162,
+      "context_length": 5809
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__BaseRidgeCV__BaseRidgeCV.fit.5.1",
+      "distance": 0.7457729578018188,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1167,
+      "end_line": 1224,
+      "tokens": 453,
+      "context_length": 6262,
+      "file_pos": 2
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV.fit__RidgeGCV.fit.19.3",
+      "distance": 0.7601354122161865,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1056,
+      "end_line": 1134,
+      "tokens": 722,
+      "context_length": 6984,
+      "file_pos": 2
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV.fit.20__RidgeGCV.fit.26.1",
+      "distance": 0.7732197046279907,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1136,
+      "end_line": 1164,
+      "tokens": 276,
+      "context_length": 7260,
+      "file_pos": 2
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV__RidgeGCV.__init__.self.store_cv_values.1",
+      "distance": 0.7883871793746948,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 918,
+      "end_line": 967,
+      "tokens": 425,
+      "context_length": 7685,
+      "file_pos": 2
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_BayesianRidge.__init___BayesianRidge.__init__.self.verbose.1",
+      "distance": 0.7932306528091431,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 144,
+      "end_line": 158,
+      "tokens": 182,
+      "context_length": 7867
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_huber_vs_ridge.py_1_",
+      "distance": 0.8003735542297363,
+      "file_path": "examples/linear_model/plot_huber_vs_ridge.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 592,
+      "context_length": 8459
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeClassifier.fit_RidgeClassifier.classes_.1.1",
+      "distance": 0.8017323613166809,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 869,
+      "end_line": 915,
+      "tokens": 351,
+      "context_length": 8810,
+      "file_pos": 3
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_1_ConvergenceWarning",
+      "distance": 0.802207350730896,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 181,
+      "context_length": 8991,
+      "file_pos": 3
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeClassifierCV.__init___",
+      "distance": 0.8031807541847229,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1443,
+      "end_line": 1491,
+      "tokens": 414,
+      "context_length": 9405,
+      "file_pos": 3
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._errors__RidgeGCV._pre_compute_svd.8.1",
+      "distance": 0.8052772283554077,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1012,
+      "end_line": 1030,
+      "tokens": 255,
+      "context_length": 9660,
+      "file_pos": 3
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_BayesianRidge.fit_BayesianRidge.fit.self.n_iter_.1",
+      "distance": 0.8057050704956055,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 160,
+      "end_line": 249,
+      "tokens": 799,
+      "context_length": 10459
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_1_y_58.1",
+      "distance": 0.8273505568504333,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 772,
+      "context_length": 11231
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_BayesianRidge.fit.28_BayesianRidge.fit.38.1",
+      "distance": 0.8363806009292603,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 251,
+      "end_line": 275,
+      "tokens": 247,
+      "context_length": 11478
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._pre_compute__RidgeGCV._pre_compute.K.8.1",
+      "distance": 0.8392789363861084,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 969,
+      "end_line": 979,
+      "tokens": 133,
+      "context_length": 11611,
+      "file_pos": 4
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_Ridge_Ridge.1",
+      "distance": 0.8402283191680908,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 576,
+      "end_line": 709,
+      "tokens": 1307,
+      "context_length": 12918,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._errors_svd__RidgeGCV._values_svd.2.1",
+      "distance": 0.8519532084465027,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1048,
+      "end_line": 1054,
+      "tokens": 123,
+      "context_length": 13041,
+      "file_pos": 4
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__solve_sparse_cg__solve_sparse_cg",
+      "distance": 0.8535792827606201,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 36,
+      "end_line": 112,
+      "tokens": 635,
+      "context_length": 13676,
+      "file_pos": 4
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeCV_RidgeCV.2",
+      "distance": 0.862118124961853,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1227,
+      "end_line": 1335,
+      "tokens": 1029,
+      "context_length": 14705,
+      "file_pos": 4
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ols_ridge_variance.py_1_",
+      "distance": 0.8651295900344849,
+      "file_path": "examples/linear_model/plot_ols_ridge_variance.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 484,
+      "context_length": 15189
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ridge_path.py_1_",
+      "distance": 0.8711748123168945,
+      "file_path": "examples/linear_model/plot_ridge_path.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 434,
+      "context_length": 15623
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_1_KernelRidge.1",
+      "distance": 0.8737118244171143,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 972,
+      "context_length": 16595
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__solve_lsqr__solve_lsqr.7.1",
+      "distance": 0.8867348432540894,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 115,
+      "end_line": 130,
+      "tokens": 169,
+      "context_length": 16764,
+      "file_pos": 7
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py_RidgeClassifierCV_RidgeClassifierCV.1",
+      "distance": 0.8870447278022766,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1338,
+      "end_line": 1441,
+      "tokens": 977,
+      "context_length": 17741,
+      "file_pos": 7
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_KernelRidge.fit_KernelRidge.fit.13.1",
+      "distance": 0.8906378746032715,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 131,
+      "end_line": 174,
+      "tokens": 349,
+      "context_length": 18090
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__solve_cholesky__solve_cholesky.2",
+      "distance": 0.89906245470047,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 133,
+      "end_line": 154,
+      "tokens": 238,
+      "context_length": 18328,
+      "file_pos": 7
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ridge_coeffs.py_1_",
+      "distance": 0.908441424369812,
+      "file_path": "examples/linear_model/plot_ridge_coeffs.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 590,
+      "context_length": 18918
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/sag.py_sag_solver.1_sag_solver.1",
+      "distance": 0.9213265776634216,
+      "file_path": "sklearn/linear_model/sag.py",
+      "start_line": 91,
+      "end_line": 240,
+      "tokens": 1513,
+      "context_length": 20431
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_clf_poly_",
+      "distance": 0.9223088026046753,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 100,
+      "end_line": 115,
+      "tokens": 149,
+      "context_length": 20580
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_KernelRidge.__init___KernelRidge._pairwise.1.1",
+      "distance": 0.9273871183395386,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 108,
+      "end_line": 129,
+      "tokens": 186,
+      "context_length": 20766
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._errors_and_values_helper__RidgeGCV._errors_and_values_helper.11.1",
+      "distance": 0.9366256594657898,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 992,
+      "end_line": 1010,
+      "tokens": 192,
+      "context_length": 20958,
+      "file_pos": 9
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.33_RANSACRegressor.fit.38.1",
+      "distance": 0.9407036304473877,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 425,
+      "end_line": 454,
+      "tokens": 346,
+      "context_length": 21304
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/__init__.py_1_",
+      "distance": 0.9461206197738647,
+      "file_path": "sklearn/linear_model/__init__.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 674,
+      "context_length": 21978
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit.16_RANSACRegressor.fit.32",
+      "distance": 0.9476094841957092,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 327,
+      "end_line": 424,
+      "tokens": 809,
+      "context_length": 22787
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._errors_and_values_svd_helper__RidgeGCV._errors_and_values_svd_helper.10.1",
+      "distance": 0.9505475759506226,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 1032,
+      "end_line": 1046,
+      "tokens": 209,
+      "context_length": 22996,
+      "file_pos": 11
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__solve_cholesky_kernel__solve_cholesky_kernel.n_samples.8.3.dual_coefs.4.1",
+      "distance": 0.9564087390899658,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 157,
+      "end_line": 215,
+      "tokens": 517,
+      "context_length": 23513,
+      "file_pos": 11
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_LinearRegression_LinearRegression.__init__.self.n_jobs.1",
+      "distance": 0.9567440748214722,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 367,
+      "end_line": 436,
+      "tokens": 660,
+      "context_length": 24173
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_ARDRegression.__init___ARDRegression.__init__.self.verbose.1",
+      "distance": 0.9570773839950562,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 479,
+      "end_line": 494,
+      "tokens": 198,
+      "context_length": 24371
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.fit.14_LogisticRegression.fit.36.1",
+      "distance": 0.9625855088233948,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1540,
+      "end_line": 1622,
+      "tokens": 823,
+      "context_length": 25194
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 0.9639452695846558,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1828,
+      "end_line": 1870,
+      "tokens": 469,
+      "context_length": 25663
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sgd_regression.py_np_",
+      "distance": 0.9642410278320312,
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "start_line": 4,
+      "end_line": 151,
+      "tokens": 1314,
+      "context_length": 26977
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_ridge_regression.py_71_",
+      "distance": 0.9703967571258545,
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "start_line": 154,
+      "end_line": 171,
+      "tokens": 194,
+      "context_length": 27171
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_1_x_36.1",
+      "distance": 0.9733262658119202,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 785,
+      "context_length": 27956
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/huber.py_HuberRegressor_HuberRegressor.1",
+      "distance": 0.9795960783958435,
+      "file_path": "sklearn/linear_model/huber.py",
+      "start_line": 124,
+      "end_line": 223,
+      "tokens": 995,
+      "context_length": 28951
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/svm/base.py__fit_liblinear.2_",
+      "distance": 0.98192298412323,
+      "file_path": "sklearn/svm/base.py",
+      "start_line": 872,
+      "end_line": 939,
+      "tokens": 686,
+      "context_length": 29637
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/theil_sen.py_TheilSenRegressor.__init___TheilSenRegressor.__init__.self.verbose.1",
+      "distance": 0.9822186231613159,
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "start_line": 296,
+      "end_line": 307,
+      "tokens": 143,
+      "context_length": 29780
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 0.9827873706817627,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 84,
+      "tokens": 741,
+      "context_length": 30521
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/theil_sen.py_TheilSenRegressor_TheilSenRegressor.1",
+      "distance": 0.9829463958740234,
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "start_line": 196,
+      "end_line": 294,
+      "tokens": 990,
+      "context_length": 31511
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_ARDRegression.fit.update_coeff_ARDRegression.fit.34.1",
+      "distance": 0.9835784435272217,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 555,
+      "end_line": 603,
+      "tokens": 572,
+      "context_length": 32083
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__solve_svd__solve_svd.9.1",
+      "distance": 0.98530113697052,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 218,
+      "end_line": 226,
+      "tokens": 131,
+      "context_length": 32214,
+      "file_pos": 21
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ard.py_1_y_58.1",
+      "distance": 0.9926317930221558,
+      "file_path": "examples/linear_model/plot_ard.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 769,
+      "context_length": 32983
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train.10_check_classifiers_train.10.24.y_prob.7.y_log_prob.3",
+      "distance": 0.9946895837783813,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1423,
+      "end_line": 1522,
+      "tokens": 940,
+      "context_length": 33923
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_types_CROSS_DECOMPOSITION.1",
+      "distance": 0.996898353099823,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 466,
+      "context_length": 34389
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_sys_cd_fast",
+      "distance": 0.9982139468193054,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 8,
+      "end_line": 27,
+      "tokens": 149,
+      "context_length": 34538
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ridge.py__RidgeGCV._decomp_diag__RidgeGCV._diag_dot.2.3.1",
+      "distance": 0.9984689354896545,
+      "file_path": "sklearn/linear_model/ridge.py",
+      "start_line": 981,
+      "end_line": 990,
+      "tokens": 133,
+      "context_length": 34671,
+      "file_pos": 23
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/sag.py_1_sag_solver",
+      "distance": 1.0000624656677246,
+      "file_path": "sklearn/linear_model/sag.py",
+      "start_line": 1,
+      "end_line": 352,
+      "tokens": 755,
+      "context_length": 35426
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 1.0007002353668213,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 7,
+      "end_line": 45,
+      "tokens": 361,
+      "context_length": 35787
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_1__EPSILON.1",
+      "distance": 1.0036709308624268,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 111,
+      "context_length": 35898
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_ARDRegression.fit.update_sigma_ARDRegression.fit.update_sigma.5.1",
+      "distance": 1.007017970085144,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 543,
+      "end_line": 553,
+      "tokens": 197,
+      "context_length": 36095
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.1_LogisticRegression.1",
+      "distance": 1.0087270736694336,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1204,
+      "end_line": 1442,
+      "tokens": 2731,
+      "context_length": 38826
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.23__lars_path_solver.23.10.3.AA.3",
+      "distance": 1.009774923324585,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 475,
+      "end_line": 632,
+      "tokens": 1591,
+      "context_length": 40417
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_46_",
+      "distance": 1.0119297504425049,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 197,
+      "end_line": 239,
+      "tokens": 373,
+      "context_length": 40790
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_1_x_plot.1",
+      "distance": 1.0152143239974976,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 509,
+      "context_length": 41299
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.016798734664917,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 880,
+      "end_line": 911,
+      "tokens": 297,
+      "context_length": 41596
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ransac.py_1_",
+      "distance": 1.0195621252059937,
+      "file_path": "examples/linear_model/plot_ransac.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 455,
+      "context_length": 42051
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_int_check_regressors_int.18",
+      "distance": 1.0235273838043213,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1800,
+      "end_line": 1825,
+      "tokens": 277,
+      "context_length": 42328
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_BayesianRidge._log_marginal_likelihood_BayesianRidge._log_marginal_likelihood.13.1",
+      "distance": 1.024607539176941,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 332,
+      "end_line": 360,
+      "tokens": 313,
+      "context_length": 42641
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__logistic_regression_path.23__logistic_regression_path.n_iter.1",
+      "distance": 1.0267369747161865,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 884,
+      "end_line": 936,
+      "tokens": 688,
+      "context_length": 43329
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_SGDRegressor.1_SGDRegressor.1",
+      "distance": 1.029860019683838,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1339,
+      "end_line": 1530,
+      "tokens": 1854,
+      "context_length": 45183
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/huber.py_HuberRegressor.__init___",
+      "distance": 1.0308200120925903,
+      "file_path": "sklearn/linear_model/huber.py",
+      "start_line": 225,
+      "end_line": 308,
+      "tokens": 773,
+      "context_length": 45956
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/sag.py_sag_solver.2_sag_solver.sag.1",
+      "distance": 1.0320329666137695,
+      "file_path": "sklearn/linear_model/sag.py",
+      "start_line": 241,
+      "end_line": 317,
+      "tokens": 785,
+      "context_length": 46741
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 1.0345624685287476,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 142,
+      "end_line": 194,
+      "tokens": 532,
+      "context_length": 47273
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_ridge_regression.py_1_kr_fit.1",
+      "distance": 1.0349719524383545,
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 759,
+      "context_length": 48032
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_transformed_target.py_122_",
+      "distance": 1.0354242324829102,
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "start_line": 179,
+      "end_line": 205,
+      "tokens": 297,
+      "context_length": 48329
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.25_LogisticRegressionCV.fit.self.Cs_.1",
+      "distance": 1.0360466241836548,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 2040,
+      "end_line": 2101,
+      "tokens": 680,
+      "context_length": 49009
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__logistic_regression_path.2__logistic_regression_path.22.8.w0.1",
+      "distance": 1.0363333225250244,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 815,
+      "end_line": 882,
+      "tokens": 773,
+      "context_length": 49782
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._fit_regressor_SGDRegressor",
+      "distance": 1.0367027521133423,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1254,
+      "end_line": 1545,
+      "tokens": 678,
+      "context_length": 50460
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit1d_check_fit1d.rnd.11",
+      "distance": 1.036705732345581,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 914,
+      "end_line": 933,
+      "tokens": 167,
+      "context_length": 50627
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.2__lars_path_solver.22.Cov_copy.1",
+      "distance": 1.037780523300171,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 399,
+      "end_line": 473,
+      "tokens": 756,
+      "context_length": 51383
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LarsCV_LarsCV.1",
+      "distance": 1.0399665832519531,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1237,
+      "end_line": 1356,
+      "tokens": 1005,
+      "context_length": 52388
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.57_LogisticRegressionCV.fit.57.3.5.2.1",
+      "distance": 1.0405895709991455,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 2135,
+      "end_line": 2211,
+      "tokens": 820,
+      "context_length": 53208
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.23.11__lars_path_solver.24.3.1.2.1.1",
+      "distance": 1.0410537719726562,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 634,
+      "end_line": 754,
+      "tokens": 1218,
+      "context_length": 54426
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._partial_fit_BaseSGDRegressor._partial_fit.9.1",
+      "distance": 1.0418972969055176,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1096,
+      "end_line": 1122,
+      "tokens": 296,
+      "context_length": 54722
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_glmnet.py_10_",
+      "distance": 1.0429401397705078,
+      "file_path": "benchmarks/bench_glmnet.py",
+      "start_line": 47,
+      "end_line": 129,
+      "tokens": 796,
+      "context_length": 55518
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_23_Lars.1",
+      "distance": 1.0436657667160034,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 757,
+      "end_line": 857,
+      "tokens": 934,
+      "context_length": 56452
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_ridge_regression.py_31_kr_70.1",
+      "distance": 1.044825553894043,
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "start_line": 80,
+      "end_line": 153,
+      "tokens": 738,
+      "context_length": 57190
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/passive_aggressive.py_PassiveAggressiveRegressor_PassiveAggressiveRegressor.1",
+      "distance": 1.0465128421783447,
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "start_line": 254,
+      "end_line": 388,
+      "tokens": 1200,
+      "context_length": 58390
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__logistic_regression_path.27__logistic_regression_path.28.1",
+      "distance": 1.0468902587890625,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 937,
+      "end_line": 1003,
+      "tokens": 827,
+      "context_length": 59217
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_BayesianRidge._update_coef__BayesianRidge._update_coef_.4.1",
+      "distance": 1.0479480028152466,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 309,
+      "end_line": 330,
+      "tokens": 234,
+      "context_length": 59451
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_unfitted_check_estimators_unfitted.9.1",
+      "distance": 1.0493541955947876,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1639,
+      "end_line": 1683,
+      "tokens": 327,
+      "context_length": 59778
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_polynomial_interpolation.py_1_",
+      "distance": 1.0495473146438599,
+      "file_path": "examples/linear_model/plot_polynomial_interpolation.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 512,
+      "context_length": 60290
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_LinearRegression.fit_LinearRegression.fit.10.1",
+      "distance": 1.0498876571655273,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 438,
+      "end_line": 509,
+      "tokens": 623,
+      "context_length": 60913
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_Lars.method_Lars._get_gram.2.1",
+      "distance": 1.050081729888916,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 858,
+      "end_line": 882,
+      "tokens": 243,
+      "context_length": 61156
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/theil_sen.py_TheilSenRegressor._check_subparams_TheilSenRegressor._check_subparams.7.1",
+      "distance": 1.0519154071807861,
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "start_line": 309,
+      "end_line": 344,
+      "tokens": 348,
+      "context_length": 61504
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNetCV.1_ElasticNetCV.1",
+      "distance": 1.0529022216796875,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1405,
+      "end_line": 1587,
+      "tokens": 1769,
+      "context_length": 63273
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_regression_target_check_decision_proba_consistency.centers.5.4",
+      "distance": 1.0530776977539062,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2348,
+      "end_line": 2377,
+      "tokens": 294,
+      "context_length": 63567
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_29_",
+      "distance": 1.0531238317489624,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 74,
+      "end_line": 98,
+      "tokens": 285,
+      "context_length": 63852
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/theil_sen.py_TheilSenRegressor.fit_",
+      "distance": 1.0533031225204468,
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "start_line": 346,
+      "end_line": 402,
+      "tokens": 473,
+      "context_length": 64325
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_results_",
+      "distance": 1.0534908771514893,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 247,
+      "end_line": 323,
+      "tokens": 662,
+      "context_length": 64987
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_BaseSGDRegressor._fit_BaseSGDRegressor._fit.8.1",
+      "distance": 1.0539741516113281,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 1155,
+      "end_line": 1187,
+      "tokens": 286,
+      "context_length": 65273
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_class_weight_classifiers_check_class_weight_classifiers.3.2",
+      "distance": 1.0544065237045288,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1897,
+      "end_line": 1941,
+      "tokens": 472,
+      "context_length": 65745
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor_RANSACRegressor.1",
+      "distance": 1.057748794555664,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 56,
+      "end_line": 208,
+      "tokens": 1473,
+      "context_length": 67218
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.fit.20_ElasticNet.fit.26.1",
+      "distance": 1.0589991807937622,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 735,
+      "end_line": 771,
+      "tokens": 370,
+      "context_length": 67588
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.fit_RANSACRegressor.fit.15.1",
+      "distance": 1.0595852136611938,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 230,
+      "end_line": 326,
+      "tokens": 806,
+      "context_length": 68394
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/bayes.py_15_ARDRegression.1",
+      "distance": 1.060603380203247,
+      "file_path": "sklearn/linear_model/bayes.py",
+      "start_line": 363,
+      "end_line": 477,
+      "tokens": 1027,
+      "context_length": 69421
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLarsIC_LassoLarsIC.1",
+      "distance": 1.061353325843811,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1619,
+      "end_line": 1735,
+      "tokens": 1104,
+      "context_length": 70525
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/scikit-learn/sklearn/kernel_ridge.py_KernelRidge.predict_",
+      "distance": 1.062129259109497,
+      "file_path": "sklearn/kernel_ridge.py",
+      "start_line": 176,
+      "end_line": 195,
+      "tokens": 182,
+      "context_length": 70707
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/ransac.py_RANSACRegressor.__init___RANSACRegressor.__init__.self.loss.1",
+      "distance": 1.0625622272491455,
+      "file_path": "sklearn/linear_model/ransac.py",
+      "start_line": 210,
+      "end_line": 228,
+      "tokens": 201,
+      "context_length": 70908
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__log_reg_scoring_path.X_train_LogisticRegression",
+      "distance": 1.0645549297332764,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1144,
+      "end_line": 1681,
+      "tokens": 601,
+      "context_length": 71509
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 1.06525719165802,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1151,
+      "end_line": 1219,
+      "tokens": 601,
+      "context_length": 72110
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_17_bench_one.12.1",
+      "distance": 1.0657567977905273,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 34,
+      "end_line": 64,
+      "tokens": 225,
+      "context_length": 72335
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.49_LogisticRegressionCV.fit.self.intercept_.1",
+      "distance": 1.0668585300445557,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 2102,
+      "end_line": 2134,
+      "tokens": 401,
+      "context_length": 72736
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_29_ElasticNet.1",
+      "distance": 1.0669982433319092,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 497,
+      "end_line": 640,
+      "tokens": 1404,
+      "context_length": 74140
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/passive_aggressive.py_PassiveAggressiveRegressor.__init___PassiveAggressiveRegressor.__init__.self.loss.1",
+      "distance": 1.067341685295105,
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "start_line": 389,
+      "end_line": 412,
+      "tokens": 209,
+      "context_length": 74349
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/scikit-learn/sklearn/gaussian_process/gpr.py_GaussianProcessRegressor.fit.15_GaussianProcessRegressor.fit.18.1",
+      "distance": 1.069333791732788,
+      "file_path": "sklearn/gaussian_process/gpr.py",
+      "start_line": 250,
+      "end_line": 262,
+      "tokens": 175,
+      "context_length": 74524
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_train_check_outliers_train.33.expected_outliers.14.2",
+      "distance": 1.070129632949829,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1545,
+      "end_line": 1617,
+      "tokens": 655,
+      "context_length": 75179
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_1_SPARSE_INTERCEPT_DECAY.1",
+      "distance": 1.073681116104126,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 240,
+      "context_length": 75419
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__yield_regressor_checks__yield_regressor_checks.14",
+      "distance": 1.0750970840454102,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 163,
+      "end_line": 180,
+      "tokens": 164,
+      "context_length": 75583
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/scikit-learn/sklearn/__init__.py_1_39.5.__SKLEARN_SETUP__.1",
+      "distance": 1.075319528579712,
+      "file_path": "sklearn/__init__.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 524,
+      "context_length": 76107
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_enet_path.26_enet_path.28.1",
+      "distance": 1.0773539543151855,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 452,
+      "end_line": 494,
+      "tokens": 530,
+      "context_length": 76637
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path.1_logistic_regression_path.2.1",
+      "distance": 1.0779759883880615,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 496,
+      "end_line": 655,
+      "tokens": 1806,
+      "context_length": 78443
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 1.0782220363616943,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1077,
+      "end_line": 1102,
+      "tokens": 282,
+      "context_length": 78725
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.__init___LogisticRegressionCV.__init__.self.l1_ratios.1",
+      "distance": 1.0789339542388916,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1929,
+      "end_line": 1950,
+      "tokens": 238,
+      "context_length": 78963
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_1_models.1",
+      "distance": 1.0791836977005005,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 497,
+      "context_length": 79460
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/sag.py_sag_solver.29_",
+      "distance": 1.0805416107177734,
+      "file_path": "sklearn/linear_model/sag.py",
+      "start_line": 318,
+      "end_line": 353,
+      "tokens": 307,
+      "context_length": 79767
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py__pre_fit_",
+      "distance": 1.0813946723937988,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 512,
+      "end_line": 568,
+      "tokens": 615,
+      "context_length": 80382
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_residues.X_train__lars_path_residues.11.1",
+      "distance": 1.0836353302001953,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1207,
+      "end_line": 1234,
+      "tokens": 362,
+      "context_length": 80744
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_plt_get_loss.6.1",
+      "distance": 1.0839611291885376,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 6,
+      "end_line": 31,
+      "tokens": 199,
+      "context_length": 80943
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_29_",
+      "distance": 1.0845144987106323,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 65,
+      "end_line": 123,
+      "tokens": 525,
+      "context_length": 81468
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_model_complexity_influence.py__count_nonzero_coefficients_",
+      "distance": 1.0848743915557861,
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "start_line": 121,
+      "end_line": 170,
+      "tokens": 540,
+      "context_length": 82008
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_transformed_target.py_1_63",
+      "distance": 1.0853710174560547,
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 743,
+      "context_length": 82751
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/samples_generator.py_make_regression.4_make_regression.16.2.1.1",
+      "distance": 1.0855963230133057,
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "start_line": 534,
+      "end_line": 574,
+      "tokens": 372,
+      "context_length": 83123
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_fit_predict_check_outliers_fit_predict.n_samples.15.expected_outliers.12.2",
+      "distance": 1.0856654644012451,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2380,
+      "end_line": 2424,
+      "tokens": 427,
+      "context_length": 83550
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_noise_37_",
+      "distance": 1.0856926441192627,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 89,
+      "end_line": 112,
+      "tokens": 196,
+      "context_length": 83746
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 1.0857670307159424,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 84,
+      "end_line": 105,
+      "tokens": 314,
+      "context_length": 84060
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_compare_gpr_krr.py_kr_",
+      "distance": 1.0857874155044556,
+      "file_path": "examples/gaussian_process/plot_compare_gpr_krr.py",
+      "start_line": 76,
+      "end_line": 122,
+      "tokens": 502,
+      "context_length": 84562
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py_LassoLars.method__check_copy_and_writeable.2.1",
+      "distance": 1.086544156074524,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 1097,
+      "end_line": 1121,
+      "tokens": 183,
+      "context_length": 84745
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/passive_aggressive.py_PassiveAggressiveRegressor.fit_",
+      "distance": 1.0875263214111328,
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "start_line": 437,
+      "end_line": 465,
+      "tokens": 214,
+      "context_length": 84959
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sparsify.py_1_31",
+      "distance": 1.0885214805603027,
+      "file_path": "benchmarks/bench_sparsify.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 754,
+      "context_length": 85713
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_BaseGradientBoosting._check_params_BaseGradientBoosting._check_params.14.1",
+      "distance": 1.0919333696365356,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 1256,
+      "end_line": 1338,
+      "tokens": 804,
+      "context_length": 86517
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/linear_model/ridge.py",
+      "position": 1,
+      "tokens": 13388,
+      "context_length": 13388
+    },
+    {
+      "file_path": "sklearn/linear_model/bayes.py",
+      "position": 2,
+      "tokens": 5652,
+      "context_length": 19040
+    },
+    {
+      "file_path": "examples/linear_model/plot_huber_vs_ridge.py",
+      "position": 3,
+      "tokens": 614,
+      "context_length": 19654
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "position": 4,
+      "tokens": 921,
+      "context_length": 20575
+    },
+    {
+      "file_path": "examples/linear_model/plot_ols_ridge_variance.py",
+      "position": 5,
+      "tokens": 492,
+      "context_length": 21067
+    },
+    {
+      "file_path": "examples/linear_model/plot_ridge_path.py",
+      "position": 6,
+      "tokens": 463,
+      "context_length": 21530
+    },
+    {
+      "file_path": "sklearn/kernel_ridge.py",
+      "position": 7,
+      "tokens": 1682,
+      "context_length": 23212
+    },
+    {
+      "file_path": "examples/linear_model/plot_ridge_coeffs.py",
+      "position": 8,
+      "tokens": 612,
+      "context_length": 23824
+    },
+    {
+      "file_path": "sklearn/linear_model/sag.py",
+      "position": 9,
+      "tokens": 3171,
+      "context_length": 26995
+    },
+    {
+      "file_path": "sklearn/linear_model/ransac.py",
+      "position": 10,
+      "tokens": 4065,
+      "context_length": 31060
+    },
+    {
+      "file_path": "sklearn/linear_model/__init__.py",
+      "position": 11,
+      "tokens": 674,
+      "context_length": 31734
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 12,
+      "tokens": 4761,
+      "context_length": 36495
+    },
+    {
+      "file_path": "sklearn/linear_model/logistic.py",
+      "position": 13,
+      "tokens": 22042,
+      "context_length": 58537
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 14,
+      "tokens": 21897,
+      "context_length": 80434
+    },
+    {
+      "file_path": "benchmarks/bench_sgd_regression.py",
+      "position": 15,
+      "tokens": 1341,
+      "context_length": 81775
+    },
+    {
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "position": 16,
+      "tokens": 1720,
+      "context_length": 83495
+    },
+    {
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "position": 17,
+      "tokens": 1004,
+      "context_length": 84499
+    },
+    {
+      "file_path": "sklearn/linear_model/huber.py",
+      "position": 18,
+      "tokens": 2817,
+      "context_length": 87316
+    },
+    {
+      "file_path": "sklearn/svm/base.py",
+      "position": 19,
+      "tokens": 8216,
+      "context_length": 95532
+    },
+    {
+      "file_path": "sklearn/linear_model/theil_sen.py",
+      "position": 20,
+      "tokens": 3425,
+      "context_length": 98957
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 21,
+      "tokens": 1125,
+      "context_length": 100082
+    },
+    {
+      "file_path": "examples/linear_model/plot_ard.py",
+      "position": 22,
+      "tokens": 924,
+      "context_length": 101006
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 23,
+      "tokens": 21095,
+      "context_length": 122101
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 24,
+      "tokens": 13928,
+      "context_length": 136029
+    },
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 25,
+      "tokens": 16498,
+      "context_length": 152527
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 26,
+      "tokens": 1945,
+      "context_length": 154472
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 27,
+      "tokens": 794,
+      "context_length": 155266
+    },
+    {
+      "file_path": "examples/linear_model/plot_ransac.py",
+      "position": 28,
+      "tokens": 455,
+      "context_length": 155721
+    },
+    {
+      "file_path": "examples/compose/plot_transformed_target.py",
+      "position": 29,
+      "tokens": 1814,
+      "context_length": 157535
+    },
+    {
+      "file_path": "benchmarks/bench_glmnet.py",
+      "position": 30,
+      "tokens": 1087,
+      "context_length": 158622
+    },
+    {
+      "file_path": "sklearn/linear_model/passive_aggressive.py",
+      "position": 31,
+      "tokens": 3978,
+      "context_length": 162600
+    },
+    {
+      "file_path": "examples/linear_model/plot_polynomial_interpolation.py",
+      "position": 32,
+      "tokens": 535,
+      "context_length": 163135
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 33,
+      "tokens": 2539,
+      "context_length": 165674
+    },
+    {
+      "file_path": "sklearn/gaussian_process/gpr.py",
+      "position": 34,
+      "tokens": 4457,
+      "context_length": 170131
+    },
+    {
+      "file_path": "sklearn/__init__.py",
+      "position": 35,
+      "tokens": 931,
+      "context_length": 171062
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "position": 36,
+      "tokens": 1029,
+      "context_length": 172091
+    },
+    {
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "position": 37,
+      "tokens": 1524,
+      "context_length": 173615
+    },
+    {
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "position": 38,
+      "tokens": 14010,
+      "context_length": 187625
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 39,
+      "tokens": 1718,
+      "context_length": 189343
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_compare_gpr_krr.py",
+      "position": 40,
+      "tokens": 1293,
+      "context_length": 190636
+    },
+    {
+      "file_path": "benchmarks/bench_sparsify.py",
+      "position": 41,
+      "tokens": 907,
+      "context_length": 191543
+    },
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 42,
+      "tokens": 21373,
+      "context_length": 212916
+    }
+  ]
+}

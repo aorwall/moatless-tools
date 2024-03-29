@@ -1,0 +1,1753 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-9274",
+  "model_patch": "diff --git a/sklearn/neural_network/multilayer_perceptron.py b/sklearn/neural_network/multilayer_perceptron.py\nindex 8a5469df5..736ad98a2 100644\n--- a/sklearn/neural_network/multilayer_perceptron.py\n+++ b/sklearn/neural_network/multilayer_perceptron.py\n@@ -459,7 +459,7 @@ class BaseMultilayerPerceptron(BaseEstimator, metaclass=ABCMeta):\n         optimal_parameters, self.loss_, d = fmin_l_bfgs_b(\n             x0=packed_coef_inter,\n             func=self._loss_grad_lbfgs,\n-            maxfun=self.max_iter,\n+            maxiter=self.max_iter,  # This is the corrected line\n             iprint=iprint,\n             pgtol=self.tol,\n             args=(X, y, activations, deltas, coef_grads, intercept_grads))\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/neural_network/multilayer_perceptron.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "faa940608befaeca99db501609c6db796739f30f",
+  "patch": "diff --git a/sklearn/neural_network/multilayer_perceptron.py b/sklearn/neural_network/multilayer_perceptron.py\n--- a/sklearn/neural_network/multilayer_perceptron.py\n+++ b/sklearn/neural_network/multilayer_perceptron.py\n@@ -51,7 +51,7 @@ def __init__(self, hidden_layer_sizes, activation, solver,\n                  max_iter, loss, shuffle, random_state, tol, verbose,\n                  warm_start, momentum, nesterovs_momentum, early_stopping,\n                  validation_fraction, beta_1, beta_2, epsilon,\n-                 n_iter_no_change):\n+                 n_iter_no_change, max_fun):\n         self.activation = activation\n         self.solver = solver\n         self.alpha = alpha\n@@ -75,6 +75,7 @@ def __init__(self, hidden_layer_sizes, activation, solver,\n         self.beta_2 = beta_2\n         self.epsilon = epsilon\n         self.n_iter_no_change = n_iter_no_change\n+        self.max_fun = max_fun\n \n     def _unpack(self, packed_parameters):\n         \"\"\"Extract the coefficients and intercepts from packed_parameters.\"\"\"\n@@ -172,7 +173,6 @@ def _loss_grad_lbfgs(self, packed_coef_inter, X, y, activations, deltas,\n         self._unpack(packed_coef_inter)\n         loss, coef_grads, intercept_grads = self._backprop(\n             X, y, activations, deltas, coef_grads, intercept_grads)\n-        self.n_iter_ += 1\n         grad = _pack(coef_grads, intercept_grads)\n         return loss, grad\n \n@@ -381,6 +381,8 @@ def _validate_hyperparameters(self):\n                              self.shuffle)\n         if self.max_iter <= 0:\n             raise ValueError(\"max_iter must be > 0, got %s.\" % self.max_iter)\n+        if self.max_fun <= 0:\n+            raise ValueError(\"max_fun must be > 0, got %s.\" % self.max_fun)\n         if self.alpha < 0.0:\n             raise ValueError(\"alpha must be >= 0, got %s.\" % self.alpha)\n         if (self.learning_rate in [\"constant\", \"invscaling\", \"adaptive\"] and\n@@ -459,10 +461,29 @@ def _fit_lbfgs(self, X, y, activations, deltas, coef_grads,\n         optimal_parameters, self.loss_, d = fmin_l_bfgs_b(\n             x0=packed_coef_inter,\n             func=self._loss_grad_lbfgs,\n-            maxfun=self.max_iter,\n+            maxfun=self.max_fun,\n+            maxiter=self.max_iter,\n             iprint=iprint,\n             pgtol=self.tol,\n             args=(X, y, activations, deltas, coef_grads, intercept_grads))\n+        self.n_iter_ = d['nit']\n+        if d['warnflag'] == 1:\n+            if d['nit'] >= self.max_iter:\n+                warnings.warn(\n+                    \"LBFGS Optimizer: Maximum iterations (%d) \"\n+                    \"reached and the optimization hasn't converged yet.\"\n+                    % self.max_iter, ConvergenceWarning)\n+            if d['funcalls'] >= self.max_fun:\n+                warnings.warn(\n+                    \"LBFGS Optimizer: Maximum function evaluations (%d) \"\n+                    \"reached and the optimization hasn't converged yet.\"\n+                    % self.max_fun, ConvergenceWarning)\n+        elif d['warnflag'] == 2:\n+            warnings.warn(\n+                \"LBFGS Optimizer: Optimization hasn't converged yet, \"\n+                \"cause of LBFGS stopping: %s.\"\n+                % d['task'], ConvergenceWarning)\n+\n \n         self._unpack(optimal_parameters)\n \n@@ -833,6 +854,15 @@ class MLPClassifier(BaseMultilayerPerceptron, ClassifierMixin):\n \n         .. versionadded:: 0.20\n \n+    max_fun : int, optional, default 15000\n+        Only used when solver='lbfgs'. Maximum number of loss function calls.\n+        The solver iterates until convergence (determined by 'tol'), number\n+        of iterations reaches max_iter, or this number of loss function calls.\n+        Note that number of loss function calls will be greater than or equal\n+        to the number of iterations for the `MLPClassifier`.\n+\n+        .. versionadded:: 0.22\n+\n     Attributes\n     ----------\n     classes_ : array or list of array of shape (n_classes,)\n@@ -898,8 +928,7 @@ def __init__(self, hidden_layer_sizes=(100,), activation=\"relu\",\n                  verbose=False, warm_start=False, momentum=0.9,\n                  nesterovs_momentum=True, early_stopping=False,\n                  validation_fraction=0.1, beta_1=0.9, beta_2=0.999,\n-                 epsilon=1e-8, n_iter_no_change=10):\n-\n+                 epsilon=1e-8, n_iter_no_change=10, max_fun=15000):\n         super().__init__(\n             hidden_layer_sizes=hidden_layer_sizes,\n             activation=activation, solver=solver, alpha=alpha,\n@@ -912,7 +941,7 @@ def __init__(self, hidden_layer_sizes=(100,), activation=\"relu\",\n             early_stopping=early_stopping,\n             validation_fraction=validation_fraction,\n             beta_1=beta_1, beta_2=beta_2, epsilon=epsilon,\n-            n_iter_no_change=n_iter_no_change)\n+            n_iter_no_change=n_iter_no_change, max_fun=max_fun)\n \n     def _validate_input(self, X, y, incremental):\n         X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],\n@@ -1216,6 +1245,15 @@ class MLPRegressor(BaseMultilayerPerceptron, RegressorMixin):\n \n         .. versionadded:: 0.20\n \n+    max_fun : int, optional, default 15000\n+        Only used when solver='lbfgs'. Maximum number of function calls.\n+        The solver iterates until convergence (determined by 'tol'), number\n+        of iterations reaches max_iter, or this number of function calls.\n+        Note that number of function calls will be greater than or equal to\n+        the number of iterations for the MLPRegressor.\n+\n+        .. versionadded:: 0.22\n+\n     Attributes\n     ----------\n     loss_ : float\n@@ -1279,8 +1317,7 @@ def __init__(self, hidden_layer_sizes=(100,), activation=\"relu\",\n                  verbose=False, warm_start=False, momentum=0.9,\n                  nesterovs_momentum=True, early_stopping=False,\n                  validation_fraction=0.1, beta_1=0.9, beta_2=0.999,\n-                 epsilon=1e-8, n_iter_no_change=10):\n-\n+                 epsilon=1e-8, n_iter_no_change=10, max_fun=15000):\n         super().__init__(\n             hidden_layer_sizes=hidden_layer_sizes,\n             activation=activation, solver=solver, alpha=alpha,\n@@ -1293,7 +1330,7 @@ def __init__(self, hidden_layer_sizes=(100,), activation=\"relu\",\n             early_stopping=early_stopping,\n             validation_fraction=validation_fraction,\n             beta_1=beta_1, beta_2=beta_2, epsilon=epsilon,\n-            n_iter_no_change=n_iter_no_change)\n+            n_iter_no_change=n_iter_no_change, max_fun=max_fun)\n \n     def predict(self, X):\n         \"\"\"Predict using the multi-layer perceptron model.\n",
+  "test_patch": "diff --git a/sklearn/neural_network/tests/test_mlp.py b/sklearn/neural_network/tests/test_mlp.py\n--- a/sklearn/neural_network/tests/test_mlp.py\n+++ b/sklearn/neural_network/tests/test_mlp.py\n@@ -48,6 +48,8 @@\n Xboston = StandardScaler().fit_transform(boston.data)[: 200]\n yboston = boston.target[:200]\n \n+regression_datasets = [(Xboston, yboston)]\n+\n iris = load_iris()\n \n X_iris = iris.data\n@@ -228,32 +230,30 @@ def loss_grad_fun(t):\n             assert_almost_equal(numgrad, grad)\n \n \n-def test_lbfgs_classification():\n+@pytest.mark.parametrize('X,y', classification_datasets)\n+def test_lbfgs_classification(X, y):\n     # Test lbfgs on classification.\n     # It should achieve a score higher than 0.95 for the binary and multi-class\n     # versions of the digits dataset.\n-    for X, y in classification_datasets:\n-        X_train = X[:150]\n-        y_train = y[:150]\n-        X_test = X[150:]\n-\n-        expected_shape_dtype = (X_test.shape[0], y_train.dtype.kind)\n-\n-        for activation in ACTIVATION_TYPES:\n-            mlp = MLPClassifier(solver='lbfgs', hidden_layer_sizes=50,\n-                                max_iter=150, shuffle=True, random_state=1,\n-                                activation=activation)\n-            mlp.fit(X_train, y_train)\n-            y_predict = mlp.predict(X_test)\n-            assert mlp.score(X_train, y_train) > 0.95\n-            assert ((y_predict.shape[0], y_predict.dtype.kind) ==\n-                         expected_shape_dtype)\n+    X_train = X[:150]\n+    y_train = y[:150]\n+    X_test = X[150:]\n+    expected_shape_dtype = (X_test.shape[0], y_train.dtype.kind)\n \n-\n-def test_lbfgs_regression():\n+    for activation in ACTIVATION_TYPES:\n+        mlp = MLPClassifier(solver='lbfgs', hidden_layer_sizes=50,\n+                            max_iter=150, shuffle=True, random_state=1,\n+                            activation=activation)\n+        mlp.fit(X_train, y_train)\n+        y_predict = mlp.predict(X_test)\n+        assert mlp.score(X_train, y_train) > 0.95\n+        assert ((y_predict.shape[0], y_predict.dtype.kind) ==\n+                expected_shape_dtype)\n+\n+\n+@pytest.mark.parametrize('X,y', regression_datasets)\n+def test_lbfgs_regression(X, y):\n     # Test lbfgs on the boston dataset, a regression problems.\n-    X = Xboston\n-    y = yboston\n     for activation in ACTIVATION_TYPES:\n         mlp = MLPRegressor(solver='lbfgs', hidden_layer_sizes=50,\n                            max_iter=150, shuffle=True, random_state=1,\n@@ -266,6 +266,39 @@ def test_lbfgs_regression():\n             assert mlp.score(X, y) > 0.95\n \n \n+@pytest.mark.parametrize('X,y', classification_datasets)\n+def test_lbfgs_classification_maxfun(X, y):\n+    # Test lbfgs parameter max_fun.\n+    # It should independently limit the number of iterations for lbfgs.\n+    max_fun = 10\n+    # classification tests\n+    for activation in ACTIVATION_TYPES:\n+        mlp = MLPClassifier(solver='lbfgs', hidden_layer_sizes=50,\n+                            max_iter=150, max_fun=max_fun, shuffle=True,\n+                            random_state=1, activation=activation)\n+        with pytest.warns(ConvergenceWarning):\n+            mlp.fit(X, y)\n+            assert max_fun >= mlp.n_iter_\n+\n+\n+@pytest.mark.parametrize('X,y', regression_datasets)\n+def test_lbfgs_regression_maxfun(X, y):\n+    # Test lbfgs parameter max_fun.\n+    # It should independently limit the number of iterations for lbfgs.\n+    max_fun = 10\n+    # regression tests\n+    for activation in ACTIVATION_TYPES:\n+        mlp = MLPRegressor(solver='lbfgs', hidden_layer_sizes=50,\n+                           max_iter=150, max_fun=max_fun, shuffle=True,\n+                           random_state=1, activation=activation)\n+        with pytest.warns(ConvergenceWarning):\n+            mlp.fit(X, y)\n+            assert max_fun >= mlp.n_iter_\n+\n+    mlp.max_fun = -1\n+    assert_raises(ValueError, mlp.fit, X, y)\n+\n+\n def test_learning_rate_warmstart():\n     # Tests that warm_start reuse past solutions.\n     X = [[3, 2], [1, 6], [5, 6], [-2, -4]]\n",
+  "problem_statement": "Training MLP using l-bfgs limited to default l-bfgs maxiter value\n#### Description\r\n\r\nTraining an MLP regressor (or classifier) using l-bfgs currently cannot run for more than (approx) 15000 iterations.\r\nThis artificial limit is caused by the call site to l-bfgs passing the MLP argument value \"max_iters\" to the argument for \"maxfun\" (maximum number of function calls), but not for \"maxiter\" (maximum number of iterations), so that no matter how large a number you pass as \"max_iters\" to train for MLP, the iterations are capped by the default value for maxiter (15000).\r\n\r\n#### Steps/Code to Reproduce\r\nFit an MLP for a problem that requires > 15000 iterations\r\n\r\nHere is an example (tested in python 2.7):\r\nhttps://gist.github.com/daniel-perry/d9e356a03936673e58e0ce47d5fc70ef\r\n\r\n(you will need data.npy from the gist linked to above)\r\n\r\n````\r\nfrom __future__ import print_function\r\nimport numpy as np\r\nfrom sklearn.neural_network import MLPRegressor\r\n\r\ntrain = np.load(\"data.npy\").tolist()\r\n\r\nmax_iter = 18000\r\nclf = MLPRegressor(max_iter=max_iter, activation='relu', solver='lbfgs', verbose=True)\r\n\r\nclf.fit(train[\"train_x\"],train[\"train_y\"])\r\n\r\nprint(\"score: \", clf.score(train[\"train_x\"],train[\"train_y\"]))\r\nprint(\"iters: \", clf.n_iter_, \" / \", max_iter)\r\n````\r\n\r\n#### Expected Results\r\n\r\nThe training should run for 18000 iterations.\r\n\r\n#### Actual Results\r\n\r\nThe training runs for 15000 iterations.\r\n\r\n#### Versions\r\n\r\nHere are my local version details, though the problem appears to exist on the current head, and so should exist for any python/sklearn versions.\r\n\r\n'Python', '2.7.12 (default, Jul  1 2016, 15:12:24) \\n[GCC 5.4.0 20160609]'\r\n'NumPy', '1.13.0'\r\n'SciPy', '0.19.1'\r\n'Scikit-Learn', '0.18'\r\n\r\n\r\n\n[WIP] FIX: use maxiter rather than maxfun in MultiLayerPerceptron with solver='lbfgs'\nIn my limited experience with LBFGS, the number of function calls is greater than the number of iterations.\r\n\r\nThe impact of this bug is that with solver='lbfgs' is probably not doing as many iterations as it should in master although I am not sure it matters that much in practice.\r\n\r\nTo get an idea how much funtion calls differ from iterations, I tweaked `examples/neural_networks/plot_mnist_filters.py` to be able to run for a few hundred iterations:\r\n\r\n```py\r\nmlp = MLPClassifier(hidden_layer_sizes=(100,), max_iter=1000, alpha=1e-4,\r\n                    solver='lbfgs', verbose=10, tol=1e-16, random_state=1,\r\n                    learning_rate_init=.1)\r\n```\r\n\r\nThe result: 393 iterations and 414 function calls.\r\n\r\nNot sure whether we nest to test this, and how to test it, suggestions more than welcome!\r\n\r\n- [ ] add a whats_new entry once there is agreement\n",
+  "hints_text": "\n",
+  "created_at": "2017-07-03T22:39:22Z",
+  "version": "0.22",
+  "FAIL_TO_PASS": "[\"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_classification_maxfun[X0-y0]\", \"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_classification_maxfun[X1-y1]\", \"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_regression_maxfun[X0-y0]\"]",
+  "PASS_TO_PASS": "[\"sklearn/neural_network/tests/test_mlp.py::test_adaptive_learning_rate\", \"sklearn/neural_network/tests/test_mlp.py::test_alpha\", \"sklearn/neural_network/tests/test_mlp.py::test_early_stopping\", \"sklearn/neural_network/tests/test_mlp.py::test_early_stopping_stratified\", \"sklearn/neural_network/tests/test_mlp.py::test_fit\", \"sklearn/neural_network/tests/test_mlp.py::test_gradient\", \"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_classification[X0-y0]\", \"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_classification[X1-y1]\", \"sklearn/neural_network/tests/test_mlp.py::test_lbfgs_regression[X0-y0]\", \"sklearn/neural_network/tests/test_mlp.py::test_learning_rate_warmstart\", \"sklearn/neural_network/tests/test_mlp.py::test_multilabel_classification\", \"sklearn/neural_network/tests/test_mlp.py::test_multioutput_regression\", \"sklearn/neural_network/tests/test_mlp.py::test_n_iter_no_change\", \"sklearn/neural_network/tests/test_mlp.py::test_n_iter_no_change_inf\", \"sklearn/neural_network/tests/test_mlp.py::test_params_errors\", \"sklearn/neural_network/tests/test_mlp.py::test_partial_fit_classes_error\", \"sklearn/neural_network/tests/test_mlp.py::test_partial_fit_classification\", \"sklearn/neural_network/tests/test_mlp.py::test_partial_fit_errors\", \"sklearn/neural_network/tests/test_mlp.py::test_partial_fit_regression\", \"sklearn/neural_network/tests/test_mlp.py::test_partial_fit_unseen_classes\", \"sklearn/neural_network/tests/test_mlp.py::test_predict_proba_binary\", \"sklearn/neural_network/tests/test_mlp.py::test_predict_proba_multiclass\", \"sklearn/neural_network/tests/test_mlp.py::test_predict_proba_multilabel\", \"sklearn/neural_network/tests/test_mlp.py::test_shuffle\", \"sklearn/neural_network/tests/test_mlp.py::test_sparse_matrices\", \"sklearn/neural_network/tests/test_mlp.py::test_tolerance\", \"sklearn/neural_network/tests/test_mlp.py::test_verbose_sgd\", \"sklearn/neural_network/tests/test_mlp.py::test_warm_start\"]",
+  "environment_setup_commit": "7e85a6d1f038bbb932b36f18d75df6be937ed00d",
+  "patch_files": [
+    "sklearn/neural_network/multilayer_perceptron.py"
+  ],
+  "test_patch_files": [
+    "sklearn/neural_network/tests/test_mlp.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/neural_network/multilayer_perceptron.py": {
+      "diffs": [
+        {
+          "start_line_old": 54,
+          "end_line_old": 54,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._update_no_improvement_count_BaseMultilayerPerceptron._update_no_improvement_count.1.3.2.self.best_loss_.1",
+          "closest_snippet_line_distance": 521,
+          "pos": 20,
+          "context_length": 11963
+        },
+        {
+          "start_line_old": 78,
+          "end_line_old": 78,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._update_no_improvement_count_BaseMultilayerPerceptron._update_no_improvement_count.1.3.2.self.best_loss_.1",
+          "closest_snippet_line_distance": 497,
+          "pos": 20,
+          "context_length": 11963
+        },
+        {
+          "start_line_old": 175,
+          "end_line_old": 175,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._initialize_BaseMultilayerPerceptron._initialize.self.n_iter_.12.3.3.self.best_loss_.1",
+          "closest_snippet_line_distance": 81,
+          "pos": 59,
+          "context_length": 33477
+        },
+        {
+          "start_line_old": 384,
+          "end_line_old": 384,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_lbfgs_BaseMultilayerPerceptron._fit_lbfgs.self._coef_indptr.12",
+          "closest_snippet_line_distance": 45,
+          "pos": 18,
+          "context_length": 11214
+        },
+        {
+          "start_line_old": 462,
+          "end_line_old": 462,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_stochastic.7_BaseMultilayerPerceptron._fit_stochastic.8.self.coefs_.self.intercepts_.1",
+          "closest_snippet_line_distance": 45,
+          "pos": 14,
+          "context_length": 8906
+        },
+        {
+          "start_line_old": 836,
+          "end_line_old": 836,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "pos": 1,
+          "context_length": 1876
+        },
+        {
+          "start_line_old": 901,
+          "end_line_old": 902,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPRegressor.1_MLPRegressor.1",
+          "closest_snippet_line_distance": 170,
+          "pos": 4,
+          "context_length": 4586
+        },
+        {
+          "start_line_old": 915,
+          "end_line_old": 915,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPRegressor.1_MLPRegressor.1",
+          "closest_snippet_line_distance": 156,
+          "pos": 4,
+          "context_length": 4586
+        },
+        {
+          "start_line_old": 1219,
+          "end_line_old": 1219,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.1_MLPClassifier.1",
+          "closest_snippet_line_distance": 327,
+          "pos": 2,
+          "context_length": 3719
+        },
+        {
+          "start_line_old": 1282,
+          "end_line_old": 1283,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.__init___MLPClassifier.__init__.1",
+          "closest_snippet_line_distance": 368,
+          "pos": 5,
+          "context_length": 4902
+        },
+        {
+          "start_line_old": 1296,
+          "end_line_old": 1296,
+          "file_pos": 1,
+          "file_context_length": 11623,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.__init___MLPClassifier.__init__.1",
+          "closest_snippet_line_distance": 381,
+          "pos": 5,
+          "context_length": 4902
+        }
+      ]
+    }
+  },
+  "vectors": 2984,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.1_MLPClassifier.1",
+      "distance": 0.8198742270469666,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 687,
+      "end_line": 892,
+      "tokens": 1876,
+      "context_length": 1876,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPRegressor.1_MLPRegressor.1",
+      "distance": 0.8214571475982666,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1071,
+      "end_line": 1272,
+      "tokens": 1843,
+      "context_length": 3719,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mlp_training_curves.py_1_plot_args.1",
+      "distance": 0.8456944227218628,
+      "file_path": "examples/neural_networks/plot_mlp_training_curves.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 555,
+      "context_length": 4274
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.__init___MLPClassifier.__init__.1",
+      "distance": 0.8649160861968994,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 893,
+      "end_line": 915,
+      "tokens": 312,
+      "context_length": 4586,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPRegressor.__init___MLPRegressor.__init__.1",
+      "distance": 0.8679008483886719,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1273,
+      "end_line": 1296,
+      "tokens": 316,
+      "context_length": 4902,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier._validate_input_MLPClassifier._validate_input.5.1",
+      "distance": 0.9125093221664429,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 917,
+      "end_line": 942,
+      "tokens": 291,
+      "context_length": 5193,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mlp_alpha.py_1_25",
+      "distance": 0.9189070463180542,
+      "file_path": "examples/neural_networks/plot_mlp_alpha.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 427,
+      "context_length": 5620
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mlp_training_curves.py_plot_on_dataset_plot_on_dataset.2",
+      "distance": 0.921394407749176,
+      "file_path": "examples/neural_networks/plot_mlp_training_curves.py",
+      "start_line": 56,
+      "end_line": 85,
+      "tokens": 270,
+      "context_length": 5890
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/examples/semi_supervised/plot_label_propagation_digits_active_learning.py_23_",
+      "distance": 0.9248365163803101,
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits_active_learning.py",
+      "start_line": 50,
+      "end_line": 116,
+      "tokens": 672,
+      "context_length": 6562
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mnist_filters.py_1_",
+      "distance": 0.9365065097808838,
+      "file_path": "examples/neural_networks/plot_mnist_filters.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 582,
+      "context_length": 7144
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_BaseMultilayerPerceptron._fit.hidden_layer_sizes.26.1",
+      "distance": 0.9506920576095581,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 310,
+      "end_line": 376,
+      "tokens": 623,
+      "context_length": 7767,
+      "file_pos": 5
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_stochastic.7_BaseMultilayerPerceptron._fit_stochastic.8.self.coefs_.self.intercepts_.1",
+      "distance": 0.9531684517860413,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 507,
+      "end_line": 573,
+      "tokens": 610,
+      "context_length": 8377,
+      "file_pos": 5
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mlp_training_curves.py_14_",
+      "distance": 0.9564377069473267,
+      "file_path": "examples/neural_networks/plot_mlp_training_curves.py",
+      "start_line": 88,
+      "end_line": 103,
+      "tokens": 162,
+      "context_length": 8539
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_lbfgs_BaseMultilayerPerceptron._fit_lbfgs.self._coef_indptr.12",
+      "distance": 0.9721036553382874,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 429,
+      "end_line": 467,
+      "tokens": 367,
+      "context_length": 8906,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_mlp_alpha.py_26_",
+      "distance": 0.9739625453948975,
+      "file_path": "examples/neural_networks/plot_mlp_alpha.py",
+      "start_line": 55,
+      "end_line": 114,
+      "tokens": 671,
+      "context_length": 9577
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_mnist.py_1_",
+      "distance": 0.9742127656936646,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_mnist.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 660,
+      "context_length": 10237
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.976967990398407,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 84,
+      "end_line": 105,
+      "tokens": 306,
+      "context_length": 10543
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._validate_hyperparameters_BaseMultilayerPerceptron._validate_hyperparameters.18.1",
+      "distance": 0.9833700060844421,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 378,
+      "end_line": 427,
+      "tokens": 671,
+      "context_length": 11214,
+      "file_pos": 7
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._update_no_improvement_count_BaseMultilayerPerceptron._update_no_improvement_count.1.3.2.self.best_loss_.1",
+      "distance": 0.9882189035415649,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 575,
+      "end_line": 604,
+      "tokens": 319,
+      "context_length": 11533,
+      "file_pos": 7
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron_BaseMultilayerPerceptron._unpack.2.4",
+      "distance": 0.9924485087394714,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 39,
+      "end_line": 86,
+      "tokens": 430,
+      "context_length": 11963,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/_stochastic_optimizers.py_1_BaseOptimizer.trigger_stopping.3.1",
+      "distance": 0.9928004145622253,
+      "file_path": "sklearn/neural_network/_stochastic_optimizers.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 390,
+      "context_length": 12353
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_13_",
+      "distance": 0.9990384578704834,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 64,
+      "end_line": 125,
+      "tokens": 523,
+      "context_length": 12876
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting_higgsboson.py_df_",
+      "distance": 0.9997199177742004,
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "start_line": 59,
+      "end_line": 124,
+      "tokens": 700,
+      "context_length": 13576
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_1_models.1",
+      "distance": 1.001266360282898,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 497,
+      "context_length": 14073
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_glmnet.py_10_",
+      "distance": 1.002969741821289,
+      "file_path": "benchmarks/bench_glmnet.py",
+      "start_line": 47,
+      "end_line": 129,
+      "tokens": 796,
+      "context_length": 14869
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_early_stopping.py_1_bar2.1",
+      "distance": 1.0089359283447266,
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 772,
+      "context_length": 15641
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_1__pack.2.1",
+      "distance": 1.0126307010650635,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 253,
+      "context_length": 15894,
+      "file_pos": 13
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_underfitting_overfitting.py_1_",
+      "distance": 1.0245670080184937,
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 631,
+      "context_length": 16525
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_29_",
+      "distance": 1.0257160663604736,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 65,
+      "end_line": 123,
+      "tokens": 525,
+      "context_length": 17050
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron.partial_fit_BaseMultilayerPerceptron._partial_fit.1.1",
+      "distance": 1.0281234979629517,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 624,
+      "end_line": 647,
+      "tokens": 178,
+      "context_length": 17228,
+      "file_pos": 14
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/examples/inspection/plot_partial_dependence.py_main_",
+      "distance": 1.0291184186935425,
+      "file_path": "examples/inspection/plot_partial_dependence.py",
+      "start_line": 72,
+      "end_line": 138,
+      "tokens": 653,
+      "context_length": 17881
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._fit_stochastic_BaseMultilayerPerceptron._fit_stochastic.6.2.batch_size.1",
+      "distance": 1.0342341661453247,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 469,
+      "end_line": 505,
+      "tokens": 368,
+      "context_length": 18249,
+      "file_pos": 15
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_results_",
+      "distance": 1.0420241355895996,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 247,
+      "end_line": 323,
+      "tokens": 658,
+      "context_length": 18907
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._backprop_BaseMultilayerPerceptron._backprop.23.1",
+      "distance": 1.0444746017456055,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 179,
+      "end_line": 254,
+      "tokens": 722,
+      "context_length": 19629,
+      "file_pos": 16
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_lasso.py_7_",
+      "distance": 1.0521345138549805,
+      "file_path": "benchmarks/bench_lasso.py",
+      "start_line": 60,
+      "end_line": 97,
+      "tokens": 382,
+      "context_length": 20011
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_one_run_one_run.cat_score_duration.1",
+      "distance": 1.054432988166809,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 59,
+      "end_line": 132,
+      "tokens": 728,
+      "context_length": 20739
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.partial_fit_MLPClassifier.partial_fit.3.1",
+      "distance": 1.0556585788726807,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 984,
+      "end_line": 1012,
+      "tokens": 234,
+      "context_length": 20973,
+      "file_pos": 18
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_non_transformer_estimators_n_iter_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.6",
+      "distance": 1.0603914260864258,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2249,
+      "end_line": 2282,
+      "tokens": 319,
+      "context_length": 21292
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_omp_lars.py_9_",
+      "distance": 1.060396432876587,
+      "file_path": "benchmarks/bench_plot_omp_lars.py",
+      "start_line": 101,
+      "end_line": 123,
+      "tokens": 306,
+      "context_length": 21598
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_model_complexity_influence.py__count_nonzero_coefficients_",
+      "distance": 1.0616514682769775,
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "start_line": 121,
+      "end_line": 170,
+      "tokens": 540,
+      "context_length": 22138
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_1_alpha_aic_.1",
+      "distance": 1.0617077350616455,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 714,
+      "context_length": 22852
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_29_",
+      "distance": 1.063227891921997,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 108,
+      "end_line": 180,
+      "tokens": 695,
+      "context_length": 23547
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier._partial_fit_MLPClassifier.predict_log_proba.3.1",
+      "distance": 1.0650684833526611,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1014,
+      "end_line": 1042,
+      "tokens": 228,
+      "context_length": 23775,
+      "file_pos": 22
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_1_30",
+      "distance": 1.0679112672805786,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 947,
+      "context_length": 24722
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNetCV.1_ElasticNetCV.1",
+      "distance": 1.0685510635375977,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1399,
+      "end_line": 1577,
+      "tokens": 1649,
+      "context_length": 26371
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpc.py_1_34",
+      "distance": 1.0692920684814453,
+      "file_path": "examples/gaussian_process/plot_gpc.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 757,
+      "context_length": 27128
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_lasso_path.py_11_",
+      "distance": 1.0716127157211304,
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "start_line": 83,
+      "end_line": 116,
+      "tokens": 347,
+      "context_length": 27475
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_lasso_path.py_1_compute_bench.5.1",
+      "distance": 1.072068691253662,
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 626,
+      "context_length": 28101
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_30_partial_fit_classifiers.1",
+      "distance": 1.074939489364624,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 187,
+      "end_line": 214,
+      "tokens": 241,
+      "context_length": 28342
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.fit_MLPClassifier.fit.2.1",
+      "distance": 1.0763187408447266,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 965,
+      "end_line": 982,
+      "tokens": 142,
+      "context_length": 28484,
+      "file_pos": 27
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_16_",
+      "distance": 1.07681143283844,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 78,
+      "end_line": 140,
+      "tokens": 520,
+      "context_length": 29004
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpr_noisy.py_1_33",
+      "distance": 1.0788636207580566,
+      "file_path": "examples/gaussian_process/plot_gpr_noisy.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 743,
+      "context_length": 29747
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/examples/tree/plot_tree_regression_multioutput.py_1_",
+      "distance": 1.0861176252365112,
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 567,
+      "context_length": 30314
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tsne_mnist.py_23_",
+      "distance": 1.0885682106018066,
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "start_line": 69,
+      "end_line": 169,
+      "tokens": 1011,
+      "context_length": 31325
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_1_classifiers.1",
+      "distance": 1.089082956314087,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 775,
+      "context_length": 32100
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_lasso.py_1_5",
+      "distance": 1.0891790390014648,
+      "file_path": "benchmarks/bench_lasso.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 111,
+      "context_length": 32211
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_1_memory.1",
+      "distance": 1.0897866487503052,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 499,
+      "context_length": 32710
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._initialize_BaseMultilayerPerceptron._initialize.self.n_iter_.12.3.3.self.best_loss_.1",
+      "distance": 1.0921624898910522,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 256,
+      "end_line": 293,
+      "tokens": 320,
+      "context_length": 33030,
+      "file_pos": 32
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._loss_grad_lbfgs_BaseMultilayerPerceptron._loss_grad_lbfgs.6.1",
+      "distance": 1.0939602851867676,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 130,
+      "end_line": 177,
+      "tokens": 447,
+      "context_length": 33477,
+      "file_pos": 32
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_load_20news_",
+      "distance": 1.0945405960083008,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 371,
+      "end_line": 423,
+      "tokens": 514,
+      "context_length": 33991
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_glmnet.py_1_rmse.1.1",
+      "distance": 1.0948486328125,
+      "file_path": "benchmarks/bench_glmnet.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 168,
+      "context_length": 34159
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_1_12",
+      "distance": 1.0954253673553467,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 302,
+      "context_length": 34461
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py__nls_subproblem.6__nls_subproblem.8.1",
+      "distance": 1.0967766046524048,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 105,
+      "end_line": 148,
+      "tokens": 401,
+      "context_length": 34862
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_dict_face_patches.py_1_",
+      "distance": 1.0972530841827393,
+      "file_path": "examples/cluster/plot_dict_face_patches.py",
+      "start_line": 1,
+      "end_line": 85,
+      "tokens": 660,
+      "context_length": 35522
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_31_",
+      "distance": 1.098198652267456,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 95,
+      "end_line": 159,
+      "tokens": 513,
+      "context_length": 36035
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron._init_coef_BaseMultilayerPerceptron._init_coef.factor.7.1",
+      "distance": 1.099735140800476,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 295,
+      "end_line": 308,
+      "tokens": 143,
+      "context_length": 36178,
+      "file_pos": 34
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_lof_outlier_detection.py_1_",
+      "distance": 1.1005337238311768,
+      "file_path": "examples/neighbors/plot_lof_outlier_detection.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 667,
+      "context_length": 36845
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_omp_lars.py_1_compute_bench.11.1",
+      "distance": 1.1018171310424805,
+      "file_path": "benchmarks/bench_plot_omp_lars.py",
+      "start_line": 1,
+      "end_line": 98,
+      "tokens": 857,
+      "context_length": 37702
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_train_error_vs_test_error.py_1_",
+      "distance": 1.103837490081787,
+      "file_path": "examples/model_selection/plot_train_error_vs_test_error.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 612,
+      "context_length": 38314
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_prediction_latency.py_28_",
+      "distance": 1.1038414239883423,
+      "file_path": "examples/applications/plot_prediction_latency.py",
+      "start_line": 267,
+      "end_line": 311,
+      "tokens": 348,
+      "context_length": 38662
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_multi_task_lasso_support.py_1_",
+      "distance": 1.1040949821472168,
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 587,
+      "context_length": 39249
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sgd_early_stopping.py_1_16",
+      "distance": 1.1042759418487549,
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 462,
+      "context_length": 39711
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic_path.py_1_",
+      "distance": 1.1053352355957031,
+      "file_path": "examples/linear_model/plot_logistic_path.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 503,
+      "context_length": 40214
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_regression.py_1_",
+      "distance": 1.105426549911499,
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 546,
+      "context_length": 40760
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/examples/impute/plot_iterative_imputer_variants_comparison.py_1_score_simple_imputer.1",
+      "distance": 1.106213927268982,
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 769,
+      "context_length": 41529
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/rbm.py_1_BernoulliRBM.__init__.self.random_state.1",
+      "distance": 1.1062915325164795,
+      "file_path": "sklearn/neural_network/rbm.py",
+      "start_line": 1,
+      "end_line": 104,
+      "tokens": 790,
+      "context_length": 42319
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_1_max_bins.1",
+      "distance": 1.1063235998153687,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 349,
+      "context_length": 42668
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_1_x_36.1",
+      "distance": 1.1072392463684082,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 785,
+      "context_length": 43453
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_solver.23__lars_path_solver.23.10.3.AA.3",
+      "distance": 1.1075114011764526,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 476,
+      "end_line": 633,
+      "tokens": 1591,
+      "context_length": 45044
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_coordinate_descent_path.py_1_neg_log_alphas_positive_enet.1",
+      "distance": 1.107950210571289,
+      "file_path": "examples/linear_model/plot_lasso_coordinate_descent_path.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 695,
+      "context_length": 45739
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpr_noisy_targets.py_1_56",
+      "distance": 1.1084551811218262,
+      "file_path": "examples/gaussian_process/plot_gpr_noisy_targets.py",
+      "start_line": 1,
+      "end_line": 100,
+      "tokens": 755,
+      "context_length": 46494
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_hist_gradient_boosting.py_n_samples_list_",
+      "distance": 1.1085952520370483,
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "start_line": 158,
+      "end_line": 242,
+      "tokens": 750,
+      "context_length": 47244
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_svm_scale_c.py_1_17",
+      "distance": 1.1088156700134277,
+      "file_path": "examples/svm/plot_svm_scale_c.py",
+      "start_line": 1,
+      "end_line": 102,
+      "tokens": 763,
+      "context_length": 48007
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/examples/neighbors/plot_lof_novelty_detection.py_1_b1.1",
+      "distance": 1.1096124649047852,
+      "file_path": "examples/neighbors/plot_lof_novelty_detection.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 753,
+      "context_length": 48760
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/examples/semi_supervised/plot_label_propagation_digits.py_1_",
+      "distance": 1.1116387844085693,
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 588,
+      "context_length": 49348
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/examples/multioutput/plot_classifier_chain_yeast.py_1_ensemble_jaccard_score.1",
+      "distance": 1.1136971712112427,
+      "file_path": "examples/multioutput/plot_classifier_chain_yeast.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 756,
+      "context_length": 50104
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_np_MAX_INT.1",
+      "distance": 1.1157399415969849,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 7,
+      "end_line": 45,
+      "tokens": 358,
+      "context_length": 50462
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_run_bench_run_bench.9.1",
+      "distance": 1.1177079677581787,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 332,
+      "end_line": 368,
+      "tokens": 377,
+      "context_length": 50839
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge_curvefit.py_1_23",
+      "distance": 1.1210154294967651,
+      "file_path": "examples/linear_model/plot_bayesian_ridge_curvefit.py",
+      "start_line": 1,
+      "end_line": 58,
+      "tokens": 432,
+      "context_length": 51271
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/examples/semi_supervised/plot_label_propagation_digits_active_learning.py_1_f.1",
+      "distance": 1.121227502822876,
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits_active_learning.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 321,
+      "context_length": 51592
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_set_checking_parameters_set_checking_parameters.params.22.1",
+      "distance": 1.1231149435043335,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 319,
+      "end_line": 397,
+      "tokens": 707,
+      "context_length": 52299
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/examples/exercises/plot_cv_diabetes.py_1_",
+      "distance": 1.1247880458831787,
+      "file_path": "examples/exercises/plot_cv_diabetes.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 672,
+      "context_length": 52971
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_24_",
+      "distance": 1.1250731945037842,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 112,
+      "end_line": 190,
+      "tokens": 757,
+      "context_length": 53728
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_LassoCV_LassoCV.1",
+      "distance": 1.1254899501800537,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1232,
+      "end_line": 1383,
+      "tokens": 1293,
+      "context_length": 55021
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_get_max_squared_sum_clfs.1",
+      "distance": 1.1259045600891113,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 142,
+      "end_line": 194,
+      "tokens": 532,
+      "context_length": 55553
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpr_co2.py_1_np",
+      "distance": 1.1277110576629639,
+      "file_path": "examples/gaussian_process/plot_gpr_co2.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 778,
+      "context_length": 56331
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_1_y_58.1",
+      "distance": 1.1278202533721924,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 772,
+      "context_length": 57103
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_saga.py_json_fit_single.16.1",
+      "distance": 1.128919243812561,
+      "file_path": "benchmarks/bench_saga.py",
+      "start_line": 6,
+      "end_line": 104,
+      "tokens": 835,
+      "context_length": 57938
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_cls_runtime_",
+      "distance": 1.1301522254943848,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 361,
+      "end_line": 419,
+      "tokens": 470,
+      "context_length": 58408
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_incremental_pca.py_variable_batch_size_comparison_",
+      "distance": 1.1302934885025024,
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "start_line": 104,
+      "end_line": 151,
+      "tokens": 468,
+      "context_length": 58876
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.fit.29__PLS.fit.29.41",
+      "distance": 1.1304638385772705,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 289,
+      "end_line": 351,
+      "tokens": 838,
+      "context_length": 59714
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_46_",
+      "distance": 1.1308271884918213,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 197,
+      "end_line": 239,
+      "tokens": 373,
+      "context_length": 60087
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/scikit-learn/examples/plot_anomaly_comparison.py_anomaly_algorithms_",
+      "distance": 1.1310540437698364,
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "start_line": 81,
+      "end_line": 152,
+      "tokens": 757,
+      "context_length": 60844
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sparsify.py_1_31",
+      "distance": 1.1314573287963867,
+      "file_path": "benchmarks/bench_sparsify.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 754,
+      "context_length": 61598
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ard.py_1_y_58.1",
+      "distance": 1.1317627429962158,
+      "file_path": "examples/linear_model/plot_ard.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 769,
+      "context_length": 62367
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_cls_stats_fig.1",
+      "distance": 1.1320226192474365,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 267,
+      "end_line": 360,
+      "tokens": 807,
+      "context_length": 63174
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_oob.py_1_37",
+      "distance": 1.1320819854736328,
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 793,
+      "context_length": 63967
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.1_LogisticRegression.1",
+      "distance": 1.1327033042907715,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1192,
+      "end_line": 1429,
+      "tokens": 2703,
+      "context_length": 66670
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_approximation.py_1_feature_map_nystroem.1",
+      "distance": 1.1334033012390137,
+      "file_path": "examples/plot_kernel_approximation.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 735,
+      "context_length": 67405
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_train_check_outliers_train.33.expected_outliers.14.2",
+      "distance": 1.1335539817810059,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1577,
+      "end_line": 1649,
+      "tokens": 655,
+      "context_length": 68060
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_learning_curve.py_11_",
+      "distance": 1.1351513862609863,
+      "file_path": "examples/model_selection/plot_learning_curve.py",
+      "start_line": 143,
+      "end_line": 166,
+      "tokens": 257,
+      "context_length": 68317
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_BaseMultilayerPerceptron.fit_BaseMultilayerPerceptron.fit.2.1",
+      "distance": 1.1361448764801025,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 606,
+      "end_line": 622,
+      "tokens": 134,
+      "context_length": 68451,
+      "file_pos": 68
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_lars.py_1_",
+      "distance": 1.1368284225463867,
+      "file_path": "examples/linear_model/plot_lasso_lars.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 226,
+      "context_length": 68677
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_ridge_regression.py_31_kr_70.1",
+      "distance": 1.1378748416900635,
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "start_line": 80,
+      "end_line": 153,
+      "tokens": 738,
+      "context_length": 69415
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py__fit_projected_gradient__fit_projected_gradient.11.1",
+      "distance": 1.1380131244659424,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 151,
+      "end_line": 192,
+      "tokens": 476,
+      "context_length": 69891
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_and_elasticnet.py_1_",
+      "distance": 1.1386771202087402,
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 630,
+      "context_length": 70521
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "position": 1,
+      "tokens": 11623,
+      "context_length": 11623
+    },
+    {
+      "file_path": "examples/neural_networks/plot_mlp_training_curves.py",
+      "position": 2,
+      "tokens": 987,
+      "context_length": 12610
+    },
+    {
+      "file_path": "examples/neural_networks/plot_mlp_alpha.py",
+      "position": 3,
+      "tokens": 1118,
+      "context_length": 13728
+    },
+    {
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits_active_learning.py",
+      "position": 4,
+      "tokens": 1013,
+      "context_length": 14741
+    },
+    {
+      "file_path": "examples/neural_networks/plot_mnist_filters.py",
+      "position": 5,
+      "tokens": 582,
+      "context_length": 15323
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_mnist.py",
+      "position": 6,
+      "tokens": 691,
+      "context_length": 16014
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 7,
+      "tokens": 1711,
+      "context_length": 17725
+    },
+    {
+      "file_path": "sklearn/neural_network/_stochastic_optimizers.py",
+      "position": 8,
+      "tokens": 1931,
+      "context_length": 19656
+    },
+    {
+      "file_path": "benchmarks/bench_tree.py",
+      "position": 9,
+      "tokens": 870,
+      "context_length": 20526
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting_higgsboson.py",
+      "position": 10,
+      "tokens": 1182,
+      "context_length": 21708
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "position": 11,
+      "tokens": 1029,
+      "context_length": 22737
+    },
+    {
+      "file_path": "benchmarks/bench_glmnet.py",
+      "position": 12,
+      "tokens": 1087,
+      "context_length": 23824
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "position": 13,
+      "tokens": 1164,
+      "context_length": 24988
+    },
+    {
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "position": 14,
+      "tokens": 631,
+      "context_length": 25619
+    },
+    {
+      "file_path": "examples/inspection/plot_partial_dependence.py",
+      "position": 15,
+      "tokens": 1341,
+      "context_length": 26960
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 16,
+      "tokens": 2535,
+      "context_length": 29495
+    },
+    {
+      "file_path": "benchmarks/bench_lasso.py",
+      "position": 17,
+      "tokens": 795,
+      "context_length": 30290
+    },
+    {
+      "file_path": "benchmarks/bench_hist_gradient_boosting.py",
+      "position": 18,
+      "tokens": 2226,
+      "context_length": 32516
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 19,
+      "tokens": 22194,
+      "context_length": 54710
+    },
+    {
+      "file_path": "benchmarks/bench_plot_omp_lars.py",
+      "position": 20,
+      "tokens": 1164,
+      "context_length": 55874
+    },
+    {
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "position": 21,
+      "tokens": 1524,
+      "context_length": 57398
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "position": 22,
+      "tokens": 1370,
+      "context_length": 58768
+    },
+    {
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "position": 23,
+      "tokens": 4381,
+      "context_length": 63149
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 24,
+      "tokens": 20561,
+      "context_length": 83710
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpc.py",
+      "position": 25,
+      "tokens": 1032,
+      "context_length": 84742
+    },
+    {
+      "file_path": "benchmarks/bench_plot_lasso_path.py",
+      "position": 26,
+      "tokens": 974,
+      "context_length": 85716
+    },
+    {
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "position": 27,
+      "tokens": 3305,
+      "context_length": 89021
+    },
+    {
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "position": 28,
+      "tokens": 1121,
+      "context_length": 90142
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpr_noisy.py",
+      "position": 29,
+      "tokens": 1123,
+      "context_length": 91265
+    },
+    {
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "position": 30,
+      "tokens": 567,
+      "context_length": 91832
+    },
+    {
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "position": 31,
+      "tokens": 1427,
+      "context_length": 93259
+    },
+    {
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "position": 32,
+      "tokens": 1824,
+      "context_length": 95083
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 33,
+      "tokens": 3898,
+      "context_length": 98981
+    },
+    {
+      "file_path": "examples/cluster/plot_dict_face_patches.py",
+      "position": 34,
+      "tokens": 660,
+      "context_length": 99641
+    },
+    {
+      "file_path": "examples/neighbors/plot_lof_outlier_detection.py",
+      "position": 35,
+      "tokens": 667,
+      "context_length": 100308
+    },
+    {
+      "file_path": "examples/model_selection/plot_train_error_vs_test_error.py",
+      "position": 36,
+      "tokens": 637,
+      "context_length": 100945
+    },
+    {
+      "file_path": "examples/applications/plot_prediction_latency.py",
+      "position": 37,
+      "tokens": 2616,
+      "context_length": 103561
+    },
+    {
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "position": 38,
+      "tokens": 612,
+      "context_length": 104173
+    },
+    {
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "position": 39,
+      "tokens": 1297,
+      "context_length": 105470
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic_path.py",
+      "position": 40,
+      "tokens": 528,
+      "context_length": 105998
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "position": 41,
+      "tokens": 574,
+      "context_length": 106572
+    },
+    {
+      "file_path": "examples/impute/plot_iterative_imputer_variants_comparison.py",
+      "position": 42,
+      "tokens": 1153,
+      "context_length": 107725
+    },
+    {
+      "file_path": "sklearn/neural_network/rbm.py",
+      "position": 43,
+      "tokens": 2789,
+      "context_length": 110514
+    },
+    {
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "position": 44,
+      "tokens": 1004,
+      "context_length": 111518
+    },
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 45,
+      "tokens": 16084,
+      "context_length": 127602
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_coordinate_descent_path.py",
+      "position": 46,
+      "tokens": 854,
+      "context_length": 128456
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpr_noisy_targets.py",
+      "position": 47,
+      "tokens": 972,
+      "context_length": 129428
+    },
+    {
+      "file_path": "examples/svm/plot_svm_scale_c.py",
+      "position": 48,
+      "tokens": 1346,
+      "context_length": 130774
+    },
+    {
+      "file_path": "examples/neighbors/plot_lof_novelty_detection.py",
+      "position": 49,
+      "tokens": 930,
+      "context_length": 131704
+    },
+    {
+      "file_path": "examples/semi_supervised/plot_label_propagation_digits.py",
+      "position": 50,
+      "tokens": 608,
+      "context_length": 132312
+    },
+    {
+      "file_path": "examples/multioutput/plot_classifier_chain_yeast.py",
+      "position": 51,
+      "tokens": 1047,
+      "context_length": 133359
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 52,
+      "tokens": 13657,
+      "context_length": 147016
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge_curvefit.py",
+      "position": 53,
+      "tokens": 811,
+      "context_length": 147827
+    },
+    {
+      "file_path": "examples/exercises/plot_cv_diabetes.py",
+      "position": 54,
+      "tokens": 672,
+      "context_length": 148499
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 55,
+      "tokens": 1891,
+      "context_length": 150390
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 56,
+      "tokens": 1945,
+      "context_length": 152335
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpr_co2.py",
+      "position": 57,
+      "tokens": 1705,
+      "context_length": 154040
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "position": 58,
+      "tokens": 921,
+      "context_length": 154961
+    },
+    {
+      "file_path": "benchmarks/bench_saga.py",
+      "position": 59,
+      "tokens": 2464,
+      "context_length": 157425
+    },
+    {
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "position": 60,
+      "tokens": 1356,
+      "context_length": 158781
+    },
+    {
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "position": 61,
+      "tokens": 8194,
+      "context_length": 166975
+    },
+    {
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "position": 62,
+      "tokens": 1518,
+      "context_length": 168493
+    },
+    {
+      "file_path": "benchmarks/bench_sparsify.py",
+      "position": 63,
+      "tokens": 907,
+      "context_length": 169400
+    },
+    {
+      "file_path": "examples/linear_model/plot_ard.py",
+      "position": 64,
+      "tokens": 924,
+      "context_length": 170324
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_oob.py",
+      "position": 65,
+      "tokens": 1245,
+      "context_length": 171569
+    },
+    {
+      "file_path": "sklearn/linear_model/logistic.py",
+      "position": 66,
+      "tokens": 21868,
+      "context_length": 193437
+    },
+    {
+      "file_path": "examples/plot_kernel_approximation.py",
+      "position": 67,
+      "tokens": 1941,
+      "context_length": 195378
+    },
+    {
+      "file_path": "examples/model_selection/plot_learning_curve.py",
+      "position": 68,
+      "tokens": 1692,
+      "context_length": 197070
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_lars.py",
+      "position": 69,
+      "tokens": 270,
+      "context_length": 197340
+    },
+    {
+      "file_path": "examples/plot_kernel_ridge_regression.py",
+      "position": 70,
+      "tokens": 1720,
+      "context_length": 199060
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "position": 71,
+      "tokens": 630,
+      "context_length": 199690
+    }
+  ]
+}

@@ -1,28 +1,15 @@
 import re
 
 
-def set_end_line(current_diff):
-    if current_diff["last_minus_line"] == 0:
-        del current_diff["end_line_old"]
-    else:
-        current_diff["end_line_old"] = current_diff["start_line_old"] + current_diff["last_minus_line"] - 1
-
-
 def diff_details(text: str):
     lines = text.split('\n')
     diffs = {}
     file_path = None
     for line in lines:
         if line.startswith('diff --git'):
-            if file_path in diffs and diffs[file_path]["diffs"]:
-                set_end_line(diffs[file_path]["diffs"][-1])
-
             file_path = line.split(' ')[2][2:]  # Extract file name after 'b/'
             diffs[file_path] = {"diffs": []}
         elif line.startswith('@@'):
-            if file_path in diffs and diffs[file_path]["diffs"]:
-                set_end_line(diffs[file_path]["diffs"][-1])
-
             # Extract the start line and size for old file from the chunk info
             match = re.search(r'\-(\d+),(\d+)', line)
             if match:
@@ -30,72 +17,89 @@ def diff_details(text: str):
                 # Initialize tracking for the current diff chunk
                 diffs[file_path]["diffs"].append({
                     "start_line_old": int(start_line_old),
-                    "end_line_old": int(start_line_old) + int(size_old) - 1,  # Temp value, to be adjusted
-                    "lines_before_first_minus": 0,  # Count lines before the first '-'
-                    "lines_until_last_minus": 0,
-                    "last_minus_line": 0  # Track the last '-' line within the chunk
+                    "lines_until_first_change": 0
                 })
         elif file_path and diffs[file_path]["diffs"]:
             current_diff = diffs[file_path]["diffs"][-1]
-            if line.startswith('-'):
-                # If it's the first '-' line, calculate the real start_line_old
-                if current_diff["last_minus_line"] == 0:
-                    current_diff["start_line_old"] += current_diff["lines_before_first_minus"]
-                current_diff["last_minus_line"] = current_diff["lines_until_last_minus"]
-            elif not line.startswith('+'):
-                # Count non-modified and non-added lines before the first '-' and after the last '-'
-                if current_diff["last_minus_line"] == 0:
-                    current_diff["lines_before_first_minus"] += 1
-                current_diff["lines_until_last_minus"] += 1
 
-    if file_path in diffs and diffs[file_path]["diffs"]:
-        set_end_line(diffs[file_path]["diffs"][-1])
+            if (line.startswith('+') or line.startswith('-')) and "lines_until_first_change" in current_diff:
+                current_diff["start_line_old"] += current_diff["lines_until_first_change"]
+                del current_diff["lines_until_first_change"]
+            elif "lines_until_first_change" in current_diff:
+                current_diff["lines_until_first_change"] += 1
+
+            if line.startswith('-'):
+                if "lines_until_last_minus" not in current_diff:
+                    current_diff["lines_until_last_minus"] = 0
+                else:
+                    current_diff["lines_until_last_minus"] += 1
+
+                current_diff["end_line_old"] = current_diff["start_line_old"] + current_diff["lines_until_last_minus"]
+            elif not line.startswith('+') and "lines_until_last_minus" in current_diff:
+                current_diff["lines_until_last_minus"] += 1
 
     # Final adjustments: remove temporary tracking keys
     for file_path, details in diffs.items():
         for diff in details["diffs"]:
-            del diff["lines_before_first_minus"]
-            del diff["lines_until_last_minus"]
-            del diff["last_minus_line"]
+            diff.pop("lines_until_last_minus", None)
+            if "end_line_old" not in diff:
+                diff["end_line_old"] = diff["start_line_old"]
     return diffs
 
 
 if __name__ == "__main__":
-    text = """diff --git a/pydicom/valuerep.py b/pydicom/valuerep.py
---- a/pydicom/valuerep.py
-+++ b/pydicom/valuerep.py
-@@ -1,6 +1,5 @@
- # Copyright 2008-2018 pydicom authors. See LICENSE file for details.
- \"""Special classes for DICOM value representations (VR)\"""
--from copy import deepcopy
- from decimal import Decimal
- import re
+    text = """diff --git a/django/contrib/auth/migrations/0011_update_proxy_permissions.py b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
+--- a/django/contrib/auth/migrations/0011_update_proxy_permissions.py
++++ b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
+@@ -1,5 +1,18 @@
+-from django.db import migrations
++import sys
++
++from django.core.management.color import color_style
++from django.db import migrations, transaction
+ from django.db.models import Q
++from django.db.utils import IntegrityError
++
++WARNING = \"""
++    A problem arose migrating proxy model permissions for {old} to {new}.
++
++      Permission(s) for {new} already existed.
++      Codenames Q: {query}
++
++    Ensure to audit ALL permissions for {old} and {new}.
++\"""
+ 
+ 
+ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
+@@ -7,6 +20,7 @@ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
+     Update the content_type of proxy model permissions to use the ContentType
+     of the proxy model.
+     \"""
++    style = color_style()
+     Permission = apps.get_model('auth', 'Permission')
+     ContentType = apps.get_model('contenttypes', 'ContentType')
+     for Model in apps.get_models():
+@@ -24,10 +38,16 @@ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
+         proxy_content_type = ContentType.objects.get_for_model(Model, for_concrete_model=False)
+         old_content_type = proxy_content_type if reverse else concrete_content_type
+         new_content_type = concrete_content_type if reverse else proxy_content_type
+-        Permission.objects.filter(
+-            permissions_query,
+-            content_type=old_content_type,
+-        ).update(content_type=new_content_type)
++        try:
++            with transaction.atomic():
++                Permission.objects.filter(
++                    permissions_query,
++                    content_type=old_content_type,
++                ).update(content_type=new_content_type)
++        except IntegrityError:
++            old = '{}_{}'.format(old_content_type.app_label, old_content_type.model)
++            new = '{}_{}'.format(new_content_type.app_label, new_content_type.model)
++            sys.stdout.write(style.WARNING(WARNING.format(old=old, new=new, query=permissions_query)))
 
-@@ -750,6 +749,25 @@ def __ne__(self, other):
-     def __str__(self):
-         return '='.join(self.components).__str__()
 
-+    def __next__(self):
-+        # Get next character or stop iteration
-+        if self._i < self._rep_len:
-+            c = self._str_rep[self._i]
-+            self._i += 1
-+            return c
-+        else:
-+            raise StopIteration
-+
-+    def __iter__(self):
-+        # Get string rep. and length, initialize index counter
-+        self._str_rep = self.__str__()
-+        self._rep_len = len(self._str_rep)
-+        self._i = 0
-+        return self
-+
-+    def __contains__(self, x):
-+        return x in self.__str__()
-+
-     def __repr__(self):
-         return '='.join(self.components).__repr__()
+ def revert_proxy_model_permissions(apps, schema_editor):
 
 """
 

@@ -1,0 +1,567 @@
+{
+  "instance_id": "sympy__sympy-17696",
+  "model_patch": "diff --git a/sympy/assumptions/handlers/order.py b/sympy/assumptions/handlers/order.py\nindex 4b3366bd20..a2ebd7794c 100644\n--- a/sympy/assumptions/handlers/order.py\n+++ b/sympy/assumptions/handlers/order.py\n@@ -268,6 +268,13 @@ def Add(expr, assumptions):\n         if expr.is_number:\n             return AskPositiveHandler._number(expr, assumptions)\n \n+        print(f\"Checking positivity for expression: {expr}\")\n+        print(f\"Assumptions: {assumptions}\")\n+        positive_check = ask(Q.positive(expr), assumptions)\n+        print(f\"Result of positive check: {positive_check}\")\n+        if positive_check:\n+            return True\n+\n         r = ask(Q.real(expr), assumptions)\n         if r is not True:\n             return r\ndiff --git a/sympy/assumptions/refine.py b/sympy/assumptions/refine.py\nindex 1dc3b5e1dd..2d0adacc88 100644\n--- a/sympy/assumptions/refine.py\n+++ b/sympy/assumptions/refine.py\n@@ -290,6 +290,32 @@ def _refine_reim(expr, assumptions):\n     # Best to leave the expression as is\n     return None\n \n+def refine_sign(expr, assumptions):\n+    \"\"\"\n+    Handler for the sign function.\n+\n+    Examples\n+    ========\n+\n+    >>> from sympy import Symbol, Q, refine, sign\n+    >>> from sympy.assumptions.refine import refine_sign\n+    >>> from sympy.abc import x\n+    >>> refine_sign(sign(x), Q.positive(x) & Q.nonzero(x))\n+    1\n+    >>> refine_sign(sign(x), Q.positive(x + 1))\n+    1\n+    \"\"\"\n+    from sympy.core.logic import fuzzy_not\n+    from sympy.functions.elementary.complexes import sign\n+    arg = expr.args[0]\n+    print(f\"Refining sign for arg: {arg}, with assumptions: {assumptions}\")\n+    if ask(Q.positive(arg), assumptions) and fuzzy_not(ask(Q.zero(arg), assumptions)):\n+        print(\"Argument is positive and not zero\")\n+        return S.One\n+    if arg.is_Add and ask(Q.positive(arg), assumptions):\n+        return S.One\n+    print(\"No conditions met, returning original expression\")\n+    return expr\n \n handlers_dict = {\n     'Abs': refine_abs,\n@@ -302,5 +328,6 @@ def _refine_reim(expr, assumptions):\n     'StrictGreaterThan': refine_Relational,\n     'StrictLessThan': refine_Relational,\n     're': refine_re,\n-    'im': refine_im\n+    'im': refine_im,\n+    'sign': refine_sign\n }\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/assumptions/handlers/order.py",
+    "sympy/assumptions/refine.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "fed3bb83dec834bd75fd8bcd68fc0c31387f394a",
+  "patch": "diff --git a/sympy/assumptions/refine.py b/sympy/assumptions/refine.py\n--- a/sympy/assumptions/refine.py\n+++ b/sympy/assumptions/refine.py\n@@ -291,6 +291,47 @@ def _refine_reim(expr, assumptions):\n     return None\n \n \n+def refine_sign(expr, assumptions):\n+    \"\"\"\n+    Handler for sign\n+\n+    Examples\n+    ========\n+\n+    >>> from sympy.assumptions.refine import refine_sign\n+    >>> from sympy import Symbol, Q, sign, im\n+    >>> x = Symbol('x', real = True)\n+    >>> expr = sign(x)\n+    >>> refine_sign(expr, Q.positive(x) & Q.nonzero(x))\n+    1\n+    >>> refine_sign(expr, Q.negative(x) & Q.nonzero(x))\n+    -1\n+    >>> refine_sign(expr, Q.zero(x))\n+    0\n+    >>> y = Symbol('y', imaginary = True)\n+    >>> expr = sign(y)\n+    >>> refine_sign(expr, Q.positive(im(y)))\n+    I\n+    >>> refine_sign(expr, Q.negative(im(y)))\n+    -I\n+    \"\"\"\n+    arg = expr.args[0]\n+    if ask(Q.zero(arg), assumptions):\n+        return S.Zero\n+    if ask(Q.real(arg)):\n+        if ask(Q.positive(arg), assumptions):\n+            return S.One\n+        if ask(Q.negative(arg), assumptions):\n+            return S.NegativeOne\n+    if ask(Q.imaginary(arg)):\n+        arg_re, arg_im = arg.as_real_imag()\n+        if ask(Q.positive(arg_im), assumptions):\n+            return S.ImaginaryUnit\n+        if ask(Q.negative(arg_im), assumptions):\n+            return -S.ImaginaryUnit\n+    return expr\n+\n+\n handlers_dict = {\n     'Abs': refine_abs,\n     'Pow': refine_Pow,\n@@ -302,5 +343,6 @@ def _refine_reim(expr, assumptions):\n     'StrictGreaterThan': refine_Relational,\n     'StrictLessThan': refine_Relational,\n     're': refine_re,\n-    'im': refine_im\n+    'im': refine_im,\n+    'sign': refine_sign\n }\n",
+  "test_patch": "diff --git a/sympy/assumptions/tests/test_refine.py b/sympy/assumptions/tests/test_refine.py\n--- a/sympy/assumptions/tests/test_refine.py\n+++ b/sympy/assumptions/tests/test_refine.py\n@@ -1,8 +1,10 @@\n from sympy import (Abs, exp, Expr, I, pi, Q, Rational, refine, S, sqrt,\n-                   atan, atan2, nan, Symbol, re, im)\n+                   atan, atan2, nan, Symbol, re, im, sign)\n from sympy.abc import w, x, y, z\n from sympy.core.relational import Eq, Ne\n from sympy.functions.elementary.piecewise import Piecewise\n+from sympy.utilities.pytest import slow\n+from sympy.core import S\n \n \n def test_Abs():\n@@ -170,6 +172,23 @@ def test_complex():\n         & Q.real(z)) == w*z + x*y\n \n \n+def test_sign():\n+    x = Symbol('x', real = True)\n+    assert refine(sign(x), Q.positive(x)) == 1\n+    assert refine(sign(x), Q.negative(x)) == -1\n+    assert refine(sign(x), Q.zero(x)) == 0\n+    assert refine(sign(x), True) == sign(x)\n+    assert refine(sign(Abs(x)), Q.nonzero(x)) == 1\n+\n+    x = Symbol('x', imaginary=True)\n+    assert refine(sign(x), Q.positive(im(x))) == S.ImaginaryUnit\n+    assert refine(sign(x), Q.negative(im(x))) == -S.ImaginaryUnit\n+    assert refine(sign(x), True) == sign(x)\n+\n+    x = Symbol('x', complex=True)\n+    assert refine(sign(x), Q.zero(x)) == 0\n+\n+\n def test_func_args():\n     class MyClass(Expr):\n         # A class with nontrivial .func\n",
+  "problem_statement": "Refine with sign\nConsider the following code:\r\n```\r\nfrom sympy import *\r\nx = Symbol('x', real = True)\r\n\r\nexpr = sign(x)\r\nexpr2 = refine(expr, Q.positive(x))\r\nexpr3 = refine(expr, Q.positive(x) & Q.nonzero(x))\r\nexpr4 = refine(expr, Q.positive(x + 1))\r\n```\r\nAll the returned expression are `sign(x)`. However, at least for `expr3` and `expr4`, the results should be `1`. This probably is due to the lack of capabilities for `refine`. A PR similar to #17019 should fix this behaviour. \r\n\r\nRelated issues: #8326 and #17052.\n",
+  "hints_text": "I would like to work on this issue.\r\nCan someone guide me on exactly what has to be done?\n@kmm555 you can write a function in `refine.py` similar to `refine_abs()`, which returns `0` if the argument is equal to `0`, `1` if positive and so on (see the possible output of `sign` in `complexes.py`",
+  "created_at": "2019-10-03T22:21:40Z",
+  "version": "1.5",
+  "FAIL_TO_PASS": "[\"test_sign\"]",
+  "PASS_TO_PASS": "[\"test_Abs\", \"test_Piecewise\", \"test_Relational\", \"test_atan2\", \"test_complex\", \"test_eval_refine\", \"test_exp\", \"test_func_args\", \"test_im\", \"test_pow1\", \"test_pow2\", \"test_re\"]",
+  "environment_setup_commit": "70381f282f2d9d039da860e391fe51649df2779d",
+  "patch_files": [
+    "sympy/assumptions/refine.py"
+  ],
+  "test_patch_files": [
+    "sympy/assumptions/tests/test_refine.py"
+  ],
+  "patch_diff_details": {
+    "sympy/assumptions/refine.py": {
+      "diffs": [
+        {
+          "start_line_old": 294,
+          "end_line_old": 294,
+          "file_pos": 1,
+          "file_context_length": 2397,
+          "pos": 1,
+          "context_length": 167
+        },
+        {
+          "start_line_old": 305,
+          "end_line_old": 305,
+          "file_pos": 1,
+          "file_context_length": 2397,
+          "pos": 1,
+          "context_length": 167
+        }
+      ]
+    }
+  },
+  "vectors": 8406,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py__refine_reim_",
+      "distance": 0.6863481998443604,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 283,
+      "end_line": 307,
+      "tokens": 167,
+      "context_length": 167,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_refine_Relational_refine_re.5.1",
+      "distance": 0.737576961517334,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 230,
+      "end_line": 260,
+      "tokens": 216,
+      "context_length": 383,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_refine_im_refine_im.5.1",
+      "distance": 0.7840563058853149,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 263,
+      "end_line": 280,
+      "tokens": 138,
+      "context_length": 521,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_1_refine.11.1",
+      "distance": 0.7858673930168152,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 319,
+      "context_length": 840,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_signsimp_signsimp.9.1",
+      "distance": 0.794365644454956,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 331,
+      "end_line": 390,
+      "tokens": 504,
+      "context_length": 1344
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_refine_abs_refine_abs.8.5.1",
+      "distance": 0.8030122518539429,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 47,
+      "end_line": 83,
+      "tokens": 270,
+      "context_length": 1614,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__int___Expr.__int__.13",
+      "distance": 0.84201979637146,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 278,
+      "end_line": 313,
+      "tokens": 500,
+      "context_length": 2114
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/core/exprtools.py__monotonic_sign.7__monotonic_sign.v.1",
+      "distance": 0.8483960628509521,
+      "file_path": "sympy/core/exprtools.py",
+      "start_line": 110,
+      "end_line": 173,
+      "tokens": 567,
+      "context_length": 2681
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/series/gruntz.py_sign_sign.7.1",
+      "distance": 0.8500909805297852,
+      "file_path": "sympy/series/gruntz.py",
+      "start_line": 354,
+      "end_line": 408,
+      "tokens": 399,
+      "context_length": 3080
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/core/exprtools.py__monotonic_sign.11__monotonic_sign.12.3.1.1",
+      "distance": 0.86497962474823,
+      "file_path": "sympy/core/exprtools.py",
+      "start_line": 174,
+      "end_line": 211,
+      "tokens": 363,
+      "context_length": 3443
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_refine_Pow_refine_Pow.6.3.1.20.1.1",
+      "distance": 0.8659298419952393,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 86,
+      "end_line": 181,
+      "tokens": 820,
+      "context_length": 4263,
+      "file_pos": 5
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr._eval_is_positive_Expr._eval_is_extended_positive.3.9.2.1.2.1",
+      "distance": 0.8667945861816406,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 876,
+      "end_line": 929,
+      "tokens": 418,
+      "context_length": 4681
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/determinant.py_refine_Determinant_",
+      "distance": 0.8726128935813904,
+      "file_path": "sympy/matrices/expressions/determinant.py",
+      "start_line": 64,
+      "end_line": 85,
+      "tokens": 143,
+      "context_length": 4824
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/matmul.py_refine_MatMul_",
+      "distance": 0.8801497220993042,
+      "file_path": "sympy/matrices/expressions/matmul.py",
+      "start_line": 371,
+      "end_line": 406,
+      "tokens": 229,
+      "context_length": 5053
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.could_extract_minus_sign_Expr.could_extract_minus_sign.6.2.3.1",
+      "distance": 0.8935975432395935,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2436,
+      "end_line": 2480,
+      "tokens": 433,
+      "context_length": 5486
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_sign._eval_is_nonnegative_sign._eval_simplify.2",
+      "distance": 0.9018439054489136,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 358,
+      "end_line": 397,
+      "tokens": 316,
+      "context_length": 5802
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py_38__simplifyconds.power.3.1",
+      "distance": 0.920951247215271,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 873,
+      "end_line": 914,
+      "tokens": 359,
+      "context_length": 6161
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_nsimplify.exprval_nsimplify.nsimplify_real.3.3.mpmath.mp.dps.1",
+      "distance": 0.9243565797805786,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1469,
+      "end_line": 1502,
+      "tokens": 347,
+      "context_length": 6508
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/codegen/rewriting.py_29_",
+      "distance": 0.9244832992553711,
+      "file_path": "sympy/codegen/rewriting.py",
+      "start_line": 234,
+      "end_line": 257,
+      "tokens": 197,
+      "context_length": 6705
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_sign.eval_sign.eval.2.12.4.1.1",
+      "distance": 0.9292581081390381,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 294,
+      "end_line": 339,
+      "tokens": 387,
+      "context_length": 7092
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.is_constant.check_denominator_zeros_Expr.is_constant.29.1",
+      "distance": 0.9294823408126831,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 646,
+      "end_line": 741,
+      "tokens": 806,
+      "context_length": 7898
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr._eval_is_extended_negative_Expr._eval_is_extended_negative.3.9.2.1.2.1",
+      "distance": 0.9305928945541382,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 931,
+      "end_line": 964,
+      "tokens": 304,
+      "context_length": 8202
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/core/mul.py_Mul._eval_pos_neg_Mul._eval_pos_neg.4.1.1",
+      "distance": 0.9320996999740601,
+      "file_path": "sympy/core/mul.py",
+      "start_line": 1395,
+      "end_line": 1428,
+      "tokens": 250,
+      "context_length": 8452
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/polys/subresultants_qq_zz.py_subresultants_amv_q.28_compute_sign.5.2.1.1",
+      "distance": 0.9342060089111328,
+      "file_path": "sympy/polys/subresultants_qq_zz.py",
+      "start_line": 1704,
+      "end_line": 1765,
+      "tokens": 548,
+      "context_length": 9000
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_19_sign.doit.2.1",
+      "distance": 0.9444085359573364,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 242,
+      "end_line": 292,
+      "tokens": 302,
+      "context_length": 9302
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.equals.35_Expr.equals.41.1",
+      "distance": 0.9449253082275391,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 817,
+      "end_line": 874,
+      "tokens": 547,
+      "context_length": 9849
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__simplifyconds.replie__simplifyconds.14.1",
+      "distance": 0.9511744976043701,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 938,
+      "end_line": 963,
+      "tokens": 231,
+      "context_length": 10080
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/core/exprtools.py_factor_terms.do_factor_terms.4.1",
+      "distance": 0.9580408334732056,
+      "file_path": "sympy/core/exprtools.py",
+      "start_line": 1208,
+      "end_line": 1258,
+      "tokens": 486,
+      "context_length": 10566
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/inverse.py_7_",
+      "distance": 0.9583969116210938,
+      "file_path": "sympy/matrices/expressions/inverse.py",
+      "start_line": 79,
+      "end_line": 103,
+      "tokens": 175,
+      "context_length": 10741
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/assumptions/refine.py_refine_atan2_refine_atan2.5.8.1.1",
+      "distance": 0.9592543244361877,
+      "file_path": "sympy/assumptions/refine.py",
+      "start_line": 184,
+      "end_line": 227,
+      "tokens": 465,
+      "context_length": 11206,
+      "file_pos": 13
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_besselsimp._bessel_simp_recursion_besselsimp.25.1",
+      "distance": 0.9593895673751831,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1295,
+      "end_line": 1322,
+      "tokens": 247,
+      "context_length": 11453
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.series.2_Expr.series.12.xpos.3.2.1.1",
+      "distance": 0.9603180885314941,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2857,
+      "end_line": 2912,
+      "tokens": 582,
+      "context_length": 12035
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_solve.1_solve.1",
+      "distance": 0.9622740745544434,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 456,
+      "end_line": 909,
+      "tokens": 4473,
+      "context_length": 16508
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/complexes.py_sign._eval_Abs_sign._eval_derivative.1.3.2.1",
+      "distance": 0.9641938209533691,
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "start_line": 341,
+      "end_line": 356,
+      "tokens": 169,
+      "context_length": 16677
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__ge___Expr.__ge__.7.1",
+      "distance": 0.965161144733429,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 332,
+      "end_line": 353,
+      "tokens": 226,
+      "context_length": 16903
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_exptrigsimp.f_exptrigsimp.f.12.1",
+      "distance": 0.9658875465393066,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 539,
+      "end_line": 590,
+      "tokens": 492,
+      "context_length": 17395
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.10_Expr._pow.1.1",
+      "distance": 0.9664992094039917,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 144,
+      "end_line": 206,
+      "tokens": 536,
+      "context_length": 17931
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_besselsimp.expander_besselsimp.expr_21.1",
+      "distance": 0.9666168689727783,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1279,
+      "end_line": 1293,
+      "tokens": 181,
+      "context_length": 18112
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.__gt___Expr.__gt__.7.1",
+      "distance": 0.9667051434516907,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 378,
+      "end_line": 400,
+      "tokens": 222,
+      "context_length": 18334
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr.round.26_Expr._eval_derivative_matrix_lines.2.1",
+      "distance": 0.9673125743865967,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 3754,
+      "end_line": 3830,
+      "tokens": 925,
+      "context_length": 19259
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py_radsimp.7_radsimp.12.1",
+      "distance": 0.9696663618087769,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 946,
+      "end_line": 968,
+      "tokens": 278,
+      "context_length": 19537
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/assumptions/refine.py",
+      "position": 1,
+      "tokens": 2397,
+      "context_length": 2397
+    },
+    {
+      "file_path": "sympy/simplify/simplify.py",
+      "position": 2,
+      "tokens": 17348,
+      "context_length": 19745
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 3,
+      "tokens": 33853,
+      "context_length": 53598
+    },
+    {
+      "file_path": "sympy/core/exprtools.py",
+      "position": 4,
+      "tokens": 12442,
+      "context_length": 66040
+    },
+    {
+      "file_path": "sympy/series/gruntz.py",
+      "position": 5,
+      "tokens": 6365,
+      "context_length": 72405
+    },
+    {
+      "file_path": "sympy/matrices/expressions/determinant.py",
+      "position": 6,
+      "tokens": 488,
+      "context_length": 72893
+    },
+    {
+      "file_path": "sympy/matrices/expressions/matmul.py",
+      "position": 7,
+      "tokens": 3205,
+      "context_length": 76098
+    },
+    {
+      "file_path": "sympy/functions/elementary/complexes.py",
+      "position": 8,
+      "tokens": 9372,
+      "context_length": 85470
+    },
+    {
+      "file_path": "sympy/integrals/transforms.py",
+      "position": 9,
+      "tokens": 16762,
+      "context_length": 102232
+    },
+    {
+      "file_path": "sympy/codegen/rewriting.py",
+      "position": 10,
+      "tokens": 2089,
+      "context_length": 104321
+    },
+    {
+      "file_path": "sympy/core/mul.py",
+      "position": 11,
+      "tokens": 15822,
+      "context_length": 120143
+    },
+    {
+      "file_path": "sympy/polys/subresultants_qq_zz.py",
+      "position": 12,
+      "tokens": 26294,
+      "context_length": 146437
+    },
+    {
+      "file_path": "sympy/matrices/expressions/inverse.py",
+      "position": 13,
+      "tokens": 699,
+      "context_length": 147136
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 14,
+      "tokens": 32533,
+      "context_length": 179669
+    },
+    {
+      "file_path": "sympy/simplify/trigsimp.py",
+      "position": 15,
+      "tokens": 12228,
+      "context_length": 191897
+    },
+    {
+      "file_path": "sympy/simplify/radsimp.py",
+      "position": 16,
+      "tokens": 10044,
+      "context_length": 201941
+    }
+  ]
+}

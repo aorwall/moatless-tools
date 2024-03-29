@@ -1,0 +1,2112 @@
+{
+  "instance_id": "django__django-10939",
+  "model_patch": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex d170f2f291..54329209a4 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -1993,10 +1993,10 @@ class InlineModelAdmin(BaseModelAdmin):\n     @property\n     def media(self):\n         extra = '' if settings.DEBUG else '.min'\n-        js = ['vendor/jquery/jquery%s.js' % extra, 'jquery.init.js',\n-              'inlines%s.js' % extra]\n+        js = ['vendor/jquery/jquery%s.js' % extra, 'jquery.init.js']\n         if self.filter_vertical or self.filter_horizontal:\n             js.extend(['SelectBox.js', 'SelectFilter2.js'])\n+        js.append('inlines%s.js' % extra)\n         if self.classes and 'collapse' in self.classes:\n             js.append('collapse%s.js' % extra)\n         return forms.Media(js=['admin/js/%s' % url for url in js])\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/contrib/admin/options.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "1933e56eca1ad17de7dd133bfb7cbee9858a75a3",
+  "patch": "diff --git a/django/forms/widgets.py b/django/forms/widgets.py\n--- a/django/forms/widgets.py\n+++ b/django/forms/widgets.py\n@@ -48,8 +48,8 @@ def __init__(self, media=None, css=None, js=None):\n                 css = {}\n             if js is None:\n                 js = []\n-        self._css = css\n-        self._js = js\n+        self._css_lists = [css]\n+        self._js_lists = [js]\n \n     def __repr__(self):\n         return 'Media(css=%r, js=%r)' % (self._css, self._js)\n@@ -57,6 +57,25 @@ def __repr__(self):\n     def __str__(self):\n         return self.render()\n \n+    @property\n+    def _css(self):\n+        css = self._css_lists[0]\n+        # filter(None, ...) avoids calling merge with empty dicts.\n+        for obj in filter(None, self._css_lists[1:]):\n+            css = {\n+                medium: self.merge(css.get(medium, []), obj.get(medium, []))\n+                for medium in css.keys() | obj.keys()\n+            }\n+        return css\n+\n+    @property\n+    def _js(self):\n+        js = self._js_lists[0]\n+        # filter(None, ...) avoids calling merge() with empty lists.\n+        for obj in filter(None, self._js_lists[1:]):\n+            js = self.merge(js, obj)\n+        return js\n+\n     def render(self):\n         return mark_safe('\\n'.join(chain.from_iterable(getattr(self, 'render_' + name)() for name in MEDIA_TYPES)))\n \n@@ -132,11 +151,8 @@ def merge(list_1, list_2):\n \n     def __add__(self, other):\n         combined = Media()\n-        combined._js = self.merge(self._js, other._js)\n-        combined._css = {\n-            medium: self.merge(self._css.get(medium, []), other._css.get(medium, []))\n-            for medium in self._css.keys() | other._css.keys()\n-        }\n+        combined._css_lists = self._css_lists + other._css_lists\n+        combined._js_lists = self._js_lists + other._js_lists\n         return combined\n \n \n",
+  "test_patch": "diff --git a/tests/forms_tests/tests/test_media.py b/tests/forms_tests/tests/test_media.py\n--- a/tests/forms_tests/tests/test_media.py\n+++ b/tests/forms_tests/tests/test_media.py\n@@ -541,3 +541,33 @@ def test_merge_warning(self):\n         msg = 'Detected duplicate Media files in an opposite order:\\n1\\n2'\n         with self.assertWarnsMessage(RuntimeWarning, msg):\n             self.assertEqual(Media.merge([1, 2], [2, 1]), [1, 2])\n+\n+    def test_merge_js_three_way(self):\n+        \"\"\"\n+        The relative order of scripts is preserved in a three-way merge.\n+        \"\"\"\n+        # custom_widget.js doesn't depend on jquery.js.\n+        widget1 = Media(js=['custom_widget.js'])\n+        widget2 = Media(js=['jquery.js', 'uses_jquery.js'])\n+        form_media = widget1 + widget2\n+        # The relative ordering of custom_widget.js and jquery.js has been\n+        # established (but without a real need to).\n+        self.assertEqual(form_media._js, ['custom_widget.js', 'jquery.js', 'uses_jquery.js'])\n+        # The inline also uses custom_widget.js. This time, it's at the end.\n+        inline_media = Media(js=['jquery.js', 'also_jquery.js']) + Media(js=['custom_widget.js'])\n+        merged = form_media + inline_media\n+        self.assertEqual(merged._js, ['custom_widget.js', 'jquery.js', 'uses_jquery.js', 'also_jquery.js'])\n+\n+    def test_merge_css_three_way(self):\n+        widget1 = Media(css={'screen': ['a.css']})\n+        widget2 = Media(css={'screen': ['b.css']})\n+        widget3 = Media(css={'all': ['c.css']})\n+        form1 = widget1 + widget2\n+        form2 = widget2 + widget1\n+        # form1 and form2 have a.css and b.css in different order...\n+        self.assertEqual(form1._css, {'screen': ['a.css', 'b.css']})\n+        self.assertEqual(form2._css, {'screen': ['b.css', 'a.css']})\n+        # ...but merging succeeds as the relative ordering of a.css and b.css\n+        # was never specified.\n+        merged = widget3 + form1 + form2\n+        self.assertEqual(merged._css, {'screen': ['a.css', 'b.css'], 'all': ['c.css']})\n",
+  "problem_statement": "ModelAdmin with custom widgets, inlines, and filter_horizontal can merge media in broken order\nDescription\n\t\nwhen a modeadmin have a inline with a filed has its own media js no need jquery , and have a one to many field show filter_horizontal, the problem appear.\nthere will be MediaOrderConflictWarning and inlines.js load before jquery.\n",
+  "hints_text": "This is the test program\nI dove into this for a while. I'm not sure if there's anything that Django can do about it. Reverting 03974d81220ffd237754a82c77913799dd5909a4 solves the problem but that'll break other cases. The root causes seems to be that ckeditor/ckeditor/ckeditor.js is collected before jquery in one case and after it in another.\nIt seems to me that Django assumes too much. Here are some assets that have been collected in my case: [ 'imagefield/ppoi.js', <JS(ckeditor/ckeditor-init.js, {'id': 'ckeditor-init-script', 'data-ckeditor-basepath': '/static/ckeditor/ckeditor/'})>, 'ckeditor/ckeditor/ckeditor.js', 'admin/js/vendor/jquery/jquery.js', 'admin/js/jquery.init.js', 'admin/js/core.js', 'admin/js/admin/RelatedObjectLookups.js', 'admin/js/actions.js', 'admin/js/urlify.js', 'admin/js/prepopulate.js', 'admin/js/vendor/xregexp/xregexp.js', <JS(https://use.fontawesome.com/releases/v5.3.1/js/all.js, {'async': 'async', 'integrity': 'sha384-kW+oWsYx3YpxvjtZjFXqazFpA7UP/MbiY4jvs+RWZo2+N94PFZ36T6TFkc9O3qoB', 'crossorigin': 'anonymous'})>, 'app/plugin_buttons.js', 'admin/js/calendar.js', 'admin/js/admin/DateTimeShortcuts.js' ] The imagefield and ckeditor assets are there because of widgets. When using the same widgets in inlines the inlines' Media class will contain jquery, jquery.init.js, inlines.js, imagefield/ppoi.js. When merging the two JS lists Django will find that imagefield/ppoi.js is at index 0, will continue with inlines.js (and of course not find it) and insert it at index 0 as well (because that's the value of last_insert_index now). As soon as jquery.init.js is encountered it notices that something is amiss and emits a MediaOrderConflictWarning. The problem was produced one iteration earlier and the error message is not very helpful. I don't have a good suggestion yet. It also baffles me that only one of two candidate models/modeladmins shows the problem, and (for now) luckily only in development.\nFollowing up. This problem exists since Django 2.0. It doesn't show itself in Django 1.11.x (not surprising since the MediaOrderConflictWarning change was introduced with Django 2.0). It's good that I'm able to reproduce this on a different computer, so that gives me hope that it's not impossible to debug & fix. It's unfortunate that the media files which cause the reordering don't even depend on jQuery.\nHi there, I was the one introducing the warning. The warning is emitted when the defined asset order can not be maintained. Which is a good thing to warn about, but not always a problem. It is particularly not an issue, if you have nested forms, where assets from multiple fields are merged into preliminary forms (like inlines) just to be merged again. I think a real solution could be to retain information about the explicitly defined order-constraints and ignore the implicit once. The merging algorithm can stay as is, it is correct. All that would need to be done, is order violation violates an implicit or explicit asset order before emitting the warning. This would however use a bit more memory, since we would need to keep a record of constraints (list of tuples). What do you think? I could invest a bit of time, to draft a solution.\nHey, yes that might be the right thing to do but maybe there is a solution which requires less effort. I suspect that the problem is an inconsistency in the way Django collects media from different places. I inserted a few print() statements here \u200bhttps://github.com/django/django/blob/893b80d95dd76642e478893ba6d4f46bb31388f1/django/contrib/admin/options.py#L1595 (Sorry for the big blob in advance) self.media <script type=\"text/javascript\" src=\"/static/admin/js/vendor/jquery/jquery.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/jquery.init.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/core.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/admin/RelatedObjectLookups.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/actions.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/urlify.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/prepopulate.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/vendor/xregexp/xregexp.js\"></script> <script type=\"text/javascript\" src=\"https://use.fontawesome.com/releases/v5.3.1/js/all.js\" async=\"async\" crossorigin=\"anonymous\" integrity=\"sha384-kW+oWsYx3YpxvjtZjFXqazFpA7UP/MbiY4jvs+RWZo2+N94PFZ36T6TFkc9O3qoB\"></script> <script type=\"text/javascript\" src=\"/static/app/plugin_buttons.js\"></script> adminForm.media <link href=\"/static/imagefield/ppoi.css\" type=\"text/css\" media=\"screen\" rel=\"stylesheet\"> <script type=\"text/javascript\" src=\"/static/imagefield/ppoi.js\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor-init.js\" data-ckeditor-basepath=\"/static/ckeditor/ckeditor/\" id=\"ckeditor-init-script\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor/ckeditor.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/vendor/jquery/jquery.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/jquery.init.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/calendar.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/admin/DateTimeShortcuts.js\"></script> inline_formset.media <class 'app.articles.models.RichText'> <script type=\"text/javascript\" src=\"/static/admin/js/vendor/jquery/jquery.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/jquery.init.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/inlines.js\"></script> <script type=\"text/javascript\" src=\"/static/feincms3/plugin_ckeditor.js\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor-init.js\" data-ckeditor-basepath=\"/static/ckeditor/ckeditor/\" id=\"ckeditor-init-script\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor/ckeditor.js\"></script> inline_formset.media <class 'app.articles.models.Image'> <link href=\"/static/imagefield/ppoi.css\" type=\"text/css\" media=\"screen\" rel=\"stylesheet\"> <script type=\"text/javascript\" src=\"/static/admin/js/vendor/jquery/jquery.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/jquery.init.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/inlines.js\"></script> <script type=\"text/javascript\" src=\"/static/imagefield/ppoi.js\"></script> So somehow the widget media files (imagefield and ckeditor) come after the files added by Django's inlines in inline formsets but before them in the helpers.AdminForm belonging to the ArticleAdmin class. The problem manifests itself when having any third-party widget (which does not reference Django's jquery asset) before any Django date field, prepopulated field or filter_* field in the fieldsets structure. Reordering fieldsets (or fields) avoids the problem completely. Now I still don't understand why the exact same project would work on the server and not locally. The problem can be worked around by including \"admin/js/vendor/jquery/jquery%s.js\", \"admin/js/jquery.init.js\" in third-party widgets' Media definitions. This sucks big time though, especially since those widgets don't even require jQuery to work. jQuery is included on all modeladmin pages anyway, so a good fix might be to remove the jquery and jquery.init.js entries from admin widgets Media definitions (which makes them incomplete when used outside of Django's admin panel, but that's probably not the intention anyway) or make the Media merging algorithm aware of libraries which are supposed to always come first. Just for reference, here's the form class and its fields. Putting e.g. publication_date before image makes everything work fine. form.media <link href=\"/static/imagefield/ppoi.css\" type=\"text/css\" media=\"screen\" rel=\"stylesheet\"> <script type=\"text/javascript\" src=\"/static/imagefield/ppoi.js\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor-init.js\" data-ckeditor-basepath=\"/static/ckeditor/ckeditor/\" id=\"ckeditor-init-script\"></script> <script type=\"text/javascript\" src=\"/static/ckeditor/ckeditor/ckeditor.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/vendor/jquery/jquery.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/jquery.init.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/calendar.js\"></script> <script type=\"text/javascript\" src=\"/static/admin/js/admin/DateTimeShortcuts.js\"></script> form.fields is_active: <class 'django.forms.fields.BooleanField'> title: <class 'django.forms.fields.CharField'> excerpt: <class 'django.forms.fields.CharField'> image: <class 'django.forms.fields.ImageField'> image_ppoi: <class 'django.forms.fields.CharField'> meta_title: <class 'django.forms.fields.CharField'> meta_description: <class 'django.forms.fields.CharField'> meta_image: <class 'django.forms.fields.ImageField'> meta_canonical: <class 'django.forms.fields.URLField'> meta_author: <class 'django.forms.fields.CharField'> meta_robots: <class 'django.forms.fields.CharField'> show_teaser_need: <class 'django.forms.fields.BooleanField'> show_teaser_competency: <class 'django.forms.fields.BooleanField'> teaser_title: <class 'django.forms.fields.CharField'> teaser_text_need: <class 'ckeditor.fields.RichTextFormField'> teaser_text_competency: <class 'ckeditor.fields.RichTextFormField'> teaser_image: <class 'django.forms.fields.ImageField'> teaser_image_ppoi: <class 'django.forms.fields.CharField'> slug: <class 'django.forms.fields.SlugField'> publication_date: <class 'django.forms.fields.SplitDateTimeField'> is_featured: <class 'django.forms.fields.BooleanField'> author: <class 'django.forms.models.ModelChoiceField'> categories: <class 'django.forms.models.ModelMultipleChoiceField'>\nI just attached a minimal patch demonstrating the problem: https://code.djangoproject.com/attachment/ticket/30153/test.patch Simply reordering date and dummy in Holder3 makes the problem go away in this case (since Holder3's modeladmin class does not define fieldsets)\nTest showing the problem\nReplacing the patch with https://code.djangoproject.com/attachment/ticket/30153/test.2.patch because Django 2.2 and 3 will not use jquery in date fields anymore and therefore cannot be used to demonstrate the problem. I changed the code to use a filter_horizontal widget and now it fails again: ====================================================================== ERROR: test_inline_media_only_inline (admin_inlines.tests.TestInlineMedia) ---------------------------------------------------------------------- Traceback (most recent call last): File \"/usr/lib/python3.6/unittest/case.py\", line 59, in testPartExecutor yield File \"/usr/lib/python3.6/unittest/case.py\", line 605, in run testMethod() File \"/home/matthias/Projects/django/tests/admin_inlines/tests.py\", line 495, in test_inline_media_only_inline response = self.client.get(change_url) File \"/home/matthias/Projects/django/django/test/client.py\", line 535, in get response = super().get(path, data=data, secure=secure, **extra) File \"/home/matthias/Projects/django/django/test/client.py\", line 347, in get **extra, File \"/home/matthias/Projects/django/django/test/client.py\", line 422, in generic return self.request(**r) File \"/home/matthias/Projects/django/django/test/client.py\", line 503, in request raise exc_value File \"/home/matthias/Projects/django/django/core/handlers/exception.py\", line 34, in inner response = get_response(request) File \"/home/matthias/Projects/django/django/core/handlers/base.py\", line 115, in _get_response response = self.process_exception_by_middleware(e, request) File \"/home/matthias/Projects/django/django/core/handlers/base.py\", line 113, in _get_response response = wrapped_callback(request, *callback_args, **callback_kwargs) File \"/home/matthias/Projects/django/django/contrib/admin/options.py\", line 604, in wrapper return self.admin_site.admin_view(view)(*args, **kwargs) File \"/home/matthias/Projects/django/django/utils/decorators.py\", line 142, in _wrapped_view response = view_func(request, *args, **kwargs) File \"/home/matthias/Projects/django/django/views/decorators/cache.py\", line 44, in _wrapped_view_func response = view_func(request, *args, **kwargs) File \"/home/matthias/Projects/django/django/contrib/admin/sites.py\", line 223, in inner return view(request, *args, **kwargs) File \"/home/matthias/Projects/django/django/contrib/admin/options.py\", line 1635, in change_view return self.changeform_view(request, object_id, form_url, extra_context) File \"/home/matthias/Projects/django/django/utils/decorators.py\", line 45, in _wrapper return bound_method(*args, **kwargs) File \"/home/matthias/Projects/django/django/utils/decorators.py\", line 142, in _wrapped_view response = view_func(request, *args, **kwargs) File \"/home/matthias/Projects/django/django/contrib/admin/options.py\", line 1520, in changeform_view return self._changeform_view(request, object_id, form_url, extra_context) File \"/home/matthias/Projects/django/django/contrib/admin/options.py\", line 1594, in _changeform_view media = media + inline_formset.media File \"/home/matthias/Projects/django/django/forms/widgets.py\", line 135, in __add__ combined._js = self.merge(self._js, other._js) File \"/home/matthias/Projects/django/django/forms/widgets.py\", line 126, in merge MediaOrderConflictWarning, django.forms.widgets.MediaOrderConflictWarning: Detected duplicate Media files in an opposite order: admin/js/inlines.min.js admin/js/jquery.init.js\n@codingjoe Here's a partial fix for the issue -- \u200bhttps://github.com/matthiask/django/commit/0640ba9f5f6272987b77c35d5ad992844d6a8822 Preserving the JavaScript lists longer and only merging them at the end works. Or maybe you have a better idea? Feel free to take over if you do (or even if you don't -- if you want to)",
+  "created_at": "2019-02-05T14:02:21Z",
+  "version": "3.0",
+  "FAIL_TO_PASS": "[\"test_merge_css_three_way (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_merge_js_three_way (forms_tests.tests.test_media.FormsMediaTestCase)\"]",
+  "PASS_TO_PASS": "[\"test_combine_media (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_construction (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_form_media (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_html_safe (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_dsl (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_inheritance (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_inheritance_extends (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_inheritance_from_property (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_inheritance_single_type (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_property (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_media_property_parent_references (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_merge (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_merge_warning (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_multi_media (forms_tests.tests.test_media.FormsMediaTestCase)\", \"test_multi_widget (forms_tests.tests.test_media.FormsMediaTestCase)\"]",
+  "environment_setup_commit": "419a78300f7cd27611196e1e464d50fd0385ff27",
+  "patch_files": [
+    "django/forms/widgets.py"
+  ],
+  "test_patch_files": [
+    "tests/forms_tests/tests/test_media.py"
+  ],
+  "patch_diff_details": {
+    "django/forms/widgets.py": {
+      "diffs": [
+        {
+          "start_line_old": 51,
+          "end_line_old": 52,
+          "file_pos": 2,
+          "file_context_length": 26303,
+          "closest_snippet_id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.id_for_label_MultiWidget.needs_multipart_form.1.1",
+          "closest_snippet_line_distance": 779,
+          "pos": 30,
+          "context_length": 9519
+        },
+        {
+          "start_line_old": 60,
+          "end_line_old": 60,
+          "file_pos": 2,
+          "file_context_length": 26303,
+          "closest_snippet_id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.id_for_label_MultiWidget.needs_multipart_form.1.1",
+          "closest_snippet_line_distance": 770,
+          "pos": 30,
+          "context_length": 9519
+        },
+        {
+          "start_line_old": 135,
+          "end_line_old": 139,
+          "file_pos": 2,
+          "file_context_length": 26303,
+          "pos": 2,
+          "context_length": 612
+        }
+      ]
+    }
+  },
+  "vectors": 3362,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.media_InlineModelAdmin.get_max_num.2.1",
+      "distance": 0.9254294633865356,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1993,
+      "end_line": 2014,
+      "tokens": 221,
+      "context_length": 221
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Media.merge_Media.__add__.4.1",
+      "distance": 0.9518427848815918,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 98,
+      "end_line": 140,
+      "tokens": 391,
+      "context_length": 612,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/forms/widgets.py_1_MediaOrderConflictWarning.1",
+      "distance": 0.9902517795562744,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 257,
+      "context_length": 869,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.media_",
+      "distance": 1.0059911012649536,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 440,
+      "end_line": 468,
+      "tokens": 203,
+      "context_length": 1072
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminDateWidget_AdminTimeWidget.__init__.2",
+      "distance": 1.0222028493881226,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 53,
+      "end_line": 74,
+      "tokens": 168,
+      "context_length": 1240
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/admin.py_GenericInlineModelAdmin_",
+      "distance": 1.0537441968917847,
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "start_line": 83,
+      "end_line": 130,
+      "tokens": 410,
+      "context_length": 1650
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin_BaseModelAdmin.__init__.overrides.self.formfield_overrides.1",
+      "distance": 1.0719184875488281,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 99,
+      "end_line": 129,
+      "tokens": 223,
+      "context_length": 1873
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.0771758556365967,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 769,
+      "context_length": 2642
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_1_FilteredSelectMultiple.get_context.6.1",
+      "distance": 1.0780752897262573,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 370,
+      "context_length": 3012
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.urls_ModelAdmin.media.3.1",
+      "distance": 1.0969136953353882,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 623,
+      "end_line": 640,
+      "tokens": 136,
+      "context_length": 3148
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.has_view_permission_",
+      "distance": 1.097980260848999,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2141,
+      "end_line": 2163,
+      "tokens": 201,
+      "context_length": 3349
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_inlines_item_ModelAdminChecks._check_inlines_item.4.4.1.1",
+      "distance": 1.1073930263519287,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 649,
+      "end_line": 683,
+      "tokens": 265,
+      "context_length": 3614
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldset_Fieldset.__iter__.1.1",
+      "distance": 1.1078715324401855,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 70,
+      "end_line": 89,
+      "tokens": 167,
+      "context_length": 3781
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view_ModelAdmin._changeform_view.15.3.title.1",
+      "distance": 1.1094937324523926,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1514,
+      "end_line": 1593,
+      "tokens": 719,
+      "context_length": 4500
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin._get_form_for_get_fields_InlineModelAdmin.has_delete_permission.2.1",
+      "distance": 1.1104519367218018,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2105,
+      "end_line": 2139,
+      "tokens": 359,
+      "context_length": 4859
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_inline_formsets_ModelAdmin.get_inline_formsets.3.1",
+      "distance": 1.116947889328003,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1463,
+      "end_line": 1479,
+      "tokens": 231,
+      "context_length": 5090
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.changelist_view.24_ModelAdmin.changelist_view.32.1",
+      "distance": 1.1307520866394043,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1722,
+      "end_line": 1803,
+      "tokens": 744,
+      "context_length": 5834
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ManyToManyRawIdWidget_ManyToManyRawIdWidget.format_value.1.1",
+      "distance": 1.1310430765151978,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 199,
+      "end_line": 225,
+      "tokens": 216,
+      "context_length": 6050
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.id_for_label_MultiWidget.needs_multipart_form.1.1",
+      "distance": 1.1345338821411133,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 830,
+      "end_line": 870,
+      "tokens": 309,
+      "context_length": 6359,
+      "file_pos": 6
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.lookup_allowed_BaseModelAdmin.lookup_allowed.14.1",
+      "distance": 1.1352174282073975,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 364,
+      "end_line": 416,
+      "tokens": 504,
+      "context_length": 6863
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin_AutocompleteMixin.get_url.2.1",
+      "distance": 1.1363028287887573,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 373,
+      "end_line": 391,
+      "tokens": 153,
+      "context_length": 7016
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks_InlineModelAdminChecks.check.2.1",
+      "distance": 1.1369068622589111,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 978,
+      "end_line": 990,
+      "tokens": 116,
+      "context_length": 7132
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.inline_formset_data_InlineAdminFormSet.media.3.1",
+      "distance": 1.1439456939697266,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 301,
+      "end_line": 327,
+      "tokens": 171,
+      "context_length": 7303
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.get_formset.DeleteProtectedModelForm_InlineModelAdmin.get_formset.18.1",
+      "distance": 1.1441224813461304,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2051,
+      "end_line": 2103,
+      "tokens": 451,
+      "context_length": 7754
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/forms/forms.py_BaseForm.media_",
+      "distance": 1.1479690074920654,
+      "file_path": "django/forms/forms.py",
+      "start_line": 454,
+      "end_line": 501,
+      "tokens": 382,
+      "context_length": 8136
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_1_IGNORED_PARAMS.1",
+      "distance": 1.158432960510254,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 244,
+      "context_length": 8380
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin_ModelAdmin.get_inline_instances.3.1",
+      "distance": 1.159487009048462,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 538,
+      "end_line": 596,
+      "tokens": 408,
+      "context_length": 8788
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminSplitDateTime_AdminSplitDateTime.get_context.4.1",
+      "distance": 1.1646406650543213,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 77,
+      "end_line": 93,
+      "tokens": 145,
+      "context_length": 8933
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.pk_field_InlineAdminForm.ordering_field.2.1",
+      "distance": 1.166637659072876,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 361,
+      "end_line": 377,
+      "tokens": 138,
+      "context_length": 9071
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Media_Media.__getitem__.3",
+      "distance": 1.168862223625183,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 40,
+      "end_line": 96,
+      "tokens": 448,
+      "context_length": 9519,
+      "file_pos": 8
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin_InlineModelAdmin.__init__.7.self.verbose_name_plural.1",
+      "distance": 1.174445390701294,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1960,
+      "end_line": 1991,
+      "tokens": 249,
+      "context_length": 9768
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks._check_exclude_of_parent_model_InlineModelAdminChecks._check_exclude_of_parent_model.errors.7.2.1.1",
+      "distance": 1.1751649379730225,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 992,
+      "end_line": 1019,
+      "tokens": 204,
+      "context_length": 9972
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_RelatedFieldWidgetWrapper.get_context_RelatedFieldWidgetWrapper.id_for_label.1.1",
+      "distance": 1.1815118789672852,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 277,
+      "end_line": 312,
+      "tokens": 382,
+      "context_length": 10354
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.fields_InlineAdminFormSet.fields.5.2.2.4",
+      "distance": 1.1820709705352783,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 272,
+      "end_line": 299,
+      "tokens": 265,
+      "context_length": 10619
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_autocomplete_fields_BaseModelAdmin.get_sortable_by.2.1",
+      "distance": 1.1850336790084839,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 277,
+      "end_line": 362,
+      "tokens": 615,
+      "context_length": 11234
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_change_form_ModelAdmin.render_change_form.11.1",
+      "distance": 1.1873265504837036,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1108,
+      "end_line": 1153,
+      "tokens": 484,
+      "context_length": 11718
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/forms/widgets.py_CheckboxSelectMultiple_CheckboxSelectMultiple.id_for_label.3.1",
+      "distance": 1.1906235218048096,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 753,
+      "end_line": 776,
+      "tokens": 204,
+      "context_length": 11922,
+      "file_pos": 8
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/forms/widgets.py_media_property_MediaDefiningClass.__new__.3.1",
+      "distance": 1.1910984516143799,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 143,
+      "end_line": 179,
+      "tokens": 235,
+      "context_length": 12157,
+      "file_pos": 8
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.get_map_widget.OLMap_",
+      "distance": 1.1940397024154663,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 80,
+      "end_line": 135,
+      "tokens": 555,
+      "context_length": 12712
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/admin.py_1_GenericInlineModelAdminChecks._check_relation.gfks.2.2.2.7.1",
+      "distance": 1.1950558423995972,
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 615,
+      "context_length": 13327
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminForm_AdminForm.media.3.1",
+      "distance": 1.1967201232910156,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 33,
+      "end_line": 67,
+      "tokens": 230,
+      "context_length": 13557
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet.__iter___InlineAdminFormSet.__iter__.4.1",
+      "distance": 1.201582908630371,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 247,
+      "end_line": 270,
+      "tokens": 235,
+      "context_length": 13792
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view.context_ModelAdmin._changeform_view.21.1",
+      "distance": 1.2047021389007568,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1594,
+      "end_line": 1618,
+      "tokens": 279,
+      "context_length": 14071
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm_InlineAdminForm.__iter__.1.1",
+      "distance": 1.2047345638275146,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 330,
+      "end_line": 348,
+      "tokens": 181,
+      "context_length": 14252
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_RelatedFieldWidgetWrapper_RelatedFieldWidgetWrapper.get_related_url.1.1",
+      "distance": 1.2065454721450806,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 228,
+      "end_line": 275,
+      "tokens": 423,
+      "context_length": 14675
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.get_filters_ChangeList.get_filters.13.3.1",
+      "distance": 1.2105743885040283,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 104,
+      "end_line": 186,
+      "tokens": 818,
+      "context_length": 15493
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminTextareaWidget_AdminEmailInputWidget.__init__.1",
+      "distance": 1.2136716842651367,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 315,
+      "end_line": 327,
+      "tokens": 114,
+      "context_length": 15607
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_filter_item_BaseModelAdminChecks._check_filter_item.2.3.1.2.1.1",
+      "distance": 1.2139244079589844,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 378,
+      "end_line": 390,
+      "tokens": 137,
+      "context_length": 15744
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_19_AllValuesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.2150942087173462,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 365,
+      "end_line": 389,
+      "tokens": 294,
+      "context_length": 16038
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_FieldListFilter_FieldListFilter.create.1.1.1.1",
+      "distance": 1.2157984972000122,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 118,
+      "end_line": 159,
+      "tokens": 365,
+      "context_length": 16403
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.formfield_for_dbfield_GeoModelAdmin.formfield_for_dbfield.2.3.1.1",
+      "distance": 1.2258741855621338,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 52,
+      "end_line": 63,
+      "tokens": 139,
+      "context_length": 16542
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ForeignKeyRawIdWidget_ForeignKeyRawIdWidget.get_context.5.1",
+      "distance": 1.2268564701080322,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 124,
+      "end_line": 163,
+      "tokens": 349,
+      "context_length": 16891
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_links_item_ModelAdminChecks._check_list_filter.1.2.1.1",
+      "distance": 1.2271437644958496,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 747,
+      "end_line": 768,
+      "tokens": 190,
+      "context_length": 17081
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateFilterIndexView_TemplateFilterIndexView.get_context_data.3.1",
+      "distance": 1.2278016805648804,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 86,
+      "end_line": 114,
+      "tokens": 285,
+      "context_length": 17366
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineFieldset_",
+      "distance": 1.228358507156372,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 380,
+      "end_line": 403,
+      "tokens": 195,
+      "context_length": 17561
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_field_queryset_BaseModelAdmin.get_field_queryset.4.1",
+      "distance": 1.228515625,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 206,
+      "end_line": 217,
+      "tokens": 135,
+      "context_length": 17696
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_DateFieldListFilter_DateFieldListFilter.choices.1.1",
+      "distance": 1.2285165786743164,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 299,
+      "end_line": 362,
+      "tokens": 627,
+      "context_length": 18323
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_ForeignKeyRawIdWidget.base_url_parameters_ForeignKeyRawIdWidget.label_and_url_for_value.4.1",
+      "distance": 1.2298991680145264,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 165,
+      "end_line": 196,
+      "tokens": 243,
+      "context_length": 18566
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget.get_context_MultiWidget.get_context.12.1",
+      "distance": 1.2308568954467773,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 799,
+      "end_line": 828,
+      "tokens": 265,
+      "context_length": 18831,
+      "file_pos": 11
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_1_GeoModelAdmin.media.2.1",
+      "distance": 1.2309373617172241,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 394,
+      "context_length": 19225
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminField_AdminField.errors.1.1",
+      "distance": 1.2354086637496948,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 123,
+      "end_line": 149,
+      "tokens": 220,
+      "context_length": 19445
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_urls_ModelAdmin.get_urls.5.1",
+      "distance": 1.2372217178344727,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 598,
+      "end_line": 621,
+      "tokens": 284,
+      "context_length": 19729
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/__init__.py_1_",
+      "distance": 1.239027976989746,
+      "file_path": "django/contrib/gis/admin/__init__.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 130,
+      "context_length": 19859
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ModelDetailView_ModelDetailView.get_context_data.15",
+      "distance": 1.23958420753479,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 182,
+      "end_line": 248,
+      "tokens": 584,
+      "context_length": 20443
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultipleHiddenInput_MultipleHiddenInput.format_value.1.1",
+      "distance": 1.24161958694458,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 325,
+      "end_line": 359,
+      "tokens": 278,
+      "context_length": 20721,
+      "file_pos": 12
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/forms/widgets.py_FileInput_FILE_INPUT_CONTRADICTION.1",
+      "distance": 1.2426180839538574,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 362,
+      "end_line": 379,
+      "tokens": 116,
+      "context_length": 20837,
+      "file_pos": 12
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/forms/widgets.py_MultiWidget_MultiWidget.is_hidden.1.1",
+      "distance": 1.244384765625,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 779,
+      "end_line": 797,
+      "tokens": 153,
+      "context_length": 20990,
+      "file_pos": 12
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/contrib/admin/__init__.py_1_",
+      "distance": 1.2480146884918213,
+      "file_path": "django/contrib/admin/__init__.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 286,
+      "context_length": 21276
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ModelDetailView.get_context_data.16_ModelDetailView.get_context_data.19.1",
+      "distance": 1.2507805824279785,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 249,
+      "end_line": 314,
+      "tokens": 585,
+      "context_length": 21861
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_1_8",
+      "distance": 1.252801537513733,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 127,
+      "context_length": 21988
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter_RelatedFieldListFilter.field_choices.4.1",
+      "distance": 1.2530269622802734,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 162,
+      "end_line": 201,
+      "tokens": 381,
+      "context_length": 22369
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SplitHiddenDateTimeWidget_SplitHiddenDateTimeWidget.__init__.2.widget.input_type.1",
+      "distance": 1.2530372142791748,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 900,
+      "end_line": 909,
+      "tokens": 107,
+      "context_length": 22476,
+      "file_pos": 13
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_GroupAdmin_GroupAdmin.formfield_for_manytomany.2.1",
+      "distance": 1.2541688680648804,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 25,
+      "end_line": 37,
+      "tokens": 128,
+      "context_length": 22604
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks_ModelAdminChecks.check.1.1",
+      "distance": 1.2549117803573608,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 599,
+      "end_line": 618,
+      "tokens": 183,
+      "context_length": 22787
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget_SelectDateWidget.__init__.7.5.self.day_none_value.1",
+      "distance": 1.2592711448669434,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 912,
+      "end_line": 958,
+      "tokens": 400,
+      "context_length": 23187,
+      "file_pos": 14
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_item_ModelAdminChecks._check_list_editable_item.1.3.1.7.1.1",
+      "distance": 1.260261058807373,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 858,
+      "end_line": 906,
+      "tokens": 416,
+      "context_length": 23603
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_modify.py_json_prepopulated_fields_js_tag.1.1",
+      "distance": 1.2628071308135986,
+      "file_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 372,
+      "context_length": 23975
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectMultiple_RadioSelect.option_template_name.1",
+      "distance": 1.264517903327942,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 731,
+      "end_line": 750,
+      "tokens": 144,
+      "context_length": 24119,
+      "file_pos": 15
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_Fieldline_Fieldline.errors.1.1",
+      "distance": 1.2665338516235352,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 92,
+      "end_line": 120,
+      "tokens": 249,
+      "context_length": 24368
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminFormSet_InlineAdminFormSet.__init__.self.has_view_permission.1",
+      "distance": 1.2677435874938965,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 223,
+      "end_line": 245,
+      "tokens": 211,
+      "context_length": 24579
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_item_ModelAdminChecks._check_list_display_item.1.4.1.1",
+      "distance": 1.2712948322296143,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 697,
+      "end_line": 728,
+      "tokens": 227,
+      "context_length": 24806
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._create_formsets_ModelAdmin._create_formsets.8.1",
+      "distance": 1.2728772163391113,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1914,
+      "end_line": 1957,
+      "tokens": 403,
+      "context_length": 25209
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_datetime_DOT.1",
+      "distance": 1.2735576629638672,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 170,
+      "context_length": 25379
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SplitArrayWidget.get_context_SplitArrayWidget.needs_multipart_form.1.1",
+      "distance": 1.2741389274597168,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 133,
+      "end_line": 165,
+      "tokens": 265,
+      "context_length": 25644
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.get_queryset_ChangeList.get_queryset.2",
+      "distance": 1.2755215167999268,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 401,
+      "end_line": 444,
+      "tokens": 390,
+      "context_length": 26034
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/forms/fields.py_SplitDateTimeField_SplitDateTimeField.compress.2.1",
+      "distance": 1.276702880859375,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1122,
+      "end_line": 1155,
+      "tokens": 293,
+      "context_length": 26327
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SplitDateTimeWidget_SplitDateTimeWidget.decompress.2.1",
+      "distance": 1.2768614292144775,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 873,
+      "end_line": 897,
+      "tokens": 172,
+      "context_length": 26499,
+      "file_pos": 18
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_AllValuesFieldListFilter.choices_",
+      "distance": 1.2793660163879395,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 391,
+      "end_line": 423,
+      "tokens": 299,
+      "context_length": 26798
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ClearableFileInput.value_from_datadict_ClearableFileInput.value_omitted_from_data.1.1",
+      "distance": 1.2794057130813599,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 428,
+      "end_line": 449,
+      "tokens": 217,
+      "context_length": 27015,
+      "file_pos": 18
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminIntegerFieldWidget_35",
+      "distance": 1.2798702716827393,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 344,
+      "end_line": 370,
+      "tokens": 328,
+      "context_length": 27343
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager._apply_rel_filters_create_forward_many_to_many_manager.ManyRelatedManager.get_queryset.1.2.2.1",
+      "distance": 1.2805664539337158,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 871,
+      "end_line": 891,
+      "tokens": 190,
+      "context_length": 27533
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.needs_explicit_pk_field_InlineAdminForm.needs_explicit_pk_field.1.1",
+      "distance": 1.2819907665252686,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 350,
+      "end_line": 359,
+      "tokens": 134,
+      "context_length": 27667
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.get_formset_InlineModelAdmin.get_formset.can_add.1",
+      "distance": 1.2828902006149292,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2016,
+      "end_line": 2049,
+      "tokens": 376,
+      "context_length": 28043
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_15_ChoicesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.283591628074646,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 258,
+      "end_line": 270,
+      "tokens": 149,
+      "context_length": 28192
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.add.alters_data_create_forward_many_to_many_manager.ManyRelatedManager.clear.alters_data.1",
+      "distance": 1.2860145568847656,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 973,
+      "end_line": 997,
+      "tokens": 240,
+      "context_length": 28432
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ViewDetailView.get_context_data_ModelIndexView.get_context_data.2.1",
+      "distance": 1.2865214347839355,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 155,
+      "end_line": 179,
+      "tokens": 234,
+      "context_length": 28666
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Widget_Widget.use_required_attribute.1.1",
+      "distance": 1.2886192798614502,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 182,
+      "end_line": 264,
+      "tokens": 622,
+      "context_length": 29288,
+      "file_pos": 19
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_ordering_item_BaseModelAdminChecks._check_ordering_item.3.4.3.3.1.1",
+      "distance": 1.2905347347259521,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 525,
+      "end_line": 560,
+      "tokens": 303,
+      "context_length": 29591
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter.choices_RelatedFieldListFilter.choices.3.1",
+      "distance": 1.2917866706848145,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 203,
+      "end_line": 220,
+      "tokens": 190,
+      "context_length": 29781
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/gis/forms/widgets.py_OpenLayersWidget_",
+      "distance": 1.2924561500549316,
+      "file_path": "django/contrib/gis/forms/widgets.py",
+      "start_line": 76,
+      "end_line": 118,
+      "tokens": 304,
+      "context_length": 30085
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_search_fields_ModelAdminChecks._check_date_hierarchy.2.2.1.3.1.2.1.1",
+      "distance": 1.292466163635254,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 908,
+      "end_line": 937,
+      "tokens": 243,
+      "context_length": 30328
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks_BaseModelAdminChecks.check.1.1",
+      "distance": 1.29250168800354,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 108,
+      "end_line": 125,
+      "tokens": 155,
+      "context_length": 30483
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget.get_context_SelectDateWidget.get_context.18.1",
+      "distance": 1.2927935123443604,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 960,
+      "end_line": 994,
+      "tokens": 391,
+      "context_length": 30874,
+      "file_pos": 20
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_deleted_objects_ModelAdmin._delete_view.16.1",
+      "distance": 1.2931358814239502,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1805,
+      "end_line": 1873,
+      "tokens": 584,
+      "context_length": 31458
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.changelist_view_ModelAdmin.changelist_view.23",
+      "distance": 1.2936400175094604,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1650,
+      "end_line": 1721,
+      "tokens": 653,
+      "context_length": 32111
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.optgroups_AutocompleteMixin.optgroups.9.1",
+      "distance": 1.2951518297195435,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 414,
+      "end_line": 438,
+      "tokens": 232,
+      "context_length": 32343
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager._remove_items_",
+      "distance": 1.2993547916412354,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1124,
+      "end_line": 1164,
+      "tokens": 378,
+      "context_length": 32721
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager._build_remove_filters_create_forward_many_to_many_manager.ManyRelatedManager._build_remove_filters.7.1",
+      "distance": 1.2997617721557617,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 855,
+      "end_line": 869,
+      "tokens": 190,
+      "context_length": 32911
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_field_spec_item_BaseModelAdminChecks._check_field_spec_item.1.5.1.3.1.2.1.1",
+      "distance": 1.2998268604278564,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 304,
+      "end_line": 330,
+      "tokens": 221,
+      "context_length": 33132
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_item_BaseModelAdminChecks._check_autocomplete_fields_item.2.3.4.1",
+      "distance": 1.2999813556671143,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 139,
+      "end_line": 180,
+      "tokens": 325,
+      "context_length": 33457
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Textarea_boolean_check.1.1",
+      "distance": 1.300094723701477,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 452,
+      "end_line": 492,
+      "tokens": 275,
+      "context_length": 33732,
+      "file_pos": 20
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.action_checkbox_ModelAdmin._get_base_actions.8.1",
+      "distance": 1.3006618022918701,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 841,
+      "end_line": 859,
+      "tokens": 187,
+      "context_length": 33919
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select_Select.use_required_attribute.6.1",
+      "distance": 1.3011057376861572,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 659,
+      "end_line": 690,
+      "tokens": 261,
+      "context_length": 34180,
+      "file_pos": 20
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks._check_relation_InlineModelAdminChecks._check_formset.2.2.1.1",
+      "distance": 1.3014599084854126,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1021,
+      "end_line": 1063,
+      "tokens": 343,
+      "context_length": 34523
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList_ChangeList.get_filters_params.8.1",
+      "distance": 1.302894115447998,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 37,
+      "end_line": 102,
+      "tokens": 581,
+      "context_length": 35104
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseInlineFormSet.add_fields_BaseInlineFormSet.get_unique_error_message.2.1",
+      "distance": 1.3036627769470215,
+      "file_path": "django/forms/models.py",
+      "start_line": 947,
+      "end_line": 980,
+      "tokens": 367,
+      "context_length": 35471
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_form_BaseModelAdminChecks._check_filter_horizontal.2.2.1.1",
+      "distance": 1.3041129112243652,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 350,
+      "end_line": 376,
+      "tokens": 281,
+      "context_length": 35752
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_BoundWidget_",
+      "distance": 1.3046848773956299,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 228,
+      "end_line": 267,
+      "tokens": 273,
+      "context_length": 36025
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateDetailView_TemplateDetailView.get_context_data.4.1",
+      "distance": 1.3056285381317139,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 317,
+      "end_line": 347,
+      "tokens": 208,
+      "context_length": 36233
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminRadioSelect_url_params_from_lookup_dict.4.1",
+      "distance": 1.3071047067642212,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 96,
+      "end_line": 121,
+      "tokens": 179,
+      "context_length": 36412
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.set.alters_data_create_forward_many_to_many_manager.ManyRelatedManager.update_or_create.alters_data.1",
+      "distance": 1.3081324100494385,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1025,
+      "end_line": 1052,
+      "tokens": 334,
+      "context_length": 36746
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_readonly_fields_item_BaseModelAdminChecks._check_readonly_fields_item.1.4.1.3.1.1",
+      "distance": 1.308741569519043,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 575,
+      "end_line": 596,
+      "tokens": 162,
+      "context_length": 36908
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/forms/fields.py_Field_Field.validate.1.1",
+      "distance": 1.3101592063903809,
+      "file_path": "django/forms/fields.py",
+      "start_line": 46,
+      "end_line": 127,
+      "tokens": 773,
+      "context_length": 37681
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager._add_items_create_forward_many_to_many_manager.ManyRelatedManager._add_items.through_defaults.4.6.4.3",
+      "distance": 1.3112324476242065,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1054,
+      "end_line": 1122,
+      "tokens": 661,
+      "context_length": 38342
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_13_BooleanFieldListFilter.expected_parameters.1.1",
+      "distance": 1.312561273574829,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 223,
+      "end_line": 238,
+      "tokens": 196,
+      "context_length": 38538
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager.add.alters_data_create_reverse_many_to_one_manager.RelatedManager.17._clear.alters_data.1",
+      "distance": 1.312881588935852,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 663,
+      "end_line": 717,
+      "tokens": 511,
+      "context_length": 39049
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.apply_select_related_",
+      "distance": 1.3129034042358398,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 446,
+      "end_line": 477,
+      "tokens": 225,
+      "context_length": 39274
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_item_BaseModelAdminChecks._check_ordering.3.4.1.1",
+      "distance": 1.3129916191101074,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 500,
+      "end_line": 523,
+      "tokens": 230,
+      "context_length": 39504
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/core/management/commands/makemigrations.py_Command.handle_merge_",
+      "distance": 1.3142030239105225,
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "start_line": 231,
+      "end_line": 311,
+      "tokens": 824,
+      "context_length": 40328
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager._remove_prefetched_objects_create_reverse_many_to_one_manager.RelatedManager.get_prefetch_queryset.13.1",
+      "distance": 1.3149569034576416,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 599,
+      "end_line": 631,
+      "tokens": 323,
+      "context_length": 40651
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_ModelAdminChecks._check_list_display.2.2.1.1",
+      "distance": 1.315963625907898,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 685,
+      "end_line": 695,
+      "tokens": 115,
+      "context_length": 40766
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_ignored_options_ManyToManyField._check_ignored_options.5.1",
+      "distance": 1.3163021802902222,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1160,
+      "end_line": 1191,
+      "tokens": 180,
+      "context_length": 40946
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.history_view_ModelAdmin.history_view.14.1",
+      "distance": 1.3173834085464478,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1875,
+      "end_line": 1912,
+      "tokens": 330,
+      "context_length": 41276
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_BoundField.subwidgets_BoundField.subwidgets.5.1",
+      "distance": 1.3177052736282349,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 35,
+      "end_line": 50,
+      "tokens": 149,
+      "context_length": 41425
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/base.py_InclusionAdminNode.render_",
+      "distance": 1.3185880184173584,
+      "file_path": "django/contrib/admin/templatetags/base.py",
+      "start_line": 22,
+      "end_line": 34,
+      "tokens": 135,
+      "context_length": 41560
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 1.3191862106323242,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1224,
+      "end_line": 1253,
+      "tokens": 242,
+      "context_length": 41802
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.3195677995681763,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 548,
+      "context_length": 42350
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager_create_reverse_many_to_one_manager.RelatedManager._apply_rel_filters.9.1",
+      "distance": 1.3198283910751343,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 542,
+      "end_line": 597,
+      "tokens": 478,
+      "context_length": 42828
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget._parse_date_fmt_SelectDateWidget.id_for_label.2.1",
+      "distance": 1.320214867591858,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1021,
+      "end_line": 1040,
+      "tokens": 144,
+      "context_length": 42972,
+      "file_pos": 27
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectDateWidget.value_from_datadict_",
+      "distance": 1.3212406635284424,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 1042,
+      "end_line": 1068,
+      "tokens": 263,
+      "context_length": 43235,
+      "file_pos": 27
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.exists_create_forward_many_to_many_manager.ManyRelatedManager.add.3.6.1",
+      "distance": 1.3216849565505981,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 951,
+      "end_line": 972,
+      "tokens": 248,
+      "context_length": 43483
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.11.3.seen_from.5.1",
+      "distance": 1.321742057800293,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1193,
+      "end_line": 1316,
+      "tokens": 1010,
+      "context_length": 44493
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ChoicesFieldListFilter.choices_17",
+      "distance": 1.3229639530181885,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 272,
+      "end_line": 296,
+      "tokens": 217,
+      "context_length": 44710
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_filter_item_ModelAdminChecks._check_list_filter_item.3.4.field.3.3.1.1",
+      "distance": 1.3235909938812256,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 770,
+      "end_line": 820,
+      "tokens": 443,
+      "context_length": 45153
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.admin_view.inner_AdminSite.admin_view.7.1",
+      "distance": 1.3237687349319458,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 211,
+      "end_line": 230,
+      "tokens": 221,
+      "context_length": 45374
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/options.py_GeoModelAdmin.get_map_widget_GeoModelAdmin.get_map_widget.3.2.collection_type.1",
+      "distance": 1.3239303827285767,
+      "file_path": "django/contrib/gis/admin/options.py",
+      "start_line": 65,
+      "end_line": 78,
+      "tokens": 150,
+      "context_length": 45524
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.build_attrs_AutocompleteMixin.build_attrs.5.1",
+      "distance": 1.3253437280654907,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 393,
+      "end_line": 412,
+      "tokens": 193,
+      "context_length": 45717
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager.add_create_reverse_many_to_one_manager.RelatedManager.add.5.4.1.1.2",
+      "distance": 1.3260564804077148,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 633,
+      "end_line": 662,
+      "tokens": 254,
+      "context_length": 45971
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._response_post_save_ModelAdmin.response_post_save_change.2.1",
+      "distance": 1.3261854648590088,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1307,
+      "end_line": 1332,
+      "tokens": 232,
+      "context_length": 46203
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_create_many_to_many_intermediary_model_create_many_to_many_intermediary_model.11.1",
+      "distance": 1.3262171745300293,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1035,
+      "end_line": 1079,
+      "tokens": 407,
+      "context_length": 46610
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_ModelFieldSerializer_OperationSerializer.serialize.4.1",
+      "distance": 1.3262269496917725,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 190,
+      "end_line": 211,
+      "tokens": 183,
+      "context_length": 46793
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ClearableFileInput.get_context_ClearableFileInput.get_context.5.1",
+      "distance": 1.3264760971069336,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 414,
+      "end_line": 426,
+      "tokens": 122,
+      "context_length": 46915,
+      "file_pos": 29
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SplitArrayWidget_SplitArrayWidget.id_for_label.2.2.1",
+      "distance": 1.3264777660369873,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 105,
+      "end_line": 131,
+      "tokens": 219,
+      "context_length": 47134
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes.39_RelatedField._check_clashes.40.1",
+      "distance": 1.3270175457000732,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 255,
+      "end_line": 282,
+      "tokens": 269,
+      "context_length": 47403
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/fields.py_create_generic_related_manager.GenericRelatedObjectManager.set.alters_data_",
+      "distance": 1.3273025751113892,
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "start_line": 664,
+      "end_line": 689,
+      "tokens": 254,
+      "context_length": 47657
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateTagIndexView_TemplateTagIndexView.get_context_data.3.1",
+      "distance": 1.3281819820404053,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 55,
+      "end_line": 83,
+      "tokens": 285,
+      "context_length": 47942
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager.set_create_reverse_many_to_one_manager.3.1",
+      "distance": 1.3290038108825684,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 719,
+      "end_line": 745,
+      "tokens": 222,
+      "context_length": 48164
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.set_create_forward_many_to_many_manager.ManyRelatedManager.set.objs.3.1.3.5",
+      "distance": 1.329242467880249,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 999,
+      "end_line": 1024,
+      "tokens": 241,
+      "context_length": 48405
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_date_hierarchy_tag_",
+      "distance": 1.3312702178955078,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 428,
+      "end_line": 486,
+      "tokens": 343,
+      "context_length": 48748
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/contrib/admin/decorators.py_register_",
+      "distance": 1.3319168090820312,
+      "file_path": "django/contrib/admin/decorators.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 134,
+      "context_length": 48882
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_delete_form_ModelAdmin.render_delete_form.5.1",
+      "distance": 1.3330466747283936,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1442,
+      "end_line": 1461,
+      "tokens": 133,
+      "context_length": 49015
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_BoundField.as_widget_BoundField.as_widget.7.1",
+      "distance": 1.3330919742584229,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 76,
+      "end_line": 94,
+      "tokens": 174,
+      "context_length": 49189
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_field_name_clashes_Model._check_field_name_clashes.12.1",
+      "distance": 1.3334143161773682,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1362,
+      "end_line": 1417,
+      "tokens": 491,
+      "context_length": 49680
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList._get_deterministic_ordering_ChangeList._get_deterministic_ordering.6.1",
+      "distance": 1.333507776260376,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 307,
+      "end_line": 359,
+      "tokens": 467,
+      "context_length": 50147
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_date_hierarchy_date_hierarchy.2.11.5.2.1",
+      "distance": 1.3343992233276367,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 353,
+      "end_line": 425,
+      "tokens": 631,
+      "context_length": 50778
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.create_option_ChoiceWidget.create_option.6.1",
+      "distance": 1.3353509902954102,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 606,
+      "end_line": 625,
+      "tokens": 189,
+      "context_length": 50967,
+      "file_pos": 31
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/contrib/admin/views/autocomplete.py_1_AutocompleteJsonView.get.8.1",
+      "distance": 1.335548996925354,
+      "file_path": "django/contrib/admin/views/autocomplete.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 256,
+      "context_length": 51223
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_value_BaseModelAdminChecks._check_view_on_site_url.1.2.1.1",
+      "distance": 1.335813283920288,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 426,
+      "end_line": 452,
+      "tokens": 190,
+      "context_length": 51413
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ViewDetailView_ViewDetailView._get_view_func.2.2.4.5",
+      "distance": 1.3361694812774658,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 135,
+      "end_line": 153,
+      "tokens": 187,
+      "context_length": 51600
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager_create_forward_many_to_many_manager.ManyRelatedManager.do_not_call_in_templates.1",
+      "distance": 1.336626648902893,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 794,
+      "end_line": 853,
+      "tokens": 576,
+      "context_length": 52176
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/contrib/admin/views/autocomplete.py_AutocompleteJsonView.get_paginator_",
+      "distance": 1.336944341659546,
+      "file_path": "django/contrib/admin/views/autocomplete.py",
+      "start_line": 38,
+      "end_line": 53,
+      "tokens": 154,
+      "context_length": 52330
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeCheckMixin_DateTimeCheckMixin._check_fix_default_value.1.1",
+      "distance": 1.337087631225586,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1114,
+      "end_line": 1143,
+      "tokens": 218,
+      "context_length": 52548
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_1_NotRegistered.1",
+      "distance": 1.3372584581375122,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 172,
+      "context_length": 52720
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.autocomplete_view_ModelAdmin._get_edited_object_pks.3.1",
+      "distance": 1.337620735168457,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1620,
+      "end_line": 1632,
+      "tokens": 167,
+      "context_length": 52887
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_IntegerRangeField_",
+      "distance": 1.338515043258667,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 66,
+      "end_line": 110,
+      "tokens": 284,
+      "context_length": 53171
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_ModelAdminChecks._check_list_editable.2.2.1.1",
+      "distance": 1.3387985229492188,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 846,
+      "end_line": 856,
+      "tokens": 129,
+      "context_length": 53300
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_backend_specific_checks_Field._check_validators.3.1",
+      "distance": 1.338986873626709,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 322,
+      "end_line": 346,
+      "tokens": 184,
+      "context_length": 53484
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.formfield_for_dbfield_BaseModelAdmin.formfield_for_dbfield.11.1",
+      "distance": 1.3395793437957764,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 131,
+      "end_line": 186,
+      "tokens": 604,
+      "context_length": 54088
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/forms/models.py_30_InlineForeignKeyField.has_changed.1.1",
+      "distance": 1.3396581411361694,
+      "file_path": "django/forms/models.py",
+      "start_line": 1080,
+      "end_line": 1120,
+      "tokens": 306,
+      "context_length": 54394
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminURLFieldWidget_AdminURLFieldWidget.get_context.5.1",
+      "distance": 1.3406381607055664,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 330,
+      "end_line": 341,
+      "tokens": 118,
+      "context_length": 54512
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ListFilter_ListFilter.expected_parameters.2",
+      "distance": 1.3408610820770264,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 20,
+      "end_line": 59,
+      "tokens": 295,
+      "context_length": 54807
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_modify.py_submit_row_tag_",
+      "distance": 1.3413474559783936,
+      "file_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "start_line": 84,
+      "end_line": 112,
+      "tokens": 203,
+      "context_length": 55010
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 1,
+      "tokens": 18325,
+      "context_length": 18325
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 2,
+      "tokens": 7978,
+      "context_length": 26303
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 3,
+      "tokens": 3798,
+      "context_length": 30101
+    },
+    {
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "position": 4,
+      "tokens": 1025,
+      "context_length": 31126
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 5,
+      "tokens": 8843,
+      "context_length": 39969
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 6,
+      "tokens": 3170,
+      "context_length": 43139
+    },
+    {
+      "file_path": "django/forms/forms.py",
+      "position": 7,
+      "tokens": 4057,
+      "context_length": 47196
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 8,
+      "tokens": 4055,
+      "context_length": 51251
+    },
+    {
+      "file_path": "django/contrib/gis/admin/options.py",
+      "position": 9,
+      "tokens": 1196,
+      "context_length": 52447
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 10,
+      "tokens": 3669,
+      "context_length": 56116
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 11,
+      "tokens": 3310,
+      "context_length": 59426
+    },
+    {
+      "file_path": "django/contrib/gis/admin/__init__.py",
+      "position": 12,
+      "tokens": 130,
+      "context_length": 59556
+    },
+    {
+      "file_path": "django/contrib/admin/__init__.py",
+      "position": 13,
+      "tokens": 286,
+      "context_length": 59842
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 14,
+      "tokens": 1726,
+      "context_length": 61568
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "position": 15,
+      "tokens": 920,
+      "context_length": 62488
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "position": 16,
+      "tokens": 3783,
+      "context_length": 66271
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "position": 17,
+      "tokens": 1453,
+      "context_length": 67724
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 18,
+      "tokens": 8944,
+      "context_length": 76668
+    },
+    {
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "position": 19,
+      "tokens": 10026,
+      "context_length": 86694
+    },
+    {
+      "file_path": "django/contrib/gis/forms/widgets.py",
+      "position": 20,
+      "tokens": 855,
+      "context_length": 87549
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 21,
+      "tokens": 11446,
+      "context_length": 98995
+    },
+    {
+      "file_path": "django/forms/boundfield.py",
+      "position": 22,
+      "tokens": 2097,
+      "context_length": 101092
+    },
+    {
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "position": 23,
+      "tokens": 2749,
+      "context_length": 103841
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 24,
+      "tokens": 13495,
+      "context_length": 117336
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/base.py",
+      "position": 25,
+      "tokens": 299,
+      "context_length": 117635
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 26,
+      "tokens": 14681,
+      "context_length": 132316
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 27,
+      "tokens": 548,
+      "context_length": 132864
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 28,
+      "tokens": 4116,
+      "context_length": 136980
+    },
+    {
+      "file_path": "django/db/migrations/serializer.py",
+      "position": 29,
+      "tokens": 2536,
+      "context_length": 139516
+    },
+    {
+      "file_path": "django/contrib/contenttypes/fields.py",
+      "position": 30,
+      "tokens": 5303,
+      "context_length": 144819
+    },
+    {
+      "file_path": "django/contrib/admin/decorators.py",
+      "position": 31,
+      "tokens": 194,
+      "context_length": 145013
+    },
+    {
+      "file_path": "django/contrib/admin/views/autocomplete.py",
+      "position": 32,
+      "tokens": 402,
+      "context_length": 145415
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 33,
+      "tokens": 16839,
+      "context_length": 162254
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 34,
+      "tokens": 704,
+      "context_length": 162958
+    }
+  ]
+}

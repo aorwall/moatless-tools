@@ -1,0 +1,2395 @@
+{
+  "instance_id": "django__django-12306",
+  "model_patch": "diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py\nindex aa21a151bc..bb025301ab 100644\n--- a/django/db/models/fields/__init__.py\n+++ b/django/db/models/fields/__init__.py\n@@ -270,7 +270,7 @@ class Field(RegisterLookupMixin):\n                     break\n                 if self.max_length is not None and group_choices:\n                     choice_max_length = max(\n-                        choice_max_length,\n+                        choice_max_length, 0,\n                         *(len(value) for value, _ in group_choices if isinstance(value, str)),\n                     )\n             except (TypeError, ValueError):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/db/models/fields/__init__.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "8b3e714ecf409ed6c9628c3f2a4e033cbfa4253b",
+  "patch": "diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py\n--- a/django/db/models/fields/__init__.py\n+++ b/django/db/models/fields/__init__.py\n@@ -269,10 +269,10 @@ def _check_choices(self):\n                 ):\n                     break\n                 if self.max_length is not None and group_choices:\n-                    choice_max_length = max(\n+                    choice_max_length = max([\n                         choice_max_length,\n                         *(len(value) for value, _ in group_choices if isinstance(value, str)),\n-                    )\n+                    ])\n             except (TypeError, ValueError):\n                 # No groups, choices in the form [value, display]\n                 value, human_name = group_name, group_choices\n",
+  "test_patch": "diff --git a/tests/invalid_models_tests/test_ordinary_fields.py b/tests/invalid_models_tests/test_ordinary_fields.py\n--- a/tests/invalid_models_tests/test_ordinary_fields.py\n+++ b/tests/invalid_models_tests/test_ordinary_fields.py\n@@ -1,4 +1,5 @@\n import unittest\n+import uuid\n \n from django.core.checks import Error, Warning as DjangoWarning\n from django.db import connection, models\n@@ -769,3 +770,20 @@ class Model(models.Model):\n                 id='fields.W162',\n             )\n         ])\n+\n+\n+@isolate_apps('invalid_models_tests')\n+class UUIDFieldTests(TestCase):\n+    def test_choices_named_group(self):\n+        class Model(models.Model):\n+            field = models.UUIDField(\n+                choices=[\n+                    ['knights', [\n+                        [uuid.UUID('5c859437-d061-4847-b3f7-e6b78852f8c8'), 'Lancelot'],\n+                        [uuid.UUID('c7853ec1-2ea3-4359-b02d-b54e8f1bcee2'), 'Galahad'],\n+                    ]],\n+                    [uuid.UUID('25d405be-4895-4d50-9b2e-d6695359ce47'), 'Other'],\n+                ],\n+            )\n+\n+        self.assertEqual(Model._meta.get_field('field').check(), [])\n",
+  "problem_statement": "Named groups in choices are not properly validated in case of non str typed values.\nDescription\n\t\nIn case of using typed choices and string value to store it (in my case it is multiple values stored in char field as JSON) it is possible to catch error while run makemigrations (_check_choices error):\nmain.MultiValueFieldModel.multi_value_field_integer_with_grouped_choices: (fields.E005) 'choices' must be an iterable containing (actual value, human readable name) tuples.\nLooking deeper into the django code, we see actual error message: 'int' object is not iterable and it happens in this block of code (\u200bhttps://github.com/django/django/blob/aa6c620249bc8c2a6245c8d7b928b05e7e5e78fc/django/db/models/fields/__init__.py#L271-L275):\nif self.max_length is not None and group_choices:\n\tchoice_max_length = max(\n\t\tchoice_max_length,\n\t\t*(len(value) for value, _ in group_choices if isinstance(value, str)),\n\t)\nIf we have CharField (any other with max_length defined) and grouped choices with non str typed values like:\nchoices=(\n\t('one', ((1, 'One',), (11, 'Eleven',),),),\n\t('two', ((2, 'Two',), (22, 'Twenty two',),),),\n)\nwe will have the situation, when max function receives only one integer value (choice_max_length), because (len(value) for value, _ in group_choices if isinstance(value, str)) will return empty generator, and that is why error 'int' object is not iterable raises (max function waits iterable if there is only one argument).\nCode block:\nchoice_max_length = max(\n\tchoice_max_length,\n\t*(len(value) for value, _ in group_choices if isinstance(value, str)),\n)\nin this case works like:\nchoice_max_length = max(\n\tchoice_max_length,\n\t*[],\n)\nwhich is incorrect.\nThe simples solution is to add one additional argument to max function, which will be usefull only in this partucular situation:\nchoice_max_length = max(\n\tchoice_max_length, 0,\n\t*(len(value) for value, _ in group_choices if isinstance(value, str)),\n)\n",
+  "hints_text": "Thanks for this report. Regression in b6251956b69512bf230322bd7a49b629ca8455c6.",
+  "created_at": "2020-01-10T19:36:24Z",
+  "version": "3.1",
+  "FAIL_TO_PASS": "[\"test_choices_named_group (invalid_models_tests.test_ordinary_fields.UUIDFieldTests)\"]",
+  "PASS_TO_PASS": "[\"Two letters isn't a valid choice pair.\", \"test_auto_now_and_auto_now_add_raise_error (invalid_models_tests.test_ordinary_fields.DateFieldTests)\", \"test_bad_db_index_value (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_bad_max_length_value (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_bad_validators (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_bad_values_of_max_digits_and_decimal_places (invalid_models_tests.test_ordinary_fields.DecimalFieldTests)\", \"test_choices_containing_lazy (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_containing_non_pairs (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_in_max_length (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_named_group (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_named_group_bad_structure (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_named_group_lazy (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_choices_named_group_non_pairs (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_decimal_places_greater_than_max_digits (invalid_models_tests.test_ordinary_fields.DecimalFieldTests)\", \"test_fix_default_value (invalid_models_tests.test_ordinary_fields.DateFieldTests)\", \"test_fix_default_value (invalid_models_tests.test_ordinary_fields.DateTimeFieldTests)\", \"test_fix_default_value (invalid_models_tests.test_ordinary_fields.TimeFieldTests)\", \"test_fix_default_value_tz (invalid_models_tests.test_ordinary_fields.DateFieldTests)\", \"test_fix_default_value_tz (invalid_models_tests.test_ordinary_fields.DateTimeFieldTests)\", \"test_fix_default_value_tz (invalid_models_tests.test_ordinary_fields.TimeFieldTests)\", \"test_forbidden_files_and_folders (invalid_models_tests.test_ordinary_fields.FilePathFieldTests)\", \"test_iterable_of_iterable_choices (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_lazy_choices (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_max_length_warning (invalid_models_tests.test_ordinary_fields.AutoFieldTests)\", \"test_max_length_warning (invalid_models_tests.test_ordinary_fields.IntegerFieldTests)\", \"test_missing_max_length (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_negative_max_digits_and_decimal_places (invalid_models_tests.test_ordinary_fields.DecimalFieldTests)\", \"test_negative_max_length (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_non_iterable_choices (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_non_nullable_blank (invalid_models_tests.test_ordinary_fields.GenericIPAddressFieldTests)\", \"test_pillow_installed (invalid_models_tests.test_ordinary_fields.ImageFieldTests)\", \"test_primary_key (invalid_models_tests.test_ordinary_fields.AutoFieldTests)\", \"test_primary_key (invalid_models_tests.test_ordinary_fields.FileFieldTests)\", \"test_required_attributes (invalid_models_tests.test_ordinary_fields.DecimalFieldTests)\", \"test_str_default_value (invalid_models_tests.test_ordinary_fields.BinaryFieldTests)\", \"test_str_max_length_type (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_str_max_length_value (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_upload_to_callable_not_checked (invalid_models_tests.test_ordinary_fields.FileFieldTests)\", \"test_upload_to_starts_with_slash (invalid_models_tests.test_ordinary_fields.FileFieldTests)\", \"test_valid_case (invalid_models_tests.test_ordinary_fields.AutoFieldTests)\", \"test_valid_case (invalid_models_tests.test_ordinary_fields.FileFieldTests)\", \"test_valid_default_case (invalid_models_tests.test_ordinary_fields.FileFieldTests)\", \"test_valid_default_value (invalid_models_tests.test_ordinary_fields.BinaryFieldTests)\", \"test_valid_field (invalid_models_tests.test_ordinary_fields.CharFieldTests)\", \"test_valid_field (invalid_models_tests.test_ordinary_fields.DecimalFieldTests)\"]",
+  "environment_setup_commit": "0668164b4ac93a5be79f5b87fae83c657124d9ab",
+  "patch_files": [
+    "django/db/models/fields/__init__.py"
+  ],
+  "test_patch_files": [
+    "tests/invalid_models_tests/test_ordinary_fields.py"
+  ],
+  "patch_diff_details": {
+    "django/db/models/fields/__init__.py": {
+      "diffs": [
+        {
+          "start_line_old": 272,
+          "end_line_old": 275,
+          "file_pos": 1,
+          "file_context_length": 17512,
+          "pos": 1,
+          "context_length": 448
+        }
+      ]
+    }
+  },
+  "vectors": 3424,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_choices_Field._check_choices.6.1",
+      "distance": 0.7306954860687256,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 244,
+      "end_line": 306,
+      "tokens": 448,
+      "context_length": 448,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/forms/fields.py_TypedMultipleChoiceField_TypedMultipleChoiceField.validate.1.2.1",
+      "distance": 0.7778651714324951,
+      "file_path": "django/forms/fields.py",
+      "start_line": 901,
+      "end_line": 934,
+      "tokens": 235,
+      "context_length": 683
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/forms/fields.py_MultipleChoiceField_MultipleChoiceField.has_changed.7.1",
+      "distance": 0.8087196350097656,
+      "file_path": "django/forms/fields.py",
+      "start_line": 859,
+      "end_line": 898,
+      "tokens": 298,
+      "context_length": 981
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField.choices_ModelChoiceField.has_changed.4.1",
+      "distance": 0.8336046934127808,
+      "file_path": "django/forms/models.py",
+      "start_line": 1254,
+      "end_line": 1284,
+      "tokens": 242,
+      "context_length": 1223
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/forms/fields.py_ChoiceField_ChoiceField.valid_value.4.1",
+      "distance": 0.8412222266197205,
+      "file_path": "django/forms/fields.py",
+      "start_line": 770,
+      "end_line": 829,
+      "tokens": 416,
+      "context_length": 1639
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/forms/fields.py_TypedChoiceField_TypedChoiceField.clean.2.1",
+      "distance": 0.8621242642402649,
+      "file_path": "django/forms/fields.py",
+      "start_line": 832,
+      "end_line": 856,
+      "tokens": 177,
+      "context_length": 1816
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField.prepare_value_",
+      "distance": 0.8881545066833496,
+      "file_path": "django/forms/models.py",
+      "start_line": 1357,
+      "end_line": 1384,
+      "tokens": 209,
+      "context_length": 2025
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceIteratorValue_ModelChoiceIterator.choice.1.1",
+      "distance": 0.9358761310577393,
+      "file_path": "django/forms/models.py",
+      "start_line": 1129,
+      "end_line": 1171,
+      "tokens": 310,
+      "context_length": 2335
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CharField_CharField._check_max_length_attribute.1.3.1.1",
+      "distance": 0.939437210559845,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 973,
+      "end_line": 1005,
+      "tokens": 208,
+      "context_length": 2543,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField._check_values_ModelMultipleChoiceField._check_values.10.1",
+      "distance": 0.9661826491355896,
+      "file_path": "django/forms/models.py",
+      "start_line": 1320,
+      "end_line": 1355,
+      "tokens": 286,
+      "context_length": 2829
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field.validate_Field.validate.5.1",
+      "distance": 0.9927536249160767,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 608,
+      "end_line": 637,
+      "tokens": 234,
+      "context_length": 3063,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_IntegerField_IntegerField._check_max_length_warning.2.1",
+      "distance": 0.9949346780776978,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1706,
+      "end_line": 1729,
+      "tokens": 146,
+      "context_length": 3209,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelMultipleChoiceField_ModelMultipleChoiceField.clean.8.1",
+      "distance": 1.000332236289978,
+      "file_path": "django/forms/models.py",
+      "start_line": 1287,
+      "end_line": 1318,
+      "tokens": 266,
+      "context_length": 3475
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField._get_choices_ModelChoiceField._get_choices.3.9.1",
+      "distance": 1.0072745084762573,
+      "file_path": "django/forms/models.py",
+      "start_line": 1239,
+      "end_line": 1252,
+      "tokens": 176,
+      "context_length": 3651
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/forms/fields.py_MultiValueField.clean_MultiValueField.clean.11.1",
+      "distance": 1.036474585533142,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1006,
+      "end_line": 1058,
+      "tokens": 450,
+      "context_length": 4101
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/models/enums.py_Choices_",
+      "distance": 1.0439141988754272,
+      "file_path": "django/db/models/enums.py",
+      "start_line": 62,
+      "end_line": 83,
+      "tokens": 118,
+      "context_length": 4219
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_IntegerField.get_prep_value_BigIntegerField.formfield.1.1",
+      "distance": 1.0452156066894531,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1760,
+      "end_line": 1805,
+      "tokens": 279,
+      "context_length": 4498,
+      "file_pos": 4
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/forms/fields.py_IntegerField.to_python_IntegerField.widget_attrs.3.1",
+      "distance": 1.0516490936279297,
+      "file_path": "django/forms/fields.py",
+      "start_line": 261,
+      "end_line": 285,
+      "tokens": 195,
+      "context_length": 4693
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_field_name_Field._choices_is_value.1.1",
+      "distance": 1.0532996654510498,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 208,
+      "end_line": 242,
+      "tokens": 235,
+      "context_length": 4928,
+      "file_pos": 4
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CharField.cast_db_type_CharField.formfield.defaults.5.1",
+      "distance": 1.0548803806304932,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1007,
+      "end_line": 1033,
+      "tokens": 229,
+      "context_length": 5157,
+      "file_pos": 4
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ChoicesFieldListFilter.choices_17",
+      "distance": 1.0586609840393066,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 278,
+      "end_line": 302,
+      "tokens": 217,
+      "context_length": 5374
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField_ModelChoiceField.label_from_instance.2.1",
+      "distance": 1.0650439262390137,
+      "file_path": "django/forms/models.py",
+      "start_line": 1174,
+      "end_line": 1237,
+      "tokens": 520,
+      "context_length": 5894
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_IntegerField.validators_IntegerField.validators.validators_.6.1",
+      "distance": 1.065300703048706,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1731,
+      "end_line": 1758,
+      "tokens": 215,
+      "context_length": 6109,
+      "file_pos": 5
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_AllValuesFieldListFilter.choices_AllValuesFieldListFilter.choices.4.1",
+      "distance": 1.0674841403961182,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 397,
+      "end_line": 419,
+      "tokens": 211,
+      "context_length": 6320
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/models/enums.py_ChoicesMeta.__contains___ChoicesMeta.values.1.1",
+      "distance": 1.0691686868667603,
+      "file_path": "django/db/models/enums.py",
+      "start_line": 37,
+      "end_line": 59,
+      "tokens": 183,
+      "context_length": 6503
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/forms/fields.py_IntegerField_IntegerField.__init__.5.1",
+      "distance": 1.0731619596481323,
+      "file_path": "django/forms/fields.py",
+      "start_line": 242,
+      "end_line": 259,
+      "tokens": 164,
+      "context_length": 6667
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field.get_choices_Field.get_choices.8.1",
+      "distance": 1.0741132497787476,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 835,
+      "end_line": 859,
+      "tokens": 244,
+      "context_length": 6911,
+      "file_pos": 5
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/forms/models.py_30_InlineForeignKeyField.has_changed.1.1",
+      "distance": 1.0784785747528076,
+      "file_path": "django/forms/models.py",
+      "start_line": 1086,
+      "end_line": 1126,
+      "tokens": 306,
+      "context_length": 7217
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField._check_decimal_places_and_max_digits_DecimalField.formfield.1.1",
+      "distance": 1.0888563394546509,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1456,
+      "end_line": 1515,
+      "tokens": 398,
+      "context_length": 7615,
+      "file_pos": 5
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner_InteractiveMigrationQuestioner._choice_input.4.result.1",
+      "distance": 1.0962880849838257,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 84,
+      "end_line": 107,
+      "tokens": 187,
+      "context_length": 7802
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AutocompleteMixin.optgroups_AutocompleteMixin.optgroups.9.1",
+      "distance": 1.097473382949829,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 423,
+      "end_line": 447,
+      "tokens": 232,
+      "context_length": 8034
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_SmallIntegerField_TextField.formfield.4.1",
+      "distance": 1.0985978841781616,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2030,
+      "end_line": 2060,
+      "tokens": 199,
+      "context_length": 8233,
+      "file_pos": 7
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_ignored_options_ManyToManyField._check_ignored_options.5.1",
+      "distance": 1.1008286476135254,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1169,
+      "end_line": 1200,
+      "tokens": 180,
+      "context_length": 8413
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_DatabaseValidation.check_field_type_",
+      "distance": 1.104263186454773,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 29,
+      "end_line": 61,
+      "tokens": 246,
+      "context_length": 8659
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_CommaSeparatedIntegerField_CommaSeparatedIntegerField.system_check_removed_details.1",
+      "distance": 1.1064136028289795,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1036,
+      "end_line": 1049,
+      "tokens": 104,
+      "context_length": 8763,
+      "file_pos": 9
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.9.3.seen_from.5.1",
+      "distance": 1.10724937915802,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1202,
+      "end_line": 1313,
+      "tokens": 939,
+      "context_length": 9702
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField._check_max_digits_DecimalField._check_max_digits.1.5.1.1",
+      "distance": 1.1094192266464233,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1432,
+      "end_line": 1454,
+      "tokens": 119,
+      "context_length": 9821,
+      "file_pos": 9
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/ranges.py_RangeField_RangeField.set_attributes_from_name.2",
+      "distance": 1.1210134029388428,
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "start_line": 42,
+      "end_line": 90,
+      "tokens": 362,
+      "context_length": 10183
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_long_column_names_Model._check_long_column_names.10.1",
+      "distance": 1.1213679313659668,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1762,
+      "end_line": 1833,
+      "tokens": 565,
+      "context_length": 10748
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter.choices_RelatedFieldListFilter.choices.3.1",
+      "distance": 1.122248888015747,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 209,
+      "end_line": 226,
+      "tokens": 190,
+      "context_length": 10938
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_IntegerRangeField_",
+      "distance": 1.1228172779083252,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 81,
+      "end_line": 103,
+      "tokens": 149,
+      "context_length": 11087
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model.4_ManyToManyField._check_relationship_model.6.1",
+      "distance": 1.1245508193969727,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1315,
+      "end_line": 1387,
+      "tokens": 616,
+      "context_length": 11703
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField_DecimalField.check.4.1",
+      "distance": 1.1285927295684814,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1383,
+      "end_line": 1406,
+      "tokens": 171,
+      "context_length": 11874,
+      "file_pos": 12
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/postgres/validators.py_1_ArrayMinLengthValidator.message.1",
+      "distance": 1.1286423206329346,
+      "file_path": "django/contrib/postgres/validators.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 181,
+      "context_length": 12055
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/core/validators.py_MaxValueValidator_MaxLengthValidator.clean.1.1",
+      "distance": 1.129404902458191,
+      "file_path": "django/core/validators.py",
+      "start_line": 330,
+      "end_line": 375,
+      "tokens": 308,
+      "context_length": 12363
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/forms/widgets.py_CheckboxSelectMultiple_CheckboxSelectMultiple.id_for_label.3.1",
+      "distance": 1.1317224502563477,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 763,
+      "end_line": 786,
+      "tokens": 204,
+      "context_length": 12567
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/core/validators.py_DecimalValidator.__call___DecimalValidator.__eq__.1.1",
+      "distance": 1.1326518058776855,
+      "file_path": "django/core/validators.py",
+      "start_line": 407,
+      "end_line": 453,
+      "tokens": 415,
+      "context_length": 12982
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.get_context_ChoiceWidget.format_value.4.1",
+      "distance": 1.1329435110092163,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 637,
+      "end_line": 666,
+      "tokens": 238,
+      "context_length": 13220
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0001_initial.py_django.contrib.auth.models_",
+      "distance": 1.1336642503738403,
+      "file_path": "django/contrib/auth/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 105,
+      "tokens": 849,
+      "context_length": 14069
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_must_be_",
+      "distance": 1.1352198123931885,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1093,
+      "end_line": 1123,
+      "tokens": 188,
+      "context_length": 14257
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeCheckMixin_DateTimeCheckMixin._check_fix_default_value.1.1",
+      "distance": 1.1407289505004883,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1052,
+      "end_line": 1081,
+      "tokens": 218,
+      "context_length": 14475,
+      "file_pos": 17
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_backend_specific_checks_Field._check_validators.3.1",
+      "distance": 1.1410717964172363,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 338,
+      "end_line": 362,
+      "tokens": 184,
+      "context_length": 14659,
+      "file_pos": 17
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Select_Select.use_required_attribute.6.1",
+      "distance": 1.141678810119629,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 669,
+      "end_line": 700,
+      "tokens": 261,
+      "context_length": 14920
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_15_ChoicesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.14170503616333,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 264,
+      "end_line": 276,
+      "tokens": 149,
+      "context_length": 15069
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/forms/fields.py_SlugField_",
+      "distance": 1.1423619985580444,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1184,
+      "end_line": 1214,
+      "tokens": 182,
+      "context_length": 15251
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_ordering_Model._check_ordering.29.1",
+      "distance": 1.144483208656311,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1662,
+      "end_line": 1760,
+      "tokens": 717,
+      "context_length": 15968
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/core/validators.py_int_list_validator_validate_comma_separated_integer_list.1",
+      "distance": 1.1488192081451416,
+      "file_path": "django/core/validators.py",
+      "start_line": 284,
+      "end_line": 294,
+      "tokens": 109,
+      "context_length": 16077
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/forms/fields.py_CharField_CharField.widget_attrs.4.1",
+      "distance": 1.149295449256897,
+      "file_path": "django/forms/fields.py",
+      "start_line": 208,
+      "end_line": 239,
+      "tokens": 274,
+      "context_length": 16351
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_BaseRangeField_BaseRangeField.compress.4.3.1.1",
+      "distance": 1.1503291130065918,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 31,
+      "end_line": 78,
+      "tokens": 325,
+      "context_length": 16676
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py_1_",
+      "distance": 1.1503543853759766,
+      "file_path": "django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 111,
+      "context_length": 16787
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_not_null_addition_InteractiveMigrationQuestioner.ask_not_null_addition.3.1",
+      "distance": 1.1510618925094604,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 143,
+      "end_line": 160,
+      "tokens": 183,
+      "context_length": 16970
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_copy_SimpleArrayField.prepare_value.2.1",
+      "distance": 1.1513068675994873,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 258,
+      "context_length": 17228
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_local_fields_Model._check_local_fields.8.1",
+      "distance": 1.151388168334961,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1612,
+      "end_line": 1660,
+      "tokens": 348,
+      "context_length": 17576
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_unique_together_Model._check_unique_together.2.3.3.1",
+      "distance": 1.1526081562042236,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1556,
+      "end_line": 1581,
+      "tokens": 183,
+      "context_length": 17759
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.set_attributes_from_rel_",
+      "distance": 1.1548144817352295,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1611,
+      "end_line": 1645,
+      "tokens": 266,
+      "context_length": 18025
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_collections.abc_return_None.1.1",
+      "distance": 1.154874563217163,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 633,
+      "context_length": 18658,
+      "file_pos": 19
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/forms/fields.py_FilePathField_FilePathField.__init__.self.widget.choices.1",
+      "distance": 1.1554434299468994,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1089,
+      "end_line": 1130,
+      "tokens": 353,
+      "context_length": 19011
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/models/fields/reverse_related.py_ForeignObjectRel.get_choices_ForeignObjectRel.get_choices.5.1",
+      "distance": 1.1563019752502441,
+      "file_path": "django/db/models/fields/reverse_related.py",
+      "start_line": 117,
+      "end_line": 134,
+      "tokens": 161,
+      "context_length": 19172
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/core/validators.py_integer_validator_EmailValidator.__init__.3.self.domain_whitelist.1",
+      "distance": 1.1580010652542114,
+      "file_path": "django/core/validators.py",
+      "start_line": 141,
+      "end_line": 176,
+      "tokens": 388,
+      "context_length": 19560
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/forms/widgets.py_SelectMultiple_RadioSelect.option_template_name.1",
+      "distance": 1.159399390220642,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 741,
+      "end_line": 760,
+      "tokens": 144,
+      "context_length": 19704
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_NonInteractiveMigrationQuestioner_",
+      "distance": 1.1602709293365479,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 227,
+      "end_line": 240,
+      "tokens": 123,
+      "context_length": 19827
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.formfield_for_choice_field_BaseModelAdmin.formfield_for_choice_field.4.1",
+      "distance": 1.1607578992843628,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 188,
+      "end_line": 204,
+      "tokens": 171,
+      "context_length": 19998
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/forms/fields.py_DecimalField.validate_DecimalField.widget_attrs.3.1",
+      "distance": 1.1611028909683228,
+      "file_path": "django/forms/fields.py",
+      "start_line": 351,
+      "end_line": 368,
+      "tokens": 160,
+      "context_length": 20158
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0008_alter_user_username_max_length.py_1_",
+      "distance": 1.1611084938049316,
+      "file_path": "django/contrib/auth/migrations/0008_alter_user_username_max_length.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 138,
+      "context_length": 20296
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_BooleanFieldListFilter.choices_BooleanFieldListFilter.choices.2.1",
+      "distance": 1.1622675657272339,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 246,
+      "end_line": 261,
+      "tokens": 154,
+      "context_length": 20450
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_PositiveBigIntegerField_PositiveSmallIntegerField.formfield.1.1",
+      "distance": 1.1640143394470215,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1958,
+      "end_line": 1994,
+      "tokens": 198,
+      "context_length": 20648,
+      "file_pos": 22
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DecimalField._check_decimal_places_DecimalField._check_decimal_places.1.5.1.1",
+      "distance": 1.164669156074524,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1408,
+      "end_line": 1430,
+      "tokens": 121,
+      "context_length": 20769,
+      "file_pos": 22
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_BooleanField.get_prep_value_BooleanField.formfield.2.1",
+      "distance": 1.1659570932388306,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 954,
+      "end_line": 970,
+      "tokens": 176,
+      "context_length": 20945,
+      "file_pos": 22
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/models/enums.py_enum_ChoicesMeta.__new__.10.1",
+      "distance": 1.1695665121078491,
+      "file_path": "django/db/models/enums.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 298,
+      "context_length": 21243
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_key_BaseModelAdminChecks._check_radio_fields_key.2.3.1.2.1.1",
+      "distance": 1.1706695556640625,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 425,
+      "end_line": 446,
+      "tokens": 191,
+      "context_length": 21434
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/forms/fields.py_DecimalField_DecimalField.to_python.6.1",
+      "distance": 1.174450159072876,
+      "file_path": "django/forms/fields.py",
+      "start_line": 323,
+      "end_line": 349,
+      "tokens": 227,
+      "context_length": 21661
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py_1_",
+      "distance": 1.1748642921447754,
+      "file_path": "django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 137,
+      "context_length": 21798
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.get_unique_error_message_BaseModelFormSet.get_form_error.1.1",
+      "distance": 1.1751147508621216,
+      "file_path": "django/forms/models.py",
+      "start_line": 752,
+      "end_line": 773,
+      "tokens": 194,
+      "context_length": 21992
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/db/migrations/exceptions.py_1_",
+      "distance": 1.1754624843597412,
+      "file_path": "django/db/migrations/exceptions.py",
+      "start_line": 1,
+      "end_line": 55,
+      "tokens": 250,
+      "context_length": 22242
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/jsonb.py_json_",
+      "distance": 1.177006483078003,
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 345,
+      "context_length": 22587
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.unique_error_message_Model.unique_error_message.4.5.3.1",
+      "distance": 1.1771332025527954,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1160,
+      "end_line": 1188,
+      "tokens": 213,
+      "context_length": 22800
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_UUIDField_UUIDField.formfield.1.1",
+      "distance": 1.1788119077682495,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2282,
+      "end_line": 2332,
+      "tokens": 339,
+      "context_length": 23139,
+      "file_pos": 25
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_index_together_Model._check_index_together.2.3.3.1",
+      "distance": 1.178951382637024,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1529,
+      "end_line": 1554,
+      "tokens": 183,
+      "context_length": 23322
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/core/validators.py_DecimalValidator_DecimalValidator.__init__.self.decimal_places.1",
+      "distance": 1.1816201210021973,
+      "file_path": "django/core/validators.py",
+      "start_line": 378,
+      "end_line": 405,
+      "tokens": 224,
+      "context_length": 23546
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/array.py_SimpleArrayField.validate_SimpleArrayField.has_changed.2.1",
+      "distance": 1.1835060119628906,
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "start_line": 62,
+      "end_line": 102,
+      "tokens": 248,
+      "context_length": 23794
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/array.py_ArrayField_ArrayField._choices_is_value.1.1",
+      "distance": 1.1852293014526367,
+      "file_path": "django/contrib/postgres/fields/array.py",
+      "start_line": 18,
+      "end_line": 51,
+      "tokens": 288,
+      "context_length": 24082
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks._check_relation_InlineModelAdminChecks._check_formset.2.2.1.1",
+      "distance": 1.1873643398284912,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1048,
+      "end_line": 1090,
+      "tokens": 343,
+      "context_length": 24425
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_not_null_alteration_InteractiveMigrationQuestioner.ask_not_null_alteration.3.1",
+      "distance": 1.1876721382141113,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 162,
+      "end_line": 185,
+      "tokens": 246,
+      "context_length": 24671
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.optgroups_ChoiceWidget.optgroups.5.1",
+      "distance": 1.1885204315185547,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 582,
+      "end_line": 614,
+      "tokens": 232,
+      "context_length": 24903
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field.clean_Field.db_check.3.2.1.1",
+      "distance": 1.1898257732391357,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 639,
+      "end_line": 663,
+      "tokens": 206,
+      "context_length": 25109,
+      "file_pos": 26
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget_ChoiceWidget.options.2.1",
+      "distance": 1.190448522567749,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 546,
+      "end_line": 580,
+      "tokens": 277,
+      "context_length": 25386
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/contrib/auth/checks.py_check_models_permissions_",
+      "distance": 1.1928536891937256,
+      "file_path": "django/contrib/auth/checks.py",
+      "start_line": 97,
+      "end_line": 167,
+      "tokens": 525,
+      "context_length": 25911
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminIntegerFieldWidget_36",
+      "distance": 1.1931382417678833,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 352,
+      "end_line": 378,
+      "tokens": 328,
+      "context_length": 26239
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/core/serializers/base.py_deserialize_m2m_values_deserialize_m2m_values.4.4.1.2.1",
+      "distance": 1.1950819492340088,
+      "file_path": "django/core/serializers/base.py",
+      "start_line": 273,
+      "end_line": 298,
+      "tokens": 218,
+      "context_length": 26457
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0004_alter_user_username_opts.py_1_",
+      "distance": 1.1956098079681396,
+      "file_path": "django/contrib/auth/migrations/0004_alter_user_username_opts.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 150,
+      "context_length": 26607
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_SlugField_SlugField.formfield.1.1",
+      "distance": 1.195615291595459,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1997,
+      "end_line": 2027,
+      "tokens": 252,
+      "context_length": 26859,
+      "file_pos": 29
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_FloatField_FloatField.formfield.1.1",
+      "distance": 1.1961232423782349,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1666,
+      "end_line": 1703,
+      "tokens": 226,
+      "context_length": 27085,
+      "file_pos": 29
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_property_name_related_field_accessor_clashes_Model._check_single_primary_key.3.1",
+      "distance": 1.1961619853973389,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1495,
+      "end_line": 1527,
+      "tokens": 231,
+      "context_length": 27316
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/db/models/fields/mixins.py_CheckFieldDefaultMixin_",
+      "distance": 1.1984343528747559,
+      "file_path": "django/db/models/fields/mixins.py",
+      "start_line": 31,
+      "end_line": 57,
+      "tokens": 173,
+      "context_length": 27489
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0010_alter_group_name_max_length.py__",
+      "distance": 1.1988945007324219,
+      "file_path": "django/contrib/auth/migrations/0010_alter_group_name_max_length.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 27489
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/checks.py_check_model_name_lengths_",
+      "distance": 1.2003151178359985,
+      "file_path": "django/contrib/contenttypes/checks.py",
+      "start_line": 24,
+      "end_line": 42,
+      "tokens": 125,
+      "context_length": 27614
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey.validate_ForeignKey.validate.7.1",
+      "distance": 1.2010753154754639,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 896,
+      "end_line": 916,
+      "tokens": 178,
+      "context_length": 27792
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_IExact_IntegerLessThan.1",
+      "distance": 1.2033185958862305,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 292,
+      "end_line": 342,
+      "tokens": 306,
+      "context_length": 28098
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/core/validators.py_BaseValidator_BaseValidator.clean.1.1",
+      "distance": 1.2051475048065186,
+      "file_path": "django/core/validators.py",
+      "start_line": 297,
+      "end_line": 327,
+      "tokens": 227,
+      "context_length": 28325
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 1.2055737972259521,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1251,
+      "end_line": 1280,
+      "tokens": 242,
+      "context_length": 28567
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedIn_RelatedIn.get_prep_lookup.2.1",
+      "distance": 1.206117868423462,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 46,
+      "end_line": 60,
+      "tokens": 224,
+      "context_length": 28791
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_table_uniqueness_ManyToManyField._check_table_uniqueness.8.1",
+      "distance": 1.2069443464279175,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1389,
+      "end_line": 1419,
+      "tokens": 322,
+      "context_length": 29113
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._perform_unique_checks_Model._perform_unique_checks.3.1",
+      "distance": 1.20717453956604,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1069,
+      "end_line": 1112,
+      "tokens": 404,
+      "context_length": 29517
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/db/models/options.py_normalize_together_make_immutable_fields_list.1.1",
+      "distance": 1.207270622253418,
+      "file_path": "django/db/models/options.py",
+      "start_line": 39,
+      "end_line": 62,
+      "tokens": 203,
+      "context_length": 29720
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/db/models/functions/text.py_1_BytesToCharFieldConversionMixin.convert_value.2.1",
+      "distance": 1.2080200910568237,
+      "file_path": "django/db/models/functions/text.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 183,
+      "context_length": 29903
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/ranges.py_IntegerRangeField_18",
+      "distance": 1.2082059383392334,
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "start_line": 114,
+      "end_line": 161,
+      "tokens": 262,
+      "context_length": 30165
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_1_DatabaseValidation._check_sql_mode.4.1",
+      "distance": 1.209458589553833,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 248,
+      "context_length": 30413
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_deprecation_details_Field._check_deprecation_details.2.1",
+      "distance": 1.2103062868118286,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 364,
+      "end_line": 390,
+      "tokens": 199,
+      "context_length": 30612,
+      "file_pos": 36
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/forms/widgets.py_ChoiceWidget.create_option_ChoiceWidget.create_option.6.1",
+      "distance": 1.2104504108428955,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 616,
+      "end_line": 635,
+      "tokens": 189,
+      "context_length": 30801
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/jsonb.py_JSONField_JSONField.formfield.1.1",
+      "distance": 1.211031436920166,
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "start_line": 29,
+      "end_line": 82,
+      "tokens": 361,
+      "context_length": 31162
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ModelState_ModelState.name_lower.1.1",
+      "distance": 1.2115452289581299,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 349,
+      "end_line": 399,
+      "tokens": 471,
+      "context_length": 31633
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ModelState.get_field_by_name_ModelState.__repr__.1.1",
+      "distance": 1.2124438285827637,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 580,
+      "end_line": 599,
+      "tokens": 188,
+      "context_length": 31821
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field.value_to_string_Field.save_form_data.1",
+      "distance": 1.2139924764633179,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 861,
+      "end_line": 882,
+      "tokens": 162,
+      "context_length": 31983,
+      "file_pos": 38
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/forms/models.py_1_ALL_FIELDS.1",
+      "distance": 1.215703010559082,
+      "file_path": "django/forms/models.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 215,
+      "context_length": 32198
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelFormSet.validate_unique_BaseModelFormSet.validate_unique.all_unique_checks.11.1",
+      "distance": 1.2159093618392944,
+      "file_path": "django/forms/models.py",
+      "start_line": 679,
+      "end_line": 750,
+      "tokens": 732,
+      "context_length": 32930
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/core/exceptions.py_ValidationError_",
+      "distance": 1.2160065174102783,
+      "file_path": "django/core/exceptions.py",
+      "start_line": 99,
+      "end_line": 194,
+      "tokens": 649,
+      "context_length": 33579
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/forms/fields.py_FloatField_FloatField.widget_attrs.3.1",
+      "distance": 1.2164700031280518,
+      "file_path": "django/forms/fields.py",
+      "start_line": 288,
+      "end_line": 320,
+      "tokens": 228,
+      "context_length": 33807
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.date_error_message_Model.date_error_message.3.1",
+      "distance": 1.216721534729004,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1143,
+      "end_line": 1158,
+      "tokens": 138,
+      "context_length": 33945
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_MigrationQuestioner.ask_not_null_addition_MigrationQuestioner.ask_auto_now_add_addition.3.1",
+      "distance": 1.2172625064849854,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 56,
+      "end_line": 81,
+      "tokens": 220,
+      "context_length": 34165
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/forms/fields.py_MultiValueField_MultiValueField.validate.1",
+      "distance": 1.218247652053833,
+      "file_path": "django/forms/fields.py",
+      "start_line": 961,
+      "end_line": 1004,
+      "tokens": 372,
+      "context_length": 34537
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.lookup_allowed_BaseModelAdmin.lookup_allowed.14.1",
+      "distance": 1.2186646461486816,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 368,
+      "end_line": 420,
+      "tokens": 504,
+      "context_length": 35041
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._post_clean_BaseModelForm._post_clean.14.1",
+      "distance": 1.2188119888305664,
+      "file_path": "django/forms/models.py",
+      "start_line": 382,
+      "end_line": 410,
+      "tokens": 240,
+      "context_length": 35281
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_editable_item_ModelAdminChecks._check_list_editable_item.1.3.1.7.1.1",
+      "distance": 1.21926748752594,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 880,
+      "end_line": 928,
+      "tokens": 416,
+      "context_length": 35697
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner._ask_default_InteractiveMigrationQuestioner._ask_default.6.4.3.1.2.1",
+      "distance": 1.2192835807800293,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 109,
+      "end_line": 141,
+      "tokens": 290,
+      "context_length": 35987
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_db_index_Field._check_null_allowed_for_primary_keys.1.5.1.1",
+      "distance": 1.220170259475708,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 308,
+      "end_line": 336,
+      "tokens": 205,
+      "context_length": 36192,
+      "file_pos": 39
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/forms/boundfield.py_BoundField.subwidgets_BoundField.subwidgets.5.1",
+      "distance": 1.2205791473388672,
+      "file_path": "django/forms/boundfield.py",
+      "start_line": 35,
+      "end_line": 50,
+      "tokens": 149,
+      "context_length": 36341
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/array.py_json___all__.1",
+      "distance": 1.2216417789459229,
+      "file_path": "django/contrib/postgres/fields/array.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 110,
+      "context_length": 36451
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_EmailField_EmailField.formfield.3.1",
+      "distance": 1.2222148180007935,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1578,
+      "end_line": 1599,
+      "tokens": 183,
+      "context_length": 36634,
+      "file_pos": 40
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_field_name_clashes_Model._check_field_name_clashes.12.1",
+      "distance": 1.222775936126709,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1389,
+      "end_line": 1444,
+      "tokens": 491,
+      "context_length": 37125
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_constraints_Model._check_constraints.3.1",
+      "distance": 1.2234091758728027,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1835,
+      "end_line": 1859,
+      "tokens": 175,
+      "context_length": 37300
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ModelState.__eq___",
+      "distance": 1.2253841161727905,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 601,
+      "end_line": 612,
+      "tokens": 136,
+      "context_length": 37436
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.contribute_to_class_Options.contribute_to_class.16.self.db_table_2.1",
+      "distance": 1.2294230461120605,
+      "file_path": "django/db/models/options.py",
+      "start_line": 149,
+      "end_line": 208,
+      "tokens": 587,
+      "context_length": 38023
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_m2m_through_same_relationship_Model._check_m2m_through_same_relationship.10.1",
+      "distance": 1.230485439300537,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1340,
+      "end_line": 1370,
+      "tokens": 244,
+      "context_length": 38267
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_radio_fields_value_BaseModelAdminChecks._check_view_on_site_url.1.2.1.1",
+      "distance": 1.232009768486023,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 448,
+      "end_line": 474,
+      "tokens": 190,
+      "context_length": 38457
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_BaseModelAdminChecks._check_prepopulated_fields_value.2.2.1.1",
+      "distance": 1.2333300113677979,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 510,
+      "end_line": 520,
+      "tokens": 134,
+      "context_length": 38591
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_column_name_clashes_Model._check_column_name_clashes.used_column_names.4.1",
+      "distance": 1.2334046363830566,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1446,
+      "end_line": 1469,
+      "tokens": 176,
+      "context_length": 38767
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_auto_now_add_addition_InteractiveMigrationQuestioner.ask_auto_now_add_addition.3.1",
+      "distance": 1.2341713905334473,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 207,
+      "end_line": 224,
+      "tokens": 171,
+      "context_length": 38938
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_BaseModelAdminChecks._check_autocomplete_fields.2.2.1.1",
+      "distance": 1.2347933053970337,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 149,
+      "end_line": 159,
+      "tokens": 123,
+      "context_length": 39061
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignObject._check_unique_target_ForeignObject._check_unique_target.9.5.1.1",
+      "distance": 1.2367380857467651,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 509,
+      "end_line": 563,
+      "tokens": 409,
+      "context_length": 39470
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_field_spec_item_BaseModelAdminChecks._check_field_spec_item.1.5.1.3.1.2.1.1",
+      "distance": 1.2374074459075928,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 326,
+      "end_line": 352,
+      "tokens": 221,
+      "context_length": 39691
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/forms/fields.py_NullBooleanField_CallableChoiceIterator.__iter__.1",
+      "distance": 1.237534999847412,
+      "file_path": "django/forms/fields.py",
+      "start_line": 735,
+      "end_line": 767,
+      "tokens": 241,
+      "context_length": 39932
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_BooleanField_BooleanField.to_python.5",
+      "distance": 1.2379523515701294,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 927,
+      "end_line": 952,
+      "tokens": 209,
+      "context_length": 40141,
+      "file_pos": 40
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_model_name_db_lookup_clashes_Model._check_model_name_db_lookup_clashes.4.1",
+      "distance": 1.2387633323669434,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1471,
+      "end_line": 1493,
+      "tokens": 171,
+      "context_length": 40312
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedLookupMixin_RelatedLookupMixin.get_prep_lookup.2.1",
+      "distance": 1.2388534545898438,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 102,
+      "end_line": 117,
+      "tokens": 215,
+      "context_length": 40527
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_filter_item_ModelAdminChecks._check_list_filter_item.3.4.field.3.3.1.1",
+      "distance": 1.2390317916870117,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 792,
+      "end_line": 842,
+      "tokens": 443,
+      "context_length": 40970
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/contrib/auth/checks.py_1_check_user_model.11.1",
+      "distance": 1.2406623363494873,
+      "file_path": "django/contrib/auth/checks.py",
+      "start_line": 1,
+      "end_line": 94,
+      "tokens": 646,
+      "context_length": 41616
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.from_db_Model.__getstate__.2.1",
+      "distance": 1.2415885925292969,
+      "file_path": "django/db/models/base.py",
+      "start_line": 505,
+      "end_line": 547,
+      "tokens": 347,
+      "context_length": 41963
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/core/serializers/base.py_deserialize_fk_value_",
+      "distance": 1.241690754890442,
+      "file_path": "django/core/serializers/base.py",
+      "start_line": 301,
+      "end_line": 323,
+      "tokens": 207,
+      "context_length": 42170
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.2418632507324219,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 769,
+      "context_length": 42939
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/core/validators.py_FileExtensionValidator_FileExtensionValidator.__eq__.1.1",
+      "distance": 1.2421131134033203,
+      "file_path": "django/core/validators.py",
+      "start_line": 456,
+      "end_line": 491,
+      "tokens": 249,
+      "context_length": 43188
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.validate_autopk_value_DatabaseOperations.bulk_insert_sql.3.1",
+      "distance": 1.2433233261108398,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 193,
+      "end_line": 236,
+      "tokens": 329,
+      "context_length": 43517
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_24_RelatedOnlyFieldListFilter.field_choices.3.1",
+      "distance": 1.2441625595092773,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 422,
+      "end_line": 429,
+      "tokens": 107,
+      "context_length": 43624
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/forms/fields.py_DurationField_DurationField.to_python.5.1",
+      "distance": 1.245225429534912,
+      "file_path": "django/forms/fields.py",
+      "start_line": 480,
+      "end_line": 505,
+      "tokens": 174,
+      "context_length": 43798
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/postgres/validators.py_KeysValidator_",
+      "distance": 1.2479208707809448,
+      "file_path": "django/contrib/postgres/validators.py",
+      "start_line": 24,
+      "end_line": 77,
+      "tokens": 370,
+      "context_length": 44168
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedIn.as_sql_RelatedIn.as_sql.1.5.2.1",
+      "distance": 1.2481474876403809,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 62,
+      "end_line": 99,
+      "tokens": 447,
+      "context_length": 44615
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/contrib/auth/models.py_GroupManager_Group.natural_key.1.1",
+      "distance": 1.2492690086364746,
+      "file_path": "django/contrib/auth/models.py",
+      "start_line": 80,
+      "end_line": 124,
+      "tokens": 309,
+      "context_length": 44924
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/utils/datastructures.py_MultiValueDict.setdefault_MultiValueDict.copy.2.1",
+      "distance": 1.249470829963684,
+      "file_path": "django/utils/datastructures.py",
+      "start_line": 151,
+      "end_line": 190,
+      "tokens": 300,
+      "context_length": 45224
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField._check_fix_default_value_DateField._check_fix_default_value.11.1",
+      "distance": 1.2498269081115723,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1102,
+      "end_line": 1140,
+      "tokens": 293,
+      "context_length": 45517,
+      "file_pos": 43
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.formfield_RelatedField.formfield.5.1",
+      "distance": 1.250024676322937,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 401,
+      "end_line": 419,
+      "tokens": 165,
+      "context_length": 45682
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/array.py_ArrayField.validate_ArrayField.validate.3.1.1",
+      "distance": 1.2507574558258057,
+      "file_path": "django/contrib/postgres/fields/array.py",
+      "start_line": 160,
+      "end_line": 177,
+      "tokens": 146,
+      "context_length": 45828
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/forms/fields.py_FileField_FileField.__init__.3",
+      "distance": 1.2516003847122192,
+      "file_path": "django/forms/fields.py",
+      "start_line": 540,
+      "end_line": 556,
+      "tokens": 180,
+      "context_length": 46008
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_GenericIPAddressField_GenericIPAddressField.formfield.1.1",
+      "distance": 1.2519056797027588,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1839,
+      "end_line": 1916,
+      "tokens": 567,
+      "context_length": 46575,
+      "file_pos": 43
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.2519488334655762,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 330,
+      "context_length": 46905
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_item_BaseModelAdminChecks._check_autocomplete_fields_item.2.3.4.1",
+      "distance": 1.2538325786590576,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 161,
+      "end_line": 202,
+      "tokens": 325,
+      "context_length": 47230
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/db/models/deletion.py_operator_get_candidate_relations_to_delete.3.1",
+      "distance": 1.254245400428772,
+      "file_path": "django/db/models/deletion.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 566,
+      "context_length": 47796
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_item_BaseModelAdminChecks._check_ordering.3.4.1.1",
+      "distance": 1.2551000118255615,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 522,
+      "end_line": 545,
+      "tokens": 230,
+      "context_length": 48026
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_10_FlexibleFieldLookupDict.base_data_types_reverse.__getitem__.2.1",
+      "distance": 1.255103349685669,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 23,
+      "end_line": 54,
+      "tokens": 296,
+      "context_length": 48322
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.add_manager_Options.add_field.5.12.3.1",
+      "distance": 1.2558557987213135,
+      "file_path": "django/db/models/options.py",
+      "start_line": 262,
+      "end_line": 294,
+      "tokens": 331,
+      "context_length": 48653
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey.formfield_ForeignKey.formfield.2.1",
+      "distance": 1.257163405418396,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 952,
+      "end_line": 962,
+      "tokens": 121,
+      "context_length": 48774
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.managers_Options.managers_map.1.1",
+      "distance": 1.257522463798523,
+      "file_path": "django/db/models/options.py",
+      "start_line": 363,
+      "end_line": 385,
+      "tokens": 164,
+      "context_length": 48938
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_FieldGetDbPrepValueIterableMixin_FieldGetDbPrepValueIterableMixin.resolve_expression_parameter.4.1",
+      "distance": 1.2598525285720825,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 208,
+      "end_line": 243,
+      "tokens": 308,
+      "context_length": 49246
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_In.get_rhs_op_In.split_parameter_list_as_sql.max_in_list_size.8.1",
+      "distance": 1.2609385251998901,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 377,
+      "end_line": 406,
+      "tokens": 337,
+      "context_length": 49583
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_AutoFieldMixin_AutoFieldMixin.formfield.1.1",
+      "distance": 1.261391282081604,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2335,
+      "end_line": 2384,
+      "tokens": 311,
+      "context_length": 49894,
+      "file_pos": 45
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_In_In.process_rhs.3.8.2.1",
+      "distance": 1.261683702468872,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 345,
+      "end_line": 375,
+      "tokens": 263,
+      "context_length": 50157
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField._check_fix_default_value_TimeField._check_fix_default_value.8.1",
+      "distance": 1.2621887922286987,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2081,
+      "end_line": 2122,
+      "tokens": 325,
+      "context_length": 50482,
+      "file_pos": 45
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/hstore.py_json_HStoreField.get_prep_value.4.1",
+      "distance": 1.2625466585159302,
+      "file_path": "django/contrib/postgres/fields/hstore.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 435,
+      "context_length": 50917
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/core/validators.py_validate_email_ip_address_validator_map.1",
+      "distance": 1.2628698348999023,
+      "file_path": "django/core/validators.py",
+      "start_line": 222,
+      "end_line": 266,
+      "tokens": 330,
+      "context_length": 51247
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField._check_fix_default_value_DateTimeField._check_fix_default_value.8.1",
+      "distance": 1.2634090185165405,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1242,
+      "end_line": 1283,
+      "tokens": 332,
+      "context_length": 51579,
+      "file_pos": 46
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes.39_RelatedField._check_clashes.40.1",
+      "distance": 1.2634363174438477,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 255,
+      "end_line": 282,
+      "tokens": 269,
+      "context_length": 51848
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/contrib/postgres/fields/ranges.py_RangeField.value_to_string_RangeField.formfield.2.1",
+      "distance": 1.2634828090667725,
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "start_line": 92,
+      "end_line": 111,
+      "tokens": 160,
+      "context_length": 52008
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_AutoField_",
+      "distance": 1.2639949321746826,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2415,
+      "end_line": 2440,
+      "tokens": 143,
+      "context_length": 52151,
+      "file_pos": 46
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_fields_BaseModelAdminChecks._check_fields.5.1",
+      "distance": 1.2641139030456543,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 231,
+      "end_line": 261,
+      "tokens": 229,
+      "context_length": 52380
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/utils/datastructures.py_MultiValueDict_MultiValueDict.setlist.1",
+      "distance": 1.2655667066574097,
+      "file_path": "django/utils/datastructures.py",
+      "start_line": 42,
+      "end_line": 149,
+      "tokens": 766,
+      "context_length": 53146
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/core/checks/translation.py_1_",
+      "distance": 1.2671363353729248,
+      "file_path": "django/core/checks/translation.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 445,
+      "context_length": 53591
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_1_BaseDatabaseFeatures.can_introspect_default.1",
+      "distance": 1.2679239511489868,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 904,
+      "context_length": 54495
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_json_checkbox.1",
+      "distance": 1.2683974504470825,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 198,
+      "context_length": 54693
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/django/django/core/validators.py_get_available_image_extensions_",
+      "distance": 1.2687790393829346,
+      "file_path": "django/core/validators.py",
+      "start_line": 494,
+      "end_line": 530,
+      "tokens": 219,
+      "context_length": 54912
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/django/django/db/models/options.py_bisect_DEFAULT_NAMES.1",
+      "distance": 1.2707908153533936,
+      "file_path": "django/db/models/options.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 301,
+      "context_length": 55213
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_select_related_ModelAdminChecks._check_list_max_show_all.2.2.1.1",
+      "distance": 1.2708196640014648,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 844,
+      "end_line": 866,
+      "tokens": 217,
+      "context_length": 55430
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_BaseModelAdminChecks._check_prepopulated_fields.2.2.1.1",
+      "distance": 1.2722688913345337,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 476,
+      "end_line": 486,
+      "tokens": 149,
+      "context_length": 55579
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/django/django/forms/models.py_BaseModelForm._get_validation_exclusions_BaseModelForm._get_validation_exclusions.6.1",
+      "distance": 1.2725486755371094,
+      "file_path": "django/forms/models.py",
+      "start_line": 309,
+      "end_line": 348,
+      "tokens": 387,
+      "context_length": 55966
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_NullBooleanField_NullBooleanField.get_internal_type.1.1",
+      "distance": 1.2725918292999268,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1919,
+      "end_line": 1938,
+      "tokens": 164,
+      "context_length": 56130,
+      "file_pos": 49
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 1,
+      "tokens": 17512,
+      "context_length": 17512
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 2,
+      "tokens": 9013,
+      "context_length": 26525
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 3,
+      "tokens": 11602,
+      "context_length": 38127
+    },
+    {
+      "file_path": "django/db/models/enums.py",
+      "position": 4,
+      "tokens": 593,
+      "context_length": 38720
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 5,
+      "tokens": 4093,
+      "context_length": 42813
+    },
+    {
+      "file_path": "django/db/migrations/questioner.py",
+      "position": 6,
+      "tokens": 2074,
+      "context_length": 44887
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 7,
+      "tokens": 3866,
+      "context_length": 48753
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 8,
+      "tokens": 13512,
+      "context_length": 62265
+    },
+    {
+      "file_path": "django/db/backends/mysql/validation.py",
+      "position": 9,
+      "tokens": 488,
+      "context_length": 62753
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/ranges.py",
+      "position": 10,
+      "tokens": 2117,
+      "context_length": 64870
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 11,
+      "tokens": 15316,
+      "context_length": 80186
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 12,
+      "tokens": 677,
+      "context_length": 80863
+    },
+    {
+      "file_path": "django/contrib/postgres/validators.py",
+      "position": 13,
+      "tokens": 551,
+      "context_length": 81414
+    },
+    {
+      "file_path": "django/core/validators.py",
+      "position": 14,
+      "tokens": 4235,
+      "context_length": 85649
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 15,
+      "tokens": 8006,
+      "context_length": 93655
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0001_initial.py",
+      "position": 16,
+      "tokens": 849,
+      "context_length": 94504
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 17,
+      "tokens": 9048,
+      "context_length": 103552
+    },
+    {
+      "file_path": "django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py",
+      "position": 18,
+      "tokens": 111,
+      "context_length": 103663
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/array.py",
+      "position": 19,
+      "tokens": 1594,
+      "context_length": 105257
+    },
+    {
+      "file_path": "django/db/models/fields/reverse_related.py",
+      "position": 20,
+      "tokens": 2143,
+      "context_length": 107400
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 21,
+      "tokens": 18487,
+      "context_length": 125887
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0008_alter_user_username_max_length.py",
+      "position": 22,
+      "tokens": 138,
+      "context_length": 126025
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0007_alter_validators_add_error_messages.py",
+      "position": 23,
+      "tokens": 137,
+      "context_length": 126162
+    },
+    {
+      "file_path": "django/db/migrations/exceptions.py",
+      "position": 24,
+      "tokens": 251,
+      "context_length": 126413
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/jsonb.py",
+      "position": 25,
+      "tokens": 345,
+      "context_length": 126758
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/array.py",
+      "position": 26,
+      "tokens": 2081,
+      "context_length": 128839
+    },
+    {
+      "file_path": "django/contrib/auth/checks.py",
+      "position": 27,
+      "tokens": 1173,
+      "context_length": 130012
+    },
+    {
+      "file_path": "django/core/serializers/base.py",
+      "position": 28,
+      "tokens": 2425,
+      "context_length": 132437
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0004_alter_user_username_opts.py",
+      "position": 29,
+      "tokens": 150,
+      "context_length": 132587
+    },
+    {
+      "file_path": "django/db/models/fields/mixins.py",
+      "position": 30,
+      "tokens": 343,
+      "context_length": 132930
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0010_alter_group_name_max_length.py",
+      "position": 31,
+      "tokens": 77,
+      "context_length": 133007
+    },
+    {
+      "file_path": "django/contrib/contenttypes/checks.py",
+      "position": 32,
+      "tokens": 249,
+      "context_length": 133256
+    },
+    {
+      "file_path": "django/db/models/lookups.py",
+      "position": 33,
+      "tokens": 4823,
+      "context_length": 138079
+    },
+    {
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "position": 34,
+      "tokens": 1449,
+      "context_length": 139528
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 35,
+      "tokens": 7084,
+      "context_length": 146612
+    },
+    {
+      "file_path": "django/db/models/functions/text.py",
+      "position": 36,
+      "tokens": 2456,
+      "context_length": 149068
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/jsonb.py",
+      "position": 37,
+      "tokens": 1223,
+      "context_length": 150291
+    },
+    {
+      "file_path": "django/db/migrations/state.py",
+      "position": 38,
+      "tokens": 5218,
+      "context_length": 155509
+    },
+    {
+      "file_path": "django/core/exceptions.py",
+      "position": 39,
+      "tokens": 1055,
+      "context_length": 156564
+    },
+    {
+      "file_path": "django/forms/boundfield.py",
+      "position": 40,
+      "tokens": 2121,
+      "context_length": 158685
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 41,
+      "tokens": 3331,
+      "context_length": 162016
+    },
+    {
+      "file_path": "django/contrib/auth/models.py",
+      "position": 42,
+      "tokens": 3189,
+      "context_length": 165205
+    },
+    {
+      "file_path": "django/utils/datastructures.py",
+      "position": 43,
+      "tokens": 2257,
+      "context_length": 167462
+    },
+    {
+      "file_path": "django/db/models/deletion.py",
+      "position": 44,
+      "tokens": 3659,
+      "context_length": 171121
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "position": 45,
+      "tokens": 3711,
+      "context_length": 174832
+    },
+    {
+      "file_path": "django/contrib/postgres/fields/hstore.py",
+      "position": 46,
+      "tokens": 700,
+      "context_length": 175532
+    },
+    {
+      "file_path": "django/core/checks/translation.py",
+      "position": 47,
+      "tokens": 445,
+      "context_length": 175977
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 48,
+      "tokens": 2579,
+      "context_length": 178556
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 49,
+      "tokens": 3193,
+      "context_length": 181749
+    }
+  ]
+}

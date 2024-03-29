@@ -1,0 +1,1664 @@
+{
+  "instance_id": "sympy__sympy-15198",
+  "model_patch": "diff --git a/sympy/printing/octave.py b/sympy/printing/octave.py\nindex 9de4f6af14..9dc99992ea 100644\n--- a/sympy/printing/octave.py\n+++ b/sympy/printing/octave.py\n@@ -56,6 +56,7 @@\n     \"RisingFactorial\": \"pochhammer\",\n     \"Shi\": \"sinhint\",\n     \"Si\": \"sinint\",\n+    \"assoc_laguerre\": \"_print_assoc_laguerre\",\n }\n \n \n@@ -561,6 +562,9 @@ def indent_code(self, code):\n             level += increase[n]\n         return pretty\n \n+    def _print_assoc_laguerre(self, expr):\n+        raise NotImplementedError(\"Code generation for the associated Laguerre polynomials is not supported in Octave.\")\n+\n \n def octave_code(expr, assign_to=None, **settings):\n     r\"\"\"Converts `expr` to a string of Octave (or Matlab) code.\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/printing/octave.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "115dd821a4b9ec94ca1bd339a8c0d63f31a12167",
+  "patch": "diff --git a/sympy/combinatorics/homomorphisms.py b/sympy/combinatorics/homomorphisms.py\n--- a/sympy/combinatorics/homomorphisms.py\n+++ b/sympy/combinatorics/homomorphisms.py\n@@ -445,6 +445,7 @@ def group_isomorphism(G, H, isomorphism=True):\n     ========\n \n     >>> from sympy.combinatorics import Permutation\n+    >>> Permutation.print_cyclic = True\n     >>> from sympy.combinatorics.perm_groups import PermutationGroup\n     >>> from sympy.combinatorics.free_groups import free_group\n     >>> from sympy.combinatorics.fp_groups import FpGroup\ndiff --git a/sympy/printing/ccode.py b/sympy/printing/ccode.py\n--- a/sympy/printing/ccode.py\n+++ b/sympy/printing/ccode.py\n@@ -168,7 +168,7 @@ class C89CodePrinter(CodePrinter):\n         'precision': 17,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'contract': True,\n         'dereference': set(),\n         'error_on_reserved': False,\ndiff --git a/sympy/printing/codeprinter.py b/sympy/printing/codeprinter.py\n--- a/sympy/printing/codeprinter.py\n+++ b/sympy/printing/codeprinter.py\n@@ -54,7 +54,7 @@ class CodePrinter(StrPrinter):\n         'reserved_word_suffix': '_',\n         'human': True,\n         'inline': False,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n     }\n \n     def __init__(self, settings=None):\n@@ -382,7 +382,7 @@ def _print_Function(self, expr):\n         elif hasattr(expr, '_imp_') and isinstance(expr._imp_, Lambda):\n             # inlined function\n             return self._print(expr._imp_(*expr.args))\n-        elif expr.is_Function and self._settings.get('allow_unknown_functions', True):\n+        elif expr.is_Function and self._settings.get('allow_unknown_functions', False):\n             return '%s(%s)' % (self._print(expr.func), ', '.join(map(self._print, expr.args)))\n         else:\n             return self._print_not_supported(expr)\ndiff --git a/sympy/printing/fcode.py b/sympy/printing/fcode.py\n--- a/sympy/printing/fcode.py\n+++ b/sympy/printing/fcode.py\n@@ -98,7 +98,7 @@ class FCodePrinter(CodePrinter):\n         'precision': 17,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'source_format': 'fixed',\n         'contract': True,\n         'standard': 77,\ndiff --git a/sympy/printing/glsl.py b/sympy/printing/glsl.py\n--- a/sympy/printing/glsl.py\n+++ b/sympy/printing/glsl.py\n@@ -50,7 +50,7 @@ class GLSLPrinter(CodePrinter):\n         'precision': 9,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'contract': True,\n         'error_on_reserved': False,\n         'reserved_word_suffix': '_'\ndiff --git a/sympy/printing/jscode.py b/sympy/printing/jscode.py\n--- a/sympy/printing/jscode.py\n+++ b/sympy/printing/jscode.py\n@@ -55,7 +55,7 @@ class JavascriptCodePrinter(CodePrinter):\n         'precision': 17,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'contract': True\n     }\n \ndiff --git a/sympy/printing/julia.py b/sympy/printing/julia.py\n--- a/sympy/printing/julia.py\n+++ b/sympy/printing/julia.py\n@@ -62,7 +62,7 @@ class JuliaCodePrinter(CodePrinter):\n         'precision': 17,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'contract': True,\n         'inline': True,\n     }\ndiff --git a/sympy/printing/mathematica.py b/sympy/printing/mathematica.py\n--- a/sympy/printing/mathematica.py\n+++ b/sympy/printing/mathematica.py\n@@ -47,7 +47,7 @@ class MCodePrinter(CodePrinter):\n         'precision': 15,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n     }\n \n     _number_symbols = set()\ndiff --git a/sympy/printing/octave.py b/sympy/printing/octave.py\n--- a/sympy/printing/octave.py\n+++ b/sympy/printing/octave.py\n@@ -78,7 +78,7 @@ class OctaveCodePrinter(CodePrinter):\n         'precision': 17,\n         'user_functions': {},\n         'human': True,\n-        'allow_unknown_functions': True,\n+        'allow_unknown_functions': False,\n         'contract': True,\n         'inline': True,\n     }\ndiff --git a/sympy/utilities/lambdify.py b/sympy/utilities/lambdify.py\n--- a/sympy/utilities/lambdify.py\n+++ b/sympy/utilities/lambdify.py\n@@ -425,6 +425,7 @@ def lambdify(args, expr, modules=None, printer=None, use_imps=True,\n                 for k in m:\n                     user_functions[k] = k\n         printer = Printer({'fully_qualified_modules': False, 'inline': True,\n+                           'allow_unknown_functions': True,\n                            'user_functions': user_functions})\n \n     # Get the names of the args, for creating a docstring\ndiff --git a/sympy/utilities/runtests.py b/sympy/utilities/runtests.py\n--- a/sympy/utilities/runtests.py\n+++ b/sympy/utilities/runtests.py\n@@ -145,13 +145,14 @@ def setup_pprint():\n     import sympy.interactive.printing as interactive_printing\n \n     # force pprint to be in ascii mode in doctests\n-    pprint_use_unicode(False)\n+    use_unicode_prev = pprint_use_unicode(False)\n \n     # hook our nice, hash-stable strprinter\n     init_printing(pretty_print=False)\n \n     # Prevent init_printing() in doctests from affecting other doctests\n     interactive_printing.NO_GLOBAL = True\n+    return use_unicode_prev\n \n def run_in_subprocess_with_hash_randomization(\n         function, function_args=(),\n@@ -657,6 +658,8 @@ def _doctest(*paths, **kwargs):\n     Returns 0 if tests passed and 1 if they failed.  See the docstrings of\n     ``doctest()`` and ``test()`` for more information.\n     \"\"\"\n+    from sympy import pprint_use_unicode\n+\n     normal = kwargs.get(\"normal\", False)\n     verbose = kwargs.get(\"verbose\", False)\n     colors = kwargs.get(\"colors\", True)\n@@ -822,7 +825,7 @@ def _doctest(*paths, **kwargs):\n             continue\n         old_displayhook = sys.displayhook\n         try:\n-            setup_pprint()\n+            use_unicode_prev = setup_pprint()\n             out = sympytestfile(\n                 rst_file, module_relative=False, encoding='utf-8',\n                 optionflags=pdoctest.ELLIPSIS | pdoctest.NORMALIZE_WHITESPACE |\n@@ -835,6 +838,7 @@ def _doctest(*paths, **kwargs):\n             # if True\n             import sympy.interactive.printing as interactive_printing\n             interactive_printing.NO_GLOBAL = False\n+            pprint_use_unicode(use_unicode_prev)\n \n         rstfailed, tested = out\n         if tested:\n@@ -1344,6 +1348,7 @@ def test_file(self, filename):\n \n         from sympy.core.compatibility import StringIO\n         import sympy.interactive.printing as interactive_printing\n+        from sympy import pprint_use_unicode\n \n         rel_name = filename[len(self._root_dir) + 1:]\n         dirname, file = os.path.split(filename)\n@@ -1354,7 +1359,6 @@ def test_file(self, filename):\n             # So we have to temporarily extend sys.path to import them\n             sys.path.insert(0, dirname)\n             module = file[:-3]  # remove \".py\"\n-        setup_pprint()\n         try:\n             module = pdoctest._normalize_module(module)\n             tests = SymPyDocTestFinder().find(module)\n@@ -1366,7 +1370,6 @@ def test_file(self, filename):\n         finally:\n             if rel_name.startswith(\"examples\"):\n                 del sys.path[0]\n-            interactive_printing.NO_GLOBAL = False\n \n         tests = [test for test in tests if len(test.examples) > 0]\n         # By default tests are sorted by alphabetical order by function name.\n@@ -1412,6 +1415,10 @@ def test_file(self, filename):\n                 # comes by default with a \"from sympy import *\"\n                 #exec('from sympy import *') in test.globs\n             test.globs['print_function'] = print_function\n+\n+            old_displayhook = sys.displayhook\n+            use_unicode_prev = setup_pprint()\n+\n             try:\n                 f, t = runner.run(test, compileflags=future_flags,\n                                   out=new.write, clear_globs=False)\n@@ -1423,6 +1430,10 @@ def test_file(self, filename):\n                 self._reporter.doctest_fail(test.name, new.getvalue())\n             else:\n                 self._reporter.test_pass()\n+                sys.displayhook = old_displayhook\n+                interactive_printing.NO_GLOBAL = False\n+                pprint_use_unicode(use_unicode_prev)\n+\n         self._reporter.leaving_filename()\n \n     def get_test_files(self, dir, pat='*.py', init_only=True):\n",
+  "test_patch": "diff --git a/sympy/printing/tests/test_ccode.py b/sympy/printing/tests/test_ccode.py\n--- a/sympy/printing/tests/test_ccode.py\n+++ b/sympy/printing/tests/test_ccode.py\n@@ -133,8 +133,12 @@ def test_ccode_inline_function():\n \n def test_ccode_exceptions():\n     assert ccode(gamma(x), standard='C99') == \"tgamma(x)\"\n+    gamma_c89 = ccode(gamma(x), standard='C89')\n+    assert 'not supported in c' in gamma_c89.lower()\n     gamma_c89 = ccode(gamma(x), standard='C89', allow_unknown_functions=False)\n     assert 'not supported in c' in gamma_c89.lower()\n+    gamma_c89 = ccode(gamma(x), standard='C89', allow_unknown_functions=True)\n+    assert not 'not supported in c' in gamma_c89.lower()\n     assert ccode(ceiling(x)) == \"ceil(x)\"\n     assert ccode(Abs(x)) == \"fabs(x)\"\n     assert ccode(gamma(x)) == \"tgamma(x)\"\ndiff --git a/sympy/printing/tests/test_fcode.py b/sympy/printing/tests/test_fcode.py\n--- a/sympy/printing/tests/test_fcode.py\n+++ b/sympy/printing/tests/test_fcode.py\n@@ -168,10 +168,10 @@ def test_implicit():\n def test_not_fortran():\n     x = symbols('x')\n     g = Function('g')\n-    gamma_f = fcode(gamma(x), allow_unknown_functions=False)\n+    gamma_f = fcode(gamma(x))\n     assert gamma_f == \"C     Not supported in Fortran:\\nC     gamma\\n      gamma(x)\"\n     assert fcode(Integral(sin(x))) == \"C     Not supported in Fortran:\\nC     Integral\\n      Integral(sin(x), x)\"\n-    assert fcode(g(x), allow_unknown_functions=False) == \"C     Not supported in Fortran:\\nC     g\\n      g(x)\"\n+    assert fcode(g(x)) == \"C     Not supported in Fortran:\\nC     g\\n      g(x)\"\n \n \n def test_user_functions():\ndiff --git a/sympy/printing/tests/test_octave.py b/sympy/printing/tests/test_octave.py\n--- a/sympy/printing/tests/test_octave.py\n+++ b/sympy/printing/tests/test_octave.py\n@@ -374,6 +374,15 @@ def test_octave_not_supported():\n     )\n \n \n+def test_octave_not_supported_not_on_whitelist():\n+    from sympy import assoc_laguerre\n+    assert mcode(assoc_laguerre(x, y, z)) == (\n+        \"% Not supported in Octave:\\n\"\n+        \"% assoc_laguerre\\n\"\n+        \"assoc_laguerre(x, y, z)\"\n+    )\n+\n+\n def test_octave_expint():\n     assert mcode(expint(1, x)) == \"expint(x)\"\n     assert mcode(expint(2, x)) == (\n",
+  "problem_statement": "1.3rc1 codegen regression in octave/julia/jscode\n@asmeurer @bjodah I have a (minor?) regression in codeprinting from e99b756df3291a666ee2d2288daec4253014df40\r\nCan one of you double-check that commit before 1.3?\r\n\r\nOctave codegen prints `laguerre` but is supposed to error on `assoc_laguerre` (untested, apparently).  The above commit breaks that.\n",
+  "hints_text": "",
+  "created_at": "2018-09-06T18:44:39Z",
+  "version": "1.4",
+  "FAIL_TO_PASS": "[\"test_ccode_exceptions\", \"test_not_fortran\", \"test_octave_not_supported_not_on_whitelist\"]",
+  "PASS_TO_PASS": "[\"test_1_over_x_and_sqrt\", \"test_C89CodePrinter\", \"test_C99CodePrinter\", \"test_C99CodePrinter__precision\", \"test_C99CodePrinter_custom_type\", \"test_CCodePrinter\", \"test_Element\", \"test_Function\", \"test_Function_change_name\", \"test_Integer\", \"test_KroneckerDelta\", \"test_Matrices\", \"test_MatrixElement_printing\", \"test_MatrixSymbol\", \"test_Matrix_printing\", \"test_Pow\", \"test_Rational\", \"test_assign_to\", \"test_aug_assign\", \"test_basic_ops\", \"test_boolean\", \"test_case\", \"test_ccode_Assignment\", \"test_ccode_Declaration\", \"test_ccode_For\", \"test_ccode_ITE\", \"test_ccode_Indexed\", \"test_ccode_Indexed_without_looking_for_contraction\", \"test_ccode_Integer\", \"test_ccode_Max\", \"test_ccode_Max_Min\", \"test_ccode_Piecewise\", \"test_ccode_Piecewise_deep\", \"test_ccode_Pow\", \"test_ccode_Rational\", \"test_ccode_Relational\", \"test_ccode_Type\", \"test_ccode_boolean\", \"test_ccode_constants_mathh\", \"test_ccode_constants_other\", \"test_ccode_functions\", \"test_ccode_inline_function\", \"test_ccode_loops_add\", \"test_ccode_loops_addfactor\", \"test_ccode_loops_matrix_vector\", \"test_ccode_loops_multiple_contractions\", \"test_ccode_loops_multiple_terms\", \"test_ccode_math_macros\", \"test_ccode_reserved_words\", \"test_ccode_settings\", \"test_ccode_sign\", \"test_ccode_sinc\", \"test_ccode_sqrt\", \"test_ccode_standard\", \"test_ccode_user_functions\", \"test_constants\", \"test_constants_other\", \"test_containers\", \"test_dereference_printing\", \"test_derived_classes\", \"test_dummy_loops\", \"test_fcode_Declaration\", \"test_fcode_Float\", \"test_fcode_For\", \"test_fcode_Indexed_without_looking_for_contraction\", \"test_fcode_Integer\", \"test_fcode_Logical\", \"test_fcode_NumberSymbol\", \"test_fcode_Piecewise\", \"test_fcode_Pow\", \"test_fcode_Rational\", \"test_fcode_Relational\", \"test_fcode_Xlogical\", \"test_fcode_complex\", \"test_fcode_functions\", \"test_fcode_functions_with_integers\", \"test_fcode_precedence\", \"test_fcode_sign\", \"test_free_form_code_line\", \"test_free_form_comment_line\", \"test_free_form_continuation_line\", \"test_get_math_macros\", \"test_haramard\", \"test_imag\", \"test_implicit\", \"test_indent\", \"test_inline_function\", \"test_line_wrapping\", \"test_loops\", \"test_minmax\", \"test_mix_number_mult_symbols\", \"test_mix_number_pow_symbols\", \"test_octave_boolean\", \"test_octave_expint\", \"test_octave_matrix_1x1\", \"test_octave_matrix_assign_to\", \"test_octave_matrix_assign_to_more\", \"test_octave_matrix_elements\", \"test_octave_noninline\", \"test_octave_not_supported\", \"test_octave_piecewise\", \"test_octave_piecewise_times_const\", \"test_printmethod\", \"test_settings\", \"test_sinc\", \"test_sparse\", \"test_specfun\", \"test_special_matrices\", \"test_subclass_CCodePrinter\", \"test_trick_indent_with_end_else_words\", \"test_trigfun\", \"test_user_functions\", \"test_vector_entries_hadamard\", \"test_wrap_fortran\", \"test_wrap_fortran_keep_d0\"]",
+  "environment_setup_commit": "73b3f90093754c5ed1561bd885242330e3583004",
+  "patch_files": [
+    "sympy/combinatorics/homomorphisms.py",
+    "sympy/printing/ccode.py",
+    "sympy/printing/codeprinter.py",
+    "sympy/printing/fcode.py",
+    "sympy/printing/glsl.py",
+    "sympy/printing/jscode.py",
+    "sympy/printing/julia.py",
+    "sympy/printing/mathematica.py",
+    "sympy/printing/octave.py",
+    "sympy/utilities/lambdify.py",
+    "sympy/utilities/runtests.py"
+  ],
+  "test_patch_files": [
+    "sympy/printing/tests/test_ccode.py",
+    "sympy/printing/tests/test_fcode.py",
+    "sympy/printing/tests/test_octave.py"
+  ],
+  "patch_diff_details": {
+    "sympy/combinatorics/homomorphisms.py": {
+      "diffs": [
+        {
+          "start_line_old": 448,
+          "end_line_old": 448
+        }
+      ]
+    },
+    "sympy/printing/ccode.py": {
+      "diffs": [
+        {
+          "start_line_old": 171,
+          "end_line_old": 171,
+          "file_pos": 5,
+          "file_context_length": 27100,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_CodeBlock_C89CodePrinter._print_union.1",
+          "closest_snippet_line_distance": 376
+        }
+      ]
+    },
+    "sympy/printing/codeprinter.py": {
+      "diffs": [
+        {
+          "start_line_old": 57,
+          "end_line_old": 57,
+          "file_pos": 12,
+          "file_context_length": 79493,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._get_expression_indices_CodePrinter._sort_optimized.9.1",
+          "closest_snippet_line_distance": 146
+        },
+        {
+          "start_line_old": 385,
+          "end_line_old": 385,
+          "file_pos": 12,
+          "file_context_length": 79493,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._get_expression_indices_CodePrinter._sort_optimized.9.1",
+          "closest_snippet_line_distance": 147
+        }
+      ]
+    },
+    "sympy/printing/fcode.py": {
+      "diffs": [
+        {
+          "start_line_old": 101,
+          "end_line_old": 101,
+          "file_pos": 11,
+          "file_context_length": 75056,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_GoTo_FCodePrinter._print_Module.1.1",
+          "closest_snippet_line_distance": 514
+        }
+      ]
+    },
+    "sympy/printing/glsl.py": {
+      "diffs": [
+        {
+          "start_line_old": 53,
+          "end_line_old": 53
+        }
+      ]
+    },
+    "sympy/printing/jscode.py": {
+      "diffs": [
+        {
+          "start_line_old": 58,
+          "end_line_old": 58,
+          "file_pos": 2,
+          "file_context_length": 6831,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._print_MatrixElement_JavascriptCodePrinter.indent_code.12.1",
+          "closest_snippet_line_distance": 115,
+          "pos": 25,
+          "context_length": 8122
+        }
+      ]
+    },
+    "sympy/printing/julia.py": {
+      "diffs": [
+        {
+          "start_line_old": 65,
+          "end_line_old": 65,
+          "file_pos": 4,
+          "file_context_length": 19103,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_SparseMatrix_JuliaCodePrinter._print_SparseMatrix.8.1",
+          "closest_snippet_line_distance": 277,
+          "pos": 71,
+          "context_length": 24203
+        }
+      ]
+    },
+    "sympy/printing/mathematica.py": {
+      "diffs": [
+        {
+          "start_line_old": 50,
+          "end_line_old": 50
+        }
+      ]
+    },
+    "sympy/printing/octave.py": {
+      "diffs": [
+        {
+          "start_line_old": 81,
+          "end_line_old": 81,
+          "file_pos": 3,
+          "file_context_length": 13344,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._nested_binary_math_func_OctaveCodePrinter._print_Piecewise.3.5.2.1",
+          "closest_snippet_line_distance": 397,
+          "pos": 42,
+          "context_length": 13178
+        }
+      ]
+    },
+    "sympy/utilities/lambdify.py": {
+      "diffs": [
+        {
+          "start_line_old": 428,
+          "end_line_old": 428
+        }
+      ]
+    },
+    "sympy/utilities/runtests.py": {
+      "diffs": [
+        {
+          "start_line_old": 148,
+          "end_line_old": 148
+        },
+        {
+          "start_line_old": 660,
+          "end_line_old": 660
+        },
+        {
+          "start_line_old": 825,
+          "end_line_old": 825
+        },
+        {
+          "start_line_old": 838,
+          "end_line_old": 838
+        },
+        {
+          "start_line_old": 1347,
+          "end_line_old": 1347
+        },
+        {
+          "start_line_old": 1357,
+          "end_line_old": 1357
+        },
+        {
+          "start_line_old": 1369,
+          "end_line_old": 1369
+        },
+        {
+          "start_line_old": 1415,
+          "end_line_old": 1415
+        },
+        {
+          "start_line_old": 1426,
+          "end_line_old": 1426
+        }
+      ]
+    }
+  },
+  "vectors": 7845,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_llvm_callable.2_",
+      "distance": 1.0737872123718262,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 438,
+      "end_line": 475,
+      "tokens": 346,
+      "context_length": 346
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._print_Pow_JavascriptCodePrinter._print_Pow.2.4.1.1",
+      "distance": 1.133323073387146,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 100,
+      "end_line": 110,
+      "tokens": 133,
+      "context_length": 479,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._get_loop_opening_ending_JavascriptCodePrinter._get_loop_opening_ending.5.1",
+      "distance": 1.138338327407837,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 87,
+      "end_line": 98,
+      "tokens": 138,
+      "context_length": 617,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._print_Rational_JavascriptCodePrinter._print_NegativeInfinity.1.1",
+      "distance": 1.1451916694641113,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 112,
+      "end_line": 139,
+      "tokens": 215,
+      "context_length": 832,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCode_LLVMJitCode._from_ctype.6",
+      "distance": 1.1505582332611084,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 148,
+      "end_line": 171,
+      "tokens": 202,
+      "context_length": 1034
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_1_known_fcns_src2.1",
+      "distance": 1.1592059135437012,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 662,
+      "context_length": 1696,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Indexed_OctaveCodePrinter._print_DiracDelta._print_LambertW.1",
+      "distance": 1.163035273551941,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 381,
+      "end_line": 475,
+      "tokens": 813,
+      "context_length": 2509,
+      "file_pos": 3
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCode._compile_function_LLVMJitCode._compile_function.14.1",
+      "distance": 1.1660174131393433,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 263,
+      "end_line": 286,
+      "tokens": 161,
+      "context_length": 2670
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCode._convert_expr_LLVMJitCode._convert_expr.3.1",
+      "distance": 1.1666996479034424,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 245,
+      "end_line": 261,
+      "tokens": 150,
+      "context_length": 2820
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter.38_OctaveCodePrinter._print_MatrixElement.1.1",
+      "distance": 1.1669621467590332,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 341,
+      "end_line": 357,
+      "tokens": 183,
+      "context_length": 3003,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCode._wrap_return_LLVMJitCode._wrap_return.4.9.1",
+      "distance": 1.167006015777588,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 210,
+      "end_line": 243,
+      "tokens": 312,
+      "context_length": 3315
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._print_Piecewise_JavascriptCodePrinter._print_Piecewise.3.3.ecpairs.3.1",
+      "distance": 1.1718461513519287,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 141,
+      "end_line": 171,
+      "tokens": 358,
+      "context_length": 3673,
+      "file_pos": 3
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCallbackPrinter._print_Symbol_current_link_suffix.1",
+      "distance": 1.1829729080200195,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 124,
+      "end_line": 145,
+      "tokens": 178,
+      "context_length": 3851
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter.40_JuliaCodePrinter._print_MatrixElement.1.1",
+      "distance": 1.184112548828125,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 353,
+      "end_line": 369,
+      "tokens": 181,
+      "context_length": 4032,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_1_known_fcns_src2.1",
+      "distance": 1.1843992471694946,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 496,
+      "context_length": 4528,
+      "file_pos": 4
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_MatPow_JuliaCodePrinter._print_GoldenRatio.1.2.1.1",
+      "distance": 1.1845614910125732,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 214,
+      "end_line": 256,
+      "tokens": 290,
+      "context_length": 4818,
+      "file_pos": 4
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_MatPow_OctaveCodePrinter._print_GoldenRatio.3.1",
+      "distance": 1.1897571086883545,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 231,
+      "end_line": 252,
+      "tokens": 172,
+      "context_length": 4990,
+      "file_pos": 4
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Assignment_OctaveCodePrinter._print_Assignment.8.4.3.1",
+      "distance": 1.1900888681411743,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 255,
+      "end_line": 280,
+      "tokens": 282,
+      "context_length": 5272,
+      "file_pos": 4
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_llvm_callable_llvm_callable.1",
+      "distance": 1.193467617034912,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 358,
+      "end_line": 436,
+      "tokens": 827,
+      "context_length": 6099
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter._print_MatrixElement_JavascriptCodePrinter.indent_code.12.1",
+      "distance": 1.1953048706054688,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 173,
+      "end_line": 204,
+      "tokens": 259,
+      "context_length": 6358,
+      "file_pos": 4
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitPrinter._print_Pow_LLVMJitPrinter._print_Pow.8.1",
+      "distance": 1.1964848041534424,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 57,
+      "end_line": 77,
+      "tokens": 242,
+      "context_length": 6600
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Pow_OctaveCodePrinter._print_Pow.5.1",
+      "distance": 1.1968557834625244,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 211,
+      "end_line": 228,
+      "tokens": 199,
+      "context_length": 6799,
+      "file_pos": 4
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_zeta_octave_code",
+      "distance": 1.2011831998825073,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 525,
+      "end_line": 701,
+      "tokens": 333,
+      "context_length": 7132,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Mul_OctaveCodePrinter._print_Mul.2.22.3.2.1",
+      "distance": 1.2037889957427979,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 136,
+      "end_line": 208,
+      "tokens": 704,
+      "context_length": 7836,
+      "file_pos": 4
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_JavascriptCodePrinter_JavascriptCodePrinter._traverse_matrix_indices.2.1",
+      "distance": 1.2081209421157837,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 46,
+      "end_line": 85,
+      "tokens": 286,
+      "context_length": 8122,
+      "file_pos": 4
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitPrinter._print_Mul_LLVMJitPrinter.emptyPrinter.1",
+      "distance": 1.2098853588104248,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 79,
+      "end_line": 107,
+      "tokens": 267,
+      "context_length": 8389
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Pow_JuliaCodePrinter._print_Pow.5.1",
+      "distance": 1.2197661399841309,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 194,
+      "end_line": 211,
+      "tokens": 198,
+      "context_length": 8587,
+      "file_pos": 4
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Declaration_C89CodePrinter._print_Declaration.7.1",
+      "distance": 1.2202919721603394,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 482,
+      "end_line": 507,
+      "tokens": 236,
+      "context_length": 8823,
+      "file_pos": 5
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Indexed_JuliaCodePrinter._print_yn.4.1",
+      "distance": 1.2242708206176758,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 393,
+      "end_line": 418,
+      "tokens": 238,
+      "context_length": 9061,
+      "file_pos": 5
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Assignment_JuliaCodePrinter._print_Assignment.8.4.3.1",
+      "distance": 1.2250676155090332,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 259,
+      "end_line": 284,
+      "tokens": 281,
+      "context_length": 9342,
+      "file_pos": 5
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_11_LLVMJitCallbackPrinter._print_Indexed.6.1",
+      "distance": 1.2261615991592407,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 110,
+      "end_line": 122,
+      "tokens": 155,
+      "context_length": 9497
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Rational_C89CodePrinter._print_NegativeInfinity.1.1",
+      "distance": 1.2309882640838623,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 302,
+      "end_line": 342,
+      "tokens": 344,
+      "context_length": 9841,
+      "file_pos": 5
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py__C9XCodePrinter__C9XCodePrinter._get_loop_opening_ending.6.1",
+      "distance": 1.2336820363998413,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 622,
+      "end_line": 635,
+      "tokens": 157,
+      "context_length": 9998,
+      "file_pos": 5
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_25_CXX17CodePrinter._print_zeta.1.1",
+      "distance": 1.2346854209899902,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 140,
+      "end_line": 156,
+      "tokens": 130,
+      "context_length": 10128
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Mul_JuliaCodePrinter._print_Mul.2.22.3.2.1",
+      "distance": 1.2350687980651855,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 119,
+      "end_line": 191,
+      "tokens": 701,
+      "context_length": 10829,
+      "file_pos": 6
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_1_known_functions.1",
+      "distance": 1.2368243932724,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 314,
+      "context_length": 11143,
+      "file_pos": 6
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._nested_binary_math_func_OctaveCodePrinter._print_Piecewise.3.5.2.1",
+      "distance": 1.2400339841842651,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 478,
+      "end_line": 522,
+      "tokens": 496,
+      "context_length": 11639,
+      "file_pos": 6
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.c7__check_antecedents.zso.1",
+      "distance": 1.2417187690734863,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 987,
+      "end_line": 1010,
+      "tokens": 442,
+      "context_length": 12081
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_29_c_code_printers.1",
+      "distance": 1.2438350915908813,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 719,
+      "end_line": 737,
+      "tokens": 179,
+      "context_length": 12260,
+      "file_pos": 7
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._get_func_suffix_C89CodePrinter._print_Type.3.1",
+      "distance": 1.2445294857025146,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 466,
+      "end_line": 480,
+      "tokens": 163,
+      "context_length": 12423,
+      "file_pos": 7
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_sign_C89CodePrinter._print_Min.4.1",
+      "distance": 1.245755672454834,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 418,
+      "end_line": 437,
+      "tokens": 251,
+      "context_length": 12674,
+      "file_pos": 7
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter_OctaveCodePrinter._get_loop_opening_ending.4.1",
+      "distance": 1.2459146976470947,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 62,
+      "end_line": 133,
+      "tokens": 504,
+      "context_length": 13178,
+      "file_pos": 7
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter.indent_code_julia_code",
+      "distance": 1.2462413311004639,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 458,
+      "end_line": 624,
+      "tokens": 269,
+      "context_length": 13447,
+      "file_pos": 7
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_ITE_RCodePrinter._print_AugmentedAssignment.4.1",
+      "distance": 1.2486233711242676,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 230,
+      "end_line": 264,
+      "tokens": 371,
+      "context_length": 13818
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_For_C89CodePrinter._print_For.4.1",
+      "distance": 1.2502068281173706,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 407,
+      "end_line": 416,
+      "tokens": 126,
+      "context_length": 13944,
+      "file_pos": 8
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_ITE_C89CodePrinter._print_sinc.5.1",
+      "distance": 1.251542091369629,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 377,
+      "end_line": 405,
+      "tokens": 314,
+      "context_length": 14258,
+      "file_pos": 8
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_1_18.1",
+      "distance": 1.2537389993667603,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 654,
+      "context_length": 14912
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Pow_C89CodePrinter._print_Pow.4.4.1.1",
+      "distance": 1.2560614347457886,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 286,
+      "end_line": 300,
+      "tokens": 204,
+      "context_length": 15116,
+      "file_pos": 8
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_SparseMatrix_OctaveCodePrinter._print_SparseMatrix.8.1",
+      "distance": 1.2580629587173462,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 330,
+      "end_line": 338,
+      "tokens": 140,
+      "context_length": 15256,
+      "file_pos": 8
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.58__check_antecedents.59",
+      "distance": 1.2597712278366089,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1011,
+      "end_line": 1052,
+      "tokens": 628,
+      "context_length": 15884
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/printing/pycode.py_MpmathPrinter._print_Rational_MpmathPrinter._print_log1p.1.1",
+      "distance": 1.2630014419555664,
+      "file_path": "sympy/printing/pycode.py",
+      "start_line": 337,
+      "end_line": 363,
+      "tokens": 272,
+      "context_length": 16156
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_RustCodePrinter._print_Assignment_RustCodePrinter._print_Assignment.4.4.3.1",
+      "distance": 1.2635424137115479,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 468,
+      "end_line": 480,
+      "tokens": 145,
+      "context_length": 16301
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C99CodePrinter._print_math_func_C99CodePrinter._print_Min.1.1",
+      "distance": 1.2643818855285645,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 683,
+      "end_line": 716,
+      "tokens": 292,
+      "context_length": 16593,
+      "file_pos": 10
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_MatrixSlice_OctaveCodePrinter._print_MatrixSlice",
+      "distance": 1.2654423713684082,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 360,
+      "end_line": 378,
+      "tokens": 189,
+      "context_length": 16782,
+      "file_pos": 10
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_1_41",
+      "distance": 1.2665588855743408,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 581,
+      "context_length": 17363
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/printing/jscode.py_jscode_",
+      "distance": 1.2677408456802368,
+      "file_path": "sympy/printing/jscode.py",
+      "start_line": 207,
+      "end_line": 321,
+      "tokens": 1145,
+      "context_length": 18508,
+      "file_pos": 10
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_1_9.5",
+      "distance": 1.2678924798965454,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 155,
+      "context_length": 18663
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_CCodePrinter_CCodePrinter.3",
+      "distance": 1.2699894905090332,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 638,
+      "end_line": 649,
+      "tokens": 107,
+      "context_length": 18770,
+      "file_pos": 10
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py_23_CXX11CodePrinter._print_using.1.2.1.1",
+      "distance": 1.270500659942627,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 111,
+      "end_line": 138,
+      "tokens": 285,
+      "context_length": 19055
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_octave_code.1_",
+      "distance": 1.2730392217636108,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 566,
+      "end_line": 710,
+      "tokens": 1626,
+      "context_length": 20681,
+      "file_pos": 10
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_MatrixBase_OctaveCodePrinter._print_MatrixBase.2.4.1",
+      "distance": 1.2802108526229858,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 317,
+      "end_line": 327,
+      "tokens": 157,
+      "context_length": 20838,
+      "file_pos": 10
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Rational_FCodePrinter._print_product_.1.1",
+      "distance": 1.2811062335968018,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 342,
+      "end_line": 376,
+      "tokens": 355,
+      "context_length": 21193,
+      "file_pos": 11
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_SparseMatrix_JuliaCodePrinter._print_SparseMatrix.8.1",
+      "distance": 1.2817161083221436,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 342,
+      "end_line": 350,
+      "tokens": 139,
+      "context_length": 21332,
+      "file_pos": 11
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_AugmentedAssignment_CodePrinter._print_Symbol.2.3.1.1",
+      "distance": 1.2829103469848633,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 331,
+      "end_line": 362,
+      "tokens": 257,
+      "context_length": 21589,
+      "file_pos": 12
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.60__check_antecedents.73",
+      "distance": 1.2829231023788452,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1053,
+      "end_line": 1095,
+      "tokens": 741,
+      "context_length": 22330
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_Piecewise_C89CodePrinter._print_Piecewise.3.3.ecpairs.3.1",
+      "distance": 1.2833023071289062,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 344,
+      "end_line": 375,
+      "tokens": 360,
+      "context_length": 22690,
+      "file_pos": 12
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Pow_FCodePrinter._print_Pow.2.3.1.1",
+      "distance": 1.285017490386963,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 323,
+      "end_line": 340,
+      "tokens": 171,
+      "context_length": 22861,
+      "file_pos": 12
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_Assignment_RCodePrinter._print_Assignment.18.5.3.1",
+      "distance": 1.2850762605667114,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 181,
+      "end_line": 216,
+      "tokens": 384,
+      "context_length": 23245
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_Pow_RCodePrinter._print_Pow.3.3.1.1",
+      "distance": 1.286768913269043,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 145,
+      "end_line": 155,
+      "tokens": 130,
+      "context_length": 23375
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Declaration_FCodePrinter._print_Declaration.8.1",
+      "distance": 1.2871500253677368,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 439,
+      "end_line": 469,
+      "tokens": 330,
+      "context_length": 23705,
+      "file_pos": 12
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter_JuliaCodePrinter._get_loop_opening_ending.4.1",
+      "distance": 1.2885355949401855,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 46,
+      "end_line": 116,
+      "tokens": 498,
+      "context_length": 24203,
+      "file_pos": 12
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitPrinter_LLVMJitPrinter._print_Symbol.4.1",
+      "distance": 1.288818359375,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 25,
+      "end_line": 55,
+      "tokens": 267,
+      "context_length": 24470
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_MatrixElement_FCodePrinter._print_Add.pure_real.5.2.1.1",
+      "distance": 1.2888884544372559,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 254,
+      "end_line": 295,
+      "tokens": 352,
+      "context_length": 24822,
+      "file_pos": 12
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_RustCodePrinter._get_loop_opening_ending_RustCodePrinter._print_caller_var.1.6.1.1",
+      "distance": 1.289731502532959,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 263,
+      "end_line": 285,
+      "tokens": 228,
+      "context_length": 25050
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_Rational_RCodePrinter._print_NegativeInfinity.1.1",
+      "distance": 1.2911287546157837,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 158,
+      "end_line": 179,
+      "tokens": 177,
+      "context_length": 25227
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.74__check_antecedents.109",
+      "distance": 1.291541576385498,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1096,
+      "end_line": 1133,
+      "tokens": 808,
+      "context_length": 26035
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sympy/sympy/parsing/latex/_parse_latex_antlr.py_1_11.2.MathErrorListener.syntaxError.4",
+      "distance": 1.2916315793991089,
+      "file_path": "sympy/parsing/latex/_parse_latex_antlr.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 471,
+      "context_length": 26506
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_MatrixSlice_JuliaCodePrinter._print_MatrixSlice",
+      "distance": 1.2919694185256958,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 372,
+      "end_line": 390,
+      "tokens": 187,
+      "context_length": 26693,
+      "file_pos": 13
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/sympy/bin/mailmap_update.py_1_46.1",
+      "distance": 1.2930995225906372,
+      "file_path": "bin/mailmap_update.py",
+      "start_line": 1,
+      "end_line": 104,
+      "tokens": 792,
+      "context_length": 27485
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_ImpliedDoLoop_FCodePrinter._print_For.4.1",
+      "distance": 1.2936794757843018,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 395,
+      "end_line": 411,
+      "tokens": 187,
+      "context_length": 27672,
+      "file_pos": 14
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Do_FCodePrinter._print_Do.3.1",
+      "distance": 1.2941018342971802,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 378,
+      "end_line": 393,
+      "tokens": 124,
+      "context_length": 27796,
+      "file_pos": 14
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/sympy/sympy/printing/octave.py_OctaveCodePrinter._print_Infinity_OctaveCodePrinter.35",
+      "distance": 1.2943938970565796,
+      "file_path": "sympy/printing/octave.py",
+      "start_line": 283,
+      "end_line": 314,
+      "tokens": 175,
+      "context_length": 27971,
+      "file_pos": 14
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Piecewise_JuliaCodePrinter._print_Piecewise.3.5.2.1",
+      "distance": 1.2945644855499268,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 421,
+      "end_line": 455,
+      "tokens": 399,
+      "context_length": 28370,
+      "file_pos": 14
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/sympy/sympy/printing/llvmjitcode.py_LLVMJitCodeCallback_LLVMJitCodeCallback._create_function.8.1",
+      "distance": 1.2947255373001099,
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "start_line": 289,
+      "end_line": 324,
+      "tokens": 314,
+      "context_length": 28684
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_For_RCodePrinter._print_For.4.1",
+      "distance": 1.2956442832946777,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 266,
+      "end_line": 275,
+      "tokens": 125,
+      "context_length": 28809
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/sympy/sympy/printing/rcode.py_RCodePrinter._print_Piecewise_RCodePrinter._print_Piecewise.3.5.1",
+      "distance": 1.2958014011383057,
+      "file_path": "sympy/printing/rcode.py",
+      "start_line": 218,
+      "end_line": 228,
+      "tokens": 158,
+      "context_length": 28967
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/sympy/sympy/codegen/ast.py_CodeBlock._sympyrepr_CodeBlock.free_symbols.1.1",
+      "distance": 1.2963626384735107,
+      "file_path": "sympy/codegen/ast.py",
+      "start_line": 630,
+      "end_line": 642,
+      "tokens": 166,
+      "context_length": 29133
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_reserved_words_reserved_words_c99.1",
+      "distance": 1.2963643074035645,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 92,
+      "end_line": 100,
+      "tokens": 132,
+      "context_length": 29265,
+      "file_pos": 15
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/cg.py__check_varsh_sum_872_4__check_varsh_sum_872_4.13.1",
+      "distance": 1.2969613075256348,
+      "file_path": "sympy/physics/quantum/cg.py",
+      "start_line": 684,
+      "end_line": 701,
+      "tokens": 229,
+      "context_length": 29494
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Equality_FCodePrinter._print_Extent.1.1",
+      "distance": 1.2972105741500854,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 413,
+      "end_line": 437,
+      "tokens": 226,
+      "context_length": 29720,
+      "file_pos": 16
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/sympy/sympy/parsing/autolev/_listener_autolev_antlr.py_20.MyListener.exitFunctionCall_20.MyListener.exitFunctionCall.6.3.13",
+      "distance": 1.2984285354614258,
+      "file_path": "sympy/parsing/autolev/_listener_autolev_antlr.py",
+      "start_line": 1741,
+      "end_line": 1860,
+      "tokens": 1531,
+      "context_length": 31251
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/cg.py__check_varsh_871_1__check_varsh_871_1.2",
+      "distance": 1.2992888689041138,
+      "file_path": "sympy/physics/quantum/cg.py",
+      "start_line": 499,
+      "end_line": 507,
+      "tokens": 171,
+      "context_length": 31422
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Function_FCodePrinter._print_Mul.2.2.1.1",
+      "distance": 1.3013328313827515,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 297,
+      "end_line": 321,
+      "tokens": 219,
+      "context_length": 31641,
+      "file_pos": 17
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._get_loop_opening_ending_FCodePrinter._get_loop_opening_ending.4.1",
+      "distance": 1.3031153678894043,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 189,
+      "end_line": 198,
+      "tokens": 117,
+      "context_length": 31758,
+      "file_pos": 17
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_julia_code.1_",
+      "distance": 1.3036843538284302,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 491,
+      "end_line": 633,
+      "tokens": 1597,
+      "context_length": 33355,
+      "file_pos": 17
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_1_20",
+      "distance": 1.303965449333191,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 1,
+      "end_line": 90,
+      "tokens": 752,
+      "context_length": 34107,
+      "file_pos": 17
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/cg.py__check_varsh_sum_871_2__check_varsh_sum_871_2.6.1",
+      "distance": 1.305448293685913,
+      "file_path": "sympy/physics/quantum/cg.py",
+      "start_line": 673,
+      "end_line": 681,
+      "tokens": 112,
+      "context_length": 34219
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/sympy/sympy/printing/cxxcode.py__CXXCodePrinterBase_CXX98CodePrinter.reserved_words.1",
+      "distance": 1.3059641122817993,
+      "file_path": "sympy/printing/cxxcode.py",
+      "start_line": 79,
+      "end_line": 108,
+      "tokens": 285,
+      "context_length": 34504
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/sympy/sympy/codegen/rewriting.py__expm1_value_log1p_opt.1",
+      "distance": 1.306657314300537,
+      "file_path": "sympy/codegen/rewriting.py",
+      "start_line": 165,
+      "end_line": 195,
+      "tokens": 248,
+      "context_length": 34752
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.153__check_antecedents.177",
+      "distance": 1.3069310188293457,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1175,
+      "end_line": 1212,
+      "tokens": 760,
+      "context_length": 35512
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._doprint_loops_CodePrinter._doprint_loops.5.16.1",
+      "distance": 1.3070677518844604,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 124,
+      "end_line": 201,
+      "tokens": 718,
+      "context_length": 36230,
+      "file_pos": 18
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._print_Expr_CodePrinter._print_Not.2.1",
+      "distance": 1.308448076248169,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 390,
+      "end_line": 441,
+      "tokens": 507,
+      "context_length": 36737,
+      "file_pos": 18
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/sympy/sympy/polys/modulargcd.py_modgcd_bivariate.gswap_modgcd_bivariate.p.1",
+      "distance": 1.3087843656539917,
+      "file_path": "sympy/polys/modulargcd.py",
+      "start_line": 790,
+      "end_line": 804,
+      "tokens": 171,
+      "context_length": 36908
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/sympy/sympy/codegen/cxxnodes.py__",
+      "distance": 1.3099396228790283,
+      "file_path": "sympy/codegen/cxxnodes.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 0,
+      "context_length": 36908
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/cg.py__check_varsh_871_2__check_varsh_871_2.2",
+      "distance": 1.31003737449646,
+      "file_path": "sympy/physics/quantum/cg.py",
+      "start_line": 510,
+      "end_line": 518,
+      "tokens": 176,
+      "context_length": 37084
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._rate_index_position_FCodePrinter._traverse_matrix_indices.2.1",
+      "distance": 1.3103148937225342,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 164,
+      "end_line": 187,
+      "tokens": 207,
+      "context_length": 37291,
+      "file_pos": 20
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/sympy/sympy/physics/wigner.py_wigner_3j.22_clebsch_gordan.3.1",
+      "distance": 1.3111536502838135,
+      "file_path": "sympy/physics/wigner.py",
+      "start_line": 205,
+      "end_line": 264,
+      "tokens": 290,
+      "context_length": 37581
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_Print_FCodePrinter._print_FortranReturn.2.2.1.1",
+      "distance": 1.3114614486694336,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 654,
+      "end_line": 674,
+      "tokens": 178,
+      "context_length": 37759,
+      "file_pos": 21
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_BooleanTrue_C89CodePrinter._print_Element.2.1",
+      "distance": 1.3119139671325684,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 522,
+      "end_line": 545,
+      "tokens": 190,
+      "context_length": 37949,
+      "file_pos": 21
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents_1.case2__check_antecedents_1.69.1",
+      "distance": 1.3131792545318604,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 799,
+      "end_line": 841,
+      "tokens": 489,
+      "context_length": 38438
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_known_functions_96",
+      "distance": 1.3135536909103394,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 57,
+      "end_line": 162,
+      "tokens": 1065,
+      "context_length": 39503
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/sympy/sympy/parsing/latex/_antlr/latexparser.py_serializedATN.1.35_serializedATN.1.66",
+      "distance": 1.315203070640564,
+      "file_path": "sympy/parsing/latex/_antlr/latexparser.py",
+      "start_line": 54,
+      "end_line": 85,
+      "tokens": 1527,
+      "context_length": 41030
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/sympy/sympy/printing/codeprinter.py_CodePrinter._get_expression_indices_CodePrinter._sort_optimized.9.1",
+      "distance": 1.3174159526824951,
+      "file_path": "sympy/printing/codeprinter.py",
+      "start_line": 203,
+      "end_line": 238,
+      "tokens": 257,
+      "context_length": 41287,
+      "file_pos": 22
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C99CodePrinter_C99CodePrinter.12",
+      "distance": 1.3182268142700195,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 652,
+      "end_line": 681,
+      "tokens": 312,
+      "context_length": 41599,
+      "file_pos": 22
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/sympy/sympy/plotting/experimental_lambdify.py_1_55",
+      "distance": 1.319698691368103,
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 865,
+      "context_length": 42464
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/sympy/sympy/printing/fcode.py_FCodePrinter._print_GoTo_FCodePrinter._print_Module.1.1",
+      "distance": 1.319961428642273,
+      "file_path": "sympy/printing/fcode.py",
+      "start_line": 615,
+      "end_line": 639,
+      "tokens": 204,
+      "context_length": 42668,
+      "file_pos": 23
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.178__check_antecedents.192",
+      "distance": 1.3226683139801025,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1213,
+      "end_line": 1239,
+      "tokens": 453,
+      "context_length": 43121
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_RustCodePrinter._print_Pow_RustCodePrinter._print_NaN.1.1",
+      "distance": 1.3234152793884277,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 338,
+      "end_line": 400,
+      "tokens": 468,
+      "context_length": 43589
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_Infinity_JuliaCodePrinter.37",
+      "distance": 1.3234226703643799,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 287,
+      "end_line": 324,
+      "tokens": 215,
+      "context_length": 43804,
+      "file_pos": 23
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/sympy/sympy/printing/ccode.py_C89CodePrinter._print_CodeBlock_C89CodePrinter._print_union.1",
+      "distance": 1.3237435817718506,
+      "file_path": "sympy/printing/ccode.py",
+      "start_line": 547,
+      "end_line": 618,
+      "tokens": 611,
+      "context_length": 44415,
+      "file_pos": 23
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/sympy/sympy/printing/rust.py_RustCodePrinter._print_ITE_RustCodePrinter._print_Symbol.2.2.1.1",
+      "distance": 1.3240399360656738,
+      "file_path": "sympy/printing/rust.py",
+      "start_line": 429,
+      "end_line": 466,
+      "tokens": 349,
+      "context_length": 44764
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/sympy/sympy/codegen/cutils.py__",
+      "distance": 1.324200987815857,
+      "file_path": "sympy/codegen/cutils.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 44764
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/sympy/sympy/printing/julia.py_JuliaCodePrinter._print_MatrixBase_JuliaCodePrinter._print_MatrixBase.2.5.1",
+      "distance": 1.3245165348052979,
+      "file_path": "sympy/printing/julia.py",
+      "start_line": 327,
+      "end_line": 339,
+      "tokens": 181,
+      "context_length": 44945,
+      "file_pos": 24
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/sympy/sympy/printing/latex.py_modifier_dict__between_two_numbers_p.1",
+      "distance": 1.3252594470977783,
+      "file_path": "sympy/printing/latex.py",
+      "start_line": 83,
+      "end_line": 118,
+      "tokens": 491,
+      "context_length": 45436
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/printing/llvmjitcode.py",
+      "position": 1,
+      "tokens": 4016,
+      "context_length": 4016
+    },
+    {
+      "file_path": "sympy/printing/jscode.py",
+      "position": 2,
+      "tokens": 2815,
+      "context_length": 6831
+    },
+    {
+      "file_path": "sympy/printing/octave.py",
+      "position": 3,
+      "tokens": 6513,
+      "context_length": 13344
+    },
+    {
+      "file_path": "sympy/printing/julia.py",
+      "position": 4,
+      "tokens": 5759,
+      "context_length": 19103
+    },
+    {
+      "file_path": "sympy/printing/ccode.py",
+      "position": 5,
+      "tokens": 7997,
+      "context_length": 27100
+    },
+    {
+      "file_path": "sympy/printing/cxxcode.py",
+      "position": 6,
+      "tokens": 1630,
+      "context_length": 28730
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 7,
+      "tokens": 24282,
+      "context_length": 53012
+    },
+    {
+      "file_path": "sympy/printing/rcode.py",
+      "position": 8,
+      "tokens": 3724,
+      "context_length": 56736
+    },
+    {
+      "file_path": "sympy/printing/pycode.py",
+      "position": 9,
+      "tokens": 5120,
+      "context_length": 61856
+    },
+    {
+      "file_path": "sympy/printing/rust.py",
+      "position": 10,
+      "tokens": 5437,
+      "context_length": 67293
+    },
+    {
+      "file_path": "sympy/printing/fcode.py",
+      "position": 11,
+      "tokens": 7763,
+      "context_length": 75056
+    },
+    {
+      "file_path": "sympy/printing/codeprinter.py",
+      "position": 12,
+      "tokens": 4437,
+      "context_length": 79493
+    },
+    {
+      "file_path": "sympy/parsing/latex/_parse_latex_antlr.py",
+      "position": 13,
+      "tokens": 4392,
+      "context_length": 83885
+    },
+    {
+      "file_path": "bin/mailmap_update.py",
+      "position": 14,
+      "tokens": 1457,
+      "context_length": 85342
+    },
+    {
+      "file_path": "sympy/codegen/ast.py",
+      "position": 15,
+      "tokens": 13350,
+      "context_length": 98692
+    },
+    {
+      "file_path": "sympy/physics/quantum/cg.py",
+      "position": 16,
+      "tokens": 6535,
+      "context_length": 105227
+    },
+    {
+      "file_path": "sympy/parsing/autolev/_listener_autolev_antlr.py",
+      "position": 17,
+      "tokens": 23111,
+      "context_length": 128338
+    },
+    {
+      "file_path": "sympy/codegen/rewriting.py",
+      "position": 18,
+      "tokens": 1854,
+      "context_length": 130192
+    },
+    {
+      "file_path": "sympy/polys/modulargcd.py",
+      "position": 19,
+      "tokens": 18495,
+      "context_length": 148687
+    },
+    {
+      "file_path": "sympy/codegen/cxxnodes.py",
+      "position": 20,
+      "tokens": 81,
+      "context_length": 148768
+    },
+    {
+      "file_path": "sympy/physics/wigner.py",
+      "position": 21,
+      "tokens": 8234,
+      "context_length": 157002
+    },
+    {
+      "file_path": "sympy/parsing/latex/_antlr/latexparser.py",
+      "position": 22,
+      "tokens": 30275,
+      "context_length": 187277
+    },
+    {
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "position": 23,
+      "tokens": 5852,
+      "context_length": 193129
+    },
+    {
+      "file_path": "sympy/codegen/cutils.py",
+      "position": 24,
+      "tokens": 94,
+      "context_length": 193223
+    },
+    {
+      "file_path": "sympy/printing/latex.py",
+      "position": 25,
+      "tokens": 23689,
+      "context_length": 216912
+    }
+  ]
+}

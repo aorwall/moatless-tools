@@ -1,0 +1,1429 @@
+{
+  "instance_id": "django__django-13807",
+  "model_patch": "diff --git a/django/db/backends/sqlite3/base.py b/django/db/backends/sqlite3/base.py\nindex 2eeaf98c0d..068c348822 100644\n--- a/django/db/backends/sqlite3/base.py\n+++ b/django/db/backends/sqlite3/base.py\n@@ -327,14 +327,13 @@ class DatabaseWrapper(BaseDatabaseWrapper):\n                     violations = cursor.execute('PRAGMA foreign_key_check').fetchall()\n                 else:\n                     violations = chain.from_iterable(\n-                        cursor.execute('PRAGMA foreign_key_check(%s)' % table_name).fetchall()\n+                        cursor.execute('PRAGMA foreign_key_check(\"%s\")' % backend_utils.quote_name(table_name)).fetchall()\n                         for table_name in table_names\n                     )\n                 # See https://www.sqlite.org/pragma.html#pragma_foreign_key_check\n                 for table_name, rowid, referenced_table_name, foreign_key_index in violations:\n                     foreign_key = cursor.execute(\n-                        'PRAGMA foreign_key_list(%s)' % table_name\n-                    ).fetchall()[foreign_key_index]\n+                        'PRAGMA foreign_key_list(\"%s\")' % backend_utils.quote_name(table_name)).fetchall()[foreign_key_index]\n                     column_name, referenced_column_name = foreign_key[3:5]\n                     primary_key_column_name = self.introspection.get_primary_key_column(cursor, table_name)\n                     primary_key_value, bad_value = cursor.execute(\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/db/backends/sqlite3/base.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "89fc144dedc737a79929231438f035b1d4a993c9",
+  "patch": "diff --git a/django/db/backends/sqlite3/base.py b/django/db/backends/sqlite3/base.py\n--- a/django/db/backends/sqlite3/base.py\n+++ b/django/db/backends/sqlite3/base.py\n@@ -327,19 +327,24 @@ def check_constraints(self, table_names=None):\n                     violations = cursor.execute('PRAGMA foreign_key_check').fetchall()\n                 else:\n                     violations = chain.from_iterable(\n-                        cursor.execute('PRAGMA foreign_key_check(%s)' % table_name).fetchall()\n+                        cursor.execute(\n+                            'PRAGMA foreign_key_check(%s)'\n+                            % self.ops.quote_name(table_name)\n+                        ).fetchall()\n                         for table_name in table_names\n                     )\n                 # See https://www.sqlite.org/pragma.html#pragma_foreign_key_check\n                 for table_name, rowid, referenced_table_name, foreign_key_index in violations:\n                     foreign_key = cursor.execute(\n-                        'PRAGMA foreign_key_list(%s)' % table_name\n+                        'PRAGMA foreign_key_list(%s)' % self.ops.quote_name(table_name)\n                     ).fetchall()[foreign_key_index]\n                     column_name, referenced_column_name = foreign_key[3:5]\n                     primary_key_column_name = self.introspection.get_primary_key_column(cursor, table_name)\n                     primary_key_value, bad_value = cursor.execute(\n                         'SELECT %s, %s FROM %s WHERE rowid = %%s' % (\n-                            primary_key_column_name, column_name, table_name\n+                            self.ops.quote_name(primary_key_column_name),\n+                            self.ops.quote_name(column_name),\n+                            self.ops.quote_name(table_name),\n                         ),\n                         (rowid,),\n                     ).fetchone()\n",
+  "test_patch": "diff --git a/tests/backends/models.py b/tests/backends/models.py\n--- a/tests/backends/models.py\n+++ b/tests/backends/models.py\n@@ -140,3 +140,11 @@ class Author(models.Model):\n \n class Book(models.Model):\n     author = models.ForeignKey(Author, models.CASCADE, to_field='name')\n+\n+\n+class SQLKeywordsModel(models.Model):\n+    id = models.AutoField(primary_key=True, db_column='select')\n+    reporter = models.ForeignKey(Reporter, models.CASCADE, db_column='where')\n+\n+    class Meta:\n+        db_table = 'order'\ndiff --git a/tests/backends/tests.py b/tests/backends/tests.py\n--- a/tests/backends/tests.py\n+++ b/tests/backends/tests.py\n@@ -20,7 +20,7 @@\n \n from .models import (\n     Article, Object, ObjectReference, Person, Post, RawData, Reporter,\n-    ReporterProxy, SchoolClass, Square,\n+    ReporterProxy, SchoolClass, SQLKeywordsModel, Square,\n     VeryLongModelNameZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ,\n )\n \n@@ -625,6 +625,17 @@ def test_check_constraints(self):\n                     connection.check_constraints()\n             transaction.set_rollback(True)\n \n+    def test_check_constraints_sql_keywords(self):\n+        with transaction.atomic():\n+            obj = SQLKeywordsModel.objects.create(reporter=self.r)\n+            obj.refresh_from_db()\n+            obj.reporter_id = 30\n+            with connection.constraint_checks_disabled():\n+                obj.save()\n+                with self.assertRaises(IntegrityError):\n+                    connection.check_constraints(table_names=['order'])\n+            transaction.set_rollback(True)\n+\n \n class ThreadTests(TransactionTestCase):\n \n",
+  "problem_statement": "loaddata crashes on SQLite when table names are SQL keywords.\nDescription\n\t\nSteps to reproduce:\nCreate a Model called Order. (order is a SQL reserved word)\nCreate fixtures for the model\nUse manage.py loaddata to load the fixture.\nNotice that it fails with the following error. This is because the table name order is not quoted properly\n(0.000) PRAGMA foreign_key_check(order); args=None\nTraceback (most recent call last):\n File \"python3.7/site-packages/django/db/backends/utils.py\", line 82, in _execute\n\treturn self.cursor.execute(sql)\n File \"python3.7/site-packages/django/db/backends/sqlite3/base.py\", line 411, in execute\n\treturn Database.Cursor.execute(self, query)\nsqlite3.OperationalError: near \"order\": syntax error\nRoot Cause\nFile: python3.7/site-packages/django/db/backends/sqlite3/base.py line 327\nFunction: check_constraints\nDetails: due to missing back ticks around %s in the SQL statement PRAGMA foreign_key_check(%s)\nHere in check_constraints line 327 in context\n\t\t\t\tif table_names is None:\n\t\t\t\t\tviolations = cursor.execute('PRAGMA foreign_key_check').fetchall()\n\t\t\t\telse:\n\t\t\t\t\tviolations = chain.from_iterable(\n\t\t\t\t\t\tcursor.execute('PRAGMA foreign_key_check(%s)' % table_name).fetchall()\n\t\t\t\t\t\tfor table_name in table_names\n\t\t\t\t\t)\nAnd here line 333\n\t\t\t\tfor table_name, rowid, referenced_table_name, foreign_key_index in violations:\n\t\t\t\t\tforeign_key = cursor.execute(\n\t\t\t\t\t\t'PRAGMA foreign_key_list(%s)' % table_name\n\t\t\t\t\t).fetchall()[foreign_key_index]\nIssue confirmed in\n3.1.0\n3.1.2\n",
+  "hints_text": "Thanks for the report, I was able to reproduce this issue with db_table = 'order'. Reproduced at 966b5b49b6521483f1c90b4499c4c80e80136de3.\nSimply wrapping table_name in connection.ops.quote_name should address the issue for anyone interested in picking the issue up.\na little guidance needed as this is my first ticket.\nwill the issue be fixed if i just wrap %s around back ticks -> %s as in 'PRAGMA foreign_key_check(%s)' and 'PRAGMA foreign_key_list(%s)' % table_name?\nNayan, Have you seen Simon's comment? We should wrap with quote_name().\n\"Details: due to missing back ticks around %s in the SQL statement PRAGMA foreign_key_check(%s)\" But it is quoted that this should fix the issue.\nshall i wrap \"table_name\" in \"quote_name\" as in \"quote_name(table_name)\"?\nshall i wrap \"table_name\" in \"quote_name\" as in \"quote_name(table_name)\"? yes, self.ops.quote_name(table_name)\nFirst contribution, currently trying to understand the code to figure out how to write a regression test for this. Any help in how to unit test this is appreciated.\nI believe I got it. Will put my test in tests/fixtures_regress which has a lot of regression tests for loaddata already, creating a new Order model and a fixture for it.\nSuggested test improvements to avoid the creation of another model.\nThings have been busy for me but I'm still on it, I'll do the changes to the patch later this week.\nSince this issue hasn't received any activity recently, may I assign it to myself?\nSure, feel-free.\nPatch awaiting review. PR: \u200bhttps://github.com/django/django/pull/13807",
+  "created_at": "2020-12-23T21:09:32Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"test_check_constraints_sql_keywords (backends.tests.FkConstraintsTests)\"]",
+  "PASS_TO_PASS": "[\"An executemany call with too many/not enough parameters will raise an exception (Refs #12612)\", \"Creating an existing table returns a DatabaseError\", \"Sequence names are correct when resetting generic relations (Ref #13941)\", \"Test creation of model with long name and long pk name doesn't error. Ref #8901\", \"last_executed_query() returns a string.\", \"test_cached_db_features (backends.tests.BackendTestCase)\", \"test_can_reference_existent (backends.tests.DBConstraintTestCase)\", \"test_can_reference_non_existent (backends.tests.DBConstraintTestCase)\", \"test_check_constraints (backends.tests.FkConstraintsTests)\", \"test_closing_non_shared_connections (backends.tests.ThreadTests)\", \"test_connections_thread_local (backends.tests.ThreadTests)\", \"test_cursor_contextmanager (backends.tests.BackendTestCase)\", \"test_cursor_executemany (backends.tests.BackendTestCase)\", \"test_cursor_executemany_with_empty_params_list (backends.tests.BackendTestCase)\", \"test_cursor_executemany_with_iterator (backends.tests.BackendTestCase)\", \"test_database_operations_helper_class (backends.tests.BackendTestCase)\", \"test_database_operations_init (backends.tests.BackendTestCase)\", \"test_debug_sql (backends.tests.LastExecutedQueryTest)\", \"test_default_connection_thread_local (backends.tests.ThreadTests)\", \"test_disable_constraint_checks_context_manager (backends.tests.FkConstraintsTests)\", \"test_disable_constraint_checks_manually (backends.tests.FkConstraintsTests)\", \"test_django_date_extract (backends.tests.DateQuotingTest)\", \"test_django_date_trunc (backends.tests.DateQuotingTest)\", \"test_integrity_checks_on_creation (backends.tests.FkConstraintsTests)\", \"test_integrity_checks_on_update (backends.tests.FkConstraintsTests)\", \"test_last_executed_query (backends.tests.LastExecutedQueryTest)\", \"test_last_executed_query_without_previous_query (backends.tests.LastExecutedQueryTest)\", \"test_many_to_many (backends.tests.DBConstraintTestCase)\", \"test_parameter_escaping (backends.tests.EscapingChecks)\", \"test_parameter_escaping (backends.tests.EscapingChecksDebug)\", \"test_paramless_no_escaping (backends.tests.EscapingChecks)\", \"test_paramless_no_escaping (backends.tests.EscapingChecksDebug)\", \"test_pass_connection_between_threads (backends.tests.ThreadTests)\", \"test_queries (backends.tests.BackendTestCase)\", \"test_sequence_name_length_limits_flush (backends.tests.LongNameTest)\", \"test_sequence_name_length_limits_m2m (backends.tests.LongNameTest)\", \"test_thread_sharing_count (backends.tests.ThreadTests)\", \"test_timezone_none_use_tz_false (backends.tests.BackendTestCase)\", \"test_unicode_fetches (backends.tests.BackendTestCase)\", \"test_unicode_password (backends.tests.BackendTestCase)\"]",
+  "environment_setup_commit": "65dfb06a1ab56c238cc80f5e1c31f61210c4577d",
+  "patch_files": [
+    "django/db/backends/sqlite3/base.py"
+  ],
+  "test_patch_files": [
+    "tests/backends/models.py",
+    "tests/backends/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/db/backends/sqlite3/base.py": {
+      "diffs": [
+        {
+          "start_line_old": 330,
+          "end_line_old": 342,
+          "file_pos": 2,
+          "file_context_length": 9107,
+          "pos": 2,
+          "context_length": 1013
+        }
+      ]
+    }
+  },
+  "vectors": 3518,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.quote_name_DatabaseOperations.__references_graph.3.2.1",
+      "distance": 0.8523987531661987,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 170,
+      "end_line": 195,
+      "tokens": 190,
+      "context_length": 190
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.check_constraints_DatabaseWrapper.is_in_memory_db.1.1",
+      "distance": 0.8816134929656982,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 316,
+      "end_line": 400,
+      "tokens": 823,
+      "context_length": 1013,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.handle_Command.handle.12.1",
+      "distance": 0.886637806892395,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 69,
+      "end_line": 85,
+      "tokens": 187,
+      "context_length": 1200
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.loaddata_Command.loaddata.25.1.2.1",
+      "distance": 0.8920156955718994,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 87,
+      "end_line": 157,
+      "tokens": 640,
+      "context_length": 1840
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_operator_",
+      "distance": 0.9104723930358887,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 1,
+      "end_line": 114,
+      "tokens": 1027,
+      "context_length": 2867
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_copy_DatabaseSchemaEditor.__exit__.3",
+      "distance": 0.9323660135269165,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 317,
+      "context_length": 3184
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_db_table_DatabaseSchemaEditor.alter_db_table.1.5.1",
+      "distance": 0.9339187145233154,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 86,
+      "end_line": 99,
+      "tokens": 181,
+      "context_length": 3365
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_model_name_db_lookup_clashes_Model._check_model_name_db_lookup_clashes.4.1",
+      "distance": 0.9554105997085571,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1511,
+      "end_line": 1533,
+      "tokens": 171,
+      "context_length": 3536
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_ordering_Model._check_ordering.29.1",
+      "distance": 0.9575351476669312,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1739,
+      "end_line": 1839,
+      "tokens": 729,
+      "context_length": 4265
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper_DatabaseWrapper.20",
+      "distance": 0.9577199220657349,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 81,
+      "end_line": 155,
+      "tokens": 757,
+      "context_length": 5022,
+      "file_pos": 6
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command_Command.add_arguments.6",
+      "distance": 0.9593186378479004,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 38,
+      "end_line": 67,
+      "tokens": 261,
+      "context_length": 5283
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 0.9613770842552185,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 619,
+      "context_length": 5902
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_DatabaseIntrospection._get_foreign_key_constraints_DatabaseIntrospection._get_foreign_key_constraints.4.1",
+      "distance": 0.9614895582199097,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 225,
+      "end_line": 239,
+      "tokens": 146,
+      "context_length": 6048
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_field_DatabaseSchemaEditor.alter_field.5.6.1",
+      "distance": 0.972448468208313,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 101,
+      "end_line": 140,
+      "tokens": 505,
+      "context_length": 6553
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.__foreign_key_constraints_DatabaseOperations.integer_field_ranges._foreign_key_constraints.3.1",
+      "distance": 0.9755410552024841,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 369,
+      "end_line": 406,
+      "tokens": 369,
+      "context_length": 6922
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_column_name_clashes_Model._check_column_name_clashes.used_column_names.4.1",
+      "distance": 0.9762373566627502,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1486,
+      "end_line": 1509,
+      "tokens": 176,
+      "context_length": 7098
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_collections_16",
+      "distance": 0.978495717048645,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 170,
+      "context_length": 7268
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_DatabaseIntrospection._parse_table_constraints_DatabaseIntrospection._parse_table_constraints.statement.9.1",
+      "distance": 0.9806978702545166,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 331,
+      "end_line": 359,
+      "tokens": 278,
+      "context_length": 7546
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 0.9813846349716187,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1265,
+      "end_line": 1296,
+      "tokens": 267,
+      "context_length": 7813
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_long_column_names_Model._check_long_column_names.11.1",
+      "distance": 0.9883869886398315,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1841,
+      "end_line": 1914,
+      "tokens": 572,
+      "context_length": 8385
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/db/backends/mysql/base.py_DatabaseWrapper.check_constraints_DatabaseWrapper.check_constraints.2.2.4.2.1",
+      "distance": 0.990064799785614,
+      "file_path": "django/db/backends/mysql/base.py",
+      "start_line": 290,
+      "end_line": 328,
+      "tokens": 402,
+      "context_length": 8787
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_constraints_Model._check_constraints.3.1",
+      "distance": 0.99696284532547,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1932,
+      "end_line": 2063,
+      "tokens": 976,
+      "context_length": 9763
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations._references_graph_DatabaseOperations.sql_flush.4.1",
+      "distance": 0.997144341468811,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 197,
+      "end_line": 216,
+      "tokens": 209,
+      "context_length": 9972
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/models/base.py_35_",
+      "distance": 0.9998553991317749,
+      "file_path": "django/db/models/base.py",
+      "start_line": 2066,
+      "end_line": 2117,
+      "tokens": 351,
+      "context_length": 10323
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/migrations/operations/__init__.py_RenameField_",
+      "distance": 1.0020146369934082,
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 195,
+      "context_length": 10518
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_datetime_DatabaseOperations.bulk_batch_size.2.3.1.1",
+      "distance": 1.0041272640228271,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 258,
+      "context_length": 10776
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.sequence_reset_by_name_sql_DatabaseOperations.sequence_reset_by_name_sql.2.1",
+      "distance": 1.005427360534668,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 218,
+      "end_line": 234,
+      "tokens": 142,
+      "context_length": 10918
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.sequence_reset_sql_DatabaseOperations.integer_field_ranges.sequence_reset_sql.4.1",
+      "distance": 1.0079867839813232,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 477,
+      "end_line": 496,
+      "tokens": 240,
+      "context_length": 11158
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._handle_objects_preventing_db_destruction_DatabaseCreation._handle_objects_preventing_db_destruction.3",
+      "distance": 1.0114142894744873,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 130,
+      "end_line": 165,
+      "tokens": 399,
+      "context_length": 11557
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_1_BaseDatabaseFeatures.82",
+      "distance": 1.0122588872909546,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 895,
+      "context_length": 12452
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_DatabaseIntrospection_DatabaseIntrospection.get_table_list.5.1",
+      "distance": 1.0127387046813965,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 57,
+      "end_line": 78,
+      "tokens": 218,
+      "context_length": 12670
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/backends/oracle/features.py_1_",
+      "distance": 1.013728141784668,
+      "file_path": "django/db/backends/oracle/features.py",
+      "start_line": 1,
+      "end_line": 124,
+      "tokens": 1048,
+      "context_length": 13718
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.sequence_reset_by_name_sql_DatabaseOperations.bulk_insert_sql.3.1",
+      "distance": 1.017090082168579,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 219,
+      "end_line": 276,
+      "tokens": 431,
+      "context_length": 14149
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_DatabaseIntrospection._get_column_collations_",
+      "distance": 1.0188708305358887,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 440,
+      "end_line": 463,
+      "tokens": 183,
+      "context_length": 14332
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.quote_name_DatabaseOperations.integer_field_ranges.quote_name.5.6.1",
+      "distance": 1.0198613405227661,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 333,
+      "end_line": 344,
+      "tokens": 227,
+      "context_length": 14559
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_1_DatabaseSchemaEditor.sql_delete_check.2.1",
+      "distance": 1.0212035179138184,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 409,
+      "context_length": 14968
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_FORMAT_QMARK_REGEX_SQLiteCursorWrapper.convert_query.1.1",
+      "distance": 1.0214953422546387,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 403,
+      "end_line": 423,
+      "tokens": 183,
+      "context_length": 15151,
+      "file_pos": 17
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_select_for_update_of_arguments.result_SQLCompiler.ordering_parts.get_select_for_update_of_arguments.9.1",
+      "distance": 1.0245964527130127,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1047,
+      "end_line": 1087,
+      "tokens": 337,
+      "context_length": 15488
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_property_name_related_field_accessor_clashes_Model._check_single_primary_key.3.1",
+      "distance": 1.0265250205993652,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1535,
+      "end_line": 1567,
+      "tokens": 231,
+      "context_length": 15719
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations_DatabaseOperations.integer_field_ranges.cache_key_culling_sql.1.1",
+      "distance": 1.0300782918930054,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 21,
+      "end_line": 73,
+      "tokens": 574,
+      "context_length": 16293
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.0302855968475342,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 328,
+      "context_length": 16621
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler_SQLCompiler.ordering_parts.setup_query.self.col_count.1",
+      "distance": 1.030766487121582,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 22,
+      "end_line": 47,
+      "tokens": 257,
+      "context_length": 16878
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_10_FlexibleFieldLookupDict.base_data_types_reverse.__getitem__.2.1",
+      "distance": 1.0314762592315674,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 23,
+      "end_line": 54,
+      "tokens": 296,
+      "context_length": 17174
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/models/options.py_bisect_DEFAULT_NAMES.1",
+      "distance": 1.0321528911590576,
+      "file_path": "django/db/models/options.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 300,
+      "context_length": 17474
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._prepare_related_fields_for_save_Model._prepare_related_fields_for_save.4.3.12.1",
+      "distance": 1.0321578979492188,
+      "file_path": "django/db/models/base.py",
+      "start_line": 911,
+      "end_line": 943,
+      "tokens": 383,
+      "context_length": 17857
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/core/exceptions.py_ValidationError_",
+      "distance": 1.033483862876892,
+      "file_path": "django/core/exceptions.py",
+      "start_line": 107,
+      "end_line": 218,
+      "tokens": 752,
+      "context_length": 18609
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.init_connection_state_DatabaseWrapper.enable_constraint_checking.1.1",
+      "distance": 1.034428596496582,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 268,
+      "end_line": 314,
+      "tokens": 419,
+      "context_length": 19028,
+      "file_pos": 19
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options._prepare_Options._prepare.2.1.4.3",
+      "distance": 1.0349607467651367,
+      "file_path": "django/db/models/options.py",
+      "start_line": 252,
+      "end_line": 287,
+      "tokens": 341,
+      "context_length": 19369
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._check_sql_BaseDatabaseSchemaEditor._delete_constraint_sql.1.1",
+      "distance": 1.0355902910232544,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1238,
+      "end_line": 1260,
+      "tokens": 173,
+      "context_length": 19542
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/introspection.py_DatabaseIntrospection.data_types_reverse.get_constraints.10_",
+      "distance": 1.0359175205230713,
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "start_line": 214,
+      "end_line": 235,
+      "tokens": 208,
+      "context_length": 19750
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_DatabaseSchemaEditor.normalize_name_",
+      "distance": 1.0391693115234375,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 138,
+      "end_line": 198,
+      "tokens": 544,
+      "context_length": 20294
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_1_40",
+      "distance": 1.0450619459152222,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 499,
+      "context_length": 20793,
+      "file_pos": 22
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/core/management/commands/dumpdata.py_Command.handle.18_",
+      "distance": 1.0454221963882446,
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "start_line": 179,
+      "end_line": 203,
+      "tokens": 224,
+      "context_length": 21017
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.sequence_reset_by_name_sql_DatabaseOperations.integer_field_ranges.sequence_reset_by_name_sql.3.1",
+      "distance": 1.0459299087524414,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 461,
+      "end_line": 475,
+      "tokens": 203,
+      "context_length": 21220
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures._mysql_storage_engine_DatabaseFeatures.supports_explain_analyze.1.1",
+      "distance": 1.0460684299468994,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 99,
+      "end_line": 184,
+      "tokens": 741,
+      "context_length": 21961
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.supports_mixed_date_datetime_comparisons_BaseDatabaseFeatures.144",
+      "distance": 1.0472490787506104,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 113,
+      "end_line": 216,
+      "tokens": 833,
+      "context_length": 22794
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_order_by.8_SQLCompiler.ordering_parts.get_order_by.9.1",
+      "distance": 1.0473649501800537,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 365,
+      "end_line": 405,
+      "tokens": 482,
+      "context_length": 23276
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.145_BaseDatabaseFeatures.225",
+      "distance": 1.0474157333374023,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 217,
+      "end_line": 318,
+      "tokens": 864,
+      "context_length": 24140
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._execute_test_db_destruction_DatabaseCreation._execute_statements.1.3.2.2",
+      "distance": 1.047682762145996,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 253,
+      "end_line": 281,
+      "tokens": 277,
+      "context_length": 24417
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.names_to_path.3_Query.names_to_path.4.1",
+      "distance": 1.0482059717178345,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1487,
+      "end_line": 1572,
+      "tokens": 801,
+      "context_length": 25218
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._remake_table.28_DatabaseSchemaEditor._remake_table.67.restore_pk_field.primary_key.1",
+      "distance": 1.048579216003418,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 225,
+      "end_line": 307,
+      "tokens": 731,
+      "context_length": 25949
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/core/management/commands/dumpdata.py_Command.handle_Command.handle.16.2",
+      "distance": 1.0515697002410889,
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "start_line": 67,
+      "end_line": 139,
+      "tokens": 624,
+      "context_length": 26573
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.quote_value_DatabaseSchemaEditor.quote_value.4.6.6.1",
+      "distance": 1.0524015426635742,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 39,
+      "end_line": 65,
+      "tokens": 243,
+      "context_length": 26816
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.sequence_reset_sql_DatabaseOperations.sequence_reset_sql.5.1",
+      "distance": 1.0535730123519897,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 160,
+      "end_line": 187,
+      "tokens": 311,
+      "context_length": 27127
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_datetime_Oracle_datetime",
+      "distance": 1.0553532838821411,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 141,
+      "context_length": 27268
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._fk_constraint_name_BaseDatabaseSchemaEditor._deferrable_constraint_sql.3.1.1",
+      "distance": 1.0555078983306885,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1126,
+      "end_line": 1148,
+      "tokens": 199,
+      "context_length": 27467
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._delete_primary_key_",
+      "distance": 1.0558955669403076,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1292,
+      "end_line": 1324,
+      "tokens": 292,
+      "context_length": 27759
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/creation.py_DatabaseCreation._create_test_db_DatabaseCreation._create_test_db.4.1",
+      "distance": 1.0561418533325195,
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "start_line": 23,
+      "end_line": 49,
+      "tokens": 239,
+      "context_length": 27998
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._create_unique_sql_BaseDatabaseSchemaEditor._create_unique_sql.7.1",
+      "distance": 1.056267499923706,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1182,
+      "end_line": 1217,
+      "tokens": 291,
+      "context_length": 28289
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.sql_flush_DatabaseOperations.integer_field_ranges.sql_flush.11.1",
+      "distance": 1.0573712587356567,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 408,
+      "end_line": 459,
+      "tokens": 516,
+      "context_length": 28805
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_extra_select_SQLCompiler.ordering_parts.get_extra_select.3.1",
+      "distance": 1.0573954582214355,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 407,
+      "end_line": 415,
+      "tokens": 133,
+      "context_length": 28938
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/db/backends/mysql/introspection.py_DatabaseIntrospection.get_constraints.15_",
+      "distance": 1.0632216930389404,
+      "file_path": "django/db/backends/mysql/introspection.py",
+      "start_line": 292,
+      "end_line": 308,
+      "tokens": 184,
+      "context_length": 29122
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.6.1",
+      "distance": 1.0639231204986572,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 53,
+      "end_line": 97,
+      "tokens": 419,
+      "context_length": 29541
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py_DatabaseWrapper.pattern_esc_DatabaseWrapper.ops_class.1",
+      "distance": 1.0655953884124756,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 156,
+      "end_line": 173,
+      "tokens": 216,
+      "context_length": 29757,
+      "file_pos": 28
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_Command.handle_",
+      "distance": 1.0661606788635254,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 31,
+      "end_line": 69,
+      "tokens": 379,
+      "context_length": 30136
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/db/backends/mysql/introspection.py_1_InfoLine.1",
+      "distance": 1.0673171281814575,
+      "file_path": "django/db/backends/mysql/introspection.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 121,
+      "context_length": 30257
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.prep_for_iexact_query_",
+      "distance": 1.067447543144226,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 189,
+      "end_line": 276,
+      "tokens": 696,
+      "context_length": 30953
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/features.py_operator_",
+      "distance": 1.067504644393921,
+      "file_path": "django/db/backends/postgresql/features.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 883,
+      "context_length": 31836
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_psycopg2_DatabaseSchemaEditor._field_base_data_types.2.2.1",
+      "distance": 1.0678402185440063,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 626,
+      "context_length": 32462
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLInsertCompiler.as_sql_SQLInsertCompiler.as_sql.qn.16.4.2.1",
+      "distance": 1.0686256885528564,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1341,
+      "end_line": 1400,
+      "tokens": 617,
+      "context_length": 33079
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_local_fields_Model._check_local_fields.8.1",
+      "distance": 1.0689911842346191,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1689,
+      "end_line": 1737,
+      "tokens": 348,
+      "context_length": 33427
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_copy_DatabaseSchemaEditor.remove_field.3.2",
+      "distance": 1.0690174102783203,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 1,
+      "end_line": 41,
+      "tokens": 427,
+      "context_length": 33854
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_altered_order_with_respect_to_MigrationAutodetector.generate_altered_order_with_respect_to.1.4.dependencies.4",
+      "distance": 1.0700410604476929,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1191,
+      "end_line": 1216,
+      "tokens": 245,
+      "context_length": 34099
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/creation.py_sys_DatabaseCreation._database_exists.2.1",
+      "distance": 1.0701885223388672,
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 238,
+      "context_length": 34337
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.bulk_insert_sql_DatabaseOperations.integer_field_ranges.bulk_insert_sql.6.1",
+      "distance": 1.0703200101852417,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 598,
+      "end_line": 617,
+      "tokens": 303,
+      "context_length": 34640
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/core/management/commands/inspectdb.py_Command.handle_inspection_Command.handle_inspection.5.15.14",
+      "distance": 1.07065749168396,
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "start_line": 38,
+      "end_line": 173,
+      "tokens": 1291,
+      "context_length": 35931
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor_BaseDatabaseSchemaEditor.__enter__.3.1",
+      "distance": 1.0726686716079712,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 44,
+      "end_line": 111,
+      "tokens": 769,
+      "context_length": 36700
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_33__UninitializedOperatorsDescriptor.__get__.4.4.1",
+      "distance": 1.0731772184371948,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 60,
+      "end_line": 99,
+      "tokens": 328,
+      "context_length": 37028
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/db/backends/mysql/validation.py_1_DatabaseValidation._check_sql_mode.2.1",
+      "distance": 1.0739774703979492,
+      "file_path": "django/db/backends/mysql/validation.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 239,
+      "context_length": 37267
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._unique_sql_BaseDatabaseSchemaEditor._unique_sql.4.1",
+      "distance": 1.074573040008545,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1150,
+      "end_line": 1180,
+      "tokens": 214,
+      "context_length": 37481
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_functools_READ_STDIN.1",
+      "distance": 1.0754185914993286,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 177,
+      "context_length": 37658
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._perform_unique_checks_Model._perform_unique_checks.3.1",
+      "distance": 1.0781476497650146,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1083,
+      "end_line": 1126,
+      "tokens": 404,
+      "context_length": 38062
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.check_expression_support_DatabaseOperations.check_expression_support.4.1",
+      "distance": 1.0794273614883423,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 40,
+      "end_line": 66,
+      "tokens": 232,
+      "context_length": 38294
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.fetch_returned_insert_columns_DatabaseOperations.integer_field_ranges.fetch_returned_insert_columns.3.1",
+      "distance": 1.0795824527740479,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 257,
+      "end_line": 271,
+      "tokens": 231,
+      "context_length": 38525
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._execute_test_db_creation_DatabaseCreation._execute_test_db_creation.5",
+      "distance": 1.079666256904602,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 187,
+      "end_line": 218,
+      "tokens": 319,
+      "context_length": 38844
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges._get_no_autofield_sequence_name_DatabaseOperations.integer_field_ranges._get_sequence_name.3.1",
+      "distance": 1.0806876420974731,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 581,
+      "end_line": 596,
+      "tokens": 221,
+      "context_length": 39065
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_timestamp_diff_",
+      "distance": 1.0813839435577393,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 588,
+      "end_line": 610,
+      "tokens": 143,
+      "context_length": 39208,
+      "file_pos": 36
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_default_pk_Model._check_default_pk.2.1",
+      "distance": 1.0824443101882935,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1298,
+      "end_line": 1320,
+      "tokens": 186,
+      "context_length": 39394
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_indexes_Model._check_indexes.8.1",
+      "distance": 1.0825988054275513,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1623,
+      "end_line": 1687,
+      "tokens": 514,
+      "context_length": 39908
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_related_query_name_is_valid_RelatedField._check_related_query_name_is_valid.6.1",
+      "distance": 1.0833253860473633,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 127,
+      "end_line": 154,
+      "tokens": 201,
+      "context_length": 40109
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_1_JoinInfo.1",
+      "distance": 1.084101676940918,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 479,
+      "context_length": 40588
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._delete_unique_sql_BaseDatabaseSchemaEditor._delete_unique_sql.3.1",
+      "distance": 1.0842792987823486,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1219,
+      "end_line": 1236,
+      "tokens": 142,
+      "context_length": 40730
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/creation.py_os_DatabaseCreation._get_test_db_name.3.1",
+      "distance": 1.0846729278564453,
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 140,
+      "context_length": 40870
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.load_label_Command.load_label.3.6.1",
+      "distance": 1.0849459171295166,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 159,
+      "end_line": 224,
+      "tokens": 583,
+      "context_length": 41453
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList._get_deterministic_ordering_ChangeList._get_deterministic_ordering.6.1",
+      "distance": 1.0852124691009521,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 340,
+      "end_line": 400,
+      "tokens": 508,
+      "context_length": 41961
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_uuid_DatabaseOperations.explain_prefix.1",
+      "distance": 1.0860363245010376,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 282,
+      "context_length": 42243
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLInsertCompiler.execute_sql_SQLInsertCompiler.execute_sql.3.5.1",
+      "distance": 1.0866310596466064,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1402,
+      "end_line": 1420,
+      "tokens": 203,
+      "context_length": 42446
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._perform_date_checks_Model._perform_date_checks.3.1",
+      "distance": 1.0877461433410645,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1128,
+      "end_line": 1155,
+      "tokens": 286,
+      "context_length": 42732
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_AlterOrderWithRespectTo.database_backwards_AlterOrderWithRespectTo.migration_name_fragment.1.1",
+      "distance": 1.0880563259124756,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 619,
+      "end_line": 636,
+      "tokens": 163,
+      "context_length": 42895
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/backends/oracle/base.py_DatabaseWrapper_DatabaseWrapper.operators.1",
+      "distance": 1.0883617401123047,
+      "file_path": "django/db/backends/oracle/base.py",
+      "start_line": 102,
+      "end_line": 155,
+      "tokens": 626,
+      "context_length": 43521
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_BaseDatabaseOperations.explain_query_prefix_",
+      "distance": 1.0886156558990479,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 674,
+      "end_line": 694,
+      "tokens": 187,
+      "context_length": 43708
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.date_error_message_Model.date_error_message.3.1",
+      "distance": 1.0886509418487549,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1157,
+      "end_line": 1172,
+      "tokens": 138,
+      "context_length": 43846
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_db_index_Field._check_null_allowed_for_primary_keys.1.5.1.1",
+      "distance": 1.0887539386749268,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 308,
+      "end_line": 336,
+      "tokens": 205,
+      "context_length": 44051
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "position": 1,
+      "tokens": 3090,
+      "context_length": 3090
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "position": 2,
+      "tokens": 6017,
+      "context_length": 9107
+    },
+    {
+      "file_path": "django/core/management/commands/loaddata.py",
+      "position": 3,
+      "tokens": 2937,
+      "context_length": 12044
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "position": 4,
+      "tokens": 1027,
+      "context_length": 13071
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "position": 5,
+      "tokens": 4156,
+      "context_length": 17227
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 6,
+      "tokens": 16858,
+      "context_length": 34085
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 7,
+      "tokens": 619,
+      "context_length": 34704
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "position": 8,
+      "tokens": 4042,
+      "context_length": 38746
+    },
+    {
+      "file_path": "django/db/backends/oracle/operations.py",
+      "position": 9,
+      "tokens": 5971,
+      "context_length": 44717
+    },
+    {
+      "file_path": "django/db/models/sql/compiler.py",
+      "position": 10,
+      "tokens": 14391,
+      "context_length": 59108
+    },
+    {
+      "file_path": "django/db/backends/mysql/base.py",
+      "position": 11,
+      "tokens": 3376,
+      "context_length": 62484
+    },
+    {
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "position": 12,
+      "tokens": 195,
+      "context_length": 62679
+    },
+    {
+      "file_path": "django/db/backends/oracle/creation.py",
+      "position": 13,
+      "tokens": 3893,
+      "context_length": 66572
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 14,
+      "tokens": 2921,
+      "context_length": 69493
+    },
+    {
+      "file_path": "django/db/backends/oracle/features.py",
+      "position": 15,
+      "tokens": 1048,
+      "context_length": 70541
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 16,
+      "tokens": 3704,
+      "context_length": 74245
+    },
+    {
+      "file_path": "django/db/backends/mysql/schema.py",
+      "position": 17,
+      "tokens": 1522,
+      "context_length": 75767
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 18,
+      "tokens": 7367,
+      "context_length": 83134
+    },
+    {
+      "file_path": "django/core/exceptions.py",
+      "position": 19,
+      "tokens": 1189,
+      "context_length": 84323
+    },
+    {
+      "file_path": "django/db/backends/base/schema.py",
+      "position": 20,
+      "tokens": 12353,
+      "context_length": 96676
+    },
+    {
+      "file_path": "django/db/backends/postgresql/introspection.py",
+      "position": 21,
+      "tokens": 2334,
+      "context_length": 99010
+    },
+    {
+      "file_path": "django/db/backends/oracle/schema.py",
+      "position": 22,
+      "tokens": 2035,
+      "context_length": 101045
+    },
+    {
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "position": 23,
+      "tokens": 1610,
+      "context_length": 102655
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 24,
+      "tokens": 1828,
+      "context_length": 104483
+    },
+    {
+      "file_path": "django/db/models/sql/query.py",
+      "position": 25,
+      "tokens": 22546,
+      "context_length": 127029
+    },
+    {
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "position": 26,
+      "tokens": 2561,
+      "context_length": 129590
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/creation.py",
+      "position": 27,
+      "tokens": 851,
+      "context_length": 130441
+    },
+    {
+      "file_path": "django/db/backends/mysql/introspection.py",
+      "position": 28,
+      "tokens": 2552,
+      "context_length": 132993
+    },
+    {
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "position": 29,
+      "tokens": 633,
+      "context_length": 133626
+    },
+    {
+      "file_path": "django/db/backends/postgresql/features.py",
+      "position": 30,
+      "tokens": 883,
+      "context_length": 134509
+    },
+    {
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "position": 31,
+      "tokens": 2159,
+      "context_length": 136668
+    },
+    {
+      "file_path": "django/db/migrations/autodetector.py",
+      "position": 32,
+      "tokens": 11619,
+      "context_length": 148287
+    },
+    {
+      "file_path": "django/db/backends/postgresql/creation.py",
+      "position": 33,
+      "tokens": 646,
+      "context_length": 148933
+    },
+    {
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "position": 34,
+      "tokens": 2633,
+      "context_length": 151566
+    },
+    {
+      "file_path": "django/db/backends/oracle/base.py",
+      "position": 35,
+      "tokens": 5096,
+      "context_length": 156662
+    },
+    {
+      "file_path": "django/db/backends/mysql/validation.py",
+      "position": 36,
+      "tokens": 520,
+      "context_length": 157182
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 37,
+      "tokens": 13876,
+      "context_length": 171058
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 38,
+      "tokens": 4396,
+      "context_length": 175454
+    },
+    {
+      "file_path": "django/db/migrations/operations/models.py",
+      "position": 39,
+      "tokens": 6925,
+      "context_length": 182379
+    },
+    {
+      "file_path": "django/db/backends/base/operations.py",
+      "position": 40,
+      "tokens": 5596,
+      "context_length": 187975
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 41,
+      "tokens": 18446,
+      "context_length": 206421
+    }
+  ]
+}

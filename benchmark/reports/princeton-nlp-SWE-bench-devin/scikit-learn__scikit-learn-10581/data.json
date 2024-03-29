@@ -1,0 +1,1005 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-10581",
+  "model_patch": "diff --git a/sklearn/linear_model/coordinate_descent.py b/sklearn/linear_model/coordinate_descent.py\nindex 7d65e8038..2f5cb95e2 100644\n--- a/sklearn/linear_model/coordinate_descent.py\n+++ b/sklearn/linear_model/coordinate_descent.py\n@@ -682,7 +682,6 @@ class ElasticNet(LinearModel, RegressorMixin):\n \n         Notes\n         -----\n-\n         Coordinate descent is an algorithm that considers each column of\n         data at a time hence it will automatically convert the X input\n         as a Fortran-contiguous numpy array if necessary.\n@@ -690,7 +689,6 @@ class ElasticNet(LinearModel, RegressorMixin):\n         To avoid memory re-allocation it is advised to allocate the\n         initial data in memory directly using that format.\n         \"\"\"\n-\n         if self.alpha == 0:\n             warnings.warn(\"With alpha=0, this algorithm does not converge \"\n                           \"well. You are advised to use the LinearRegression \"\n@@ -709,62 +707,32 @@ class ElasticNet(LinearModel, RegressorMixin):\n                              multi_output=True, y_numeric=True)\n             y = check_array(y, order='F', copy=False, dtype=X.dtype.type,\n                             ensure_2d=False)\n+        else:\n+            # If check_input is False, ensure X is copied if copy_X is True\n+            if self.copy_X:\n+                X = X.copy(order='K')\n \n         X, y, X_offset, y_offset, X_scale, precompute, Xy = \\\n             _pre_fit(X, y, None, self.precompute, self.normalize,\n-                     self.fit_intercept, copy=False)\n+                     self.fit_intercept, copy=True if self.copy_X else False)\n         if y.ndim == 1:\n             y = y[:, np.newaxis]\n-        if Xy is not None and Xy.ndim == 1:\n+        if Xy is not None:\n             Xy = Xy[:, np.newaxis]\n-\n         n_samples, n_features = X.shape\n         n_targets = y.shape[1]\n \n         if self.selection not in ['cyclic', 'random']:\n-            raise ValueError(\"selection should be either random or cyclic.\")\n+            raise ValueError(\"selection should be either 'cyclic' or 'random';\"\n+                             \" got (selection=%r)\" % self.selection)\n \n-        if not self.warm_start or not hasattr(self, \"coef_\"):\n-            coef_ = np.zeros((n_targets, n_features), dtype=X.dtype,\n-                             order='F')\n-        else:\n-            coef_ = self.coef_\n-            if coef_.ndim == 1:\n-                coef_ = coef_[np.newaxis, :]\n-\n-        dual_gaps_ = np.zeros(n_targets, dtype=X.dtype)\n-        self.n_iter_ = []\n+        self.coef_, self.dual_gap_, self.eps_ = map(np.ravel, _path_residuals(\n+            X, y, X_offset, y_offset, X_scale, precompute, self.n_alphas,\n+            self.alphas, self.l1_ratio, self.eps, self.n_iter, self.tol,\n+            self.selection, self.random_state, copy_X=self.copy_X,\n+            return_n_iter=True, check_input=False, **params))\n \n-        for k in xrange(n_targets):\n-            if Xy is not None:\n-                this_Xy = Xy[:, k]\n-            else:\n-                this_Xy = None\n-            _, this_coef, this_dual_gap, this_iter = \\\n-                self.path(X, y[:, k],\n-                          l1_ratio=self.l1_ratio, eps=None,\n-                          n_alphas=None, alphas=[self.alpha],\n-                          precompute=precompute, Xy=this_Xy,\n-                          fit_intercept=False, normalize=False, copy_X=True,\n-                          verbose=False, tol=self.tol, positive=self.positive,\n-                          X_offset=X_offset, X_scale=X_scale, return_n_iter=True,\n-                          coef_init=coef_[k], max_iter=self.max_iter,\n-                          random_state=self.random_state,\n-                          selection=self.selection,\n-                          check_input=False)\n-            coef_[k] = this_coef[:, 0]\n-            dual_gaps_[k] = this_dual_gap[0]\n-            self.n_iter_.append(this_iter[0])\n-\n-        if n_targets == 1:\n-            self.n_iter_ = self.n_iter_[0]\n-\n-        self.coef_, self.dual_gap_ = map(np.squeeze, [coef_, dual_gaps_])\n         self._set_intercept(X_offset, y_offset, X_scale)\n-\n-        # workaround since _set_intercept will cast self.coef_ into X.dtype\n-        self.coef_ = np.asarray(self.coef_, dtype=X.dtype)\n-\n         # return self for chaining fit and predict calls\n         return self\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/linear_model/coordinate_descent.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "b27e285ea39450550fc8c81f308a91a660c03a56",
+  "patch": "diff --git a/sklearn/linear_model/coordinate_descent.py b/sklearn/linear_model/coordinate_descent.py\n--- a/sklearn/linear_model/coordinate_descent.py\n+++ b/sklearn/linear_model/coordinate_descent.py\n@@ -700,19 +700,23 @@ def fit(self, X, y, check_input=True):\n             raise ValueError('precompute should be one of True, False or'\n                              ' array-like. Got %r' % self.precompute)\n \n+        # Remember if X is copied\n+        X_copied = False\n         # We expect X and y to be float64 or float32 Fortran ordered arrays\n         # when bypassing checks\n         if check_input:\n+            X_copied = self.copy_X and self.fit_intercept\n             X, y = check_X_y(X, y, accept_sparse='csc',\n                              order='F', dtype=[np.float64, np.float32],\n-                             copy=self.copy_X and self.fit_intercept,\n-                             multi_output=True, y_numeric=True)\n+                             copy=X_copied, multi_output=True, y_numeric=True)\n             y = check_array(y, order='F', copy=False, dtype=X.dtype.type,\n                             ensure_2d=False)\n \n+        # Ensure copying happens only once, don't do it again if done above\n+        should_copy = self.copy_X and not X_copied\n         X, y, X_offset, y_offset, X_scale, precompute, Xy = \\\n             _pre_fit(X, y, None, self.precompute, self.normalize,\n-                     self.fit_intercept, copy=False)\n+                     self.fit_intercept, copy=should_copy)\n         if y.ndim == 1:\n             y = y[:, np.newaxis]\n         if Xy is not None and Xy.ndim == 1:\n",
+  "test_patch": "diff --git a/sklearn/linear_model/tests/test_coordinate_descent.py b/sklearn/linear_model/tests/test_coordinate_descent.py\n--- a/sklearn/linear_model/tests/test_coordinate_descent.py\n+++ b/sklearn/linear_model/tests/test_coordinate_descent.py\n@@ -3,6 +3,7 @@\n # License: BSD 3 clause\n \n import numpy as np\n+import pytest\n from scipy import interpolate, sparse\n from copy import deepcopy\n \n@@ -669,6 +670,30 @@ def test_check_input_false():\n     assert_raises(ValueError, clf.fit, X, y, check_input=False)\n \n \n+@pytest.mark.parametrize(\"check_input\", [True, False])\n+def test_enet_copy_X_True(check_input):\n+    X, y, _, _ = build_dataset()\n+    X = X.copy(order='F')\n+\n+    original_X = X.copy()\n+    enet = ElasticNet(copy_X=True)\n+    enet.fit(X, y, check_input=check_input)\n+\n+    assert_array_equal(original_X, X)\n+\n+\n+def test_enet_copy_X_False_check_input_False():\n+    X, y, _, _ = build_dataset()\n+    X = X.copy(order='F')\n+\n+    original_X = X.copy()\n+    enet = ElasticNet(copy_X=False)\n+    enet.fit(X, y, check_input=False)\n+\n+    # No copying, X is overwritten\n+    assert_true(np.any(np.not_equal(original_X, X)))\n+\n+\n def test_overrided_gram_matrix():\n     X, y, _, _ = build_dataset(n_samples=20, n_features=10)\n     Gram = X.T.dot(X)\n",
+  "problem_statement": "ElasticNet overwrites X even with copy_X=True\nThe `fit` function of an `ElasticNet`, called with `check_input=False`, overwrites X, even when `copy_X=True`:\r\n```python\r\nimport numpy as np\r\nfrom sklearn.linear_model import ElasticNet\r\n\r\n\r\nrng = np.random.RandomState(0)\r\nn_samples, n_features = 20, 2\r\nX = rng.randn(n_samples, n_features).copy(order='F')\r\nbeta = rng.randn(n_features)\r\ny = 2 + np.dot(X, beta) + rng.randn(n_samples)\r\n\r\nX_copy = X.copy()\r\nenet = ElasticNet(fit_intercept=True, normalize=False, copy_X=True)\r\nenet.fit(X, y, check_input=False)\r\n\r\nprint(\"X unchanged = \", np.all(X == X_copy))\r\n```\nElasticNet overwrites X even with copy_X=True\nThe `fit` function of an `ElasticNet`, called with `check_input=False`, overwrites X, even when `copy_X=True`:\r\n```python\r\nimport numpy as np\r\nfrom sklearn.linear_model import ElasticNet\r\n\r\n\r\nrng = np.random.RandomState(0)\r\nn_samples, n_features = 20, 2\r\nX = rng.randn(n_samples, n_features).copy(order='F')\r\nbeta = rng.randn(n_features)\r\ny = 2 + np.dot(X, beta) + rng.randn(n_samples)\r\n\r\nX_copy = X.copy()\r\nenet = ElasticNet(fit_intercept=True, normalize=False, copy_X=True)\r\nenet.fit(X, y, check_input=False)\r\n\r\nprint(\"X unchanged = \", np.all(X == X_copy))\r\n```\n[MRG] FIX #10540 ElasticNet overwrites X even with copy_X=True\nMade changes as suggested by @gxyd.\r\nplease review and suggest changes @jnothman @gxyd \n",
+  "hints_text": "I think this will be easy to fix. The culprit is this line https://github.com/scikit-learn/scikit-learn/blob/master/sklearn/linear_model/coordinate_descent.py#L715 which passes `copy=False`, instead of `copy=self.copy_X`. That'll probably fix the issue.\r\n\r\nThanks for reporting it.\nThanks for the diagnosis, @gxyd!\n@jnothman, @gxyd: May I work on this?\ngo ahead\n\nThanks. On it!!\nproblem comes from this old PR:\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/pull/5133\r\n\r\nbasically we should now remove the \"check_input=True\" fit param from the objects now that we have the context manager to avoid slow checks.\r\n\r\nsee http://scikit-learn.org/stable/modules/generated/sklearn.config_context.html\nI don't think the diagnosis is correct. The problem is that if you pass check_input=True, you bypass the check_input call that is meant to make the copy of X\nThanks for the additional clarifications @agramfort . Could you please  help reviewing [the PR](https://github.com/scikit-learn/scikit-learn/pull/10581)?\nI think this will be easy to fix. The culprit is this line https://github.com/scikit-learn/scikit-learn/blob/master/sklearn/linear_model/coordinate_descent.py#L715 which passes `copy=False`, instead of `copy=self.copy_X`. That'll probably fix the issue.\r\n\r\nThanks for reporting it.\nThanks for the diagnosis, @gxyd!\n@jnothman, @gxyd: May I work on this?\ngo ahead\n\nThanks. On it!!\nproblem comes from this old PR:\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/pull/5133\r\n\r\nbasically we should now remove the \"check_input=True\" fit param from the objects now that we have the context manager to avoid slow checks.\r\n\r\nsee http://scikit-learn.org/stable/modules/generated/sklearn.config_context.html\nI don't think the diagnosis is correct. The problem is that if you pass check_input=True, you bypass the check_input call that is meant to make the copy of X\nThanks for the additional clarifications @agramfort . Could you please  help reviewing [the PR](https://github.com/scikit-learn/scikit-learn/pull/10581)?\nyou need to add a non-regression test case that fails without this patch\nand shows that we do not modify the data when told to copy.\n",
+  "created_at": "2018-02-03T15:23:17Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_copy_X_True[False]\"]",
+  "PASS_TO_PASS": "[\"sklearn/linear_model/tests/test_coordinate_descent.py::test_1d_multioutput_enet_and_multitask_enet_cv\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_1d_multioutput_lasso_and_multitask_lasso_cv\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_check_input_false\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_copy_X_False_check_input_False\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_copy_X_True[True]\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_cv_positive_constraint\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_float_precision\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_l1_ratio\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_multitarget\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_path\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_path_positive\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_positive_constraint\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_enet_toy\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_alpha_warning\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_cv\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_cv_positive_constraint\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_cv_with_some_model_selection\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_non_float_y\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_path_return_models_vs_new_return_gives_same_coefficients\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_positive_constraint\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_readonly_data\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_toy\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_lasso_zero\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_multi_task_lasso_and_enet\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_multi_task_lasso_readonly_data\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_multioutput_enetcv_error\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_multitask_enet_and_lasso_cv\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_overrided_gram_matrix\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_path_parameters\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_precompute_invalid_argument\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_random_descent\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_sparse_dense_descent_paths\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_sparse_input_dtype_enet_and_lassocv\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_uniform_targets\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_warm_start\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_warm_start_convergence\", \"sklearn/linear_model/tests/test_coordinate_descent.py::test_warm_start_convergence_with_regularizer_decrement\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/linear_model/coordinate_descent.py"
+  ],
+  "test_patch_files": [
+    "sklearn/linear_model/tests/test_coordinate_descent.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/linear_model/coordinate_descent.py": {
+      "diffs": [
+        {
+          "start_line_old": 703,
+          "end_line_old": 710,
+          "file_pos": 1,
+          "file_context_length": 20402,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskElasticNet.fit_MultiTaskElasticNet.fit.21.1",
+          "closest_snippet_line_distance": 1016,
+          "pos": 15,
+          "context_length": 8062
+        }
+      ]
+    }
+  },
+  "vectors": 2899,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.fit.16_ElasticNet.fit.23.1",
+      "distance": 0.990676760673523,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 738,
+      "end_line": 769,
+      "tokens": 343,
+      "context_length": 343,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 0.9931800365447998,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1008,
+      "end_line": 1076,
+      "tokens": 601,
+      "context_length": 944
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNetCV.1_ElasticNetCV.1",
+      "distance": 1.0164597034454346,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1385,
+      "end_line": 1561,
+      "tokens": 1689,
+      "context_length": 2633,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_and_elasticnet.py_1_",
+      "distance": 1.0198044776916504,
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 535,
+      "context_length": 3168
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.path_ElasticNet.__init__.self.selection.1",
+      "distance": 1.025829792022705,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 649,
+      "end_line": 666,
+      "tokens": 182,
+      "context_length": 3350,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_enet_path.2_enet_path.25.2.coef_.1",
+      "distance": 1.028355360031128,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 383,
+      "end_line": 452,
+      "tokens": 776,
+      "context_length": 4126,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_dont_overwrite_parameters_check_dont_overwrite_parameters.2.21",
+      "distance": 1.0312893390655518,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 571,
+      "end_line": 619,
+      "tokens": 441,
+      "context_length": 4567
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_overwrite_params_check_estimators_overwrite_params.16.8",
+      "distance": 1.0352301597595215,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1675,
+      "end_line": 1710,
+      "tokens": 352,
+      "context_length": 4919
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y.X_check_X_y.6.1",
+      "distance": 1.038037896156311,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 654,
+      "end_line": 668,
+      "tokens": 205,
+      "context_length": 5124
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.12.4.2.1",
+      "distance": 1.0551964044570923,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 817,
+      "end_line": 891,
+      "tokens": 702,
+      "context_length": 5826
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_train_error_vs_test_error.py_1_",
+      "distance": 1.073951244354248,
+      "file_path": "examples/model_selection/plot_train_error_vs_test_error.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 606,
+      "context_length": 6432
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_data_not_an_array_check_estimators_data_not_an_array.14",
+      "distance": 1.075007677078247,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1782,
+      "end_line": 1802,
+      "tokens": 200,
+      "context_length": 6632
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskElasticNet.fit_MultiTaskElasticNet.fit.21.1",
+      "distance": 1.0802409648895264,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1719,
+      "end_line": 1786,
+      "tokens": 612,
+      "context_length": 7244,
+      "file_pos": 5
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_supervised_y_no_nan_check_supervised_y_no_nan.estimator.7.3.1",
+      "distance": 1.0836741924285889,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 141,
+      "end_line": 161,
+      "tokens": 203,
+      "context_length": 7447
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.fit_ElasticNet.fit.self.n_iter_.1",
+      "distance": 1.084442138671875,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 668,
+      "end_line": 736,
+      "tokens": 615,
+      "context_length": 8062,
+      "file_pos": 5
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer.fit_FunctionTransformer.fit.4.1",
+      "distance": 1.084895133972168,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 100,
+      "end_line": 119,
+      "tokens": 126,
+      "context_length": 8188
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/incremental_pca.py_IncrementalPCA.partial_fit_",
+      "distance": 1.0849854946136475,
+      "file_path": "sklearn/decomposition/incremental_pca.py",
+      "start_line": 191,
+      "end_line": 283,
+      "tokens": 851,
+      "context_length": 9039
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_43_MultiTaskElasticNet.1",
+      "distance": 1.0891451835632324,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1587,
+      "end_line": 1704,
+      "tokens": 1136,
+      "context_length": 10175,
+      "file_pos": 7
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit1d_check_fit1d.rnd.9",
+      "distance": 1.0945520401000977,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 761,
+      "end_line": 776,
+      "tokens": 139,
+      "context_length": 10314
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_enet_path_enet_path.1",
+      "distance": 1.0953625440597534,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 268,
+      "end_line": 382,
+      "tokens": 989,
+      "context_length": 11303,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskElasticNet.__init___MultiTaskElasticNet.__init__.self.selection.1",
+      "distance": 1.0955802202224731,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1705,
+      "end_line": 1717,
+      "tokens": 147,
+      "context_length": 11450,
+      "file_pos": 7
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_31_ElasticNet.1",
+      "distance": 1.0974276065826416,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 506,
+      "end_line": 648,
+      "tokens": 1385,
+      "context_length": 12835,
+      "file_pos": 7
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_enet_path.26_enet_path.28.1",
+      "distance": 1.1002366542816162,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 454,
+      "end_line": 503,
+      "tokens": 588,
+      "context_length": 13423,
+      "file_pos": 7
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskElasticNetCV.1_MultiTaskElasticNetCV.1",
+      "distance": 1.1109273433685303,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1908,
+      "end_line": 2065,
+      "tokens": 1540,
+      "context_length": 14963,
+      "file_pos": 7
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNetCV.path_ElasticNetCV.__init__.self.selection.1",
+      "distance": 1.111639142036438,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1562,
+      "end_line": 1584,
+      "tokens": 234,
+      "context_length": 15197,
+      "file_pos": 7
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator_sparse_data_check_estimator_sparse_data.10.5.5.2",
+      "distance": 1.1124327182769775,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 406,
+      "end_line": 447,
+      "tokens": 427,
+      "context_length": 15624
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_coordinate_descent_path.py_1_neg_log_alphas_positive_enet.1",
+      "distance": 1.1139329671859741,
+      "file_path": "examples/linear_model/plot_lasso_coordinate_descent_path.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 695,
+      "context_length": 16319
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/rbm.py_BernoulliRBM.fit_",
+      "distance": 1.1148509979248047,
+      "file_path": "sklearn/neural_network/rbm.py",
+      "start_line": 324,
+      "end_line": 366,
+      "tokens": 347,
+      "context_length": 16666
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_26__alpha_grid.10.1",
+      "distance": 1.118605613708496,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 32,
+      "end_line": 123,
+      "tokens": 845,
+      "context_length": 17511,
+      "file_pos": 9
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_29_",
+      "distance": 1.1211833953857422,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 74,
+      "end_line": 98,
+      "tokens": 285,
+      "context_length": 17796
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/covariance/elliptic_envelope.py_EllipticEnvelope.fit_EllipticEnvelope.decision_function.6.1",
+      "distance": 1.1248338222503662,
+      "file_path": "sklearn/covariance/elliptic_envelope.py",
+      "start_line": 97,
+      "end_line": 148,
+      "tokens": 402,
+      "context_length": 18198
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_OneHotEncoder.fit_transform_OneHotEncoder.fit_transform.2.1",
+      "distance": 1.1248825788497925,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2047,
+      "end_line": 2059,
+      "tokens": 115,
+      "context_length": 18313
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskElasticNetCV.path_MultiTaskElasticNetCV.__init__.self.selection.1",
+      "distance": 1.1261038780212402,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 2066,
+      "end_line": 2085,
+      "tokens": 213,
+      "context_length": 18526,
+      "file_pos": 12
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_normalize.6_normalize.8.2.1.1",
+      "distance": 1.1266638040542603,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1450,
+      "end_line": 1480,
+      "tokens": 278,
+      "context_length": 18804
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_Normalizer.transform_Normalizer.transform.5.1",
+      "distance": 1.1288706064224243,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1544,
+      "end_line": 1565,
+      "tokens": 229,
+      "context_length": 19033
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/validation.py_check_X_y_check_X_y.1",
+      "distance": 1.1299800872802734,
+      "file_path": "sklearn/utils/validation.py",
+      "start_line": 553,
+      "end_line": 653,
+      "tokens": 979,
+      "context_length": 20012
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_Lasso.path_Lasso.__init__.1",
+      "distance": 1.1366686820983887,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 917,
+      "end_line": 928,
+      "tokens": 155,
+      "context_length": 20167,
+      "file_pos": 12
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.1410832405090332,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 727,
+      "end_line": 758,
+      "tokens": 297,
+      "context_length": 20464
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/extmath.py_softmax_softmax.8.1",
+      "distance": 1.1414713859558105,
+      "file_path": "sklearn/utils/extmath.py",
+      "start_line": 583,
+      "end_line": 614,
+      "tokens": 209,
+      "context_length": 20673
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_dtypes_check_estimators_dtypes.10.5.1.1",
+      "distance": 1.1424469947814941,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 959,
+      "end_line": 982,
+      "tokens": 269,
+      "context_length": 20942
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_supervised_y_2d_check_supervised_y_2d.17",
+      "distance": 1.1446144580841064,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1414,
+      "end_line": 1443,
+      "tokens": 324,
+      "context_length": 21266
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 1.1450262069702148,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1511,
+      "end_line": 1549,
+      "tokens": 442,
+      "context_length": 21708
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation._check_non_neg_array_LatentDirichletAllocation.partial_fit.11.1",
+      "distance": 1.14536452293396,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 454,
+      "end_line": 507,
+      "tokens": 355,
+      "context_length": 22063
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py__gram_omp.18__gram_omp.19.2.1.1",
+      "distance": 1.147035002708435,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 225,
+      "end_line": 271,
+      "tokens": 550,
+      "context_length": 22613
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 1.1487362384796143,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 931,
+      "end_line": 956,
+      "tokens": 282,
+      "context_length": 22895
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/lof.py_LocalOutlierFactor.fit_LocalOutlierFactor.fit.13.1",
+      "distance": 1.1495964527130127,
+      "file_path": "sklearn/neighbors/lof.py",
+      "start_line": 172,
+      "end_line": 222,
+      "tokens": 513,
+      "context_length": 23408
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_multioutput_estimator_convert_y_2d_check_non_transformer_estimators_n_iter.not_run_check_n_iter.7.8.1",
+      "distance": 1.1518898010253906,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1873,
+      "end_line": 1917,
+      "tokens": 455,
+      "context_length": 23863
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.sparse_coef__ElasticNet._decision_function.3.2.1.1",
+      "distance": 1.1524522304534912,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 771,
+      "end_line": 793,
+      "tokens": 170,
+      "context_length": 24033,
+      "file_pos": 16
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_inputs_QuantileTransformer._check_inputs.8.1",
+      "distance": 1.1577303409576416,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2386,
+      "end_line": 2403,
+      "tokens": 192,
+      "context_length": 24225
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py__pre_fit_",
+      "distance": 1.1583945751190186,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 518,
+      "end_line": 572,
+      "tokens": 599,
+      "context_length": 24824
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_predict1d_check_fit2d_predict1d.rnd.11.1.1",
+      "distance": 1.158771276473999,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 622,
+      "end_line": 644,
+      "tokens": 221,
+      "context_length": 25045
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__fit_and_predict.10__fit_and_predict.11.1",
+      "distance": 1.1594493389129639,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 759,
+      "end_line": 804,
+      "tokens": 462,
+      "context_length": 25507
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 1.159503698348999,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 792,
+      "end_line": 814,
+      "tokens": 248,
+      "context_length": 25755
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/least_angle.py__lars_path_residues.X_train__lars_path_residues.11.1",
+      "distance": 1.1603150367736816,
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "start_line": 949,
+      "end_line": 976,
+      "tokens": 362,
+      "context_length": 26117
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_int_check_regressors_int.18",
+      "distance": 1.162397027015686,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1483,
+      "end_line": 1508,
+      "tokens": 277,
+      "context_length": 26394
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_13_nudge_dataset.6.1",
+      "distance": 1.1632084846496582,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 45,
+      "end_line": 76,
+      "tokens": 271,
+      "context_length": 26665
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskLasso.__init___MultiTaskElasticNetCV",
+      "distance": 1.164507269859314,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1892,
+      "end_line": 2085,
+      "tokens": 161,
+      "context_length": 26826,
+      "file_pos": 20
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifier_data_not_an_array_check_regressor_data_not_an_array.4",
+      "distance": 1.1654424667358398,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1765,
+      "end_line": 1779,
+      "tokens": 211,
+      "context_length": 27037
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/neighbors/base.py_SupervisedIntegerMixin_",
+      "distance": 1.1668987274169922,
+      "file_path": "sklearn/neighbors/base.py",
+      "start_line": 748,
+      "end_line": 802,
+      "tokens": 457,
+      "context_length": 27494
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py__PGNMF._fit_transform__PGNMF._fit_transform.13.1",
+      "distance": 1.1675326824188232,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 231,
+      "end_line": 278,
+      "tokens": 530,
+      "context_length": 28024
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/omp.py__cholesky_omp.15__cholesky_omp.16.2.1.1",
+      "distance": 1.1681678295135498,
+      "file_path": "sklearn/linear_model/omp.py",
+      "start_line": 98,
+      "end_line": 142,
+      "tokens": 509,
+      "context_length": 28533
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_noise_37_",
+      "distance": 1.1717681884765625,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 89,
+      "end_line": 112,
+      "tokens": 196,
+      "context_length": 28729
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/naive_bayes.py_GaussianNB.fit_GaussianNB.fit.3.1",
+      "distance": 1.1737897396087646,
+      "file_path": "sklearn/naive_bayes.py",
+      "start_line": 168,
+      "end_line": 192,
+      "tokens": 195,
+      "context_length": 28924
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/_function_transformer.py_FunctionTransformer._check_inverse_transform_FunctionTransformer._check_inverse_transform.3.2.1",
+      "distance": 1.1739673614501953,
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "start_line": 87,
+      "end_line": 98,
+      "tokens": 127,
+      "context_length": 29051
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_fit_returns_self_check_estimators_fit_returns_self.10",
+      "distance": 1.1773176193237305,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1363,
+      "end_line": 1379,
+      "tokens": 154,
+      "context_length": 29205
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/isotonic.py_IsotonicRegression.y__IsotonicRegression._check_fit_data.1.1",
+      "distance": 1.1782803535461426,
+      "file_path": "sklearn/isotonic.py",
+      "start_line": 234,
+      "end_line": 250,
+      "tokens": 145,
+      "context_length": 29350
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/manifold/isomap.py_Isomap.fit_transform_Isomap.fit_transform.3.1",
+      "distance": 1.1801347732543945,
+      "file_path": "sklearn/manifold/isomap.py",
+      "start_line": 169,
+      "end_line": 185,
+      "tokens": 118,
+      "context_length": 29468
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_partial_fit_n_features_check_estimators_partial_fit_n_features.2.6.1",
+      "distance": 1.1803717613220215,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1119,
+      "end_line": 1142,
+      "tokens": 185,
+      "context_length": 29653
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_QuantileTransformer._check_is_fitted_QuantileTransformer._check_is_fitted.4.1",
+      "distance": 1.180553674697876,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2405,
+      "end_line": 2413,
+      "tokens": 119,
+      "context_length": 29772
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/forest.py_RandomTreesEmbedding.fit_transform_RandomTreesEmbedding.fit_transform.8.1",
+      "distance": 1.1834450960159302,
+      "file_path": "sklearn/ensemble/forest.py",
+      "start_line": 1902,
+      "end_line": 1935,
+      "tokens": 306,
+      "context_length": 30078
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/manifold/t_sne.py_TSNE._fit_TSNE._fit.neighbors_nn.1",
+      "distance": 1.1839715242385864,
+      "file_path": "sklearn/manifold/t_sne.py",
+      "start_line": 632,
+      "end_line": 696,
+      "tokens": 763,
+      "context_length": 30841
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_26__randomized_lasso.10.1",
+      "distance": 1.184325098991394,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 148,
+      "end_line": 182,
+      "tokens": 314,
+      "context_length": 31155
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/isotonic.py_np_check_increasing.7.1",
+      "distance": 1.1847889423370361,
+      "file_path": "sklearn/isotonic.py",
+      "start_line": 6,
+      "end_line": 75,
+      "tokens": 534,
+      "context_length": 31689
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/online_lda.py_LatentDirichletAllocation._unnormalized_transform_LatentDirichletAllocation._unnormalized_transform.8.1",
+      "distance": 1.1850905418395996,
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "start_line": 586,
+      "end_line": 615,
+      "tokens": 249,
+      "context_length": 31938
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__apply_func__apply_func.result_full.6.1",
+      "distance": 1.185758352279663,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 647,
+      "end_line": 658,
+      "tokens": 120,
+      "context_length": 32058
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/tree/tree.py_BaseDecisionTree._validate_X_predict_BaseDecisionTree._validate_X_predict.5.1",
+      "distance": 1.186103105545044,
+      "file_path": "sklearn/tree/tree.py",
+      "start_line": 373,
+      "end_line": 389,
+      "tokens": 180,
+      "context_length": 32238
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 1,
+      "tokens": 20402,
+      "context_length": 20402
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 2,
+      "tokens": 17919,
+      "context_length": 38321
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "position": 3,
+      "tokens": 535,
+      "context_length": 38856
+    },
+    {
+      "file_path": "sklearn/utils/validation.py",
+      "position": 4,
+      "tokens": 7263,
+      "context_length": 46119
+    },
+    {
+      "file_path": "examples/model_selection/plot_train_error_vs_test_error.py",
+      "position": 5,
+      "tokens": 631,
+      "context_length": 46750
+    },
+    {
+      "file_path": "sklearn/preprocessing/_function_transformer.py",
+      "position": 6,
+      "tokens": 1388,
+      "context_length": 48138
+    },
+    {
+      "file_path": "sklearn/decomposition/incremental_pca.py",
+      "position": 7,
+      "tokens": 2549,
+      "context_length": 50687
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_coordinate_descent_path.py",
+      "position": 8,
+      "tokens": 854,
+      "context_length": 51541
+    },
+    {
+      "file_path": "sklearn/neural_network/rbm.py",
+      "position": 9,
+      "tokens": 2830,
+      "context_length": 54371
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 10,
+      "tokens": 794,
+      "context_length": 55165
+    },
+    {
+      "file_path": "sklearn/covariance/elliptic_envelope.py",
+      "position": 11,
+      "tokens": 1655,
+      "context_length": 56820
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 12,
+      "tokens": 25898,
+      "context_length": 82718
+    },
+    {
+      "file_path": "sklearn/utils/extmath.py",
+      "position": 13,
+      "tokens": 6236,
+      "context_length": 88954
+    },
+    {
+      "file_path": "sklearn/decomposition/online_lda.py",
+      "position": 14,
+      "tokens": 6659,
+      "context_length": 95613
+    },
+    {
+      "file_path": "sklearn/linear_model/omp.py",
+      "position": 15,
+      "tokens": 7841,
+      "context_length": 103454
+    },
+    {
+      "file_path": "sklearn/neighbors/lof.py",
+      "position": 16,
+      "tokens": 3305,
+      "context_length": 106759
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 17,
+      "tokens": 4968,
+      "context_length": 111727
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 18,
+      "tokens": 11732,
+      "context_length": 123459
+    },
+    {
+      "file_path": "sklearn/linear_model/least_angle.py",
+      "position": 19,
+      "tokens": 13807,
+      "context_length": 137266
+    },
+    {
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "position": 20,
+      "tokens": 1091,
+      "context_length": 138357
+    },
+    {
+      "file_path": "sklearn/neighbors/base.py",
+      "position": 21,
+      "tokens": 6680,
+      "context_length": 145037
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 22,
+      "tokens": 3913,
+      "context_length": 148950
+    },
+    {
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "position": 23,
+      "tokens": 1004,
+      "context_length": 149954
+    },
+    {
+      "file_path": "sklearn/naive_bayes.py",
+      "position": 24,
+      "tokens": 8409,
+      "context_length": 158363
+    },
+    {
+      "file_path": "sklearn/isotonic.py",
+      "position": 25,
+      "tokens": 3378,
+      "context_length": 161741
+    },
+    {
+      "file_path": "sklearn/manifold/isomap.py",
+      "position": 26,
+      "tokens": 1684,
+      "context_length": 163425
+    },
+    {
+      "file_path": "sklearn/ensemble/forest.py",
+      "position": 27,
+      "tokens": 16939,
+      "context_length": 180364
+    },
+    {
+      "file_path": "sklearn/manifold/t_sne.py",
+      "position": 28,
+      "tokens": 8304,
+      "context_length": 188668
+    },
+    {
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "position": 29,
+      "tokens": 5771,
+      "context_length": 194439
+    },
+    {
+      "file_path": "sklearn/tree/tree.py",
+      "position": 30,
+      "tokens": 12958,
+      "context_length": 207397
+    }
+  ]
+}

@@ -1,0 +1,1112 @@
+{
+  "instance_id": "sympy__sympy-13429",
+  "model_patch": "diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py\nindex cacba9eb29..be98ba715a 100644\n--- a/sympy/core/numbers.py\n+++ b/sympy/core/numbers.py\n@@ -1735,7 +1735,7 @@ def __eq__(self, other):\n                 # so we can just check equivalence of args\n                 return self.p == other.p and self.q == other.q\n             if isinstance(other, Float):\n-                return mlib.mpf_eq(self._as_mpf_val(other._prec), other._mpf_)\n+                return other.__eq__(self)\n         return False\n \n     def __ne__(self, other):\n@@ -2156,12 +2156,7 @@ def __le__(self, other):\n         return Rational.__le__(self, other)\n \n     def __hash__(self):\n-        return hash(self.p)\n-\n-    def __index__(self):\n-        return self.p\n-\n-    ########################################\n+        return super(Integer, self).__hash__()\n \n     def _eval_is_odd(self):\n         return bool(self.p % 2)\n@@ -2937,7 +2932,7 @@ def __add__(self, other):\n                 return S.NaN\n             elif other.is_Float:\n                 if other == Float('inf'):\n-                    return Float('nan')\n+                    return S.NaN\n                 else:\n                     return Float('-inf')\n             else:\n@@ -2952,7 +2947,7 @@ def __sub__(self, other):\n                 return S.NaN\n             elif other.is_Float:\n                 if other == Float('-inf'):\n-                    return Float('nan')\n+                    return S.NaN\n                 else:\n                     return Float('-inf')\n             else:\n@@ -3147,7 +3142,7 @@ class NaN(with_metaclass(Singleton, Number)):\n     Examples\n     ========\n \n-    >>> from sympy import nan, S, oo, Eq\n+    >>> from sympy import nan, S, oo, sin, exp, integrate, Symbol\n     >>> nan is S.NaN\n     True\n     >>> oo - oo\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/core/numbers.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "ac03325b44485e603992a0bb783536a9f8a9152f",
+  "patch": "diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py\n--- a/sympy/core/numbers.py\n+++ b/sympy/core/numbers.py\n@@ -1259,13 +1259,13 @@ def __eq__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             return NotImplemented\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             if other.is_irrational:\n                 return False\n             return other.__eq__(self)\n-        if isinstance(other, Float):\n+        if other.is_Float:\n             return bool(mlib.mpf_eq(self._mpf_, other._mpf_))\n-        if isinstance(other, Number):\n+        if other.is_Number:\n             # numbers should compare at the same precision;\n             # all _as_mpf_val routines should be sure to abide\n             # by the request to change the prec if necessary; if\n@@ -1283,11 +1283,14 @@ def __gt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s > %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__lt__(self)\n-        if other.is_comparable:\n+        if other.is_Rational and not other.is_Integer:\n+            self *= other.q\n+            other = _sympify(other.p)\n+        elif other.is_comparable:\n             other = other.evalf()\n-        if isinstance(other, Number) and other is not S.NaN:\n+        if other.is_Number and other is not S.NaN:\n             return _sympify(bool(\n                 mlib.mpf_gt(self._mpf_, other._as_mpf_val(self._prec))))\n         return Expr.__gt__(self, other)\n@@ -1297,11 +1300,14 @@ def __ge__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s >= %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__le__(self)\n-        if other.is_comparable:\n+        if other.is_Rational and not other.is_Integer:\n+            self *= other.q\n+            other = _sympify(other.p)\n+        elif other.is_comparable:\n             other = other.evalf()\n-        if isinstance(other, Number) and other is not S.NaN:\n+        if other.is_Number and other is not S.NaN:\n             return _sympify(bool(\n                 mlib.mpf_ge(self._mpf_, other._as_mpf_val(self._prec))))\n         return Expr.__ge__(self, other)\n@@ -1311,11 +1317,14 @@ def __lt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s < %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__gt__(self)\n-        if other.is_real and other.is_number:\n+        if other.is_Rational and not other.is_Integer:\n+            self *= other.q\n+            other = _sympify(other.p)\n+        elif other.is_comparable:\n             other = other.evalf()\n-        if isinstance(other, Number) and other is not S.NaN:\n+        if other.is_Number and other is not S.NaN:\n             return _sympify(bool(\n                 mlib.mpf_lt(self._mpf_, other._as_mpf_val(self._prec))))\n         return Expr.__lt__(self, other)\n@@ -1325,11 +1334,14 @@ def __le__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s <= %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__ge__(self)\n-        if other.is_real and other.is_number:\n+        if other.is_Rational and not other.is_Integer:\n+            self *= other.q\n+            other = _sympify(other.p)\n+        elif other.is_comparable:\n             other = other.evalf()\n-        if isinstance(other, Number) and other is not S.NaN:\n+        if other.is_Number and other is not S.NaN:\n             return _sympify(bool(\n                 mlib.mpf_le(self._mpf_, other._as_mpf_val(self._prec))))\n         return Expr.__le__(self, other)\n@@ -1720,16 +1732,16 @@ def __eq__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             return NotImplemented\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             if other.is_irrational:\n                 return False\n             return other.__eq__(self)\n-        if isinstance(other, Number):\n-            if isinstance(other, Rational):\n+        if other.is_Number:\n+            if other.is_Rational:\n                 # a Rational is always in reduced form so will never be 2/4\n                 # so we can just check equivalence of args\n                 return self.p == other.p and self.q == other.q\n-            if isinstance(other, Float):\n+            if other.is_Float:\n                 return mlib.mpf_eq(self._as_mpf_val(other._prec), other._mpf_)\n         return False\n \n@@ -1741,13 +1753,13 @@ def __gt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s > %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__lt__(self)\n         expr = self\n-        if isinstance(other, Number):\n-            if isinstance(other, Rational):\n+        if other.is_Number:\n+            if other.is_Rational:\n                 return _sympify(bool(self.p*other.q > self.q*other.p))\n-            if isinstance(other, Float):\n+            if other.is_Float:\n                 return _sympify(bool(mlib.mpf_gt(\n                     self._as_mpf_val(other._prec), other._mpf_)))\n         elif other.is_number and other.is_real:\n@@ -1759,13 +1771,13 @@ def __ge__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s >= %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__le__(self)\n         expr = self\n-        if isinstance(other, Number):\n-            if isinstance(other, Rational):\n+        if other.is_Number:\n+            if other.is_Rational:\n                  return _sympify(bool(self.p*other.q >= self.q*other.p))\n-            if isinstance(other, Float):\n+            if other.is_Float:\n                 return _sympify(bool(mlib.mpf_ge(\n                     self._as_mpf_val(other._prec), other._mpf_)))\n         elif other.is_number and other.is_real:\n@@ -1777,13 +1789,13 @@ def __lt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s < %s\" % (self, other))\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__gt__(self)\n         expr = self\n-        if isinstance(other, Number):\n-            if isinstance(other, Rational):\n+        if other.is_Number:\n+            if other.is_Rational:\n                 return _sympify(bool(self.p*other.q < self.q*other.p))\n-            if isinstance(other, Float):\n+            if other.is_Float:\n                 return _sympify(bool(mlib.mpf_lt(\n                     self._as_mpf_val(other._prec), other._mpf_)))\n         elif other.is_number and other.is_real:\n@@ -1796,12 +1808,12 @@ def __le__(self, other):\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s <= %s\" % (self, other))\n         expr = self\n-        if isinstance(other, NumberSymbol):\n+        if other.is_NumberSymbol:\n             return other.__ge__(self)\n-        elif isinstance(other, Number):\n-            if isinstance(other, Rational):\n+        elif other.is_Number:\n+            if other.is_Rational:\n                 return _sympify(bool(self.p*other.q <= self.q*other.p))\n-            if isinstance(other, Float):\n+            if other.is_Float:\n                 return _sympify(bool(mlib.mpf_le(\n                     self._as_mpf_val(other._prec), other._mpf_)))\n         elif other.is_number and other.is_real:\n@@ -2119,7 +2131,7 @@ def __gt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s > %s\" % (self, other))\n-        if isinstance(other, Integer):\n+        if other.is_Integer:\n             return _sympify(self.p > other.p)\n         return Rational.__gt__(self, other)\n \n@@ -2128,7 +2140,7 @@ def __lt__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s < %s\" % (self, other))\n-        if isinstance(other, Integer):\n+        if other.is_Integer:\n             return _sympify(self.p < other.p)\n         return Rational.__lt__(self, other)\n \n@@ -2137,7 +2149,7 @@ def __ge__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s >= %s\" % (self, other))\n-        if isinstance(other, Integer):\n+        if other.is_Integer:\n             return _sympify(self.p >= other.p)\n         return Rational.__ge__(self, other)\n \n@@ -2146,7 +2158,7 @@ def __le__(self, other):\n             other = _sympify(other)\n         except SympifyError:\n             raise TypeError(\"Invalid comparison %s <= %s\" % (self, other))\n-        if isinstance(other, Integer):\n+        if other.is_Integer:\n             return _sympify(self.p <= other.p)\n         return Rational.__le__(self, other)\n \n@@ -3344,7 +3356,7 @@ def __eq__(self, other):\n             return NotImplemented\n         if self is other:\n             return True\n-        if isinstance(other, Number) and self.is_irrational:\n+        if other.is_Number and self.is_irrational:\n             return False\n \n         return False    # NumberSymbol != non-(Number|self)\n@@ -3352,61 +3364,15 @@ def __eq__(self, other):\n     def __ne__(self, other):\n         return not self == other\n \n-    def __lt__(self, other):\n-        try:\n-            other = _sympify(other)\n-        except SympifyError:\n-            raise TypeError(\"Invalid comparison %s < %s\" % (self, other))\n-        if self is other:\n-            return S.false\n-        if isinstance(other, Number):\n-            approx = self.approximation_interval(other.__class__)\n-            if approx is not None:\n-                l, u = approx\n-                if other < l:\n-                    return S.false\n-                if other > u:\n-                    return S.true\n-            return _sympify(self.evalf() < other)\n-        if other.is_real and other.is_number:\n-            other = other.evalf()\n-            return _sympify(self.evalf() < other)\n-        return Expr.__lt__(self, other)\n-\n     def __le__(self, other):\n-        try:\n-            other = _sympify(other)\n-        except SympifyError:\n-            raise TypeError(\"Invalid comparison %s <= %s\" % (self, other))\n         if self is other:\n             return S.true\n-        if other.is_real and other.is_number:\n-            other = other.evalf()\n-        if isinstance(other, Number):\n-            return _sympify(self.evalf() <= other)\n         return Expr.__le__(self, other)\n \n-    def __gt__(self, other):\n-        try:\n-            other = _sympify(other)\n-        except SympifyError:\n-            raise TypeError(\"Invalid comparison %s > %s\" % (self, other))\n-        r = _sympify((-self) < (-other))\n-        if r in (S.true, S.false):\n-            return r\n-        else:\n-            return Expr.__gt__(self, other)\n-\n     def __ge__(self, other):\n-        try:\n-            other = _sympify(other)\n-        except SympifyError:\n-            raise TypeError(\"Invalid comparison %s >= %s\" % (self, other))\n-        r = _sympify((-self) <= (-other))\n-        if r in (S.true, S.false):\n-            return r\n-        else:\n-            return Expr.__ge__(self, other)\n+        if self is other:\n+            return S.true\n+        return Expr.__ge__(self, other)\n \n     def __int__(self):\n         # subclass with appropriate return value\n",
+  "test_patch": "diff --git a/sympy/core/tests/test_relational.py b/sympy/core/tests/test_relational.py\n--- a/sympy/core/tests/test_relational.py\n+++ b/sympy/core/tests/test_relational.py\n@@ -718,6 +718,55 @@ def test_issue_10927():\n     assert str(Eq(x, -oo)) == 'Eq(x, -oo)'\n \n \n+def test_issues_13081_12583_12534():\n+    # 13081\n+    r = Rational('905502432259640373/288230376151711744')\n+    assert (r < pi) is S.false\n+    assert (r > pi) is S.true\n+    # 12583\n+    v = sqrt(2)\n+    u = sqrt(v) + 2/sqrt(10 - 8/sqrt(2 - v) + 4*v*(1/sqrt(2 - v) - 1))\n+    assert (u >= 0) is S.true\n+    # 12534; Rational vs NumberSymbol\n+    # here are some precisions for which Rational forms\n+    # at a lower and higher precision bracket the value of pi\n+    # e.g. for p = 20:\n+    # Rational(pi.n(p + 1)).n(25) = 3.14159265358979323846 2834\n+    #                    pi.n(25) = 3.14159265358979323846 2643\n+    # Rational(pi.n(p    )).n(25) = 3.14159265358979323846 1987\n+    assert [p for p in range(20, 50) if\n+            (Rational(pi.n(p)) < pi) and\n+            (pi < Rational(pi.n(p + 1)))\n+        ] == [20, 24, 27, 33, 37, 43, 48]\n+    # pick one such precision and affirm that the reversed operation\n+    # gives the opposite result, i.e. if x < y is true then x > y\n+    # must be false\n+    p = 20\n+    # Rational vs NumberSymbol\n+    G = [Rational(pi.n(i)) > pi for i in (p, p + 1)]\n+    L = [Rational(pi.n(i)) < pi for i in (p, p + 1)]\n+    assert G == [False, True]\n+    assert all(i is not j for i, j in zip(L, G))\n+    # Float vs NumberSymbol\n+    G = [pi.n(i) > pi for i in (p, p + 1)]\n+    L = [pi.n(i) < pi for i in (p, p + 1)]\n+    assert G == [False, True]\n+    assert all(i is not j for i, j in zip(L, G))\n+    # Float vs Float\n+    G = [pi.n(p) > pi.n(p + 1)]\n+    L = [pi.n(p) < pi.n(p + 1)]\n+    assert G == [True]\n+    assert all(i is not j for i, j in zip(L, G))\n+    # Float vs Rational\n+    # the rational form is less than the floating representation\n+    # at the same precision\n+    assert [i for i in range(15, 50) if Rational(pi.n(i)) > pi.n(i)\n+        ] == []\n+    # this should be the same if we reverse the relational\n+    assert [i for i in range(15, 50) if pi.n(i) < Rational(pi.n(i))\n+        ] == []\n+\n+\n def test_binary_symbols():\n     ans = set([x])\n     for f in Eq, Ne:\n",
+  "problem_statement": "Some comparisons between rational and irrational numbers are incorrect\nIf you choose just the right rational number, you can end up in a situation where it is neither less than pi, nor equal to it, nor is pi less than it. This is with sympy 1.1.1, using Python 3.6.0 from Anaconda on Ubuntu 16.04.\r\n```\r\n>>> import sympy\r\n>>> sympy.__version__\r\n'1.1.1'\r\n>>> r = sympy.Rational('905502432259640373/288230376151711744')\r\n>>> r < sympy.pi\r\nFalse\r\n>>> r == sympy.pi\r\nFalse\r\n>>> sympy.pi < r\r\nFalse\r\n```\r\nOf course, that same number is greater than pi, even though pi is not less than it.\r\n```\r\n>>> r > sympy.pi\r\nTrue\r\n```\r\nI believe this is a result of using evalf() to do comparisons between rationals and reals... As we can see, this particular fraction happens to be exactly equal to pi if we use the default evalf precision of 15, but not if we use more.\r\n```\r\n>>> r == sympy.pi.evalf(15)\r\nTrue\r\n>>> r == sympy.pi.evalf(16)\r\nFalse\r\n```\r\nHopefully this isn't a duplicate issue; I did a bit of searching for related ones, and found the likes of #12583 and #12534. I think this is different than #12583 because I'm only concerned about comparisons where one of the numbers is rational. That should always be decidable - or am I misunderstanding something about math?\n",
+  "hints_text": "Some experimentation shows that the behavior can be improved by computing the difference and then looking at the sign with .is_positive and .is_negative. However, that can break as well, you just need a bigger fraction:\r\n```\r\n>>> r = sympy.Rational('472202503979844695356573871761845338575143343779448489867569357017941709222155070092152068445390137810467671349/150306725297525326584926758194517569752043683130132471725266622178061377607334940381676735896625196994043838464')\r\n>>> r < sympy.pi\r\nTrue\r\n>>> r > sympy.pi\r\nTrue\r\n>>> x = r - sympy.pi\r\n>>> repr(x.is_positive)\r\n'None'\r\n>>> repr(x.is_negative)\r\n'None'\r\n```\nThis is the same as that issue. See the discussion there and at https://github.com/sympy/sympy/pull/12537. \nAh, awesome.\r\n\r\nIs there a workaround to force evalf() to use enough precision that the digits it gives me are correct? I don't mind if it uses a lot of memory, or loops forever, or tells me it can't determine the answer. I just want to avoid the case where I get an answer that's wrong.\r\n\r\nSomething like the behavior of Hans Boehm's [constructive reals](http://www.hboehm.info/new_crcalc/CRCalc.html) would be ideal.\nevalf already does this. It's just the way it's being used in the comparisons is wrong. But if you do `(a - b).evalf()` the sign of the result should tell if you if a < b or a > b (or you'll get something like `-0.e-124` if it can't determine, which I believe you can check with `is_comparable). \nTo clarify, evalf internally increases the precision to try to give you as many digits as you asked for correctly (the default is 15 digits). For comparisions, you can just use `evalf(2)`, which is what the [core does](https://github.com/sympy/sympy/blob/d1320814eda6549996190618a21eaf212cfd4d1e/sympy/core/expr.py#L3371). \r\n\r\nAn example of where it can fail\r\n\r\n```\r\n>>> (sin(1)**2 + cos(1)**2 - 1).evalf()\r\n-0.e-124\r\n>>> (sin(1)**2 + cos(1)**2 - 1).evalf().is_comparable\r\nFalse\r\n```\r\n\r\nBecause `sin(1)**2 + cos(1)**2` and `1` are actually equal, it will never be able to compute enough digits of each to get something that it knows is greater than or less than 0 (you can also construct more diabolic examples where expressions aren't equal, but evalf won't try enough digits to determine that). \nPerfect.\r\n\r\nSo it seems like I can do the following to compare (rational or irrational reals) a and b:\r\n1) check if a == b; if so, we're done\r\n2) subtract, and keep calling evalf(2) with increasing arguments to maxn, until the result .is_comparable\r\n3) if we find a comparable result, then return the appropriate ordering\r\n4) otherwise give up at some point and claim the results are incomparable\r\n\r\nHmm, is there any benefit in actually checking a == b? Or will the subtraction always give exactly zero in that case?\r\n\r\nAlternatively, is there any danger that a == b will be True even though the a and b aren't exactly equal?\nFor floats in the present code, yes (see https://github.com/sympy/sympy/issues/11707).  Once that is fixed no. ",
+  "created_at": "2017-10-10T13:20:35Z",
+  "version": "1.1",
+  "FAIL_TO_PASS": "[\"test_issues_13081_12583_12534\"]",
+  "PASS_TO_PASS": "[\"test_Eq\", \"test_Not\", \"test_binary_symbols\", \"test_bool\", \"test_canonical\", \"test_complex_compare_not_real\", \"test_complex_infinity_inequalities\", \"test_complex_pure_imag_not_ordered\", \"test_doit\", \"test_equals\", \"test_evaluate\", \"test_imaginary_and_inf_compare_raises_TypeError\", \"test_imaginary_compare_raises_TypeError\", \"test_ineq_avoid_wild_symbol_flip\", \"test_inequalities_cant_sympify_other\", \"test_inequalities_symbol_name_same\", \"test_inequalities_symbol_name_same_complex\", \"test_issue_10304\", \"test_issue_10401\", \"test_issue_10633\", \"test_issue_10927\", \"test_issue_8245\", \"test_issue_8449\", \"test_nan_complex_inequalities\", \"test_nan_equality_exceptions\", \"test_nan_inequality_raise_errors\", \"test_new_relational\", \"test_rel_Infinity\", \"test_rel_ne\", \"test_rel_subs\", \"test_relational_bool_output\", \"test_relational_logic_symbols\", \"test_reversed\", \"test_rich_cmp\", \"test_simplify\", \"test_univariate_relational_as_set\", \"test_wrappers\", \"test_x_minus_y_not_same_as_x_lt_y\"]",
+  "environment_setup_commit": "ec9e3c0436fbff934fa84e22bf07f1b3ef5bfac3",
+  "patch_files": [
+    "sympy/core/numbers.py"
+  ],
+  "test_patch_files": [
+    "sympy/core/tests/test_relational.py"
+  ],
+  "patch_diff_details": {
+    "sympy/core/numbers.py": {
+      "diffs": [
+        {
+          "start_line_old": 1262,
+          "end_line_old": 1268,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.12_Float.__mul__.2.1",
+          "closest_snippet_line_distance": 91,
+          "pos": 76,
+          "context_length": 23900
+        },
+        {
+          "start_line_old": 1286,
+          "end_line_old": 1290,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_I_",
+          "closest_snippet_line_distance": 2541,
+          "pos": 53,
+          "context_length": 16105
+        },
+        {
+          "start_line_old": 1300,
+          "end_line_old": 1304,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_NumberSymbol.__lt___NumberSymbol.__lt__.5.1",
+          "closest_snippet_line_distance": 2060,
+          "pos": 56,
+          "context_length": 16746
+        },
+        {
+          "start_line_old": 1314,
+          "end_line_old": 1318,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__rdivmod___Number.__sub__.2.1",
+          "closest_snippet_line_distance": 666,
+          "pos": 63,
+          "context_length": 19378
+        },
+        {
+          "start_line_old": 1328,
+          "end_line_old": 1332,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__lt___Float.__lt__.5.1",
+          "closest_snippet_line_distance": 6,
+          "pos": 67,
+          "context_length": 20870
+        },
+        {
+          "start_line_old": 1723,
+          "end_line_old": 1732,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__le___Rational.__le__.4.1",
+          "closest_snippet_line_distance": 75,
+          "pos": 5,
+          "context_length": 869
+        },
+        {
+          "start_line_old": 1744,
+          "end_line_old": 1750,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__ge___Rational.__ge__.5.1",
+          "closest_snippet_line_distance": 18,
+          "pos": 2,
+          "context_length": 350
+        },
+        {
+          "start_line_old": 1762,
+          "end_line_old": 1768,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "pos": 1,
+          "context_length": 175
+        },
+        {
+          "start_line_old": 1780,
+          "end_line_old": 1786,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__gt___Rational.__gt__.5.1",
+          "closest_snippet_line_distance": 26,
+          "pos": 3,
+          "context_length": 525
+        },
+        {
+          "start_line_old": 1799,
+          "end_line_old": 1804,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__lt___Rational.__lt__.5.1",
+          "closest_snippet_line_distance": 8,
+          "pos": 4,
+          "context_length": 700
+        },
+        {
+          "start_line_old": 2122,
+          "end_line_old": 2122,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+          "closest_snippet_line_distance": 527,
+          "pos": 11,
+          "context_length": 2256
+        },
+        {
+          "start_line_old": 2131,
+          "end_line_old": 2131,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+          "closest_snippet_line_distance": 536,
+          "pos": 11,
+          "context_length": 2256
+        },
+        {
+          "start_line_old": 2140,
+          "end_line_old": 2140,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+          "closest_snippet_line_distance": 545,
+          "pos": 11,
+          "context_length": 2256
+        },
+        {
+          "start_line_old": 2149,
+          "end_line_old": 2149,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+          "closest_snippet_line_distance": 554,
+          "pos": 11,
+          "context_length": 2256
+        },
+        {
+          "start_line_old": 3347,
+          "end_line_old": 3347,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__abs___Float.__eq__.7",
+          "closest_snippet_line_distance": 2066
+        },
+        {
+          "start_line_old": 3355,
+          "end_line_old": 3409,
+          "file_pos": 1,
+          "file_context_length": 29204,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__abs___Float.__eq__.7",
+          "closest_snippet_line_distance": 2111
+        }
+      ]
+    }
+  },
+  "vectors": 7993,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__ge___Rational.__ge__.5.1",
+      "distance": 0.5370903015136719,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1762,
+      "end_line": 1778,
+      "tokens": 175,
+      "context_length": 175,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__gt___Rational.__gt__.5.1",
+      "distance": 0.5379263162612915,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1744,
+      "end_line": 1760,
+      "tokens": 175,
+      "context_length": 350,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__lt___Rational.__lt__.5.1",
+      "distance": 0.5432438850402832,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1780,
+      "end_line": 1796,
+      "tokens": 175,
+      "context_length": 525,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__le___Rational.__le__.4.1",
+      "distance": 0.554029643535614,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1798,
+      "end_line": 1814,
+      "tokens": 175,
+      "context_length": 700,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__eq___Rational.__ne__.1.1",
+      "distance": 0.5585155487060547,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1723,
+      "end_line": 1742,
+      "tokens": 169,
+      "context_length": 869,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rdiv___Rational.__truediv__.1",
+      "distance": 0.6546841859817505,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1625,
+      "end_line": 1637,
+      "tokens": 144,
+      "context_length": 1013,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational._eval_power_Rational._eval_power.3",
+      "distance": 0.657779335975647,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1658,
+      "end_line": 1698,
+      "tokens": 448,
+      "context_length": 1461,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__div___Rational.__div__.2.1",
+      "distance": 0.6650115847587585,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1610,
+      "end_line": 1624,
+      "tokens": 156,
+      "context_length": 1617,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational._as_mpf_val_Rational.ceiling.1.1",
+      "distance": 0.6683356761932373,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1700,
+      "end_line": 1721,
+      "tokens": 163,
+      "context_length": 1780,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__rsub___Rational.__rsub__.2.1",
+      "distance": 0.6755496263504028,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1584,
+      "end_line": 1595,
+      "tokens": 125,
+      "context_length": 1905,
+      "file_pos": 1
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__gt___Integer._eval_is_odd.1.1",
+      "distance": 0.6760469675064087,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2122,
+      "end_line": 2167,
+      "tokens": 351,
+      "context_length": 2256,
+      "file_pos": 1
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__mod___Rational.__rmod__.2.1",
+      "distance": 0.681369423866272,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1639,
+      "end_line": 1656,
+      "tokens": 188,
+      "context_length": 2444,
+      "file_pos": 1
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__radd___Rational.__sub__.2.1",
+      "distance": 0.6887669563293457,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1570,
+      "end_line": 1583,
+      "tokens": 131,
+      "context_length": 2575,
+      "file_pos": 1
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__add___Rational.__add__.2.1",
+      "distance": 0.6924550533294678,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1557,
+      "end_line": 1569,
+      "tokens": 132,
+      "context_length": 2707,
+      "file_pos": 1
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__mul___Rational.__rmul__.1",
+      "distance": 0.6998710632324219,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1596,
+      "end_line": 1608,
+      "tokens": 141,
+      "context_length": 2848,
+      "file_pos": 1
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational_Rational.is_Rational.1",
+      "distance": 0.7049765586853027,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1363,
+      "end_line": 1455,
+      "tokens": 597,
+      "context_length": 3445,
+      "file_pos": 1
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__new___Rational.__new__.14.1",
+      "distance": 0.7144066691398621,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1457,
+      "end_line": 1527,
+      "tokens": 495,
+      "context_length": 3940,
+      "file_pos": 1
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.gcd_Rational._sage_.2.1",
+      "distance": 0.7376827597618103,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1831,
+      "end_line": 1854,
+      "tokens": 182,
+      "context_length": 4122,
+      "file_pos": 1
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.20_Integer.__ne__.1.1",
+      "distance": 0.7720550298690796,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2032,
+      "end_line": 2120,
+      "tokens": 750,
+      "context_length": 4872,
+      "file_pos": 1
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer_Integer.__new__.9.2.obj.4.1",
+      "distance": 0.7758524417877197,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1944,
+      "end_line": 1985,
+      "tokens": 321,
+      "context_length": 5193,
+      "file_pos": 1
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py__decimal_to_Rational_prec__gcdcache.1",
+      "distance": 0.7788764834403992,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 134,
+      "end_line": 155,
+      "tokens": 209,
+      "context_length": 5402,
+      "file_pos": 1
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_1_PythonRational.__neg__.1.1",
+      "distance": 0.779362142086029,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 640,
+      "context_length": 6042
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer._eval_power_Integer._eval_power.sqr_dict.1",
+      "distance": 0.7978955507278442,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2169,
+      "end_line": 2247,
+      "tokens": 747,
+      "context_length": 6789,
+      "file_pos": 2
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/concrete/guess.py_rationalize_rationalize.6.1",
+      "distance": 0.8023215532302856,
+      "file_path": "sympy/concrete/guess.py",
+      "start_line": 109,
+      "end_line": 167,
+      "tokens": 552,
+      "context_length": 7341
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.limit_denominator_Rational.__neg__.1.1",
+      "distance": 0.804671049118042,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1529,
+      "end_line": 1555,
+      "tokens": 205,
+      "context_length": 7546,
+      "file_pos": 3
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_E_pi.1",
+      "distance": 0.8067803382873535,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3498,
+      "end_line": 3566,
+      "tokens": 429,
+      "context_length": 7975,
+      "file_pos": 3
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_Pow._eval_is_rational_Pow._eval_is_rational.6.1.3.1.1",
+      "distance": 0.8144683837890625,
+      "file_path": "sympy/core/power.py",
+      "start_line": 1104,
+      "end_line": 1120,
+      "tokens": 165,
+      "context_length": 8140
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__truediv___",
+      "distance": 0.8149912357330322,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 208,
+      "end_line": 288,
+      "tokens": 500,
+      "context_length": 8640
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer._eval_power.28_63.1",
+      "distance": 0.8289986252784729,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2248,
+      "end_line": 2300,
+      "tokens": 471,
+      "context_length": 9111,
+      "file_pos": 4
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.as_content_primitive__intcache.1",
+      "distance": 0.8368159532546997,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1856,
+      "end_line": 1886,
+      "tokens": 197,
+      "context_length": 9308,
+      "file_pos": 4
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__getnewargs___Integer.__divmod__.2.2.1.1",
+      "distance": 0.8372872471809387,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1987,
+      "end_line": 2016,
+      "tokens": 172,
+      "context_length": 9480,
+      "file_pos": 4
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/sets.py_AskRationalHandler_AskRationalHandler.13",
+      "distance": 0.8432269096374512,
+      "file_path": "sympy/assumptions/handlers/sets.py",
+      "start_line": 97,
+      "end_line": 160,
+      "tokens": 419,
+      "context_length": 9899
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Integer.__rdivmod___Integer.__rdivmod__.2.2.2.1",
+      "distance": 0.843618631362915,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2018,
+      "end_line": 2030,
+      "tokens": 126,
+      "context_length": 10025,
+      "file_pos": 5
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/core/benchmarks/bench_numbers.py_1_",
+      "distance": 0.8477942943572998,
+      "file_path": "sympy/core/benchmarks/bench_numbers.py",
+      "start_line": 1,
+      "end_line": 94,
+      "tokens": 367,
+      "context_length": 10392
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/core/basic.py_Basic.is_comparable_Basic.is_comparable.8.6.1.1",
+      "distance": 0.8514639139175415,
+      "file_path": "sympy/core/basic.py",
+      "start_line": 572,
+      "end_line": 616,
+      "tokens": 355,
+      "context_length": 10747
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr._eval_is_rational_function_Expr.is_rational_function.4.3.1.1",
+      "distance": 0.8623536229133606,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2381,
+      "end_line": 2449,
+      "tokens": 517,
+      "context_length": 11264
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Rational.__hash___Rational.factors.3.1",
+      "distance": 0.8646804690361023,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1816,
+      "end_line": 1829,
+      "tokens": 143,
+      "context_length": 11407,
+      "file_pos": 8
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/core/expr.py_Expr._eval_is_algebraic_expr_Expr.97",
+      "distance": 0.8678199052810669,
+      "file_path": "sympy/core/expr.py",
+      "start_line": 2451,
+      "end_line": 2511,
+      "tokens": 448,
+      "context_length": 11855
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_RationalConstant_Zero.__neg__.1.1",
+      "distance": 0.8722578883171082,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2430,
+      "end_line": 2485,
+      "tokens": 258,
+      "context_length": 12113,
+      "file_pos": 8
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/core/power.py_Pow._eval_is_rational_function_Pow._eval_is_algebraic_expr.2.2.1.1",
+      "distance": 0.8776768445968628,
+      "file_path": "sympy/core/power.py",
+      "start_line": 1143,
+      "end_line": 1161,
+      "tokens": 133,
+      "context_length": 12246
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__rsub___PythonRational.__mul__.3.1",
+      "distance": 0.8817761540412903,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 156,
+      "end_line": 179,
+      "tokens": 234,
+      "context_length": 12480
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.rational_AssumptionKeys.rational.2.1",
+      "distance": 0.8856809139251709,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 272,
+      "end_line": 297,
+      "tokens": 133,
+      "context_length": 12613
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float._eval_power_Float._eval_power.3.4.3.2.1",
+      "distance": 0.8900196552276611,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1212,
+      "end_line": 1242,
+      "tokens": 337,
+      "context_length": 12950,
+      "file_pos": 9
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/assumptions/ask.py_AssumptionKeys.irrational_AssumptionKeys.irrational.2.1",
+      "distance": 0.8921900987625122,
+      "file_path": "sympy/assumptions/ask.py",
+      "start_line": 299,
+      "end_line": 326,
+      "tokens": 165,
+      "context_length": 13115
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__rmul___PythonRational.__div__.3.1",
+      "distance": 0.8952965140342712,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 181,
+      "end_line": 206,
+      "tokens": 263,
+      "context_length": 13378
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py__real_to_rational__real_to_rational.9.1",
+      "distance": 0.8991304636001587,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1313,
+      "end_line": 1373,
+      "tokens": 554,
+      "context_length": 13932
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number_Number._prec.1",
+      "distance": 0.8992918729782104,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 507,
+      "end_line": 526,
+      "tokens": 155,
+      "context_length": 14087,
+      "file_pos": 10
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__div___Float.__mod__.4.1",
+      "distance": 0.8994473218917847,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1179,
+      "end_line": 1201,
+      "tokens": 283,
+      "context_length": 14370,
+      "file_pos": 10
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__radd___PythonRational.__sub__.3.1",
+      "distance": 0.9005131125450134,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 126,
+      "end_line": 154,
+      "tokens": 277,
+      "context_length": 14647
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/polys/domains/pythonrational.py_PythonRational.__add___PythonRational.__add__.3.1",
+      "distance": 0.9025486707687378,
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "start_line": 105,
+      "end_line": 124,
+      "tokens": 223,
+      "context_length": 14870
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_I_",
+      "distance": 0.9040982723236084,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3827,
+      "end_line": 3877,
+      "tokens": 307,
+      "context_length": 15177,
+      "file_pos": 10
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_nsimplify_nsimplify.15.4",
+      "distance": 0.9044619798660278,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1178,
+      "end_line": 1259,
+      "tokens": 779,
+      "context_length": 15956
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__ne___Float.__gt__.5.1",
+      "distance": 0.9094818830490112,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1283,
+      "end_line": 1298,
+      "tokens": 149,
+      "context_length": 16105,
+      "file_pos": 10
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NumberSymbol.__le___NumberSymbol.__hash__.1.1",
+      "distance": 0.9120003581047058,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3381,
+      "end_line": 3424,
+      "tokens": 336,
+      "context_length": 16441,
+      "file_pos": 10
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NumberSymbol.__lt___NumberSymbol.__lt__.5.1",
+      "distance": 0.9157727360725403,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3360,
+      "end_line": 3379,
+      "tokens": 172,
+      "context_length": 16613,
+      "file_pos": 10
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__ge___Float.__ge__.5.1",
+      "distance": 0.9162366986274719,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1300,
+      "end_line": 1312,
+      "tokens": 133,
+      "context_length": 16746,
+      "file_pos": 10
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Half_Half.__abs__.1.1",
+      "distance": 0.9182804822921753,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2625,
+      "end_line": 2651,
+      "tokens": 134,
+      "context_length": 16880,
+      "file_pos": 10
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_NegativeInfinity._as_mpf_val_NegativeInfinity.ceiling.1.1",
+      "distance": 0.9192606210708618,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3049,
+      "end_line": 3120,
+      "tokens": 498,
+      "context_length": 17378,
+      "file_pos": 10
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Number.__rdivmod___Number.__sub__.2.1",
+      "distance": 0.9247415065765381,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 574,
+      "end_line": 652,
+      "tokens": 604,
+      "context_length": 17982,
+      "file_pos": 10
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py__has_rational_power__has_rational_power.5.2.1.1",
+      "distance": 0.9260733127593994,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 495,
+      "end_line": 527,
+      "tokens": 288,
+      "context_length": 18270
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/assumptions/handlers/sets.py_AskRealHandler.Pow_AskRealHandler.Pow.6.1.1.4.1.1",
+      "distance": 0.929604172706604,
+      "file_path": "sympy/assumptions/handlers/sets.py",
+      "start_line": 232,
+      "end_line": 285,
+      "tokens": 560,
+      "context_length": 18830
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/solvers/inequalities.py_solve_rational_inequalities_solve_rational_inequalities.4.1",
+      "distance": 0.929966390132904,
+      "file_path": "sympy/solvers/inequalities.py",
+      "start_line": 131,
+      "end_line": 195,
+      "tokens": 412,
+      "context_length": 19242
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__lt___Float.__lt__.5.1",
+      "distance": 0.9313787817955017,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1314,
+      "end_line": 1326,
+      "tokens": 136,
+      "context_length": 19378,
+      "file_pos": 12
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_exp_polar._eval_evalf_exp_polar.as_base_exp.2.2.1",
+      "distance": 0.9332597255706787,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 159,
+      "end_line": 186,
+      "tokens": 241,
+      "context_length": 19619
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/solvers/solveset.py__solve_as_rational__solve_as_rational.4.2.3.1",
+      "distance": 0.9351896047592163,
+      "file_path": "sympy/solvers/solveset.py",
+      "start_line": 388,
+      "end_line": 403,
+      "tokens": 154,
+      "context_length": 19773
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/core/mul.py_Mul.as_powers_dict_Mul._eval_is_real.1.1",
+      "distance": 0.9374518394470215,
+      "file_path": "sympy/core/mul.py",
+      "start_line": 1030,
+      "end_line": 1132,
+      "tokens": 842,
+      "context_length": 20615
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__le___RealNumber.1",
+      "distance": 0.9384889006614685,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1328,
+      "end_line": 1360,
+      "tokens": 255,
+      "context_length": 20870,
+      "file_pos": 14
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_1__LOG2.1",
+      "distance": 0.9407329559326172,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 302,
+      "context_length": 21172,
+      "file_pos": 14
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/polys/numberfields.py_isolate_",
+      "distance": 0.940768837928772,
+      "file_path": "sympy/polys/numberfields.py",
+      "start_line": 1078,
+      "end_line": 1113,
+      "tokens": 221,
+      "context_length": 21393
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_28__as_integer_ratio.4.1",
+      "distance": 0.9411173462867737,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 107,
+      "end_line": 131,
+      "tokens": 184,
+      "context_length": 21577,
+      "file_pos": 15
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Infinity._as_mpf_val_Infinity.ceiling.1.1",
+      "distance": 0.9414576292037964,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 2828,
+      "end_line": 2899,
+      "tokens": 494,
+      "context_length": 22071,
+      "file_pos": 15
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_ImaginaryUnit._eval_power_ImaginaryUnit._mpc_.1.1",
+      "distance": 0.9419286847114563,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 3791,
+      "end_line": 3825,
+      "tokens": 303,
+      "context_length": 22374,
+      "file_pos": 15
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.12_Float.__mul__.2.1",
+      "distance": 0.944556713104248,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1089,
+      "end_line": 1177,
+      "tokens": 752,
+      "context_length": 23126,
+      "file_pos": 15
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/sympy/sympy/parsing/sympy_parser.py_rationalize_rationalize.5.1",
+      "distance": 0.9457110166549683,
+      "file_path": "sympy/parsing/sympy_parser.py",
+      "start_line": 691,
+      "end_line": 707,
+      "tokens": 131,
+      "context_length": 23257
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/exponential.py_log._eval_is_rational_log._eval_is_nonnegative.1.1",
+      "distance": 0.9481387138366699,
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "start_line": 674,
+      "end_line": 711,
+      "tokens": 301,
+      "context_length": 23558
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_Float.__abs___Float.__eq__.7",
+      "distance": 0.9517191648483276,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1244,
+      "end_line": 1281,
+      "tokens": 342,
+      "context_length": 23900,
+      "file_pos": 16
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.58__check_antecedents.59",
+      "distance": 0.9560799598693848,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1003,
+      "end_line": 1043,
+      "tokens": 625,
+      "context_length": 24525
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 1,
+      "tokens": 29204,
+      "context_length": 29204
+    },
+    {
+      "file_path": "sympy/polys/domains/pythonrational.py",
+      "position": 2,
+      "tokens": 2043,
+      "context_length": 31247
+    },
+    {
+      "file_path": "sympy/concrete/guess.py",
+      "position": 3,
+      "tokens": 4957,
+      "context_length": 36204
+    },
+    {
+      "file_path": "sympy/core/power.py",
+      "position": 4,
+      "tokens": 13836,
+      "context_length": 50040
+    },
+    {
+      "file_path": "sympy/assumptions/handlers/sets.py",
+      "position": 5,
+      "tokens": 4710,
+      "context_length": 54750
+    },
+    {
+      "file_path": "sympy/core/benchmarks/bench_numbers.py",
+      "position": 6,
+      "tokens": 368,
+      "context_length": 55118
+    },
+    {
+      "file_path": "sympy/core/basic.py",
+      "position": 7,
+      "tokens": 14522,
+      "context_length": 69640
+    },
+    {
+      "file_path": "sympy/core/expr.py",
+      "position": 8,
+      "tokens": 28453,
+      "context_length": 98093
+    },
+    {
+      "file_path": "sympy/assumptions/ask.py",
+      "position": 9,
+      "tokens": 10784,
+      "context_length": 108877
+    },
+    {
+      "file_path": "sympy/simplify/simplify.py",
+      "position": 10,
+      "tokens": 12174,
+      "context_length": 121051
+    },
+    {
+      "file_path": "sympy/solvers/solveset.py",
+      "position": 11,
+      "tokens": 20125,
+      "context_length": 141176
+    },
+    {
+      "file_path": "sympy/solvers/inequalities.py",
+      "position": 12,
+      "tokens": 7156,
+      "context_length": 148332
+    },
+    {
+      "file_path": "sympy/functions/elementary/exponential.py",
+      "position": 13,
+      "tokens": 6707,
+      "context_length": 155039
+    },
+    {
+      "file_path": "sympy/core/mul.py",
+      "position": 14,
+      "tokens": 14289,
+      "context_length": 169328
+    },
+    {
+      "file_path": "sympy/polys/numberfields.py",
+      "position": 15,
+      "tokens": 8931,
+      "context_length": 178259
+    },
+    {
+      "file_path": "sympy/parsing/sympy_parser.py",
+      "position": 16,
+      "tokens": 7320,
+      "context_length": 185579
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 17,
+      "tokens": 23944,
+      "context_length": 209523
+    }
+  ]
+}

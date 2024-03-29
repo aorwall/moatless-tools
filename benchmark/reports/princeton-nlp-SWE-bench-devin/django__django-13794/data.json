@@ -1,0 +1,1817 @@
+{
+  "instance_id": "django__django-13794",
+  "model_patch": "diff --git a/django/template/defaultfilters.py b/django/template/defaultfilters.py\nindex 1c844580c6..89b0684d33 100644\n--- a/django/template/defaultfilters.py\n+++ b/django/template/defaultfilters.py\n@@ -671,9 +671,16 @@ def unordered_list(value, autoescape=True):\n # INTEGERS        #\n ###################\n \n+from django.utils.functional import Promise\n+\n @register.filter(is_safe=False)\n def add(value, arg):\n     \"\"\"Add the arg to the value.\"\"\"\n+    if isinstance(value, Promise):\n+        value = str(value)\n+    if isinstance(arg, Promise):\n+        arg = str(arg)\n+\n     try:\n         return int(value) + int(arg)\n     except (ValueError, TypeError):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/template/defaultfilters.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "fe886eee36be8022f34cfe59aa61ff1c21fe01d9",
+  "patch": "diff --git a/django/utils/functional.py b/django/utils/functional.py\n--- a/django/utils/functional.py\n+++ b/django/utils/functional.py\n@@ -176,6 +176,12 @@ def __mod__(self, rhs):\n                 return str(self) % rhs\n             return self.__cast() % rhs\n \n+        def __add__(self, other):\n+            return self.__cast() + other\n+\n+        def __radd__(self, other):\n+            return other + self.__cast()\n+\n         def __deepcopy__(self, memo):\n             # Instances of this class are effectively immutable. It's just a\n             # collection of functions. So we don't need to do anything\n",
+  "test_patch": "diff --git a/tests/template_tests/filter_tests/test_add.py b/tests/template_tests/filter_tests/test_add.py\n--- a/tests/template_tests/filter_tests/test_add.py\n+++ b/tests/template_tests/filter_tests/test_add.py\n@@ -2,6 +2,7 @@\n \n from django.template.defaultfilters import add\n from django.test import SimpleTestCase\n+from django.utils.translation import gettext_lazy\n \n from ..utils import setup\n \n@@ -46,6 +47,22 @@ def test_add07(self):\n         output = self.engine.render_to_string('add07', {'d': date(2000, 1, 1), 't': timedelta(10)})\n         self.assertEqual(output, 'Jan. 11, 2000')\n \n+    @setup({'add08': '{{ s1|add:lazy_s2 }}'})\n+    def test_add08(self):\n+        output = self.engine.render_to_string(\n+            'add08',\n+            {'s1': 'string', 'lazy_s2': gettext_lazy('lazy')},\n+        )\n+        self.assertEqual(output, 'stringlazy')\n+\n+    @setup({'add09': '{{ lazy_s1|add:lazy_s2 }}'})\n+    def test_add09(self):\n+        output = self.engine.render_to_string(\n+            'add09',\n+            {'lazy_s1': gettext_lazy('string'), 'lazy_s2': gettext_lazy('lazy')},\n+        )\n+        self.assertEqual(output, 'stringlazy')\n+\n \n class FunctionTests(SimpleTestCase):\n \ndiff --git a/tests/utils_tests/test_functional.py b/tests/utils_tests/test_functional.py\n--- a/tests/utils_tests/test_functional.py\n+++ b/tests/utils_tests/test_functional.py\n@@ -184,6 +184,11 @@ class Foo:\n         with self.assertRaisesMessage(TypeError, msg):\n             Foo().cp\n \n+    def test_lazy_add(self):\n+        lazy_4 = lazy(lambda: 4, int)\n+        lazy_5 = lazy(lambda: 5, int)\n+        self.assertEqual(lazy_4() + lazy_5(), 9)\n+\n     def test_lazy_equality(self):\n         \"\"\"\n         == and != work correctly for Promises.\n",
+  "problem_statement": "add filter is unable to concatenate strings with lazy string\nDescription\n\t\nIf you try to concatenate a string with a lazy string with the add template filter, the result is always the empty string because the add filter generates an exception (TypeError: can only concatenate str (not \"__proxy__\") to str).\n",
+  "hints_text": "Tests.\nThanks. I attached a test.",
+  "created_at": "2020-12-19T20:09:34Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"test_add08 (template_tests.filter_tests.test_add.AddTests)\", \"test_add09 (template_tests.filter_tests.test_add.AddTests)\", \"test_lazy_add (utils_tests.test_functional.FunctionalTests)\"]",
+  "PASS_TO_PASS": "[\"Disallow this case because the decorated function wouldn't be cached.\", \"cached_property caches its value and behaves like a property.\", \"lazy also finds base class methods in the proxy object\", \"lazy finds the correct (overridden) method implementation\", \"test_add (template_tests.filter_tests.test_add.FunctionTests)\", \"test_add01 (template_tests.filter_tests.test_add.AddTests)\", \"test_add02 (template_tests.filter_tests.test_add.AddTests)\", \"test_add03 (template_tests.filter_tests.test_add.AddTests)\", \"test_add04 (template_tests.filter_tests.test_add.AddTests)\", \"test_add05 (template_tests.filter_tests.test_add.AddTests)\", \"test_add06 (template_tests.filter_tests.test_add.AddTests)\", \"test_add07 (template_tests.filter_tests.test_add.AddTests)\", \"test_cached_property_auto_name (utils_tests.test_functional.FunctionalTests)\", \"test_cached_property_reuse_same_name (utils_tests.test_functional.FunctionalTests)\", \"test_cached_property_set_name_not_called (utils_tests.test_functional.FunctionalTests)\", \"test_classproperty_getter (utils_tests.test_functional.FunctionalTests)\", \"test_classproperty_override_getter (utils_tests.test_functional.FunctionalTests)\", \"test_lazy (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_class_preparation_caching (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_equality (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_object_to_string (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_bytes (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_int (utils_tests.test_functional.FunctionalTests)\", \"test_lazy_repr_text (utils_tests.test_functional.FunctionalTests)\"]",
+  "environment_setup_commit": "65dfb06a1ab56c238cc80f5e1c31f61210c4577d",
+  "patch_files": [
+    "django/utils/functional.py"
+  ],
+  "test_patch_files": [
+    "tests/template_tests/filter_tests/test_add.py",
+    "tests/utils_tests/test_functional.py"
+  ],
+  "patch_diff_details": {
+    "django/utils/functional.py": {
+      "diffs": [
+        {
+          "start_line_old": 179,
+          "end_line_old": 179,
+          "file_pos": 3,
+          "file_context_length": 17164,
+          "closest_snippet_id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__prepare_class___lazy.__proxy__.__prepare_class__.5.2.cls.__bytes__.1",
+          "closest_snippet_line_distance": 52,
+          "pos": 28,
+          "context_length": 8829
+        }
+      ]
+    }
+  },
+  "vectors": 3518,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_21_stringfilter.7.1",
+      "distance": 1.1347665786743164,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 31,
+      "end_line": 53,
+      "tokens": 191,
+      "context_length": 191
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/template/base.py_FilterExpression.resolve_FilterExpression.resolve.3.1",
+      "distance": 1.1708003282546997,
+      "file_path": "django/template/base.py",
+      "start_line": 668,
+      "end_line": 703,
+      "tokens": 272,
+      "context_length": 463
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_unordered_list.list_formatter_add.2.2.1.2.1.1",
+      "distance": 1.191455364227295,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 655,
+      "end_line": 683,
+      "tokens": 212,
+      "context_length": 675
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/template/base.py_44_filter_re.1",
+      "distance": 1.2175734043121338,
+      "file_path": "django/template/base.py",
+      "start_line": 572,
+      "end_line": 607,
+      "tokens": 361,
+      "context_length": 1036
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_25_json_script.2.1",
+      "distance": 1.221075177192688,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 56,
+      "end_line": 91,
+      "tokens": 203,
+      "context_length": 1239
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/utils/functional.py__lazy_proxy_unpickle_new_method_proxy",
+      "distance": 1.2217168807983398,
+      "file_path": "django/utils/functional.py",
+      "start_line": 194,
+      "end_line": 242,
+      "tokens": 299,
+      "context_length": 1538,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/template/base.py_FilterExpression.args_check_FilterExpression.__str__.1.1",
+      "distance": 1.2396247386932373,
+      "file_path": "django/template/base.py",
+      "start_line": 705,
+      "end_line": 724,
+      "tokens": 179,
+      "context_length": 1717
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/template/backends/dummy.py_string_",
+      "distance": 1.26408052444458,
+      "file_path": "django/template/backends/dummy.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 325,
+      "context_length": 2042
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_filter_Query.build_where.1.1",
+      "distance": 1.2818634510040283,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1375,
+      "end_line": 1396,
+      "tokens": 250,
+      "context_length": 2292
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_urlize_force_escape.2.1",
+      "distance": 1.284663200378418,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 340,
+      "end_line": 424,
+      "tokens": 499,
+      "context_length": 2791
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/template/base.py_Parser.unclosed_block_tag_Parser.find_filter.1.2.1",
+      "distance": 1.2880744934082031,
+      "file_path": "django/template/base.py",
+      "start_line": 537,
+      "end_line": 569,
+      "tokens": 207,
+      "context_length": 2998
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/models/functions/text.py_ConcatPair_ConcatPair.coalesce.c.3.1",
+      "distance": 1.2897875308990479,
+      "file_path": "django/db/models/functions/text.py",
+      "start_line": 64,
+      "end_line": 92,
+      "tokens": 231,
+      "context_length": 3229
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/template/base.py_VariableNode_kwarg_re.1",
+      "distance": 1.2945635318756104,
+      "file_path": "django/template/base.py",
+      "start_line": 979,
+      "end_line": 998,
+      "tokens": 143,
+      "context_length": 3372
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/template/library.py_Library.filter_Library.filter.2.5.1",
+      "distance": 1.2967604398727417,
+      "file_path": "django/template/library.py",
+      "start_line": 54,
+      "end_line": 94,
+      "tokens": 338,
+      "context_length": 3710
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__prepare_class___lazy.__proxy__.__prepare_class__.5.2.cls.__bytes__.1",
+      "distance": 1.30904221534729,
+      "file_path": "django/utils/functional.py",
+      "start_line": 109,
+      "end_line": 127,
+      "tokens": 208,
+      "context_length": 3918,
+      "file_pos": 7
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/template/base.py_1_tag_re.1",
+      "distance": 1.3139574527740479,
+      "file_path": "django/template/base.py",
+      "start_line": 1,
+      "end_line": 94,
+      "tokens": 779,
+      "context_length": 4697
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_EmptyFieldListFilter_EmptyFieldListFilter.__init__.4",
+      "distance": 1.314420223236084,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 434,
+      "end_line": 446,
+      "tokens": 142,
+      "context_length": 4839
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/utils/translation/template.py_warnings_constant_re.1",
+      "distance": 1.3153187036514282,
+      "file_path": "django/utils/translation/template.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 376,
+      "context_length": 5215
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/template/base.py_FilterExpression_FilterExpression.__init__.self.var.1",
+      "distance": 1.315479040145874,
+      "file_path": "django/template/base.py",
+      "start_line": 610,
+      "end_line": 666,
+      "tokens": 439,
+      "context_length": 5654
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_title_upper.2.1",
+      "distance": 1.3180649280548096,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 255,
+      "end_line": 320,
+      "tokens": 425,
+      "context_length": 6079
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_lower_slugify.2.1",
+      "distance": 1.3272733688354492,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 206,
+      "end_line": 233,
+      "tokens": 155,
+      "context_length": 6234
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/template/library.py_functools_Library.tag_function.2.1",
+      "distance": 1.3315293788909912,
+      "file_path": "django/template/library.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 344,
+      "context_length": 6578
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_Q_Q.resolve_expression.3",
+      "distance": 1.3359482288360596,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 57,
+      "end_line": 108,
+      "tokens": 396,
+      "context_length": 6974
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filter_Query.build_filter.allow_many.1",
+      "distance": 1.3457221984863281,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1228,
+      "end_line": 1306,
+      "tokens": 729,
+      "context_length": 7703
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_TemplateFilterIndexView_TemplateFilterIndexView.get_context_data.3.1",
+      "distance": 1.3499479293823242,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 87,
+      "end_line": 115,
+      "tokens": 285,
+      "context_length": 7988
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_do_with_",
+      "distance": 1.3502817153930664,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1455,
+      "end_line": 1488,
+      "tokens": 246,
+      "context_length": 8234
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_urlencode_urlencode.4.1",
+      "distance": 1.3525028228759766,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 323,
+      "end_line": 337,
+      "tokens": 111,
+      "context_length": 8345
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy.__proxy__.__promise___lazy.4.1",
+      "distance": 1.3536152839660645,
+      "file_path": "django/utils/functional.py",
+      "start_line": 129,
+      "end_line": 191,
+      "tokens": 484,
+      "context_length": 8829,
+      "file_pos": 12
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_SimpleListFilter_SimpleListFilter.parameter_name.choices.2.1",
+      "distance": 1.3551959991455078,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 62,
+      "end_line": 115,
+      "tokens": 411,
+      "context_length": 9240
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/models/functions/text.py_Concat_Concat._paired.4.2.1",
+      "distance": 1.3587896823883057,
+      "file_path": "django/db/models/functions/text.py",
+      "start_line": 95,
+      "end_line": 116,
+      "tokens": 202,
+      "context_length": 9442
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_DebugNode_FirstOfNode.render.4.1",
+      "distance": 1.3623497486114502,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 97,
+      "end_line": 132,
+      "tokens": 224,
+      "context_length": 9666
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_EmptyFieldListFilter.queryset_",
+      "distance": 1.363506555557251,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 448,
+      "end_line": 477,
+      "tokens": 226,
+      "context_length": 9892
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/utils/functional.py_lazy_lazy.__proxy__.__repr__.1.1",
+      "distance": 1.3660989999771118,
+      "file_path": "django/utils/functional.py",
+      "start_line": 76,
+      "end_line": 107,
+      "tokens": 235,
+      "context_length": 10127,
+      "file_pos": 12
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/template/smartif.py_IfParser_",
+      "distance": 1.3673462867736816,
+      "file_path": "django/template/smartif.py",
+      "start_line": 150,
+      "end_line": 209,
+      "tokens": 423,
+      "context_length": 10550
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_csrf_token_do_filter.8.1",
+      "distance": 1.3679057359695435,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 633,
+      "end_line": 680,
+      "tokens": 331,
+      "context_length": 10881
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/utils/encoding.py_force_str_force_str.6.1",
+      "distance": 1.369825839996338,
+      "file_path": "django/utils/encoding.py",
+      "start_line": 48,
+      "end_line": 67,
+      "tokens": 156,
+      "context_length": 11037
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ListFilter_ListFilter.expected_parameters.2",
+      "distance": 1.3723030090332031,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 20,
+      "end_line": 59,
+      "tokens": 295,
+      "context_length": 11332
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_linebreaksbr_striptags.2.1",
+      "distance": 1.3816249370574951,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 439,
+      "end_line": 474,
+      "tokens": 233,
+      "context_length": 11565
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filter.19_Query.build_filter.31.1",
+      "distance": 1.3842906951904297,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1308,
+      "end_line": 1373,
+      "tokens": 772,
+      "context_length": 12337
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/utils/safestring.py_SafeString_SafeString.__str__.1.1",
+      "distance": 1.3843533992767334,
+      "file_path": "django/utils/safestring.py",
+      "start_line": 21,
+      "end_line": 37,
+      "tokens": 112,
+      "context_length": 12449
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/template/base.py_DebugLexer_DebugLexer.tokenize.8.1",
+      "distance": 1.3862409591674805,
+      "file_path": "django/template/base.py",
+      "start_line": 381,
+      "end_line": 404,
+      "tokens": 230,
+      "context_length": 12679
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/template/loader_tags.py_do_extends_do_extends.8.1",
+      "distance": 1.3873605728149414,
+      "file_path": "django/template/loader_tags.py",
+      "start_line": 254,
+      "end_line": 273,
+      "tokens": 239,
+      "context_length": 12918
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_1_register.1",
+      "distance": 1.3874428272247314,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 207,
+      "context_length": 13125
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_AllValuesFieldListFilter.choices_AllValuesFieldListFilter.choices.4.1",
+      "distance": 1.3878153562545776,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 399,
+      "end_line": 421,
+      "tokens": 211,
+      "context_length": 13336
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/utils/regex_helper.py_flatten_result_",
+      "distance": 1.3902723789215088,
+      "file_path": "django/utils/regex_helper.py",
+      "start_line": 286,
+      "end_line": 352,
+      "tokens": 484,
+      "context_length": 13820
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_ChoicesFieldListFilter.choices_17",
+      "distance": 1.3921747207641602,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 280,
+      "end_line": 304,
+      "tokens": 217,
+      "context_length": 14037
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_do_ifequal_do_ifequal.bits.9.1",
+      "distance": 1.3932585716247559,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 824,
+      "end_line": 839,
+      "tokens": 163,
+      "context_length": 14200
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query._add_q_Query._add_q.9.1",
+      "distance": 1.3960356712341309,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1398,
+      "end_line": 1418,
+      "tokens": 247,
+      "context_length": 14447
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/template/loader_tags.py_do_include_",
+      "distance": 1.396369218826294,
+      "file_path": "django/template/loader_tags.py",
+      "start_line": 276,
+      "end_line": 322,
+      "tokens": 392,
+      "context_length": 14839
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/template/library.py_Library.filter_function_Library.simple_tag.3.4.1",
+      "distance": 1.398922324180603,
+      "file_path": "django/template/library.py",
+      "start_line": 96,
+      "end_line": 134,
+      "tokens": 324,
+      "context_length": 15163
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/template/base.py_Template.compile_nodelist_Template.compile_nodelist.5.2.2",
+      "distance": 1.4001414775848389,
+      "file_path": "django/template/base.py",
+      "start_line": 174,
+      "end_line": 197,
+      "tokens": 152,
+      "context_length": 15315
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_datetime_register.1",
+      "distance": 1.4017590284347534,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 175,
+      "context_length": 15490
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter.choices_RelatedFieldListFilter.choices.3.1",
+      "distance": 1.4019625186920166,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 209,
+      "end_line": 226,
+      "tokens": 190,
+      "context_length": 15680
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/template/smartif.py_Literal_EndToken_18.1",
+      "distance": 1.4025707244873047,
+      "file_path": "django/template/smartif.py",
+      "start_line": 114,
+      "end_line": 147,
+      "tokens": 188,
+      "context_length": 15868
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_19_AllValuesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.4087035655975342,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 373,
+      "end_line": 397,
+      "tokens": 294,
+      "context_length": 16162
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_unordered_list_unordered_list.walk_items.2.3.1",
+      "distance": 1.4098165035247803,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 603,
+      "end_line": 653,
+      "tokens": 322,
+      "context_length": 16484
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/views/debug.py_get_default_exception_reporter_filter_get_exception_reporter_class.2.1",
+      "distance": 1.4158052206039429,
+      "file_path": "django/views/debug.py",
+      "start_line": 64,
+      "end_line": 77,
+      "tokens": 115,
+      "context_length": 16599
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.get_filters_ChangeList.get_filters.14.3.1",
+      "distance": 1.4164438247680664,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 123,
+      "end_line": 212,
+      "tokens": 861,
+      "context_length": 17460
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py_lazy_number_lazy_number.2.1",
+      "distance": 1.4181971549987793,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 152,
+      "end_line": 196,
+      "tokens": 335,
+      "context_length": 17795
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/template/utils.py_functools_EngineHandler.templates.8.1",
+      "distance": 1.4203135967254639,
+      "file_path": "django/template/utils.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 401,
+      "context_length": 18196
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/template/loaders/cached.py_Loader.get_template_sources_",
+      "distance": 1.421831488609314,
+      "file_path": "django/template/loaders/cached.py",
+      "start_line": 67,
+      "end_line": 98,
+      "tokens": 225,
+      "context_length": 18421
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_urls.py_1_",
+      "distance": 1.4227354526519775,
+      "file_path": "django/contrib/admin/templatetags/admin_urls.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 405,
+      "context_length": 18826
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_stringformat_stringformat.3.2.1.1",
+      "distance": 1.424180507659912,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 236,
+      "end_line": 252,
+      "tokens": 116,
+      "context_length": 18942
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.complex_filter_QuerySet.complex_filter.2.4.1.1",
+      "distance": 1.4267613887786865,
+      "file_path": "django/db/models/query.py",
+      "start_line": 968,
+      "end_line": 983,
+      "tokens": 124,
+      "context_length": 19066
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.cleanse_special_types_SafeExceptionReporterFilter.cleanse_special_types.3.1",
+      "distance": 1.4270904064178467,
+      "file_path": "django/views/debug.py",
+      "start_line": 181,
+      "end_line": 193,
+      "tokens": 143,
+      "context_length": 19209
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/template/response.py_SimpleTemplateResponse.__getstate___SimpleTemplateResponse.__getstate__.5.1",
+      "distance": 1.4271081686019897,
+      "file_path": "django/template/response.py",
+      "start_line": 45,
+      "end_line": 58,
+      "tokens": 120,
+      "context_length": 19329
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_13_BooleanFieldListFilter.expected_parameters.1.1",
+      "distance": 1.429075002670288,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 229,
+      "end_line": 244,
+      "tokens": 196,
+      "context_length": 19525
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/template/loader.py_render_to_string_",
+      "distance": 1.429443359375,
+      "file_path": "django/template/loader.py",
+      "start_line": 52,
+      "end_line": 67,
+      "tokens": 117,
+      "context_length": 19642
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/db/models/aggregates.py_Aggregate.as_sql_Aggregate._get_repr_options.4.1",
+      "distance": 1.4297109842300415,
+      "file_path": "django/db/models/aggregates.py",
+      "start_line": 70,
+      "end_line": 96,
+      "tokens": 266,
+      "context_length": 19908
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_dictsort_slice_filter.2.4.2",
+      "distance": 1.4297256469726562,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 507,
+      "end_line": 600,
+      "tokens": 527,
+      "context_length": 20435
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_load_load.5.1",
+      "distance": 1.4333115816116333,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1065,
+      "end_line": 1093,
+      "tokens": 225,
+      "context_length": 20660
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/templatetags/i18n.py_TranslateNode_TranslateNode.render.10.3.1.1",
+      "distance": 1.4340794086456299,
+      "file_path": "django/templatetags/i18n.py",
+      "start_line": 70,
+      "end_line": 97,
+      "tokens": 229,
+      "context_length": 20889
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/template/base.py_Lexer_Lexer.create_token.3.2.1.1",
+      "distance": 1.4356276988983154,
+      "file_path": "django/template/base.py",
+      "start_line": 332,
+      "end_line": 378,
+      "tokens": 455,
+      "context_length": 21344
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_DateFieldListFilter_DateFieldListFilter.choices.1.1",
+      "distance": 1.4371975660324097,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 307,
+      "end_line": 370,
+      "tokens": 627,
+      "context_length": 21971
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_ifnotequal_TemplateIfParser.create_var.1.1",
+      "distance": 1.437523365020752,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 866,
+      "end_line": 900,
+      "tokens": 218,
+      "context_length": 22189
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_linebreaks_filter_linebreaks_filter.3.1",
+      "distance": 1.4399244785308838,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 427,
+      "end_line": 436,
+      "tokens": 111,
+      "context_length": 22300
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.add_arguments_TemplateCommand.add_arguments.5",
+      "distance": 1.441108226776123,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 40,
+      "end_line": 56,
+      "tokens": 181,
+      "context_length": 22481
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/utils/functional.py_LazyObject_LazyObject.__contains__.1",
+      "distance": 1.4428069591522217,
+      "file_path": "django/utils/functional.py",
+      "start_line": 245,
+      "end_line": 345,
+      "tokens": 905,
+      "context_length": 23386,
+      "file_pos": 30
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/log.py_get_admin_log_",
+      "distance": 1.4447802305221558,
+      "file_path": "django/contrib/admin/templatetags/log.py",
+      "start_line": 26,
+      "end_line": 60,
+      "tokens": 317,
+      "context_length": 23703
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream.read_LazyStream.read",
+      "distance": 1.446199655532837,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 348,
+      "end_line": 372,
+      "tokens": 169,
+      "context_length": 23872
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/template/context_processors.py_1_csrf.3.1",
+      "distance": 1.4481520652770996,
+      "file_path": "django/template/context_processors.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 218,
+      "context_length": 24090
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_1_CommentNode.render.1.1",
+      "distance": 1.4482946395874023,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 327,
+      "context_length": 24417
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_FieldListFilter_FieldListFilter.create.1.1.1.1",
+      "distance": 1.4483240842819214,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 118,
+      "end_line": 159,
+      "tokens": 365,
+      "context_length": 24782
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_15_ChoicesFieldListFilter.expected_parameters.1.1",
+      "distance": 1.4490113258361816,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 266,
+      "end_line": 278,
+      "tokens": 149,
+      "context_length": 24931
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/template/smartif.py_1_TokenBase.__repr__.2.1",
+      "distance": 1.4500505924224854,
+      "file_path": "django/template/smartif.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 299,
+      "context_length": 25230
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/forms/widgets.py_Media.merge_Media.__add__.6.1",
+      "distance": 1.4505209922790527,
+      "file_path": "django/forms/widgets.py",
+      "start_line": 114,
+      "end_line": 157,
+      "tokens": 367,
+      "context_length": 25597
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/template/backends/jinja2.py_1_Jinja2.template_context_processors.1.1",
+      "distance": 1.4512460231781006,
+      "file_path": "django/template/backends/jinja2.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 341,
+      "context_length": 25938
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/template/backends/django.py_Template_copy_exception.5.1",
+      "distance": 1.4516148567199707,
+      "file_path": "django/template/backends/django.py",
+      "start_line": 48,
+      "end_line": 76,
+      "tokens": 210,
+      "context_length": 26148
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/template/response.py_1_SimpleTemplateResponse.__init__.self.template_name.self._is_rendered.1",
+      "distance": 1.451810598373413,
+      "file_path": "django/template/response.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 389,
+      "context_length": 26537
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/template/loader_tags.py_construct_relative_path_construct_relative_path.6.1",
+      "distance": 1.4519846439361572,
+      "file_path": "django/template/loader_tags.py",
+      "start_line": 224,
+      "end_line": 251,
+      "tokens": 239,
+      "context_length": 26776
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_BooleanFieldListFilter.choices_BooleanFieldListFilter.choices.3.1",
+      "distance": 1.4519966840744019,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 246,
+      "end_line": 263,
+      "tokens": 184,
+      "context_length": 26960
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/template/engine.py_functools_Engine.__init__.self.template_builtins.1",
+      "distance": 1.452948808670044,
+      "file_path": "django/template/engine.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 388,
+      "context_length": 27348
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_WithNode_WithNode.render.2.1.1",
+      "distance": 1.4531981945037842,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 501,
+      "end_line": 516,
+      "tokens": 142,
+      "context_length": 27490
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/template/base.py_Parser.error_Parser.invalid_block_tag.2",
+      "distance": 1.453462839126587,
+      "file_path": "django/template/base.py",
+      "start_line": 507,
+      "end_line": 535,
+      "tokens": 244,
+      "context_length": 27734
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filtered_relation_q_Query.build_filtered_relation_q.7.1",
+      "distance": 1.454308271408081,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1420,
+      "end_line": 1440,
+      "tokens": 212,
+      "context_length": 27946
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_iriencode_linenumbers.7.1",
+      "distance": 1.4549357891082764,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 182,
+      "end_line": 203,
+      "tokens": 206,
+      "context_length": 28152
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/template/exceptions.py_1_",
+      "distance": 1.4566059112548828,
+      "file_path": "django/template/exceptions.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 262,
+      "context_length": 28414
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/template/loader_tags.py_ExtendsNode.get_parent_ExtendsNode.get_parent.5.1",
+      "distance": 1.4590356349945068,
+      "file_path": "django/template/loader_tags.py",
+      "start_line": 109,
+      "end_line": 124,
+      "tokens": 155,
+      "context_length": 28569
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_83_divisibleby.2.1",
+      "distance": 1.4603700637817383,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 707,
+      "end_line": 784,
+      "tokens": 443,
+      "context_length": 29012
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_1_8",
+      "distance": 1.4609136581420898,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 127,
+      "context_length": 29139
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/shortcuts.py_1_render.3.1",
+      "distance": 1.4618490934371948,
+      "file_path": "django/shortcuts.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 155,
+      "context_length": 29294
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_pluralize_",
+      "distance": 1.461899757385254,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 868,
+      "end_line": 923,
+      "tokens": 539,
+      "context_length": 29833
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_JoinPromoter_JoinPromoter.add_votes.2",
+      "distance": 1.463411569595337,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2402,
+      "end_line": 2428,
+      "tokens": 176,
+      "context_length": 30009
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/utils/encoding.py_smart_text_force_text.2.1",
+      "distance": 1.4641554355621338,
+      "file_path": "django/utils/encoding.py",
+      "start_line": 102,
+      "end_line": 115,
+      "tokens": 130,
+      "context_length": 30139
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Combinable_Combinable.__ror__.1",
+      "distance": 1.4645473957061768,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 33,
+      "end_line": 147,
+      "tokens": 836,
+      "context_length": 30975
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_24_RelatedOnlyFieldListFilter.field_choices.3.1",
+      "distance": 1.4648640155792236,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 424,
+      "end_line": 431,
+      "tokens": 107,
+      "context_length": 31082
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_1_FilteredSelectMultiple.get_context.6.1",
+      "distance": 1.4653996229171753,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 330,
+      "context_length": 31412
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_RelatedFieldListFilter_RelatedFieldListFilter.field_choices.2.1",
+      "distance": 1.4657483100891113,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 162,
+      "end_line": 207,
+      "tokens": 427,
+      "context_length": 31839
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_64__property_resolver.2.3.1.1",
+      "distance": 1.4679290056228638,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 477,
+      "end_line": 504,
+      "tokens": 164,
+      "context_length": 32003
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_autoescape_comment.3.1",
+      "distance": 1.4705771207809448,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 519,
+      "end_line": 542,
+      "tokens": 188,
+      "context_length": 32191
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/template/base.py_Template_Template.render.2.1.2.1.1",
+      "distance": 1.4705801010131836,
+      "file_path": "django/template/base.py",
+      "start_line": 140,
+      "end_line": 172,
+      "tokens": 255,
+      "context_length": 32446
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/template/smartif.py_prefix_15.op.id.1",
+      "distance": 1.4759719371795654,
+      "file_path": "django/template/smartif.py",
+      "start_line": 68,
+      "end_line": 111,
+      "tokens": 463,
+      "context_length": 32909
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_IfEqualNode_IfEqualNode.child_nodelists.render.4.1",
+      "distance": 1.4789153337478638,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 264,
+      "end_line": 281,
+      "tokens": 196,
+      "context_length": 33105
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/utils/text.py_25_smart_split_re.1",
+      "distance": 1.4803413152694702,
+      "file_path": "django/utils/text.py",
+      "start_line": 277,
+      "end_line": 318,
+      "tokens": 289,
+      "context_length": 33394
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter.get_traceback_frame_variables_SafeExceptionReporterFilter.get_traceback_frame_variables.10.1",
+      "distance": 1.4806559085845947,
+      "file_path": "django/views/debug.py",
+      "start_line": 195,
+      "end_line": 243,
+      "tokens": 467,
+      "context_length": 33861
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_ifequal_ifequal.3.1",
+      "distance": 1.4811581373214722,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 842,
+      "end_line": 863,
+      "tokens": 122,
+      "context_length": 33983
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_ForNode.render_ForNode.render.3.1",
+      "distance": 1.4818837642669678,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 157,
+      "end_line": 218,
+      "tokens": 532,
+      "context_length": 34515
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._fetch_all_QuerySet._next_is_sticky.3.1",
+      "distance": 1.4862563610076904,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1320,
+      "end_line": 1338,
+      "tokens": 186,
+      "context_length": 34701
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/template/backends/django.py_reraise_get_installed_libraries.6.1",
+      "distance": 1.4869093894958496,
+      "file_path": "django/template/backends/django.py",
+      "start_line": 79,
+      "end_line": 111,
+      "tokens": 225,
+      "context_length": 34926
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_preserved_filters_ModelAdmin.construct_change_message.2.1",
+      "distance": 1.4871355295181274,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1038,
+      "end_line": 1060,
+      "tokens": 198,
+      "context_length": 35124
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/template/smartif.py_infix_infix.3.1",
+      "distance": 1.4877445697784424,
+      "file_path": "django/template/smartif.py",
+      "start_line": 43,
+      "end_line": 65,
+      "tokens": 150,
+      "context_length": 35274
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/layer.py_Layer._set_spatial_filter_Layer._set_spatial_filter.1.4.1",
+      "distance": 1.4899474382400513,
+      "file_path": "django/contrib/gis/gdal/layer.py",
+      "start_line": 169,
+      "end_line": 182,
+      "tokens": 177,
+      "context_length": 35451
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/contrib/postgres/utils.py_1_",
+      "distance": 1.4902615547180176,
+      "file_path": "django/contrib/postgres/utils.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 218,
+      "context_length": 35669
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/utils/feedgenerator.py_SyndicationFeed.add_item_SyndicationFeed.add_item.4",
+      "distance": 1.4903957843780518,
+      "file_path": "django/utils/feedgenerator.py",
+      "start_line": 85,
+      "end_line": 114,
+      "tokens": 310,
+      "context_length": 35979
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/template/loaders/cached.py_1_Loader.get_template.6.1",
+      "distance": 1.490883469581604,
+      "file_path": "django/template/loaders/cached.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 497,
+      "context_length": 36476
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream_LazyStream.tell.1.1",
+      "distance": 1.4910218715667725,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 322,
+      "end_line": 346,
+      "tokens": 179,
+      "context_length": 36655
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/utils/text.py_camel_case_to_spaces_",
+      "distance": 1.491163730621338,
+      "file_path": "django/utils/text.py",
+      "start_line": 410,
+      "end_line": 426,
+      "tokens": 104,
+      "context_length": 36759
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/template/base.py_Parser_Parser.__init__.self.tokens.self.origin.1",
+      "distance": 1.491409420967102,
+      "file_path": "django/template/base.py",
+      "start_line": 407,
+      "end_line": 424,
+      "tokens": 127,
+      "context_length": 36886
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/template/utils.py_EngineHandler.__getitem___EngineHandler.all.1.1",
+      "distance": 1.4920389652252197,
+      "file_path": "django/template/utils.py",
+      "start_line": 64,
+      "end_line": 90,
+      "tokens": 195,
+      "context_length": 37081
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_yesno_yesno.8.1",
+      "distance": 1.4946212768554688,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 787,
+      "end_line": 818,
+      "tokens": 287,
+      "context_length": 37368
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/utils/translation/template.py_templatize.16_",
+      "distance": 1.494685411453247,
+      "file_path": "django/utils/translation/template.py",
+      "start_line": 61,
+      "end_line": 228,
+      "tokens": 1428,
+      "context_length": 38796
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.join_Query.join.9.1",
+      "distance": 1.4952890872955322,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 953,
+      "end_line": 999,
+      "tokens": 439,
+      "context_length": 39235
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.lookup_allowed_BaseModelAdmin.lookup_allowed.14.1",
+      "distance": 1.495445966720581,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 377,
+      "end_line": 429,
+      "tokens": 504,
+      "context_length": 39739
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_cycle_cycle.21.1",
+      "distance": 1.496157169342041,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 545,
+      "end_line": 630,
+      "tokens": 803,
+      "context_length": 40542
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/template/library.py_parse_bits_parse_bits.10.1",
+      "distance": 1.4968611001968384,
+      "file_path": "django/template/library.py",
+      "start_line": 237,
+      "end_line": 309,
+      "tokens": 626,
+      "context_length": 41168
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_FilteredRelation_",
+      "distance": 1.4970229864120483,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 312,
+      "end_line": 352,
+      "tokens": 286,
+      "context_length": 41454
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_lorem_lorem.13.1",
+      "distance": 1.4983041286468506,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1096,
+      "end_line": 1140,
+      "tokens": 370,
+      "context_length": 41824
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/views/debug.py_SafeExceptionReporterFilter_SafeExceptionReporterFilter.cleanse_setting.5.1",
+      "distance": 1.4990055561065674,
+      "file_path": "django/views/debug.py",
+      "start_line": 80,
+      "end_line": 112,
+      "tokens": 258,
+      "context_length": 42082
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.get_reverse_related_filter_RelatedField.get_reverse_related_filter.6.1",
+      "distance": 1.4991837739944458,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 343,
+      "end_line": 360,
+      "tokens": 163,
+      "context_length": 42245
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_url_url.11.1",
+      "distance": 1.499617099761963,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1327,
+      "end_line": 1391,
+      "tokens": 504,
+      "context_length": 42749
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/utils/html.py_MLStripper__strip_once.5.1",
+      "distance": 1.4998500347137451,
+      "file_path": "django/utils/html.py",
+      "start_line": 150,
+      "end_line": 176,
+      "tokens": 149,
+      "context_length": 42898
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/template/defaulttags.py_templatetag_templatetag.7.1",
+      "distance": 1.5009737014770508,
+      "file_path": "django/template/defaulttags.py",
+      "start_line": 1292,
+      "end_line": 1324,
+      "tokens": 287,
+      "context_length": 43185
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/template/base.py_Parser.skip_past_Parser.extend_nodelist.2.7",
+      "distance": 1.5010212659835815,
+      "file_path": "django/template/base.py",
+      "start_line": 486,
+      "end_line": 505,
+      "tokens": 187,
+      "context_length": 43372
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Expression__resolve_combined_type.2.1.1.1",
+      "distance": 1.5016363859176636,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 417,
+      "end_line": 439,
+      "tokens": 204,
+      "context_length": 43576
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/http/multipartparser.py_LazyStream.__next___LazyStream.unget.self._leftover.1",
+      "distance": 1.5038399696350098,
+      "file_path": "django/http/multipartparser.py",
+      "start_line": 374,
+      "end_line": 413,
+      "tokens": 258,
+      "context_length": 43834
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/utils/translation/__init__.py__trans_ugettext_lazy.3.1",
+      "distance": 1.504531741142273,
+      "file_path": "django/utils/translation/__init__.py",
+      "start_line": 70,
+      "end_line": 149,
+      "tokens": 489,
+      "context_length": 44323
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/forms/utils.py_ErrorList.__reduce_ex___ErrorList.__reduce_ex__.info.2.1",
+      "distance": 1.5056861639022827,
+      "file_path": "django/forms/utils.py",
+      "start_line": 144,
+      "end_line": 151,
+      "tokens": 132,
+      "context_length": 44455
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/template/defaultfilters.py",
+      "position": 1,
+      "tokens": 6230,
+      "context_length": 6230
+    },
+    {
+      "file_path": "django/template/base.py",
+      "position": 2,
+      "tokens": 7878,
+      "context_length": 14108
+    },
+    {
+      "file_path": "django/utils/functional.py",
+      "position": 3,
+      "tokens": 3056,
+      "context_length": 17164
+    },
+    {
+      "file_path": "django/template/backends/dummy.py",
+      "position": 4,
+      "tokens": 325,
+      "context_length": 17489
+    },
+    {
+      "file_path": "django/db/models/sql/query.py",
+      "position": 5,
+      "tokens": 22546,
+      "context_length": 40035
+    },
+    {
+      "file_path": "django/db/models/functions/text.py",
+      "position": 6,
+      "tokens": 2336,
+      "context_length": 42371
+    },
+    {
+      "file_path": "django/template/library.py",
+      "position": 7,
+      "tokens": 2537,
+      "context_length": 44908
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 8,
+      "tokens": 4123,
+      "context_length": 49031
+    },
+    {
+      "file_path": "django/utils/translation/template.py",
+      "position": 9,
+      "tokens": 1949,
+      "context_length": 50980
+    },
+    {
+      "file_path": "django/db/models/query_utils.py",
+      "position": 10,
+      "tokens": 2706,
+      "context_length": 53686
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 11,
+      "tokens": 3296,
+      "context_length": 56982
+    },
+    {
+      "file_path": "django/template/defaulttags.py",
+      "position": 12,
+      "tokens": 11143,
+      "context_length": 68125
+    },
+    {
+      "file_path": "django/template/smartif.py",
+      "position": 13,
+      "tokens": 1526,
+      "context_length": 69651
+    },
+    {
+      "file_path": "django/utils/encoding.py",
+      "position": 14,
+      "tokens": 2362,
+      "context_length": 72013
+    },
+    {
+      "file_path": "django/utils/safestring.py",
+      "position": 15,
+      "tokens": 386,
+      "context_length": 72399
+    },
+    {
+      "file_path": "django/template/loader_tags.py",
+      "position": 16,
+      "tokens": 2579,
+      "context_length": 74978
+    },
+    {
+      "file_path": "django/utils/regex_helper.py",
+      "position": 17,
+      "tokens": 2641,
+      "context_length": 77619
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "position": 18,
+      "tokens": 3660,
+      "context_length": 81279
+    },
+    {
+      "file_path": "django/views/debug.py",
+      "position": 19,
+      "tokens": 4591,
+      "context_length": 85870
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 20,
+      "tokens": 4396,
+      "context_length": 90266
+    },
+    {
+      "file_path": "django/utils/translation/__init__.py",
+      "position": 21,
+      "tokens": 2340,
+      "context_length": 92606
+    },
+    {
+      "file_path": "django/template/utils.py",
+      "position": 22,
+      "tokens": 708,
+      "context_length": 93314
+    },
+    {
+      "file_path": "django/template/loaders/cached.py",
+      "position": 23,
+      "tokens": 718,
+      "context_length": 94032
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_urls.py",
+      "position": 24,
+      "tokens": 405,
+      "context_length": 94437
+    },
+    {
+      "file_path": "django/db/models/query.py",
+      "position": 25,
+      "tokens": 17310,
+      "context_length": 111747
+    },
+    {
+      "file_path": "django/template/response.py",
+      "position": 26,
+      "tokens": 1091,
+      "context_length": 112838
+    },
+    {
+      "file_path": "django/template/loader.py",
+      "position": 27,
+      "tokens": 416,
+      "context_length": 113254
+    },
+    {
+      "file_path": "django/db/models/aggregates.py",
+      "position": 28,
+      "tokens": 1301,
+      "context_length": 114555
+    },
+    {
+      "file_path": "django/templatetags/i18n.py",
+      "position": 29,
+      "tokens": 4026,
+      "context_length": 118581
+    },
+    {
+      "file_path": "django/core/management/templates.py",
+      "position": 30,
+      "tokens": 2675,
+      "context_length": 121256
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/log.py",
+      "position": 31,
+      "tokens": 479,
+      "context_length": 121735
+    },
+    {
+      "file_path": "django/http/multipartparser.py",
+      "position": 32,
+      "tokens": 5085,
+      "context_length": 126820
+    },
+    {
+      "file_path": "django/template/context_processors.py",
+      "position": 33,
+      "tokens": 489,
+      "context_length": 127309
+    },
+    {
+      "file_path": "django/forms/widgets.py",
+      "position": 34,
+      "tokens": 8108,
+      "context_length": 135417
+    },
+    {
+      "file_path": "django/template/backends/jinja2.py",
+      "position": 35,
+      "tokens": 822,
+      "context_length": 136239
+    },
+    {
+      "file_path": "django/template/backends/django.py",
+      "position": 36,
+      "tokens": 856,
+      "context_length": 137095
+    },
+    {
+      "file_path": "django/template/engine.py",
+      "position": 37,
+      "tokens": 1310,
+      "context_length": 138405
+    },
+    {
+      "file_path": "django/template/exceptions.py",
+      "position": 38,
+      "tokens": 263,
+      "context_length": 138668
+    },
+    {
+      "file_path": "django/shortcuts.py",
+      "position": 39,
+      "tokens": 1097,
+      "context_length": 139765
+    },
+    {
+      "file_path": "django/db/models/expressions.py",
+      "position": 40,
+      "tokens": 10921,
+      "context_length": 150686
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 41,
+      "tokens": 3794,
+      "context_length": 154480
+    },
+    {
+      "file_path": "django/utils/text.py",
+      "position": 42,
+      "tokens": 3451,
+      "context_length": 157931
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 43,
+      "tokens": 18593,
+      "context_length": 176524
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/layer.py",
+      "position": 44,
+      "tokens": 1919,
+      "context_length": 178443
+    },
+    {
+      "file_path": "django/contrib/postgres/utils.py",
+      "position": 45,
+      "tokens": 218,
+      "context_length": 178661
+    },
+    {
+      "file_path": "django/utils/feedgenerator.py",
+      "position": 46,
+      "tokens": 3333,
+      "context_length": 181994
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 47,
+      "tokens": 13876,
+      "context_length": 195870
+    },
+    {
+      "file_path": "django/utils/html.py",
+      "position": 48,
+      "tokens": 3102,
+      "context_length": 198972
+    },
+    {
+      "file_path": "django/forms/utils.py",
+      "position": 49,
+      "tokens": 1257,
+      "context_length": 200229
+    }
+  ]
+}

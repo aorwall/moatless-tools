@@ -1,0 +1,1296 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-12938",
+  "model_patch": "diff --git a/sklearn/utils/_pprint.py b/sklearn/utils/_pprint.py\nindex 42f4d14cf..5627c4184 100644\n--- a/sklearn/utils/_pprint.py\n+++ b/sklearn/utils/_pprint.py\n@@ -70,7 +70,7 @@ from collections import OrderedDict\n from ..base import BaseEstimator\n from .._config import get_config\n from . import is_scalar_nan\n-\n+import math\n \n class KeyValTuple(tuple):\n     \"\"\"Dummy class for correctly rendering key-value tuples from dicts.\"\"\"\n@@ -156,8 +156,8 @@ class _EstimatorPrettyPrinter(pprint.PrettyPrinter):\n                  compact=False, indent_at_name=True,\n                  n_max_elements_to_show=None):\n         super().__init__(indent, width, depth, stream, compact=compact)\n-        self._indent_at_name = indent_at_name\n-        if self._indent_at_name:\n+        self.indent_at_name = indent_at_name\n+        if self.indent_at_name:\n             self._indent_per_level = 1  # ignore indent param\n         self._changed_only = get_config()['print_changed_only']\n         # Max number of elements in a list, dict, tuple until we start using\n@@ -169,12 +169,8 @@ class _EstimatorPrettyPrinter(pprint.PrettyPrinter):\n         return _safe_repr(object, context, maxlevels, level,\n                           changed_only=self._changed_only)\n \n-    def _pprint_estimator(self, object, stream, indent, allowance, context,\n-                          level):\n+    def _pprint_estimator(self, object, stream, indent, allowance, context, level):\n         stream.write(object.__class__.__name__ + '(')\n-        if self._indent_at_name:\n-            indent += len(object.__class__.__name__)\n-\n         if self._changed_only:\n             params = _changed_params(object)\n         else:\n@@ -321,7 +317,7 @@ class _EstimatorPrettyPrinter(pprint.PrettyPrinter):\n         self._format(v, stream, indent + len(rep) + len(middle), allowance,\n                      context, level)\n \n-    _dispatch = pprint.PrettyPrinter._dispatch\n+    _dispatch = pprint.PrettyPrinter._dispatch.copy()\n     _dispatch[BaseEstimator.__repr__] = _pprint_estimator\n     _dispatch[KeyValTuple.__repr__] = _pprint_key_val_tuple\n \n@@ -331,7 +327,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n     objects.\"\"\"\n     typ = type(object)\n \n-    if typ in pprint._builtin_scalars:\n+    if isinstance(object, (int, float, str, bytes, bool, type(None))):\n         return repr(object), True, False\n \n     r = getattr(typ, \"__repr__\", None)\n@@ -342,7 +338,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n         if maxlevels and level >= maxlevels:\n             return \"{...}\", False, objid in context\n         if objid in context:\n-            return pprint._recursion(object), False, True\n+            return _recursion(object), False, True\n         context[objid] = 1\n         readable = True\n         recursive = False\n@@ -350,7 +346,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n         append = components.append\n         level += 1\n         saferepr = _safe_repr\n-        items = sorted(object.items(), key=pprint._safe_tuple)\n+        items = sorted(object.items(), key=_safe_tuple)\n         for k, v in items:\n             krepr, kreadable, krecur = saferepr(\n                 k, context, maxlevels, level, changed_only=changed_only)\n@@ -379,7 +375,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n         if maxlevels and level >= maxlevels:\n             return format % \"...\", False, objid in context\n         if objid in context:\n-            return pprint._recursion(object), False, True\n+            return _recursion(object), False, True\n         context[objid] = 1\n         readable = True\n         recursive = False\n@@ -402,7 +398,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n         if maxlevels and level >= maxlevels:\n             return \"{...}\", False, objid in context\n         if objid in context:\n-            return pprint._recursion(object), False, True\n+            return _recursion(object), False, True\n         context[objid] = 1\n         readable = True\n         recursive = False\n@@ -414,7 +410,7 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n         append = components.append\n         level += 1\n         saferepr = _safe_repr\n-        items = sorted(params.items(), key=pprint._safe_tuple)\n+        items = sorted(params.items(), key=_safe_tuple)\n         for k, v in items:\n             krepr, kreadable, krecur = saferepr(\n                 k, context, maxlevels, level, changed_only=changed_only)\n@@ -430,3 +426,22 @@ def _safe_repr(object, context, maxlevels, level, changed_only=False):\n \n     rep = repr(object)\n     return rep, (rep and not rep.startswith('<')), False\n+\n+def _safe_tuple(t):\n+    \"\"\"Return a sortable version of the tuple for sorting purposes.\"\"\"\n+    return tuple(_safe_key(k) for k in t)\n+\n+def _safe_key(key):\n+    \"\"\"Return a sortable key for sorting purposes.\"\"\"\n+    if isinstance(key, (list, tuple, set)):\n+        return (0, tuple(_safe_key(k) for k in key))\n+    if key is None:\n+        return (1,)\n+    if isinstance(key, float) and math.isnan(key):\n+        return (2,)\n+    if isinstance(key, (int, float, str)):\n+        return (3, key)\n+    return (4, str(key))\n+\n+def _recursion(object):\n+    return \"<Recursion on {} with id={}>\".format(type(object).__name__, id(object))\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/utils/_pprint.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "acb810647233e40839203ac553429e8663169702",
+  "patch": "diff --git a/sklearn/utils/_pprint.py b/sklearn/utils/_pprint.py\n--- a/sklearn/utils/_pprint.py\n+++ b/sklearn/utils/_pprint.py\n@@ -321,7 +321,10 @@ def _pprint_key_val_tuple(self, object, stream, indent, allowance, context,\n         self._format(v, stream, indent + len(rep) + len(middle), allowance,\n                      context, level)\n \n-    _dispatch = pprint.PrettyPrinter._dispatch\n+    # Note: need to copy _dispatch to prevent instances of the builtin\n+    # PrettyPrinter class to call methods of _EstimatorPrettyPrinter (see issue\n+    # 12906)\n+    _dispatch = pprint.PrettyPrinter._dispatch.copy()\n     _dispatch[BaseEstimator.__repr__] = _pprint_estimator\n     _dispatch[KeyValTuple.__repr__] = _pprint_key_val_tuple\n \n",
+  "test_patch": "diff --git a/sklearn/utils/tests/test_pprint.py b/sklearn/utils/tests/test_pprint.py\n--- a/sklearn/utils/tests/test_pprint.py\n+++ b/sklearn/utils/tests/test_pprint.py\n@@ -1,4 +1,5 @@\n import re\n+from pprint import PrettyPrinter\n \n from sklearn.utils._pprint import _EstimatorPrettyPrinter\n from sklearn.pipeline import make_pipeline, Pipeline\n@@ -311,3 +312,11 @@ def test_length_constraint():\n     vectorizer = CountVectorizer(vocabulary=vocabulary)\n     repr_ = vectorizer.__repr__()\n     assert '...' in repr_\n+\n+\n+def test_builtin_prettyprinter():\n+    # non regression test than ensures we can still use the builtin\n+    # PrettyPrinter class for estimators (as done e.g. by joblib).\n+    # Used to be a bug\n+\n+    PrettyPrinter().pprint(LogisticRegression())\n",
+  "problem_statement": "AttributeError: 'PrettyPrinter' object has no attribute '_indent_at_name'\nThere's a failing example in #12654, and here's a piece of code causing it:\r\n\r\n```\r\nimport numpy as np\r\nfrom sklearn.datasets import load_digits\r\nfrom sklearn.model_selection import GridSearchCV\r\nfrom sklearn.pipeline import Pipeline\r\nfrom sklearn.svm import LinearSVC\r\nfrom sklearn.decomposition import PCA, NMF\r\nfrom sklearn.feature_selection import SelectKBest, chi2\r\n\r\npipe = Pipeline([\r\n    # the reduce_dim stage is populated by the param_grid\r\n    ('reduce_dim', 'passthrough'),\r\n    ('classify', LinearSVC(dual=False, max_iter=10000))\r\n])\r\n\r\nN_FEATURES_OPTIONS = [2, 4, 8]\r\nC_OPTIONS = [1, 10, 100, 1000]\r\nparam_grid = [\r\n    {\r\n        'reduce_dim': [PCA(iterated_power=7), NMF()],\r\n        'reduce_dim__n_components': N_FEATURES_OPTIONS,\r\n        'classify__C': C_OPTIONS\r\n    },\r\n    {\r\n        'reduce_dim': [SelectKBest(chi2)],\r\n        'reduce_dim__k': N_FEATURES_OPTIONS,\r\n        'classify__C': C_OPTIONS\r\n    },\r\n]\r\nreducer_labels = ['PCA', 'NMF', 'KBest(chi2)']\r\n\r\ngrid = GridSearchCV(pipe, cv=5, n_jobs=1, param_grid=param_grid, iid=False)\r\nfrom tempfile import mkdtemp\r\nfrom joblib import Memory\r\n\r\n# Create a temporary folder to store the transformers of the pipeline\r\ncachedir = mkdtemp()\r\nmemory = Memory(location=cachedir, verbose=10)\r\ncached_pipe = Pipeline([('reduce_dim', PCA()),\r\n                        ('classify', LinearSVC(dual=False, max_iter=10000))],\r\n                       memory=memory)\r\n\r\n# This time, a cached pipeline will be used within the grid search\r\ngrid = GridSearchCV(cached_pipe, cv=5, n_jobs=1, param_grid=param_grid,\r\n                    iid=False, error_score='raise')\r\ndigits = load_digits()\r\ngrid.fit(digits.data, digits.target)\r\n```\r\n\r\nWith the stack trace:\r\n\r\n```\r\nTraceback (most recent call last):\r\n  File \"<console>\", line 1, in <module>\r\n  File \"/path/to//sklearn/model_selection/_search.py\", line 683, in fit\r\n    self._run_search(evaluate_candidates)\r\n  File \"/path/to//sklearn/model_selection/_search.py\", line 1127, in _run_search\r\n    evaluate_candidates(ParameterGrid(self.param_grid))\r\n  File \"/path/to//sklearn/model_selection/_search.py\", line 672, in evaluate_candidates\r\n    cv.split(X, y, groups)))\r\n  File \"/path/to//sklearn/externals/joblib/parallel.py\", line 917, in __call__\r\n    if self.dispatch_one_batch(iterator):\r\n  File \"/path/to//sklearn/externals/joblib/parallel.py\", line 759, in dispatch_one_batch\r\n    self._dispatch(tasks)\r\n  File \"/path/to//sklearn/externals/joblib/parallel.py\", line 716, in _dispatch\r\n    job = self._backend.apply_async(batch, callback=cb)\r\n  File \"/path/to//sklearn/externals/joblib/_parallel_backends.py\", line 182, in apply_async\r\n    result = ImmediateResult(func)\r\n  File \"/path/to//sklearn/externals/joblib/_parallel_backends.py\", line 549, in __init__\r\n    self.results = batch()\r\n  File \"/path/to//sklearn/externals/joblib/parallel.py\", line 225, in __call__\r\n    for func, args, kwargs in self.items]\r\n  File \"/path/to//sklearn/externals/joblib/parallel.py\", line 225, in <listcomp>\r\n    for func, args, kwargs in self.items]\r\n  File \"/path/to//sklearn/model_selection/_validation.py\", line 511, in _fit_and_score\r\n    estimator.fit(X_train, y_train, **fit_params)\r\n  File \"/path/to//sklearn/pipeline.py\", line 279, in fit\r\n    Xt, fit_params = self._fit(X, y, **fit_params)\r\n  File \"/path/to//sklearn/pipeline.py\", line 244, in _fit\r\n    **fit_params_steps[name])\r\n  File \"/path/to/packages/joblib/memory.py\", line 555, in __call__\r\n    return self._cached_call(args, kwargs)[0]\r\n  File \"/path/to/packages/joblib/memory.py\", line 521, in _cached_call\r\n    out, metadata = self.call(*args, **kwargs)\r\n  File \"/path/to/packages/joblib/memory.py\", line 720, in call\r\n    print(format_call(self.func, args, kwargs))\r\n  File \"/path/to/packages/joblib/func_inspect.py\", line 356, in format_call\r\n    path, signature = format_signature(func, *args, **kwargs)\r\n  File \"/path/to/packages/joblib/func_inspect.py\", line 340, in format_signature\r\n    formatted_arg = _format_arg(arg)\r\n  File \"/path/to/packages/joblib/func_inspect.py\", line 322, in _format_arg\r\n    formatted_arg = pformat(arg, indent=2)\r\n  File \"/path/to/packages/joblib/logger.py\", line 54, in pformat\r\n    out = pprint.pformat(obj, depth=depth, indent=indent)\r\n  File \"/usr/lib64/python3.7/pprint.py\", line 58, in pformat\r\n    compact=compact).pformat(object)\r\n  File \"/usr/lib64/python3.7/pprint.py\", line 144, in pformat\r\n    self._format(object, sio, 0, 0, {}, 0)\r\n  File \"/usr/lib64/python3.7/pprint.py\", line 167, in _format\r\n    p(self, object, stream, indent, allowance, context, level + 1)\r\n  File \"/path/to//sklearn/utils/_pprint.py\", line 175, in _pprint_estimator\r\n    if self._indent_at_name:\r\nAttributeError: 'PrettyPrinter' object has no attribute '_indent_at_name'\r\n```\n",
+  "hints_text": "So for some reason, the class is `PrettyPrinter` instead of `_EstimatorPrettyPrinter` (which inherits from `PrettyPrinter`). But then \r\n\r\n```\r\n  File \"/path/to//sklearn/utils/_pprint.py\", line 175, in _pprint_estimator\r\n    if self._indent_at_name:\r\n```\r\nis a `_EstimatorPrettyPrinter` method, so I don't understand what is going on...\nBy the way, the example also fails on master, but somehow circle-ci on master is green.\nby example, I mean `examples/compose/plot_compare_reduction.py`\n#12791 seems to be failing for the same reason.\n> By the way, the example also fails on master, but somehow circle-ci on master is green.\r\n\r\nI can't see it in the latest build on master.\nI think it's because this line should involve a `.copy()`\r\n\r\nhttps://github.com/scikit-learn/scikit-learn/blob/684d8a221d29ba1659e81961425a2380a9930044/sklearn/utils/_pprint.py#L324\nThat is, we're modifying the dispatch used by `pprint` rather than the local pretty printer.\r\n\r\nBut then it's also a bit weird that `_pprint_estimator` references a method on the class. This means that configuration of the class cannot affect anything. Rather it should perhaps reference an instancemethod on a configuration singleton??\n@NicolasHug do you want to fix this, or should we open it to other contributors?\nThanks @jnothman I didn't see this, I'll take a look\nYou're right @jnothman we should make a copy of `_dispatch`.\r\n\r\nThe bug happens because joblib is using calling `PrettyPrinter` on an estimator, but the `_dispatch` dict of `PrettyPrinter` has been updated by `_EstimatorPrettyPrinter` sometime before, which tells the `PrettyPrinter` object to use `_EstimatorPrettyPrinter._pprint_estimator` to render `BaseEstimator` objects.\r\n\r\nPretty sneaky... I'll submit a fix.\r\n\r\n\r\nHowever I'm not sure I follow your concern about `_pprint_estimator` being a method.\nMinimal reproducing example:\r\n\r\n```\r\nfrom pprint import PrettyPrinter\r\nfrom sklearn.linear_model import LogisticRegression\r\n\r\nlr = LogisticRegression()\r\nPrettyPrinter().pprint(lr)\r\n```",
+  "created_at": "2019-01-07T22:45:53Z",
+  "version": "0.21",
+  "FAIL_TO_PASS": "[\"sklearn/utils/tests/test_pprint.py::test_builtin_prettyprinter\"]",
+  "PASS_TO_PASS": "[\"sklearn/utils/tests/test_pprint.py::test_basic\", \"sklearn/utils/tests/test_pprint.py::test_changed_only\", \"sklearn/utils/tests/test_pprint.py::test_deeply_nested\", \"sklearn/utils/tests/test_pprint.py::test_gridsearch\", \"sklearn/utils/tests/test_pprint.py::test_gridsearch_pipeline\", \"sklearn/utils/tests/test_pprint.py::test_length_constraint\", \"sklearn/utils/tests/test_pprint.py::test_n_max_elements_to_show\", \"sklearn/utils/tests/test_pprint.py::test_pipeline\"]",
+  "environment_setup_commit": "7813f7efb5b2012412888b69e73d76f2df2b50b6",
+  "patch_files": [
+    "sklearn/utils/_pprint.py"
+  ],
+  "test_patch_files": [
+    "sklearn/utils/tests/test_pprint.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/utils/_pprint.py": {
+      "diffs": [
+        {
+          "start_line_old": 324,
+          "end_line_old": 324,
+          "file_pos": 4,
+          "file_context_length": 28371,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/utils/_pprint.py__EstimatorPrettyPrinter.format__EstimatorPrettyPrinter._format_params.1.1",
+          "closest_snippet_line_distance": 127,
+          "pos": 20,
+          "context_length": 12297
+        }
+      ]
+    }
+  },
+  "vectors": 3152,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_1_56",
+      "distance": 0.7009068727493286,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 1,
+      "end_line": 106,
+      "tokens": 824,
+      "context_length": 824
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_1_classifiers.1",
+      "distance": 0.709511399269104,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 793,
+      "context_length": 1617
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_1_ALLOW_NAN.1",
+      "distance": 0.7983847856521606,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 698,
+      "context_length": 2315
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_pprint.py__EstimatorPrettyPrinter.format__EstimatorPrettyPrinter._format_params.1.1",
+      "distance": 0.8077157735824585,
+      "file_path": "sklearn/utils/_pprint.py",
+      "start_line": 168,
+      "end_line": 197,
+      "tokens": 270,
+      "context_length": 2585,
+      "file_pos": 4
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/__init__.py_BaseCrossValidator_",
+      "distance": 0.8152445554733276,
+      "file_path": "sklearn/model_selection/__init__.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 405,
+      "context_length": 2990
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py_BaseSearchCV._format_results.10_GridSearchCV",
+      "distance": 0.8337152600288391,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 755,
+      "end_line": 1124,
+      "tokens": 570,
+      "context_length": 3560
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_discretization_classification.py_35_",
+      "distance": 0.843799352645874,
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "start_line": 109,
+      "end_line": 193,
+      "tokens": 874,
+      "context_length": 4434
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_column_transformer_mixed_types.py_1_",
+      "distance": 0.8528916835784912,
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "start_line": 1,
+      "end_line": 106,
+      "tokens": 807,
+      "context_length": 5241
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_30_",
+      "distance": 0.8536264300346375,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 109,
+      "end_line": 181,
+      "tokens": 695,
+      "context_length": 5936
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/grid_search_text_feature_extraction.py_1_35",
+      "distance": 0.855009913444519,
+      "file_path": "examples/model_selection/grid_search_text_feature_extraction.py",
+      "start_line": 2,
+      "end_line": 97,
+      "tokens": 663,
+      "context_length": 6599
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.8585320711135864,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 85,
+      "end_line": 106,
+      "tokens": 314,
+      "context_length": 6913
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_grid_search_digits.py_1_",
+      "distance": 0.862307071685791,
+      "file_path": "examples/model_selection/plot_grid_search_digits.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 637,
+      "context_length": 7550
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_results_",
+      "distance": 0.8697057962417603,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 250,
+      "end_line": 326,
+      "tokens": 662,
+      "context_length": 8212
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_covertype.py_25_",
+      "distance": 0.8722041249275208,
+      "file_path": "benchmarks/bench_covertype.py",
+      "start_line": 113,
+      "end_line": 191,
+      "tokens": 757,
+      "context_length": 8969
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_31",
+      "distance": 0.8768360614776611,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 762,
+      "context_length": 9731
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_compare_reduction.py_57_",
+      "distance": 0.8802890777587891,
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "start_line": 107,
+      "end_line": 132,
+      "tokens": 225,
+      "context_length": 9956
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_32_",
+      "distance": 0.8823888897895813,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 83,
+      "end_line": 135,
+      "tokens": 457,
+      "context_length": 10413
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_random_projections.py_21_",
+      "distance": 0.8829882740974426,
+      "file_path": "benchmarks/bench_random_projections.py",
+      "start_line": 88,
+      "end_line": 254,
+      "tokens": 1264,
+      "context_length": 11677
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py_sys_",
+      "distance": 0.8887072205543518,
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 64,
+      "tokens": 441,
+      "context_length": 12118
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_pprint.py__EstimatorPrettyPrinter._pprint_key_val_tuple__EstimatorPrettyPrinter.12",
+      "distance": 0.8908447623252869,
+      "file_path": "sklearn/utils/_pprint.py",
+      "start_line": 309,
+      "end_line": 326,
+      "tokens": 179,
+      "context_length": 12297,
+      "file_pos": 15
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py_GridSearchCV.1_GridSearchCV.1",
+      "distance": 0.8913816213607788,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 813,
+      "end_line": 1108,
+      "tokens": 3193,
+      "context_length": 15490
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py_sys_",
+      "distance": 0.8915618062019348,
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "start_line": 14,
+      "end_line": 80,
+      "tokens": 633,
+      "context_length": 16123
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/grid_search_text_feature_extraction.py_parameters_",
+      "distance": 0.8931738138198853,
+      "file_path": "examples/model_selection/grid_search_text_feature_extraction.py",
+      "start_line": 98,
+      "end_line": 133,
+      "tokens": 374,
+      "context_length": 16497
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimators_nan_inf_check_estimators_nan_inf.rnd.13.2.10.1.4.1",
+      "distance": 0.8946676254272461,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1124,
+      "end_line": 1192,
+      "tokens": 601,
+      "context_length": 17098
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_1_32",
+      "distance": 0.8948848843574524,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 1,
+      "end_line": 107,
+      "tokens": 792,
+      "context_length": 17890
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_np_DEFAULT_EPSILON.1",
+      "distance": 0.8951271772384644,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 7,
+      "end_line": 43,
+      "tokens": 346,
+      "context_length": 18236
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train.9_check_classifiers_train.9.21.y_prob.8.y_log_prob.3",
+      "distance": 0.8990820646286011,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1398,
+      "end_line": 1495,
+      "tokens": 1019,
+      "context_length": 19255
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/examples/compose/plot_digits_pipe.py_1_",
+      "distance": 0.9005429744720459,
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 572,
+      "context_length": 19827
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_cv_indices.py_41_",
+      "distance": 0.9100706577301025,
+      "file_path": "examples/model_selection/plot_cv_indices.py",
+      "start_line": 105,
+      "end_line": 150,
+      "tokens": 381,
+      "context_length": 20208
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_9___all__.1",
+      "distance": 0.9103173613548279,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 10,
+      "end_line": 60,
+      "tokens": 325,
+      "context_length": 20533
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_multi_metric_evaluation.py_1_X_axis.1",
+      "distance": 0.9103285074234009,
+      "file_path": "examples/model_selection/plot_multi_metric_evaluation.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 543,
+      "context_length": 21076
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_function_transformer.py_1_",
+      "distance": 0.9203580617904663,
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 450,
+      "context_length": 21526
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/__init__.py_1_",
+      "distance": 0.9226624965667725,
+      "file_path": "sklearn/preprocessing/__init__.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 419,
+      "context_length": 21945
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_early_stopping.py_1_bar2.1",
+      "distance": 0.9231448173522949,
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 772,
+      "context_length": 22717
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_pprint.py__EstimatorPrettyPrinter__EstimatorPrettyPrinter.__init__.self.n_max_elements_to_show.1",
+      "distance": 0.923700213432312,
+      "file_path": "sklearn/utils/_pprint.py",
+      "start_line": 104,
+      "end_line": 166,
+      "tokens": 765,
+      "context_length": 23482,
+      "file_pos": 25
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_nested_cross_validation_iris.py_22_",
+      "distance": 0.9238691329956055,
+      "file_path": "examples/model_selection/plot_nested_cross_validation_iris.py",
+      "start_line": 74,
+      "end_line": 118,
+      "tokens": 433,
+      "context_length": 23915
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py_GridSearchCV.__init___RandomizedSearchCV",
+      "distance": 0.93071448802948,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 1110,
+      "end_line": 1436,
+      "tokens": 184,
+      "context_length": 24099
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__fit_and_score.2__fit_and_score.13.3.5.train_scores.1",
+      "distance": 0.931287944316864,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 482,
+      "end_line": 554,
+      "tokens": 746,
+      "context_length": 24845
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_43_123",
+      "distance": 0.9347999691963196,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 221,
+      "end_line": 312,
+      "tokens": 815,
+      "context_length": 25660
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py__check_transformer__check_transformer.12.4.2.1",
+      "distance": 0.9351019859313965,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 939,
+      "end_line": 1013,
+      "tokens": 702,
+      "context_length": 26362
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_pipeline_consistency_check_pipeline_consistency.13.2.4",
+      "distance": 0.9369924664497375,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1016,
+      "end_line": 1047,
+      "tokens": 346,
+      "context_length": 26708
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sgd_early_stopping.py_20_",
+      "distance": 0.9371881484985352,
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "start_line": 90,
+      "end_line": 151,
+      "tokens": 530,
+      "context_length": 27238
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_29_",
+      "distance": 0.9373237490653992,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 74,
+      "end_line": 98,
+      "tokens": 285,
+      "context_length": 27523
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/__init__.py_1_30.4.__all__.1",
+      "distance": 0.9378472566604614,
+      "file_path": "sklearn/__init__.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 663,
+      "context_length": 28186
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_precision_recall.py_8_81",
+      "distance": 0.9379277229309082,
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "start_line": 100,
+      "end_line": 205,
+      "tokens": 767,
+      "context_length": 28953
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._fit_Pipeline._fit.self.steps.11.1",
+      "distance": 0.9429097175598145,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 206,
+      "end_line": 250,
+      "tokens": 413,
+      "context_length": 29366
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/examples/decomposition/plot_faces_decomposition.py_29_41",
+      "distance": 0.9430809020996094,
+      "file_path": "examples/decomposition/plot_faces_decomposition.py",
+      "start_line": 64,
+      "end_line": 143,
+      "tokens": 628,
+      "context_length": 29994
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_data_not_an_array_check_transformers_unfitted.3.1",
+      "distance": 0.9470561146736145,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 914,
+      "end_line": 936,
+      "tokens": 248,
+      "context_length": 30242
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_nested_cross_validation_iris.py_1_21",
+      "distance": 0.9538663029670715,
+      "file_path": "examples/model_selection/plot_nested_cross_validation_iris.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 640,
+      "context_length": 30882
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_cls_stats_fig.1",
+      "distance": 0.9574880003929138,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 268,
+      "end_line": 361,
+      "tokens": 807,
+      "context_length": 31689
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_56_trim.2.1",
+      "distance": 0.9582170248031616,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 122,
+      "end_line": 203,
+      "tokens": 697,
+      "context_length": 32386
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_cls_runtime_",
+      "distance": 0.9595186710357666,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 362,
+      "end_line": 420,
+      "tokens": 470,
+      "context_length": 32856
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_BaseEstimator.__repr___BaseEstimator.__repr__.11.1",
+      "distance": 0.9598290920257568,
+      "file_path": "sklearn/base.py",
+      "start_line": 226,
+      "end_line": 243,
+      "tokens": 190,
+      "context_length": 33046
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_sys_cd_fast",
+      "distance": 0.9599291086196899,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 8,
+      "end_line": 28,
+      "tokens": 153,
+      "context_length": 33199
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline._validate_steps_Pipeline._validate_steps.9.1",
+      "distance": 0.9615790843963623,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 150,
+      "end_line": 176,
+      "tokens": 248,
+      "context_length": 33447
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/examples/manifold/plot_lle_digits.py_21_80",
+      "distance": 0.961857259273529,
+      "file_path": "examples/manifold/plot_lle_digits.py",
+      "start_line": 73,
+      "end_line": 164,
+      "tokens": 748,
+      "context_length": 34195
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_theilsen.py_noise_37_",
+      "distance": 0.9625347852706909,
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "start_line": 89,
+      "end_line": 112,
+      "tokens": 196,
+      "context_length": 34391
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/__init__.py_1__IS_32BIT.1",
+      "distance": 0.9637612700462341,
+      "file_path": "sklearn/utils/__init__.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 585,
+      "context_length": 34976
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/examples/plot_missing_values.py_get_results_get_results.25.1",
+      "distance": 0.9665733575820923,
+      "file_path": "examples/plot_missing_values.py",
+      "start_line": 34,
+      "end_line": 78,
+      "tokens": 447,
+      "context_length": 35423
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PowerTransformer._fit_PowerTransformer._fit.7.1",
+      "distance": 0.967200756072998,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 2588,
+      "end_line": 2615,
+      "tokens": 293,
+      "context_length": 35716
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tsne_mnist.py_24_",
+      "distance": 0.9694949984550476,
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "start_line": 70,
+      "end_line": 170,
+      "tokens": 1011,
+      "context_length": 36727
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_124_",
+      "distance": 0.9697275161743164,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 313,
+      "end_line": 358,
+      "tokens": 353,
+      "context_length": 37080
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_gradient_boosting_regression.py_1_",
+      "distance": 0.969729483127594,
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 546,
+      "context_length": 37626
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/examples/plot_anomaly_comparison.py_anomaly_algorithms_",
+      "distance": 0.9697847366333008,
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "start_line": 81,
+      "end_line": 153,
+      "tokens": 763,
+      "context_length": 38389
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_rbf_parameters.py_np_59",
+      "distance": 0.9711720943450928,
+      "file_path": "examples/svm/plot_rbf_parameters.py",
+      "start_line": 74,
+      "end_line": 160,
+      "tokens": 732,
+      "context_length": 39121
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/_joblib.py_1_",
+      "distance": 0.971449613571167,
+      "file_path": "sklearn/utils/_joblib.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 324,
+      "context_length": 39445
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/classification/plot_classifier_comparison.py_36_",
+      "distance": 0.971547544002533,
+      "file_path": "examples/classification/plot_classifier_comparison.py",
+      "start_line": 79,
+      "end_line": 145,
+      "tokens": 710,
+      "context_length": 40155
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py__check_param_grid__check_param_grid.2.1.3.1",
+      "distance": 0.971727728843689,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 360,
+      "end_line": 377,
+      "tokens": 158,
+      "context_length": 40313
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_validation.py__fit_and_score.14__fit_and_score.21.1",
+      "distance": 0.9718356132507324,
+      "file_path": "sklearn/model_selection/_validation.py",
+      "start_line": 555,
+      "end_line": 584,
+      "tokens": 341,
+      "context_length": 40654
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_1_y_pred_grd_lm.1",
+      "distance": 0.972072958946228,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 740,
+      "context_length": 41394
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py_1_72",
+      "distance": 0.9726781845092773,
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "start_line": 1,
+      "end_line": 94,
+      "tokens": 787,
+      "context_length": 42181
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 0.9732328653335571,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 848,
+      "end_line": 879,
+      "tokens": 297,
+      "context_length": 42478
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_outliers_train_check_outliers_train.37.contamination.7.2",
+      "distance": 0.9767473936080933,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1498,
+      "end_line": 1563,
+      "tokens": 567,
+      "context_length": 43045
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_tree.py_13_",
+      "distance": 0.9769139289855957,
+      "file_path": "benchmarks/bench_tree.py",
+      "start_line": 64,
+      "end_line": 125,
+      "tokens": 523,
+      "context_length": 43568
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/sklearn/base.py_14__pprint.13.1",
+      "distance": 0.9779143333435059,
+      "file_path": "sklearn/base.py",
+      "start_line": 77,
+      "end_line": 125,
+      "tokens": 404,
+      "context_length": 43972
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_glmnet.py_10_",
+      "distance": 0.9793672561645508,
+      "file_path": "benchmarks/bench_glmnet.py",
+      "start_line": 47,
+      "end_line": 129,
+      "tokens": 796,
+      "context_length": 44768
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_36_make_plot.12",
+      "distance": 0.9796454906463623,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 184,
+      "end_line": 218,
+      "tokens": 381,
+      "context_length": 45149
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator_sparse_data_check_estimator_sparse_data.10.2.3.5.2",
+      "distance": 0.9799071550369263,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 482,
+      "end_line": 528,
+      "tokens": 467,
+      "context_length": 45616
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_cv_indices.py_1_groups.1",
+      "distance": 0.9799546003341675,
+      "file_path": "examples/model_selection/plot_cv_indices.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 368,
+      "context_length": 45984
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_bias_variance.py_X_train_",
+      "distance": 0.9812332391738892,
+      "file_path": "examples/ensemble/plot_bias_variance.py",
+      "start_line": 116,
+      "end_line": 192,
+      "tokens": 684,
+      "context_length": 46668
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/testing.py_1_assert_false.1",
+      "distance": 0.9812378883361816,
+      "file_path": "sklearn/utils/testing.py",
+      "start_line": 1,
+      "end_line": 115,
+      "tokens": 782,
+      "context_length": 47450
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_transformer_n_iter_check_get_params_invariance.e.4",
+      "distance": 0.9814851880073547,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 2179,
+      "end_line": 2214,
+      "tokens": 401,
+      "context_length": 47851
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit_score_takes_y_check_fit_score_takes_y.rnd.9.2.4",
+      "distance": 0.9815565943717957,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1050,
+      "end_line": 1075,
+      "tokens": 282,
+      "context_length": 48133
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_selection/rfe.py_np_SelectorMixin",
+      "distance": 0.9823427200317383,
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "start_line": 9,
+      "end_line": 22,
+      "tokens": 130,
+      "context_length": 48263
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/model_selection/_search.py_1___all__.1",
+      "distance": 0.9848507642745972,
+      "file_path": "sklearn/model_selection/_search.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 290,
+      "context_length": 48553
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_1_55",
+      "distance": 0.9853796362876892,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 121,
+      "tokens": 783,
+      "context_length": 49336
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_randomized_search.py_17_",
+      "distance": 0.9860230684280396,
+      "file_path": "examples/model_selection/plot_randomized_search.py",
+      "start_line": 54,
+      "end_line": 87,
+      "tokens": 310,
+      "context_length": 49646
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_multilabel_metrics.py_21_",
+      "distance": 0.9862483739852905,
+      "file_path": "benchmarks/bench_multilabel_metrics.py",
+      "start_line": 136,
+      "end_line": 191,
+      "tokens": 543,
+      "context_length": 50189
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_multi_metric_evaluation.py_40_",
+      "distance": 0.988353967666626,
+      "file_path": "examples/model_selection/plot_multi_metric_evaluation.py",
+      "start_line": 72,
+      "end_line": 97,
+      "tokens": 317,
+      "context_length": 50506
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/sklearn/pipeline.py_Pipeline_Pipeline.1",
+      "distance": 0.9883733987808228,
+      "file_path": "sklearn/pipeline.py",
+      "start_line": 29,
+      "end_line": 113,
+      "tokens": 914,
+      "context_length": 51420
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/cross_decomposition/pls_.py__PLS.fit.28__PLS.fit.31",
+      "distance": 0.9886870980262756,
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "start_line": 287,
+      "end_line": 349,
+      "tokens": 844,
+      "context_length": 52264
+    }
+  ],
+  "files": [
+    {
+      "file_path": "examples/compose/plot_compare_reduction.py",
+      "position": 1,
+      "tokens": 1068,
+      "context_length": 1068
+    },
+    {
+      "file_path": "examples/preprocessing/plot_discretization_classification.py",
+      "position": 2,
+      "tokens": 1846,
+      "context_length": 2914
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 3,
+      "tokens": 21398,
+      "context_length": 24312
+    },
+    {
+      "file_path": "sklearn/utils/_pprint.py",
+      "position": 4,
+      "tokens": 4059,
+      "context_length": 28371
+    },
+    {
+      "file_path": "sklearn/model_selection/__init__.py",
+      "position": 5,
+      "tokens": 405,
+      "context_length": 28776
+    },
+    {
+      "file_path": "sklearn/model_selection/_search.py",
+      "position": 6,
+      "tokens": 13066,
+      "context_length": 41842
+    },
+    {
+      "file_path": "examples/compose/plot_column_transformer_mixed_types.py",
+      "position": 7,
+      "tokens": 829,
+      "context_length": 42671
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 8,
+      "tokens": 1728,
+      "context_length": 44399
+    },
+    {
+      "file_path": "examples/model_selection/grid_search_text_feature_extraction.py",
+      "position": 9,
+      "tokens": 1097,
+      "context_length": 45496
+    },
+    {
+      "file_path": "examples/model_selection/plot_grid_search_digits.py",
+      "position": 10,
+      "tokens": 637,
+      "context_length": 46133
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 11,
+      "tokens": 2547,
+      "context_length": 48680
+    },
+    {
+      "file_path": "benchmarks/bench_covertype.py",
+      "position": 12,
+      "tokens": 1901,
+      "context_length": 50581
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 13,
+      "tokens": 1227,
+      "context_length": 51808
+    },
+    {
+      "file_path": "benchmarks/bench_random_projections.py",
+      "position": 14,
+      "tokens": 1750,
+      "context_length": 53558
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/skeletons/exercise_02_sentiment.py",
+      "position": 15,
+      "tokens": 534,
+      "context_length": 54092
+    },
+    {
+      "file_path": "doc/tutorial/text_analytics/solutions/exercise_02_sentiment.py",
+      "position": 16,
+      "tokens": 726,
+      "context_length": 54818
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 17,
+      "tokens": 3116,
+      "context_length": 57934
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 18,
+      "tokens": 14402,
+      "context_length": 72336
+    },
+    {
+      "file_path": "examples/compose/plot_digits_pipe.py",
+      "position": 19,
+      "tokens": 580,
+      "context_length": 72916
+    },
+    {
+      "file_path": "examples/model_selection/plot_cv_indices.py",
+      "position": 20,
+      "tokens": 1315,
+      "context_length": 74231
+    },
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 21,
+      "tokens": 24232,
+      "context_length": 98463
+    },
+    {
+      "file_path": "examples/model_selection/plot_multi_metric_evaluation.py",
+      "position": 22,
+      "tokens": 881,
+      "context_length": 99344
+    },
+    {
+      "file_path": "examples/preprocessing/plot_function_transformer.py",
+      "position": 23,
+      "tokens": 450,
+      "context_length": 99794
+    },
+    {
+      "file_path": "sklearn/preprocessing/__init__.py",
+      "position": 24,
+      "tokens": 419,
+      "context_length": 100213
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_early_stopping.py",
+      "position": 25,
+      "tokens": 1164,
+      "context_length": 101377
+    },
+    {
+      "file_path": "examples/model_selection/plot_nested_cross_validation_iris.py",
+      "position": 26,
+      "tokens": 1074,
+      "context_length": 102451
+    },
+    {
+      "file_path": "sklearn/model_selection/_validation.py",
+      "position": 27,
+      "tokens": 13086,
+      "context_length": 115537
+    },
+    {
+      "file_path": "examples/linear_model/plot_sgd_early_stopping.py",
+      "position": 28,
+      "tokens": 1301,
+      "context_length": 116838
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 29,
+      "tokens": 794,
+      "context_length": 117632
+    },
+    {
+      "file_path": "sklearn/__init__.py",
+      "position": 30,
+      "tokens": 796,
+      "context_length": 118428
+    },
+    {
+      "file_path": "examples/model_selection/plot_precision_recall.py",
+      "position": 31,
+      "tokens": 2350,
+      "context_length": 120778
+    },
+    {
+      "file_path": "sklearn/pipeline.py",
+      "position": 32,
+      "tokens": 6916,
+      "context_length": 127694
+    },
+    {
+      "file_path": "examples/decomposition/plot_faces_decomposition.py",
+      "position": 33,
+      "tokens": 1437,
+      "context_length": 129131
+    },
+    {
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "position": 34,
+      "tokens": 3307,
+      "context_length": 132438
+    },
+    {
+      "file_path": "sklearn/base.py",
+      "position": 35,
+      "tokens": 4059,
+      "context_length": 136497
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 36,
+      "tokens": 21155,
+      "context_length": 157652
+    },
+    {
+      "file_path": "examples/manifold/plot_lle_digits.py",
+      "position": 37,
+      "tokens": 1879,
+      "context_length": 159531
+    },
+    {
+      "file_path": "examples/linear_model/plot_theilsen.py",
+      "position": 38,
+      "tokens": 1004,
+      "context_length": 160535
+    },
+    {
+      "file_path": "sklearn/utils/__init__.py",
+      "position": 39,
+      "tokens": 4728,
+      "context_length": 165263
+    },
+    {
+      "file_path": "examples/plot_missing_values.py",
+      "position": 40,
+      "tokens": 1079,
+      "context_length": 166342
+    },
+    {
+      "file_path": "benchmarks/bench_tsne_mnist.py",
+      "position": 41,
+      "tokens": 1436,
+      "context_length": 167778
+    },
+    {
+      "file_path": "examples/ensemble/plot_gradient_boosting_regression.py",
+      "position": 42,
+      "tokens": 574,
+      "context_length": 168352
+    },
+    {
+      "file_path": "examples/plot_anomaly_comparison.py",
+      "position": 43,
+      "tokens": 1524,
+      "context_length": 169876
+    },
+    {
+      "file_path": "examples/svm/plot_rbf_parameters.py",
+      "position": 44,
+      "tokens": 1982,
+      "context_length": 171858
+    },
+    {
+      "file_path": "sklearn/utils/_joblib.py",
+      "position": 45,
+      "tokens": 324,
+      "context_length": 172182
+    },
+    {
+      "file_path": "examples/classification/plot_classifier_comparison.py",
+      "position": 46,
+      "tokens": 1346,
+      "context_length": 173528
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 47,
+      "tokens": 1175,
+      "context_length": 174703
+    },
+    {
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "position": 48,
+      "tokens": 986,
+      "context_length": 175689
+    },
+    {
+      "file_path": "benchmarks/bench_tree.py",
+      "position": 49,
+      "tokens": 870,
+      "context_length": 176559
+    },
+    {
+      "file_path": "benchmarks/bench_glmnet.py",
+      "position": 50,
+      "tokens": 1087,
+      "context_length": 177646
+    },
+    {
+      "file_path": "examples/ensemble/plot_bias_variance.py",
+      "position": 51,
+      "tokens": 1814,
+      "context_length": 179460
+    },
+    {
+      "file_path": "sklearn/utils/testing.py",
+      "position": 52,
+      "tokens": 7562,
+      "context_length": 187022
+    },
+    {
+      "file_path": "sklearn/feature_selection/rfe.py",
+      "position": 53,
+      "tokens": 4576,
+      "context_length": 191598
+    },
+    {
+      "file_path": "examples/model_selection/plot_randomized_search.py",
+      "position": 54,
+      "tokens": 692,
+      "context_length": 192290
+    },
+    {
+      "file_path": "benchmarks/bench_multilabel_metrics.py",
+      "position": 55,
+      "tokens": 1651,
+      "context_length": 193941
+    },
+    {
+      "file_path": "sklearn/cross_decomposition/pls_.py",
+      "position": 56,
+      "tokens": 8204,
+      "context_length": 202145
+    }
+  ]
+}

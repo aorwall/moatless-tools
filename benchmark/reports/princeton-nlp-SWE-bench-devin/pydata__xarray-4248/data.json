@@ -1,0 +1,676 @@
+{
+  "instance_id": "pydata__xarray-4248",
+  "model_patch": "diff --git a/xarray/core/formatting.py b/xarray/core/formatting.py\nindex 28eaae5f..41c3c6f1 100644\n--- a/xarray/core/formatting.py\n+++ b/xarray/core/formatting.py\n@@ -283,7 +283,9 @@ def summarize_variable(\n         dims_str = \"({}) \".format(\", \".join(map(str, var.dims)))\n     else:\n         dims_str = \"\"\n-    front_str = f\"{first_col}{dims_str}{var.dtype} \"\n+    # Check for units in attributes and append to name if present\n+    units_str = f\", in {var.attrs['units']}\" if 'units' in var.attrs else \"\"\n+    front_str = f\"{first_col}{units_str}{dims_str}{var.dtype} \"\n \n     values_width = max_width - len(front_str)\n     values_str = inline_variable_array_repr(var, values_width)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/formatting.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "98dc1f4ea18738492e074e9e51ddfed5cd30ab94",
+  "patch": "diff --git a/xarray/core/formatting.py b/xarray/core/formatting.py\n--- a/xarray/core/formatting.py\n+++ b/xarray/core/formatting.py\n@@ -261,6 +261,8 @@ def inline_variable_array_repr(var, max_width):\n         return inline_dask_repr(var.data)\n     elif isinstance(var._data, sparse_array_type):\n         return inline_sparse_repr(var.data)\n+    elif hasattr(var._data, \"_repr_inline_\"):\n+        return var._data._repr_inline_(max_width)\n     elif hasattr(var._data, \"__array_function__\"):\n         return maybe_truncate(repr(var._data).replace(\"\\n\", \" \"), max_width)\n     else:\n",
+  "test_patch": "diff --git a/xarray/tests/test_formatting.py b/xarray/tests/test_formatting.py\n--- a/xarray/tests/test_formatting.py\n+++ b/xarray/tests/test_formatting.py\n@@ -7,6 +7,7 @@\n \n import xarray as xr\n from xarray.core import formatting\n+from xarray.core.npcompat import IS_NEP18_ACTIVE\n \n from . import raises_regex\n \n@@ -391,6 +392,44 @@ def test_array_repr(self):\n         assert actual == expected\n \n \n+@pytest.mark.skipif(not IS_NEP18_ACTIVE, reason=\"requires __array_function__\")\n+def test_inline_variable_array_repr_custom_repr():\n+    class CustomArray:\n+        def __init__(self, value, attr):\n+            self.value = value\n+            self.attr = attr\n+\n+        def _repr_inline_(self, width):\n+            formatted = f\"({self.attr}) {self.value}\"\n+            if len(formatted) > width:\n+                formatted = f\"({self.attr}) ...\"\n+\n+            return formatted\n+\n+        def __array_function__(self, *args, **kwargs):\n+            return NotImplemented\n+\n+        @property\n+        def shape(self):\n+            return self.value.shape\n+\n+        @property\n+        def dtype(self):\n+            return self.value.dtype\n+\n+        @property\n+        def ndim(self):\n+            return self.value.ndim\n+\n+    value = CustomArray(np.array([20, 40]), \"m\")\n+    variable = xr.Variable(\"x\", value)\n+\n+    max_width = 10\n+    actual = formatting.inline_variable_array_repr(variable, max_width=10)\n+\n+    assert actual == value._repr_inline_(max_width)\n+\n+\n def test_set_numpy_options():\n     original_options = np.get_printoptions()\n     with formatting.set_numpy_options(threshold=10):\n",
+  "problem_statement": "Feature request: show units in dataset overview\nHere's a hypothetical dataset:\r\n\r\n```\r\n<xarray.Dataset>\r\nDimensions:  (time: 3, x: 988, y: 822)\r\nCoordinates:\r\n  * x         (x) float64 ...\r\n  * y         (y) float64 ...\r\n  * time      (time) datetime64[ns] ...\r\nData variables:\r\n    rainfall  (time, y, x) float32 ...\r\n    max_temp  (time, y, x) float32 ...\r\n```\r\n\r\nIt would be really nice if the units of the coordinates and of the data variables were shown in the `Dataset` repr, for example as:\r\n\r\n```\r\n<xarray.Dataset>\r\nDimensions:  (time: 3, x: 988, y: 822)\r\nCoordinates:\r\n  * x, in metres         (x)            float64 ...\r\n  * y, in metres         (y)            float64 ...\r\n  * time                 (time)         datetime64[ns] ...\r\nData variables:\r\n    rainfall, in mm      (time, y, x)   float32 ...\r\n    max_temp, in deg C   (time, y, x)   float32 ...\r\n```\n",
+  "hints_text": "I would love to see this.\r\n\r\nWhat would we want the exact formatting to be? Square brackets to copy how units from `attrs['units']` are displayed on plots? e.g.\r\n```\r\n<xarray.Dataset>\r\nDimensions:  (time: 3, x: 988, y: 822)\r\nCoordinates:\r\n  * x [m]             (x)            float64 ...\r\n  * y [m]             (y)            float64 ...\r\n  * time [s]          (time)         datetime64[ns] ...\r\nData variables:\r\n    rainfall [mm]     (time, y, x)   float32 ...\r\n    max_temp [deg C]  (time, y, x)   float32 ...\r\n```\r\nThe lack of vertical alignment is kind of ugly...\r\n\r\nThere are now two cases to discuss: units in `attrs`, and unit-aware arrays like pint. (If we do the latter we may not need the former though...)\r\n\r\nfrom @keewis on #3616:\r\n\r\n>At the moment, the formatting.diff_*_repr functions that provide the pretty-printing for assert_* use repr to format NEP-18 strings, truncating the result if it is too long. In the case of pint's quantities, this makes the pretty printing useless since only a few values are visible and the unit is in the truncated part.\r\n>\r\n> What should we about this? Does pint have to change its repr?\r\n\r\nWe could presumably just extract the units from pint's repr to display them separately. I don't know if that raises questions about generality of duck-typing arrays though @dcherian ? Is it fine to make units a special-case?\nit was argued in pint that the unit is part of the data, so we should keep it as close to the data as possible. How about\r\n```\r\n<xarray.Dataset>\r\nDimensions:  (time: 3, x: 988, y: 822)\r\nCoordinates:\r\n  * x             (x)          [m]     float64 ...\r\n  * y             (y)          [m]     float64 ...\r\n  * time          (time)       [s]     datetime64[ns] ...\r\nData variables:\r\n    rainfall      (time, y, x) [mm]    float32 ...\r\n    max_temp      (time, y, x) [deg C] float32 ...\r\n```\r\nor\r\n```\r\n<xarray.Dataset>\r\nDimensions:  (time: 3, x: 988, y: 822)\r\nCoordinates:\r\n  * x             (x)             float64 [m] ...\r\n  * y             (y)             float64 [m] ...\r\n  * time          (time)          datetime64[ns] [s] ...\r\nData variables:\r\n    rainfall      (time, y, x)    float32 [mm] ...\r\n    max_temp      (time, y, x)    float32 [deg C] ...\r\n```\r\nThe issue with the second example is that it is easy to confuse with numpy's dtype, though. Maybe we should use parentheses instead?\r\n\r\nre special casing: I think would be fine for attributes since we already special case them for plotting, but I don't know about duck arrays. Even if we want to special case them, there are many unit libraries with different interfaces so we would either need to special case all of them or require a specific interface (or a function to retrieve the necessary data?).\r\n\r\nAlso, we should keep in mind is that using more horizontal space for the units results in less space for data. And we should not forget about https://github.com/dask/dask/issues/5329#issue-485927396, where a different kind of format was proposed, at least for the values of a `DataArray`.\nInstead of trying to come up with our own formatting, how about supporting a `_repr_short_(self, length)` method on the duck array (with a fall back to the current behavior)? That way duck arrays have to explicitly define the format (or have a compatibility package like `pint-xarray` provide it for them) if they want something different from their normal repr and we don't have to add duck array specific code.\r\n\r\nThis won't help with displaying the `units` attributes (which we don't really need once we have support for pint arrays in indexes).",
+  "created_at": "2020-07-22T14:54:03Z",
+  "version": "0.12",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_formatting.py::test_inline_variable_array_repr_custom_repr\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_formatting.py::TestFormatting::test_array_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_attribute_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_array_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_attrs_repr_with_array\", \"xarray/tests/test_formatting.py::TestFormatting::test_diff_dataset_repr\", \"xarray/tests/test_formatting.py::TestFormatting::test_first_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_array_flat\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_item\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_format_timestamp_out_of_bounds\", \"xarray/tests/test_formatting.py::TestFormatting::test_get_indexer_at_least_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_last_item\", \"xarray/tests/test_formatting.py::TestFormatting::test_last_n_items\", \"xarray/tests/test_formatting.py::TestFormatting::test_maybe_truncate\", \"xarray/tests/test_formatting.py::TestFormatting::test_pretty_print\", \"xarray/tests/test_formatting.py::test_large_array_repr_length\", \"xarray/tests/test_formatting.py::test_set_numpy_options\", \"xarray/tests/test_formatting.py::test_short_numpy_repr\"]",
+  "environment_setup_commit": "1c198a191127c601d091213c4b3292a8bb3054e1",
+  "patch_files": [
+    "xarray/core/formatting.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_formatting.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/formatting.py": {
+      "diffs": [
+        {
+          "start_line_old": 264,
+          "end_line_old": 264,
+          "file_pos": 1,
+          "file_context_length": 5259,
+          "closest_snippet_id": "/tmp/repos/xarray/xarray/core/formatting.py_summarize_coord_summarize_coord.4.1",
+          "closest_snippet_line_distance": 48
+        }
+      ]
+    }
+  },
+  "vectors": 988,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_dataset_repr_diff_dim_summary.1.2.1.1",
+      "distance": 0.8380595445632935,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 495,
+      "end_line": 524,
+      "tokens": 206,
+      "context_length": 206,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py_scatter_",
+      "distance": 0.9225156307220459,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 404,
+      "end_line": 454,
+      "tokens": 390,
+      "context_length": 596
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.load_store_Dataset.data_vars.2.1",
+      "distance": 0.9411149621009827,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 555,
+      "end_line": 1390,
+      "tokens": 6285,
+      "context_length": 6881
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_DataVariables__LocIndexer.__getitem__.2.1",
+      "distance": 0.9493905901908875,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 375,
+      "end_line": 425,
+      "tokens": 398,
+      "context_length": 7279
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py_functools__infer_meta_data.9.1",
+      "distance": 0.9671372175216675,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 518,
+      "context_length": 7797
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__dsplot__dsplot.commondoc.1",
+      "distance": 0.9696674346923828,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 167,
+      "end_line": 243,
+      "tokens": 931,
+      "context_length": 8728
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/conventions.py_encode_dataset_coordinates_encode_dataset_coordinates.3.1",
+      "distance": 0.9822638034820557,
+      "file_path": "xarray/conventions.py",
+      "start_line": 718,
+      "end_line": 737,
+      "tokens": 110,
+      "context_length": 8838
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py_11__Dataset_PlotMethods.__call__.1",
+      "distance": 0.9862210750579834,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 110,
+      "end_line": 164,
+      "tokens": 350,
+      "context_length": 9188
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_DatasetCoordinates._update_coords_DatasetCoordinates._update_coords.self._data._indexes.1",
+      "distance": 0.9933310151100159,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 221,
+      "end_line": 244,
+      "tokens": 198,
+      "context_length": 9386
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_copy__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 0.9984884858131409,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 136,
+      "tokens": 647,
+      "context_length": 10033
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__infer_scatter_data__infer_scatter_data.9.1",
+      "distance": 1.005103349685669,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 79,
+      "end_line": 107,
+      "tokens": 206,
+      "context_length": 10239
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__dsplot.2__dsplot.newplotfunc.15.1",
+      "distance": 1.0099645853042603,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 245,
+      "end_line": 351,
+      "tokens": 765,
+      "context_length": 11004
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_DatasetCoordinates_DatasetCoordinates.to_dataset.2.1",
+      "distance": 1.0148547887802124,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 184,
+      "end_line": 219,
+      "tokens": 252,
+      "context_length": 11256
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_datetime_22.4.2.iris_Cube.1",
+      "distance": 1.0234580039978027,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 433,
+      "context_length": 11689
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.reindex.1_Dataset.swap_dims.12.1",
+      "distance": 1.048865556716919,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 2347,
+      "end_line": 3028,
+      "tokens": 5902,
+      "context_length": 17591
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.sortby_Dataset.map_blocks.3.1",
+      "distance": 1.0490036010742188,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 5186,
+      "end_line": 5853,
+      "tokens": 6177,
+      "context_length": 23768
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_DatasetCoordinates.__delitem___DatasetCoordinates._ipython_key_completions_.2.1",
+      "distance": 1.056107997894287,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 246,
+      "end_line": 258,
+      "tokens": 116,
+      "context_length": 23884
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_calculate_dimensions_calculate_dimensions.6.1",
+      "distance": 1.061915636062622,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 187,
+      "end_line": 211,
+      "tokens": 229,
+      "context_length": 24113
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 1.0636968612670898,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 516,
+      "end_line": 712,
+      "tokens": 2442,
+      "context_length": 26555
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_diff_dataset_repr_",
+      "distance": 1.06669282913208,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 658,
+      "end_line": 679,
+      "tokens": 158,
+      "context_length": 26713,
+      "file_pos": 7
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/doc/gallery/plot_cartopy_facetgrid.py_1_",
+      "distance": 1.0699961185455322,
+      "file_path": "doc/gallery/plot_cartopy_facetgrid.py",
+      "start_line": 1,
+      "end_line": 46,
+      "tokens": 327,
+      "context_length": 27040
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/testing.py__assert_dataset_invariants__assert_dataset_invariants.16",
+      "distance": 1.0727205276489258,
+      "file_path": "xarray/testing.py",
+      "start_line": 288,
+      "end_line": 322,
+      "tokens": 413,
+      "context_length": 27453
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_ImplementsDatasetReduce._reduce_extra_args_docstring_ImplementsDatasetReduce._cum_extra_args_docstring.1",
+      "distance": 1.079944133758545,
+      "file_path": "xarray/core/common.py",
+      "start_line": 94,
+      "end_line": 110,
+      "tokens": 139,
+      "context_length": 27592
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_DataArrayCoordinates.variables_DataArrayCoordinates._ipython_key_completions_.2.1",
+      "distance": 1.0840997695922852,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 304,
+      "end_line": 324,
+      "tokens": 197,
+      "context_length": 27789
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_summarize_variable_summarize_variable.8.1",
+      "distance": 1.0857126712799072,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 271,
+      "end_line": 291,
+      "tokens": 209,
+      "context_length": 27998,
+      "file_pos": 10
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset_Dataset.__init__.self._indexes.1",
+      "distance": 1.0875582695007324,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 428,
+      "end_line": 553,
+      "tokens": 1010,
+      "context_length": 29008
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.expand_dims_Dataset.drop.8.1",
+      "distance": 1.0910589694976807,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 3030,
+      "end_line": 3779,
+      "tokens": 6067,
+      "context_length": 35075
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/xarray/xarray/core/concat.py__dataset_concat.32__dataset_concat.42.1",
+      "distance": 1.0941975116729736,
+      "file_path": "xarray/core/concat.py",
+      "start_line": 398,
+      "end_line": 426,
+      "tokens": 278,
+      "context_length": 35353
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.set_coords_Dataset.to_netcdf.4.1",
+      "distance": 1.106557846069336,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1392,
+      "end_line": 1569,
+      "tokens": 1589,
+      "context_length": 36942
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/xarray/xarray/conventions.py__encode_coordinates__encode_coordinates.non_dim_coord_names.18.1",
+      "distance": 1.1069586277008057,
+      "file_path": "xarray/conventions.py",
+      "start_line": 648,
+      "end_line": 715,
+      "tokens": 614,
+      "context_length": 37556
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/xarray/xarray/plot/facetgrid.py_FacetGrid.__init___FacetGrid.__init__.self._finalized.1",
+      "distance": 1.1072114706039429,
+      "file_path": "xarray/plot/facetgrid.py",
+      "start_line": 76,
+      "end_line": 213,
+      "tokens": 1058,
+      "context_length": 38614
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.to_zarr_Dataset.broadcast_like.5.1",
+      "distance": 1.1109569072723389,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1571,
+      "end_line": 2276,
+      "tokens": 5972,
+      "context_length": 44586
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/xarray/xarray/core/formatting_html.py_array_repr_",
+      "distance": 1.113047480583191,
+      "file_path": "xarray/core/formatting_html.py",
+      "start_line": 254,
+      "end_line": 290,
+      "tokens": 260,
+      "context_length": 44846
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/xarray/xarray/core/weighted.py_Weighted._implementation_Weighted.__repr__.4.1",
+      "distance": 1.1140997409820557,
+      "file_path": "xarray/core/weighted.py",
+      "start_line": 183,
+      "end_line": 224,
+      "tokens": 347,
+      "context_length": 45193
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 1.1161377429962158,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 635,
+      "end_line": 840,
+      "tokens": 2707,
+      "context_length": 47900
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/xarray/xarray/coding/times.py_re__unpack_netcdf_time_units.matches.4.1",
+      "distance": 1.1174535751342773,
+      "file_path": "xarray/coding/times.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 451,
+      "context_length": 48351
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/xarray/xarray/plot/plot.py__plot2d.newplotfunc.4.add_colorbar__plot2d.newplotfunc.4.43.1",
+      "distance": 1.118405818939209,
+      "file_path": "xarray/plot/plot.py",
+      "start_line": 617,
+      "end_line": 776,
+      "tokens": 1741,
+      "context_length": 50092
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/xarray/xarray/plot/dataset_plot.py__dsplot.plotmethod__dsplot.8.1",
+      "distance": 1.1205545663833618,
+      "file_path": "xarray/plot/dataset_plot.py",
+      "start_line": 353,
+      "end_line": 401,
+      "tokens": 288,
+      "context_length": 50380
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/xarray/xarray/core/coordinates.py_Coordinates_Coordinates.to_dataset.1",
+      "distance": 1.1224191188812256,
+      "file_path": "xarray/core/coordinates.py",
+      "start_line": 33,
+      "end_line": 77,
+      "tokens": 289,
+      "context_length": 50669
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.assign_Dataset.roll.10.1",
+      "distance": 1.1248745918273926,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 4401,
+      "end_line": 5184,
+      "tokens": 6203,
+      "context_length": 56872
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/xarray/xarray/plot/utils.py_itertools__determine_extend.4.1",
+      "distance": 1.1260313987731934,
+      "file_path": "xarray/plot/utils.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 283,
+      "context_length": 57155
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/xarray/xarray/core/concat.py_11__parse_datasets.10.1",
+      "distance": 1.126279354095459,
+      "file_path": "xarray/core/concat.py",
+      "start_line": 287,
+      "end_line": 306,
+      "tokens": 159,
+      "context_length": 57314
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_Dataset.drop_sel_Dataset.apply.3.1",
+      "distance": 1.128739833831787,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 3781,
+      "end_line": 4399,
+      "tokens": 5357,
+      "context_length": 62671
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_pkg_resources_",
+      "distance": 1.1308979988098145,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 603,
+      "context_length": 63274
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_diff_coords_repr__compat_to_str.2.3.1.1",
+      "distance": 1.134218692779541,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 597,
+      "end_line": 621,
+      "tokens": 130,
+      "context_length": 63404,
+      "file_pos": 19
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/xarray/xarray/core/formatting.py_summarize_coord_summarize_coord.4.1",
+      "distance": 1.1376616954803467,
+      "file_path": "xarray/core/formatting.py",
+      "start_line": 312,
+      "end_line": 324,
+      "tokens": 112,
+      "context_length": 63516,
+      "file_pos": 19
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_Variable.__dask_tokenize___Variable.dims_30.self._dims.1",
+      "distance": 1.1379661560058594,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 407,
+      "end_line": 502,
+      "tokens": 751,
+      "context_length": 64267
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/xarray/xarray/core/formatting_html.py_summarize_attrs_summarize_coords.4.1",
+      "distance": 1.1391862630844116,
+      "file_path": "xarray/core/formatting_html.py",
+      "start_line": 49,
+      "end_line": 97,
+      "tokens": 369,
+      "context_length": 64636
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/xarray/xarray/core/concat.py__dataset_concat__dataset_concat.30",
+      "distance": 1.1409356594085693,
+      "file_path": "xarray/core/concat.py",
+      "start_line": 309,
+      "end_line": 384,
+      "tokens": 609,
+      "context_length": 65245
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_apply_dataset_vfunc__iter_over_selections.4.2",
+      "distance": 1.141023874282837,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 349,
+      "end_line": 411,
+      "tokens": 472,
+      "context_length": 65717
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/formatting.py",
+      "position": 1,
+      "tokens": 5259,
+      "context_length": 5259
+    },
+    {
+      "file_path": "xarray/plot/dataset_plot.py",
+      "position": 2,
+      "tokens": 3421,
+      "context_length": 8680
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 3,
+      "tokens": 53768,
+      "context_length": 62448
+    },
+    {
+      "file_path": "xarray/conventions.py",
+      "position": 4,
+      "tokens": 5854,
+      "context_length": 68302
+    },
+    {
+      "file_path": "xarray/core/coordinates.py",
+      "position": 5,
+      "tokens": 2972,
+      "context_length": 71274
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 6,
+      "tokens": 33952,
+      "context_length": 105226
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 7,
+      "tokens": 6713,
+      "context_length": 111939
+    },
+    {
+      "file_path": "doc/gallery/plot_cartopy_facetgrid.py",
+      "position": 8,
+      "tokens": 327,
+      "context_length": 112266
+    },
+    {
+      "file_path": "xarray/testing.py",
+      "position": 9,
+      "tokens": 2986,
+      "context_length": 115252
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 10,
+      "tokens": 13403,
+      "context_length": 128655
+    },
+    {
+      "file_path": "xarray/core/concat.py",
+      "position": 11,
+      "tokens": 3770,
+      "context_length": 132425
+    },
+    {
+      "file_path": "xarray/plot/facetgrid.py",
+      "position": 12,
+      "tokens": 4816,
+      "context_length": 137241
+    },
+    {
+      "file_path": "xarray/core/formatting_html.py",
+      "position": 13,
+      "tokens": 2197,
+      "context_length": 139438
+    },
+    {
+      "file_path": "xarray/core/weighted.py",
+      "position": 14,
+      "tokens": 1999,
+      "context_length": 141437
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 15,
+      "tokens": 7823,
+      "context_length": 149260
+    },
+    {
+      "file_path": "xarray/coding/times.py",
+      "position": 16,
+      "tokens": 3854,
+      "context_length": 153114
+    },
+    {
+      "file_path": "xarray/plot/plot.py",
+      "position": 17,
+      "tokens": 8210,
+      "context_length": 161324
+    },
+    {
+      "file_path": "xarray/plot/utils.py",
+      "position": 18,
+      "tokens": 6528,
+      "context_length": 167852
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 19,
+      "tokens": 603,
+      "context_length": 168455
+    },
+    {
+      "file_path": "xarray/core/variable.py",
+      "position": 20,
+      "tokens": 20712,
+      "context_length": 189167
+    },
+    {
+      "file_path": "xarray/core/computation.py",
+      "position": 21,
+      "tokens": 13369,
+      "context_length": 202536
+    }
+  ]
+}

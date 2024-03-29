@@ -1,0 +1,2108 @@
+{
+  "instance_id": "django__django-13667",
+  "model_patch": "diff --git a/django/db/models/query.py b/django/db/models/query.py\nindex 7956b1695e..036e58c029 100644\n--- a/django/db/models/query.py\n+++ b/django/db/models/query.py\n@@ -986,9 +986,20 @@ class QuerySet:\n         # Clone the query to inherit the select list and everything\n         clone = self._chain()\n         # Clear limits and ordering so they can be reapplied\n-        clone.query.clear_ordering(True)\n+        clone.query.clear_ordering(force_empty=True)\n         clone.query.clear_limits()\n-        clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in other_qs)\n+\n+        # Check if 'exists' is being called and modify the query accordingly\n+        if getattr(self, '_optimize_exists', False):\n+            clone.query.add_annotation(Value(1), alias='__exists_select', is_summary=True)\n+            clone.query.set_limits(high=1)\n+            clone.query.combined_queries = tuple(\n+                qs.query.chain(clone=True).set_limits(high=1).clear_select_clause().add_annotation(Value(1), alias='__exists_select', is_summary=True)\n+                for qs in other_qs\n+            )\n+        else:\n+            clone.query.combined_queries = (self.query,) + tuple(qs.query for qs in other_qs)\n+\n         clone.query.combinator = combinator\n         clone.query.combinator_all = all\n         return clone\n@@ -1002,7 +1013,10 @@ class QuerySet:\n             if len(qs) == 1:\n                 return qs[0]\n             return qs[0]._combinator_query('union', *qs[1:], all=all)\n-        return self._combinator_query('union', *other_qs, all=all)\n+        # Set the _optimize_exists flag to optimize the exists() call.\n+        clone = self._combinator_query('union', *other_qs, all=all)\n+        clone._optimize_exists = True\n+        return clone\n \n     def intersection(self, *other_qs):\n         # If any query is an EmptyQuerySet, return it.\n@@ -1436,8 +1450,7 @@ class RawQuerySet:\n         \"\"\"Resolve the init field names and value positions.\"\"\"\n         converter = connections[self.db].introspection.identifier_converter\n         model_init_fields = [f for f in self.model._meta.fields if converter(f.column) in self.columns]\n-        annotation_fields = [(column, pos) for pos, column in enumerate(self.columns)\n-                             if column not in self.model_fields]\n+        annotation_fields = [(column, pos) for pos, column in enumerate(self.columns) if column not in self.model_fields]\n         model_init_order = [self.columns.index(converter(f.column)) for f in model_init_fields]\n         model_init_names = [f.attname for f in model_init_fields]\n         return model_init_names, model_init_order, annotation_fields\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/db/models/query.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "4cce1d13cfe9d8e56921c5fa8c61e3034dc8e20c",
+  "patch": "diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py\n--- a/django/db/models/expressions.py\n+++ b/django/db/models/expressions.py\n@@ -1116,10 +1116,11 @@ def copy(self):\n     def external_aliases(self):\n         return self.query.external_aliases\n \n-    def as_sql(self, compiler, connection, template=None, **extra_context):\n+    def as_sql(self, compiler, connection, template=None, query=None, **extra_context):\n         connection.ops.check_expression_support(self)\n         template_params = {**self.extra, **extra_context}\n-        subquery_sql, sql_params = self.query.as_sql(compiler, connection)\n+        query = query or self.query\n+        subquery_sql, sql_params = query.as_sql(compiler, connection)\n         template_params['subquery'] = subquery_sql[1:-1]\n \n         template = template or template_params.get('template', self.template)\n@@ -1142,7 +1143,6 @@ class Exists(Subquery):\n     def __init__(self, queryset, negated=False, **kwargs):\n         self.negated = negated\n         super().__init__(queryset, **kwargs)\n-        self.query = self.query.exists()\n \n     def __invert__(self):\n         clone = self.copy()\n@@ -1150,7 +1150,14 @@ def __invert__(self):\n         return clone\n \n     def as_sql(self, compiler, connection, template=None, **extra_context):\n-        sql, params = super().as_sql(compiler, connection, template, **extra_context)\n+        query = self.query.exists(using=connection.alias)\n+        sql, params = super().as_sql(\n+            compiler,\n+            connection,\n+            template=template,\n+            query=query,\n+            **extra_context,\n+        )\n         if self.negated:\n             sql = 'NOT {}'.format(sql)\n         return sql, params\ndiff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py\n--- a/django/db/models/sql/query.py\n+++ b/django/db/models/sql/query.py\n@@ -525,7 +525,7 @@ def get_count(self, using):\n     def has_filters(self):\n         return self.where\n \n-    def exists(self):\n+    def exists(self, using, limit=True):\n         q = self.clone()\n         if not q.distinct:\n             if q.group_by is True:\n@@ -534,14 +534,21 @@ def exists(self):\n                 # SELECT clause which is about to be cleared.\n                 q.set_group_by(allow_aliases=False)\n             q.clear_select_clause()\n+        if q.combined_queries and q.combinator == 'union':\n+            limit_combined = connections[using].features.supports_slicing_ordering_in_compound\n+            q.combined_queries = tuple(\n+                combined_query.exists(using, limit=limit_combined)\n+                for combined_query in q.combined_queries\n+            )\n         q.clear_ordering(True)\n-        q.set_limits(high=1)\n+        if limit:\n+            q.set_limits(high=1)\n         q.add_extra({'a': 1}, None, None, None, None, None)\n         q.set_extra_mask(['a'])\n         return q\n \n     def has_results(self, using):\n-        q = self.exists()\n+        q = self.exists(using)\n         compiler = q.get_compiler(using=using)\n         return compiler.has_results()\n \n",
+  "test_patch": "diff --git a/tests/queries/test_qs_combinators.py b/tests/queries/test_qs_combinators.py\n--- a/tests/queries/test_qs_combinators.py\n+++ b/tests/queries/test_qs_combinators.py\n@@ -3,6 +3,7 @@\n from django.db import DatabaseError, NotSupportedError, connection\n from django.db.models import Exists, F, IntegerField, OuterRef, Value\n from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature\n+from django.test.utils import CaptureQueriesContext\n \n from .models import Number, ReservedName\n \n@@ -254,6 +255,41 @@ def test_count_intersection(self):\n         qs2 = Number.objects.filter(num__lte=5)\n         self.assertEqual(qs1.intersection(qs2).count(), 1)\n \n+    def test_exists_union(self):\n+        qs1 = Number.objects.filter(num__gte=5)\n+        qs2 = Number.objects.filter(num__lte=5)\n+        with CaptureQueriesContext(connection) as context:\n+            self.assertIs(qs1.union(qs2).exists(), True)\n+        captured_queries = context.captured_queries\n+        self.assertEqual(len(captured_queries), 1)\n+        captured_sql = captured_queries[0]['sql']\n+        self.assertNotIn(\n+            connection.ops.quote_name(Number._meta.pk.column),\n+            captured_sql,\n+        )\n+        self.assertEqual(\n+            captured_sql.count(connection.ops.limit_offset_sql(None, 1)),\n+            3 if connection.features.supports_slicing_ordering_in_compound else 1\n+        )\n+\n+    def test_exists_union_empty_result(self):\n+        qs = Number.objects.filter(pk__in=[])\n+        self.assertIs(qs.union(qs).exists(), False)\n+\n+    @skipUnlessDBFeature('supports_select_intersection')\n+    def test_exists_intersection(self):\n+        qs1 = Number.objects.filter(num__gt=5)\n+        qs2 = Number.objects.filter(num__lt=5)\n+        self.assertIs(qs1.intersection(qs1).exists(), True)\n+        self.assertIs(qs1.intersection(qs2).exists(), False)\n+\n+    @skipUnlessDBFeature('supports_select_difference')\n+    def test_exists_difference(self):\n+        qs1 = Number.objects.filter(num__gte=5)\n+        qs2 = Number.objects.filter(num__gte=3)\n+        self.assertIs(qs1.difference(qs2).exists(), False)\n+        self.assertIs(qs2.difference(qs1).exists(), True)\n+\n     def test_get_union(self):\n         qs = Number.objects.filter(num=2)\n         self.assertEqual(qs.union(qs).get().num, 2)\n",
+  "problem_statement": "Augment QuerySet.exists() optimizations to .union().exists().\nDescription\n\t \n\t\t(last modified by Simon Charette)\n\t \nThe QuerySet.exists method performs optimization by \u200bclearing the select clause, \u200bdropping ordering, and limiting the number of results to 1 if possible.\nA similar optimization can be applied for combined queries when using QuerySet.union() as some query planers (e.g. MySQL) are not smart enough to prune changes down into combined queries.\nFor example, given filtered_authors.union(other_authors).exists() the currently generated is\nSELECT 1 FROM (SELECT * FROM authors WHERE ... ORDER BY ... UNION SELECT * FROM authors WHERE ... ORDER BY ...) LIMIT 1;\nBut some planers won't be smart enough to realize that both * and ORDER BY are not necessary and fetch all matching rows. In order to help them we should generate the following SQL\nSELECT 1 FROM (SELECT 1 FROM authors WHERE ... LIMIT 1 UNION SELECT 1 FROM authors WHERE ... LIMIT 1) LIMIT 1;\nThis can already be done manually through filtered_authors.order_by().values(Value(1))[:1].union(other_authors.order_by().values(Value(1))[:1]).exists() but that involves a lot of boilerplate.\nNote that the optimization is only possible in this form for union and not for intersection and difference since they require both sets to be unaltered.\n",
+  "hints_text": "PR \u200bhttps://github.com/django/django/pull/13667",
+  "created_at": "2020-11-11T22:27:30Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"test_exists_union (queries.test_qs_combinators.QuerySetSetOperationTests)\"]",
+  "PASS_TO_PASS": "[\"test_combining_multiple_models (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_count_difference (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_count_intersection (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_count_union (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_count_union_empty_result (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_difference_with_empty_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_difference_with_values (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_empty_qs_union_with_ordered_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_exists_difference (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_exists_intersection (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_exists_union_empty_result (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_get_difference (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_get_intersection (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_get_union (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_get_with_filters_unsupported_on_combined_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_intersection_with_empty_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_intersection_with_values (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_limits (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_order_by_same_type (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_order_raises_on_non_selected_column (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_ordering (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_ordering_by_alias (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_ordering_by_f_expression (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_ordering_by_f_expression_and_alias (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_qs_with_subcompound_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_simple_difference (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_simple_intersection (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_simple_union (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_distinct (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_none (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_empty_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_extra_and_values_list (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_two_annotated_values_list (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_values (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_values_list_and_order (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_values_list_and_order_on_annotation (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_union_with_values_list_on_annotated_and_unannotated (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_unsupported_operations_on_combined_qs (queries.test_qs_combinators.QuerySetSetOperationTests)\", \"test_unsupported_ordering_slicing_raises_db_error (queries.test_qs_combinators.QuerySetSetOperationTests)\"]",
+  "environment_setup_commit": "65dfb06a1ab56c238cc80f5e1c31f61210c4577d",
+  "patch_files": [
+    "django/db/models/expressions.py",
+    "django/db/models/sql/query.py"
+  ],
+  "test_patch_files": [
+    "tests/queries/test_qs_combinators.py"
+  ],
+  "patch_diff_details": {
+    "django/db/models/expressions.py": {
+      "diffs": [
+        {
+          "start_line_old": 1119,
+          "end_line_old": 1122,
+          "file_pos": 2,
+          "file_context_length": 28082,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/expressions.py_BaseExpression.contains_aggregate_BaseExpression.resolve_expression.5.1",
+          "closest_snippet_line_distance": 869,
+          "pos": 35,
+          "context_length": 12946
+        },
+        {
+          "start_line_old": 1145,
+          "end_line_old": 1145,
+          "file_pos": 2,
+          "file_context_length": 28082,
+          "pos": 2,
+          "context_length": 561
+        },
+        {
+          "start_line_old": 1153,
+          "end_line_old": 1153,
+          "file_pos": 2,
+          "file_context_length": 28082,
+          "pos": 2,
+          "context_length": 561
+        }
+      ]
+    },
+    "django/db/models/sql/query.py": {
+      "diffs": [
+        {
+          "start_line_old": 528,
+          "end_line_old": 528,
+          "file_pos": 3,
+          "file_context_length": 50540,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/sql/query.py_JoinPromoter.update_join_types_",
+          "closest_snippet_line_distance": 1890,
+          "pos": 14,
+          "context_length": 5254
+        },
+        {
+          "start_line_old": 537,
+          "end_line_old": 543,
+          "file_pos": 3,
+          "file_context_length": 50540,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/sql/query.py_JoinPromoter.update_join_types_",
+          "closest_snippet_line_distance": 1881,
+          "pos": 14,
+          "context_length": 5254
+        }
+      ]
+    }
+  },
+  "vectors": 3515,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._update.alters_data_QuerySet.values.4.1",
+      "distance": 0.9376715421676636,
+      "file_path": "django/db/models/query.py",
+      "start_line": 801,
+      "end_line": 840,
+      "tokens": 322,
+      "context_length": 322
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Exists_Exists.select_format.4.2.1",
+      "distance": 1.008439302444458,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 1138,
+      "end_line": 1164,
+      "tokens": 239,
+      "context_length": 561,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._combinator_query_QuerySet.union.2.5.1",
+      "distance": 1.0263886451721191,
+      "file_path": "django/db/models/query.py",
+      "start_line": 985,
+      "end_line": 1005,
+      "tokens": 239,
+      "context_length": 800
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.__class_getitem___QuerySet.__or__.9.1",
+      "distance": 1.0692676305770874,
+      "file_path": "django/db/models/query.py",
+      "start_line": 320,
+      "end_line": 346,
+      "tokens": 222,
+      "context_length": 1022
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.split_exclude_Query.split_exclude.21.1",
+      "distance": 1.0974149703979492,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1750,
+      "end_line": 1815,
+      "tokens": 666,
+      "context_length": 1688,
+      "file_pos": 3
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filter.19_Query.build_filter.31.1",
+      "distance": 1.113654613494873,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1301,
+      "end_line": 1366,
+      "tokens": 772,
+      "context_length": 2460,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.intersection_QuerySet.difference.2.2.1",
+      "distance": 1.1253019571304321,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1007,
+      "end_line": 1020,
+      "tokens": 126,
+      "context_length": 2586
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.combine.40_Query.combine.self.extra_order_by.1",
+      "distance": 1.127726435661316,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 631,
+      "end_line": 655,
+      "tokens": 269,
+      "context_length": 2855,
+      "file_pos": 3
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._merge_known_related_objects_QuerySet._not_support_combined_queries.1.1",
+      "distance": 1.128222107887268,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1351,
+      "end_line": 1399,
+      "tokens": 405,
+      "context_length": 3260
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.setup_joins.16_Query.setup_joins.17.1",
+      "distance": 1.1343746185302734,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1643,
+      "end_line": 1667,
+      "tokens": 227,
+      "context_length": 3487,
+      "file_pos": 3
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.clear_limits_Query.add_distinct_fields.self.distinct.1",
+      "distance": 1.1358685493469238,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1848,
+      "end_line": 1897,
+      "tokens": 329,
+      "context_length": 3816,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_FilteredRelation_",
+      "distance": 1.144214153289795,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 312,
+      "end_line": 352,
+      "tokens": 286,
+      "context_length": 4102
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_JoinPromoter.update_join_types_",
+      "distance": 1.146153450012207,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2418,
+      "end_line": 2473,
+      "tokens": 827,
+      "context_length": 4929,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.get_count_Query.explain.6.1",
+      "distance": 1.151702880859375,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 514,
+      "end_line": 554,
+      "tokens": 325,
+      "context_length": 5254,
+      "file_pos": 4
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.none_QuerySet._filter_or_exclude_inplace.1.2.1",
+      "distance": 1.151833415031433,
+      "file_path": "django/db/models/query.py",
+      "start_line": 916,
+      "end_line": 966,
+      "tokens": 371,
+      "context_length": 5625
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.combine_Query.combine.39",
+      "distance": 1.15346097946167,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 556,
+      "end_line": 630,
+      "tokens": 809,
+      "context_length": 6434,
+      "file_pos": 4
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.only_QuerySet.only.8.1",
+      "distance": 1.1735697984695435,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1196,
+      "end_line": 1215,
+      "tokens": 209,
+      "context_length": 6643
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._merge_sanity_check_QuerySet._merge_sanity_check.2.1",
+      "distance": 1.1916255950927734,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1340,
+      "end_line": 1349,
+      "tokens": 114,
+      "context_length": 6757
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._annotate_QuerySet._annotate.10.1",
+      "distance": 1.1917839050292969,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1098,
+      "end_line": 1139,
+      "tokens": 323,
+      "context_length": 7080
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_filter_Query.build_where.1.1",
+      "distance": 1.1992213726043701,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1368,
+      "end_line": 1389,
+      "tokens": 250,
+      "context_length": 7330,
+      "file_pos": 4
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.using_QuerySet.ordered.3.3.1.1",
+      "distance": 1.1995372772216797,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1217,
+      "end_line": 1245,
+      "tokens": 183,
+      "context_length": 7513
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_filtered_relation_Query.add_filtered_relation.6",
+      "distance": 1.201570987701416,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1435,
+      "end_line": 1462,
+      "tokens": 283,
+      "context_length": 7796,
+      "file_pos": 4
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.set_values_Query.set_values.9",
+      "distance": 1.2019915580749512,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2181,
+      "end_line": 2228,
+      "tokens": 394,
+      "context_length": 8190,
+      "file_pos": 4
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.prefetch_related_QuerySet.prefetch_related.5.1",
+      "distance": 1.2102551460266113,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1060,
+      "end_line": 1081,
+      "tokens": 214,
+      "context_length": 8404
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.order_by_QuerySet.reverse.5.1",
+      "distance": 1.2144553661346436,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1141,
+      "end_line": 1177,
+      "tokens": 324,
+      "context_length": 8728
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.rewrite_cols_Query.rewrite_cols.orig_exprs.5.1",
+      "distance": 1.2150980234146118,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 373,
+      "end_line": 423,
+      "tokens": 494,
+      "context_length": 9222,
+      "file_pos": 4
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_select_related_Query.add_extra.5.self.extra_order_by.1",
+      "distance": 1.2293012142181396,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2039,
+      "end_line": 2085,
+      "tokens": 370,
+      "context_length": 9592,
+      "file_pos": 4
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet_QuerySet.__getstate__.2",
+      "distance": 1.2295372486114502,
+      "file_path": "django/db/models/query.py",
+      "start_line": 175,
+      "end_line": 234,
+      "tokens": 469,
+      "context_length": 10061
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.clear_ordering_Query.set_group_by.self.group_by.1",
+      "distance": 1.232062578201294,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1988,
+      "end_line": 2037,
+      "tokens": 420,
+      "context_length": 10481,
+      "file_pos": 4
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.deferred_to_data.8_Query.deferred_to_data.8.6.6.1",
+      "distance": 1.2449767589569092,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 706,
+      "end_line": 741,
+      "tokens": 389,
+      "context_length": 10870,
+      "file_pos": 4
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_SubqueryConstraint_",
+      "distance": 1.2483501434326172,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 233,
+      "end_line": 249,
+      "tokens": 130,
+      "context_length": 11000
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_Q_Q.resolve_expression.3",
+      "distance": 1.2486066818237305,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 57,
+      "end_line": 108,
+      "tokens": 396,
+      "context_length": 11396
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query_Query.__init__.self.explain_options.1",
+      "distance": 1.2523584365844727,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 137,
+      "end_line": 231,
+      "tokens": 833,
+      "context_length": 12229,
+      "file_pos": 5
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_BaseExpression.contains_aggregate_BaseExpression.resolve_expression.5.1",
+      "distance": 1.2538011074066162,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 219,
+      "end_line": 253,
+      "tokens": 285,
+      "context_length": 12514,
+      "file_pos": 5
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Subquery_Subquery.get_group_by_cols.4.1",
+      "distance": 1.2546875476837158,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 1077,
+      "end_line": 1135,
+      "tokens": 432,
+      "context_length": 12946,
+      "file_pos": 5
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.values_list_QuerySet.values_list.10.1",
+      "distance": 1.2562694549560547,
+      "file_path": "django/db/models/query.py",
+      "start_line": 842,
+      "end_line": 871,
+      "tokens": 248,
+      "context_length": 13194
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.annotate_QuerySet.alias.3.1",
+      "distance": 1.2585453987121582,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1083,
+      "end_line": 1096,
+      "tokens": 115,
+      "context_length": 13309
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_1_JoinInfo.1",
+      "distance": 1.2601287364959717,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 479,
+      "context_length": 13788,
+      "file_pos": 5
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.complex_filter_QuerySet.complex_filter.2.4.1.1",
+      "distance": 1.2630470991134644,
+      "file_path": "django/db/models/query.py",
+      "start_line": 968,
+      "end_line": 983,
+      "tokens": 124,
+      "context_length": 13912
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.set_empty_Query.set_limits.4.1",
+      "distance": 1.2679401636123657,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1817,
+      "end_line": 1846,
+      "tokens": 259,
+      "context_length": 14171,
+      "file_pos": 5
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.select_related_QuerySet.select_related.6.1",
+      "distance": 1.268532633781433,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1038,
+      "end_line": 1058,
+      "tokens": 155,
+      "context_length": 14326
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.trim_start_Query.trim_start.30.1",
+      "distance": 1.2687678337097168,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2264,
+      "end_line": 2336,
+      "tokens": 774,
+      "context_length": 15100,
+      "file_pos": 5
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._chain_QuerySet._clone.9.1",
+      "distance": 1.2694261074066162,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1294,
+      "end_line": 1318,
+      "tokens": 210,
+      "context_length": 15310
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.names_to_path.3_Query.names_to_path.4.1",
+      "distance": 1.2721995115280151,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1480,
+      "end_line": 1565,
+      "tokens": 801,
+      "context_length": 16111,
+      "file_pos": 5
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.bump_prefix.3_Query.bump_prefix.12",
+      "distance": 1.272899866104126,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 902,
+      "end_line": 924,
+      "tokens": 248,
+      "context_length": 16359,
+      "file_pos": 5
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/db/models/sql/subqueries.py_1_DeleteQuery.delete_batch.6.1",
+      "distance": 1.2731866836547852,
+      "file_path": "django/db/models/sql/subqueries.py",
+      "start_line": 1,
+      "end_line": 44,
+      "tokens": 320,
+      "context_length": 16679
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/db/models/query.py_1_BaseIterable.__init__.self.chunk_size.1",
+      "distance": 1.2741189002990723,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 294,
+      "context_length": 16973
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.resolve_ref_Query.resolve_ref.3.3.10.1",
+      "distance": 1.274374008178711,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1709,
+      "end_line": 1748,
+      "tokens": 439,
+      "context_length": 17412,
+      "file_pos": 6
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.update.alters_data_QuerySet._update.8.1",
+      "distance": 1.2798930406570435,
+      "file_path": "django/db/models/query.py",
+      "start_line": 784,
+      "end_line": 800,
+      "tokens": 157,
+      "context_length": 17569
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.get_external_cols_Query.resolve_lookup_value.2.1",
+      "distance": 1.2806031703948975,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1062,
+      "end_line": 1091,
+      "tokens": 245,
+      "context_length": 17814,
+      "file_pos": 6
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/models/query.py_RawQuerySet.iterator_RawQuerySet.iterator.db.4.8.2.1",
+      "distance": 1.281151294708252,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1485,
+      "end_line": 1518,
+      "tokens": 297,
+      "context_length": 18111
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._fetch_all_QuerySet._next_is_sticky.3.1",
+      "distance": 1.287075400352478,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1320,
+      "end_line": 1338,
+      "tokens": 186,
+      "context_length": 18297
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_related_objects.13_prefetch_related_objects.13.7.2.16.8.new_obj_list.obj_list.1",
+      "distance": 1.2871270179748535,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1657,
+      "end_line": 1763,
+      "tokens": 1063,
+      "context_length": 19360
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.annotation_select_Query.extra_select.2.3.1.1",
+      "distance": 1.287553310394287,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2230,
+      "end_line": 2262,
+      "tokens": 228,
+      "context_length": 19588,
+      "file_pos": 6
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.delete_QuerySet.delete.19.1",
+      "distance": 1.291844367980957,
+      "file_path": "django/db/models/query.py",
+      "start_line": 721,
+      "end_line": 748,
+      "tokens": 235,
+      "context_length": 19823
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.as_subquery_condition_SQLCompiler.ordering_parts.explain_query.4.1.2.1",
+      "distance": 1.291919469833374,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1208,
+      "end_line": 1229,
+      "tokens": 223,
+      "context_length": 20046
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.trim_joins_Query._gen_col_aliases.1",
+      "distance": 1.2922298908233643,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1669,
+      "end_line": 1707,
+      "tokens": 356,
+      "context_length": 20402,
+      "file_pos": 7
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.promote_joins_Query.promote_joins.3.8.4",
+      "distance": 1.2930612564086914,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 776,
+      "end_line": 808,
+      "tokens": 392,
+      "context_length": 20794,
+      "file_pos": 7
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.join_parent_model_Query.join_parent_model.7.1",
+      "distance": 1.293943166732788,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 994,
+      "end_line": 1025,
+      "tokens": 307,
+      "context_length": 21101,
+      "file_pos": 7
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.check_related_objects_Query.check_filterable.3.1.1",
+      "distance": 1.2947193384170532,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1122,
+      "end_line": 1154,
+      "tokens": 338,
+      "context_length": 21439,
+      "file_pos": 7
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/models/query.py_RawQuerySet.prefetch_related_RawQuerySet.__iter__.2.1",
+      "distance": 1.2953225374221802,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1445,
+      "end_line": 1483,
+      "tokens": 308,
+      "context_length": 21747
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_combinator_sql_SQLCompiler.ordering_parts.get_combinator_sql.14.1",
+      "distance": 1.2968709468841553,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 442,
+      "end_line": 495,
+      "tokens": 564,
+      "context_length": 22311
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/models/sql/datastructures.py_1_Empty.1",
+      "distance": 1.2974491119384766,
+      "file_path": "django/db/models/sql/datastructures.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 126,
+      "context_length": 22437
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.earliest_QuerySet.last.2.1.1",
+      "distance": 1.2979762554168701,
+      "file_path": "django/db/models/query.py",
+      "start_line": 666,
+      "end_line": 680,
+      "tokens": 132,
+      "context_length": 22569
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.demote_joins_Query.reset_refcounts.2.2",
+      "distance": 1.3002424240112305,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 810,
+      "end_line": 836,
+      "tokens": 280,
+      "context_length": 22849,
+      "file_pos": 8
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.select_for_update_QuerySet.select_for_update.10.1",
+      "distance": 1.3018403053283691,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1022,
+      "end_line": 1036,
+      "tokens": 145,
+      "context_length": 22994
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filter_Query.build_filter.allow_many.1",
+      "distance": 1.3033785820007324,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1221,
+      "end_line": 1299,
+      "tokens": 729,
+      "context_length": 23723,
+      "file_pos": 8
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query._add_q_Query._add_q.9.1",
+      "distance": 1.3067216873168945,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1391,
+      "end_line": 1411,
+      "tokens": 247,
+      "context_length": 23970,
+      "file_pos": 8
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_filtered_relation_q_Query.build_filtered_relation_q.7.1",
+      "distance": 1.3078161478042603,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1413,
+      "end_line": 1433,
+      "tokens": 212,
+      "context_length": 24182,
+      "file_pos": 8
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_JoinPromoter_JoinPromoter.add_votes.2",
+      "distance": 1.310628890991211,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2390,
+      "end_line": 2416,
+      "tokens": 176,
+      "context_length": 24358,
+      "file_pos": 8
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchQueryCombinable_SearchQueryCombinable.__rand__.1.1",
+      "distance": 1.3110535144805908,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 130,
+      "end_line": 157,
+      "tokens": 248,
+      "context_length": 24606
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.clone_Query.clone.30.1",
+      "distance": 1.3113529682159424,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 297,
+      "end_line": 346,
+      "tokens": 444,
+      "context_length": 25050,
+      "file_pos": 9
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.__iter___QuerySet.__bool__.2.1",
+      "distance": 1.3114113807678223,
+      "file_path": "django/db/models/query.py",
+      "start_line": 265,
+      "end_line": 285,
+      "tokens": 180,
+      "context_length": 25230
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_one_level.29_prefetch_one_level.30.1",
+      "distance": 1.311999797821045,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1878,
+      "end_line": 1910,
+      "tokens": 314,
+      "context_length": 25544
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.chain_Query._get_col.2.1",
+      "distance": 1.3122706413269043,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 348,
+      "end_line": 371,
+      "tokens": 179,
+      "context_length": 25723,
+      "file_pos": 9
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.defer_QuerySet.defer.6.1",
+      "distance": 1.3129870891571045,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1179,
+      "end_line": 1194,
+      "tokens": 149,
+      "context_length": 25872
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/db/models/sql/subqueries.py_UpdateQuery_UpdateQuery.update_batch.2.3",
+      "distance": 1.3131780624389648,
+      "file_path": "django/db/models/sql/subqueries.py",
+      "start_line": 47,
+      "end_line": 75,
+      "tokens": 210,
+      "context_length": 26082
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_order_by_SQLCompiler.ordering_parts.get_order_by.seen.1",
+      "distance": 1.3151421546936035,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 271,
+      "end_line": 363,
+      "tokens": 753,
+      "context_length": 26835
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.delete.alters_data_QuerySet.update.11.1",
+      "distance": 1.3168578147888184,
+      "file_path": "django/db/models/query.py",
+      "start_line": 750,
+      "end_line": 783,
+      "tokens": 274,
+      "context_length": 27109
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.collapse_group_by_SQLCompiler.ordering_parts.collapse_group_by.5.4.1",
+      "distance": 1.3192436695098877,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 149,
+      "end_line": 197,
+      "tokens": 523,
+      "context_length": 27632
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts._setup_joins_SQLCompiler.ordering_parts._setup_joins.5.1",
+      "distance": 1.3196942806243896,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 765,
+      "end_line": 776,
+      "tokens": 163,
+      "context_length": 27795
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Lookup.rhs_is_direct_value_Lookup.__hash__.1.1",
+      "distance": 1.319756031036377,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 103,
+      "end_line": 157,
+      "tokens": 427,
+      "context_length": 28222
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/db/models/sql/subqueries.py_InsertQuery_",
+      "distance": 1.3211334943771362,
+      "file_path": "django/db/models/sql/subqueries.py",
+      "start_line": 137,
+      "end_line": 163,
+      "tokens": 161,
+      "context_length": 28383
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.get_aggregation_Query.get_aggregation.25.1",
+      "distance": 1.321998953819275,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 425,
+      "end_line": 512,
+      "tokens": 890,
+      "context_length": 29273,
+      "file_pos": 10
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.count_QuerySet.get.10",
+      "distance": 1.323805332183838,
+      "file_path": "django/db/models/query.py",
+      "start_line": 401,
+      "end_line": 444,
+      "tokens": 370,
+      "context_length": 29643
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.__setstate___QuerySet.__len__.2.1",
+      "distance": 1.324446439743042,
+      "file_path": "django/db/models/query.py",
+      "start_line": 236,
+      "end_line": 263,
+      "tokens": 221,
+      "context_length": 29864
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedIn.as_sql_RelatedIn.as_sql.1.5.2.1",
+      "distance": 1.325954794883728,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 62,
+      "end_line": 101,
+      "tokens": 451,
+      "context_length": 30315
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.join_Query.join.9.1",
+      "distance": 1.326582908630371,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 946,
+      "end_line": 992,
+      "tokens": 439,
+      "context_length": 30754,
+      "file_pos": 11
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_When_When.get_group_by_cols.cols.3.1",
+      "distance": 1.3266453742980957,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 929,
+      "end_line": 993,
+      "tokens": 591,
+      "context_length": 31345,
+      "file_pos": 11
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.build_lookup_Query.build_lookup.18.1",
+      "distance": 1.328250527381897,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1156,
+      "end_line": 1199,
+      "tokens": 469,
+      "context_length": 31814,
+      "file_pos": 11
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/models/aggregates.py_Aggregate.as_sql_Aggregate._get_repr_options.4.1",
+      "distance": 1.3299751281738281,
+      "file_path": "django/db/models/aggregates.py",
+      "start_line": 70,
+      "end_line": 96,
+      "tokens": 266,
+      "context_length": 32080
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.subtract_temporals_",
+      "distance": 1.3300275802612305,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 619,
+      "end_line": 645,
+      "tokens": 303,
+      "context_length": 32383
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/models/query.py_Prefetch_Prefetch.__hash__.1.1",
+      "distance": 1.3308745622634888,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1569,
+      "end_line": 1625,
+      "tokens": 481,
+      "context_length": 32864
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_from_clause_SQLCompiler.ordering_parts.get_from_clause.6.1",
+      "distance": 1.3317252397537231,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 778,
+      "end_line": 810,
+      "tokens": 348,
+      "context_length": 33212
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.as_sql_SQLCompiler.ordering_parts.as_sql.3.14.2",
+      "distance": 1.3333442211151123,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 497,
+      "end_line": 654,
+      "tokens": 1469,
+      "context_length": 34681
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler_SQLCompiler.ordering_parts.setup_query.self.col_count.1",
+      "distance": 1.3344753980636597,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 22,
+      "end_line": 47,
+      "tokens": 257,
+      "context_length": 34938
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_fields_Query.add_fields.4.5.1.5.2",
+      "distance": 1.3363773822784424,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1899,
+      "end_line": 1940,
+      "tokens": 355,
+      "context_length": 35293,
+      "file_pos": 13
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_OrderBy.as_oracle_OrderBy.desc.self.descending.1",
+      "distance": 1.3372883796691895,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 1218,
+      "end_line": 1247,
+      "tokens": 211,
+      "context_length": 35504,
+      "file_pos": 13
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_distinct_SQLCompiler.ordering_parts.get_distinct.6.1",
+      "distance": 1.337440013885498,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 700,
+      "end_line": 722,
+      "tokens": 202,
+      "context_length": 35706
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/contrib/postgres/constraints.py_ExclusionConstraint._get_expression_sql_ExclusionConstraint._get_condition_sql.4.1",
+      "distance": 1.3380470275878906,
+      "file_path": "django/contrib/postgres/constraints.py",
+      "start_line": 69,
+      "end_line": 91,
+      "tokens": 213,
+      "context_length": 35919
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.clear_deferred_loading_Query.add_deferred_loading.7.3.self.deferred_loading.1",
+      "distance": 1.338222861289978,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 2087,
+      "end_line": 2109,
+      "tokens": 249,
+      "context_length": 36168,
+      "file_pos": 14
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/db/models/aggregates.py_Aggregate.resolve_expression_Aggregate.get_group_by_cols.1.1",
+      "distance": 1.3386924266815186,
+      "file_path": "django/db/models/aggregates.py",
+      "start_line": 45,
+      "end_line": 68,
+      "tokens": 294,
+      "context_length": 36462
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_group_by_SQLCompiler.ordering_parts.get_group_by.45.1",
+      "distance": 1.3389743566513062,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 63,
+      "end_line": 147,
+      "tokens": 881,
+      "context_length": 37343
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_CombinedExpression.resolve_expression_CombinedExpression.resolve_expression.8.1",
+      "distance": 1.340094804763794,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 489,
+      "end_line": 514,
+      "tokens": 303,
+      "context_length": 37646,
+      "file_pos": 14
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.output_field_Query.get_meta.2.1",
+      "distance": 1.3447349071502686,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 233,
+      "end_line": 295,
+      "tokens": 446,
+      "context_length": 38092,
+      "file_pos": 14
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.setup_joins_Query.setup_joins.15",
+      "distance": 1.3452744483947754,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1567,
+      "end_line": 1642,
+      "tokens": 758,
+      "context_length": 38850,
+      "file_pos": 14
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_order_by.8_SQLCompiler.ordering_parts.get_order_by.9.1",
+      "distance": 1.3465025424957275,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 365,
+      "end_line": 405,
+      "tokens": 482,
+      "context_length": 39332
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/forms/models.py_apply_limit_choices_to_to_formfield_apply_limit_choices_to_to_formfield.3.2.formfield.queryset.1",
+      "distance": 1.347644329071045,
+      "file_path": "django/forms/models.py",
+      "start_line": 98,
+      "end_line": 111,
+      "tokens": 157,
+      "context_length": 39489
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_RawSQL.resolve_expression_Star.as_sql.1.1",
+      "distance": 1.3528594970703125,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 795,
+      "end_line": 811,
+      "tokens": 153,
+      "context_length": 39642,
+      "file_pos": 15
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/models/query.py_ValuesIterable_ValuesIterable.__iter__.7.1",
+      "distance": 1.3540838956832886,
+      "file_path": "django/db/models/query.py",
+      "start_line": 92,
+      "end_line": 110,
+      "tokens": 138,
+      "context_length": 39780
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedLookupMixin.as_sql_",
+      "distance": 1.3556361198425293,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 121,
+      "end_line": 157,
+      "tokens": 244,
+      "context_length": 40024
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_WhereNode.split_having_WhereNode.split_having.13.1",
+      "distance": 1.357552409172058,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 32,
+      "end_line": 63,
+      "tokens": 317,
+      "context_length": 40341
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.deferred_to_data_Query.deferred_to_data.7.10.1",
+      "distance": 1.3577766418457031,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 657,
+      "end_line": 704,
+      "tokens": 511,
+      "context_length": 40852,
+      "file_pos": 15
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_extra_select_SQLCompiler.ordering_parts.get_extra_select.3.1",
+      "distance": 1.3582571744918823,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 407,
+      "end_line": 415,
+      "tokens": 133,
+      "context_length": 40985
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/db/models/query.py_ValuesListIterable_ValuesListIterable.__iter__.5.1",
+      "distance": 1.3602044582366943,
+      "file_path": "django/db/models/query.py",
+      "start_line": 113,
+      "end_line": 140,
+      "tokens": 233,
+      "context_length": 41218
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLUpdateCompiler.pre_sql_setup_SQLUpdateCompiler.pre_sql_setup.19",
+      "distance": 1.3617281913757324,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1549,
+      "end_line": 1589,
+      "tokens": 409,
+      "context_length": 41627
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/forms/models.py_ModelChoiceField_ModelChoiceField.label_from_instance.2.1",
+      "distance": 1.362856149673462,
+      "file_path": "django/forms/models.py",
+      "start_line": 1188,
+      "end_line": 1253,
+      "tokens": 543,
+      "context_length": 42170
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/models/sql/subqueries.py_UpdateQuery.add_related_update_UpdateQuery.get_related_updates.5.1",
+      "distance": 1.3629302978515625,
+      "file_path": "django/db/models/sql/subqueries.py",
+      "start_line": 111,
+      "end_line": 134,
+      "tokens": 192,
+      "context_length": 42362
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/db/models/sql/datastructures.py_Join.as_sql_Join.as_sql.17.1",
+      "distance": 1.3641645908355713,
+      "file_path": "django/db/models/sql/datastructures.py",
+      "start_line": 59,
+      "end_line": 102,
+      "tokens": 419,
+      "context_length": 42781
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignObject.get_extra_restriction_ForeignObject.get_extra_restriction.2.1",
+      "distance": 1.3642300367355347,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 696,
+      "end_line": 708,
+      "tokens": 116,
+      "context_length": 42897
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_CombinedExpression_CombinedExpression.as_sql.12.1",
+      "distance": 1.364816665649414,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 442,
+      "end_line": 487,
+      "tokens": 314,
+      "context_length": 43211,
+      "file_pos": 16
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/db/models/query.py_prefetch_one_level_prefetch_one_level.leaf.1",
+      "distance": 1.3651788234710693,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1813,
+      "end_line": 1876,
+      "tokens": 658,
+      "context_length": 43869
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_WhereNode.as_sql_WhereNode.as_sql.9.1",
+      "distance": 1.3661885261535645,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 65,
+      "end_line": 115,
+      "tokens": 396,
+      "context_length": 44265
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/db/models/query.py_NamedValuesListIterable_FlatValuesListIterable.__iter__.3.1",
+      "distance": 1.367742657661438,
+      "file_path": "django/db/models/query.py",
+      "start_line": 143,
+      "end_line": 172,
+      "tokens": 207,
+      "context_length": 44472
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_annotation_Query.resolve_expression.12.1",
+      "distance": 1.3709049224853516,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1027,
+      "end_line": 1060,
+      "tokens": 349,
+      "context_length": 44821,
+      "file_pos": 16
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.add_ordering_Query.add_ordering.5.2.self.default_ordering.1",
+      "distance": 1.3717193603515625,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1942,
+      "end_line": 1986,
+      "tokens": 364,
+      "context_length": 45185,
+      "file_pos": 16
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.22_QuerySet.iterator.4.1",
+      "distance": 1.3720345497131348,
+      "file_path": "django/db/models/query.py",
+      "start_line": 348,
+      "end_line": 363,
+      "tokens": 146,
+      "context_length": 45331
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_Exact.as_sql_Exact.as_sql.4.4.1",
+      "distance": 1.372473955154419,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 303,
+      "end_line": 315,
+      "tokens": 168,
+      "context_length": 45499
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/db/models/constraints.py_UniqueConstraint_UniqueConstraint.remove_sql.3.1",
+      "distance": 1.3729690313339233,
+      "file_path": "django/db/models/constraints.py",
+      "start_line": 79,
+      "end_line": 161,
+      "tokens": 729,
+      "context_length": 46228
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_CombinedSearchQuery_SearchRank.__init__.7",
+      "distance": 1.377581000328064,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 198,
+      "end_line": 230,
+      "tokens": 243,
+      "context_length": 46471
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_ordering_Model._check_ordering.29.1",
+      "distance": 1.378645896911621,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1714,
+      "end_line": 1814,
+      "tokens": 729,
+      "context_length": 47200
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/db/models/deletion.py_operator_get_candidate_relations_to_delete.3.1",
+      "distance": 1.3797508478164673,
+      "file_path": "django/db/models/deletion.py",
+      "start_line": 1,
+      "end_line": 76,
+      "tokens": 566,
+      "context_length": 47766
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.get_initial_alias_Query.count_active_tables.2.1",
+      "distance": 1.3803633451461792,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 926,
+      "end_line": 944,
+      "tokens": 146,
+      "context_length": 47912,
+      "file_pos": 19
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/contrib/postgres/lookups.py_1_",
+      "distance": 1.3806414604187012,
+      "file_path": "django/contrib/postgres/lookups.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 337,
+      "context_length": 48249
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/db/models/functions/comparison.py_Coalesce_Coalesce.as_oracle.3.4.1",
+      "distance": 1.3846004009246826,
+      "file_path": "django/db/models/functions/comparison.py",
+      "start_line": 57,
+      "end_line": 75,
+      "tokens": 205,
+      "context_length": 48454
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_Col_Col.get_db_converters.2.1",
+      "distance": 1.3853764533996582,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 814,
+      "end_line": 848,
+      "tokens": 292,
+      "context_length": 48746,
+      "file_pos": 21
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.table_alias_Query.unref_alias.2",
+      "distance": 1.386055588722229,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 743,
+      "end_line": 774,
+      "tokens": 296,
+      "context_length": 49042,
+      "file_pos": 21
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_TemporalSubtraction_F.__hash__.1.1",
+      "distance": 1.3863844871520996,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 547,
+      "end_line": 588,
+      "tokens": 298,
+      "context_length": 49340,
+      "file_pos": 21
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/db/models/query.py_normalize_prefetch_lookups_prefetch_related_objects.all_lookups.1",
+      "distance": 1.3876729011535645,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1628,
+      "end_line": 1656,
+      "tokens": 246,
+      "context_length": 49586
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/contrib/postgres/aggregates/mixins.py_OrderableAggMixin.as_sql_OrderableAggMixin.as_sql.2.1",
+      "distance": 1.3878962993621826,
+      "file_path": "django/contrib/postgres/aggregates/mixins.py",
+      "start_line": 22,
+      "end_line": 34,
+      "tokens": 124,
+      "context_length": 49710
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchQuery_SearchQuery.__str__.2.1",
+      "distance": 1.388309121131897,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 160,
+      "end_line": 195,
+      "tokens": 313,
+      "context_length": 50023
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/contrib/gis/geos/geometry.py_GEOSGeometryBase.sym_difference_GEOSGeometryBase.clone.2.1",
+      "distance": 1.388498067855835,
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "start_line": 580,
+      "end_line": 638,
+      "tokens": 461,
+      "context_length": 50484
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/db/migrations/optimizer.py_MigrationOptimizer_MigrationOptimizer.optimize.5.operations.1",
+      "distance": 1.3896958827972412,
+      "file_path": "django/db/migrations/optimizer.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 344,
+      "context_length": 50828
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_RawQuery_RawQuery.__str__.1.1",
+      "distance": 1.3923789262771606,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 69,
+      "end_line": 117,
+      "tokens": 361,
+      "context_length": 51189,
+      "file_pos": 24
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_OrderBy.as_sql_OrderBy.as_sql.8.1",
+      "distance": 1.3932634592056274,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 1191,
+      "end_line": 1216,
+      "tokens": 248,
+      "context_length": 51437,
+      "file_pos": 24
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_related_selections.13_SQLCompiler.ordering_parts.get_related_selections.14.1",
+      "distance": 1.3939884901046753,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 894,
+      "end_line": 986,
+      "tokens": 839,
+      "context_length": 52276
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_search_results_ModelAdmin.get_search_results.construct_search.9.1",
+      "distance": 1.3943730592727661,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 988,
+      "end_line": 1021,
+      "tokens": 310,
+      "context_length": 52586
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_related_selections_SQLCompiler.ordering_parts.get_related_selections.12.14",
+      "distance": 1.3950062990188599,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 812,
+      "end_line": 892,
+      "tokens": 717,
+      "context_length": 53303
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_psycopg2_SearchVectorExact.as_sql.4.1",
+      "distance": 1.4005047082901,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 205,
+      "context_length": 53508
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.4009675979614258,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 53,
+      "tokens": 619,
+      "context_length": 54127
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.bulk_update.alters_data_QuerySet.get_or_create.5.2.3.2.2",
+      "distance": 1.401315450668335,
+      "file_path": "django/db/models/query.py",
+      "start_line": 569,
+      "end_line": 594,
+      "tokens": 202,
+      "context_length": 54329
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/db/models/deletion.py_Collector.related_objects_Collector.instances_with_model.1.1.1",
+      "distance": 1.403076410293579,
+      "file_path": "django/db/models/deletion.py",
+      "start_line": 346,
+      "end_line": 359,
+      "tokens": 116,
+      "context_length": 54445
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/features.py_operator_",
+      "distance": 1.405468463897705,
+      "file_path": "django/db/backends/postgresql/features.py",
+      "start_line": 1,
+      "end_line": 104,
+      "tokens": 844,
+      "context_length": 55289
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/db/models/sql/datastructures.py_Join.identity_Join.promote.3.1",
+      "distance": 1.4063220024108887,
+      "file_path": "django/db/models/sql/datastructures.py",
+      "start_line": 117,
+      "end_line": 148,
+      "tokens": 170,
+      "context_length": 55459
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet._batched_insert_QuerySet._batched_insert.9.1",
+      "distance": 1.4072291851043701,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1272,
+      "end_line": 1292,
+      "tokens": 253,
+      "context_length": 55712
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.formfield_RelatedField.formfield.5.1",
+      "distance": 1.4077398777008057,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 401,
+      "end_line": 419,
+      "tokens": 165,
+      "context_length": 55877
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/db/models/query.py_RelatedPopulator.populate_",
+      "distance": 1.4079062938690186,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1974,
+      "end_line": 1997,
+      "tokens": 200,
+      "context_length": 56077
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/contrib/postgres/constraints.py_ExclusionConstraint.constraint_sql_ExclusionConstraint.constraint_sql.6.1",
+      "distance": 1.4092535972595215,
+      "file_path": "django/contrib/postgres/constraints.py",
+      "start_line": 93,
+      "end_line": 106,
+      "tokens": 179,
+      "context_length": 56256
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_ResolvedOuterRef_OuterRef.relabeled_clone.1.1",
+      "distance": 1.4092707633972168,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 591,
+      "end_line": 630,
+      "tokens": 290,
+      "context_length": 56546,
+      "file_pos": 27
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_NothingNode_ExtraWhere.contains_aggregate.as_sql.2.1",
+      "distance": 1.410736322402954,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 212,
+      "end_line": 230,
+      "tokens": 131,
+      "context_length": 56677
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.aggregate_QuerySet.aggregate.7.1",
+      "distance": 1.4111356735229492,
+      "file_path": "django/db/models/query.py",
+      "start_line": 365,
+      "end_line": 399,
+      "tokens": 314,
+      "context_length": 56991
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/views/generic/detail.py_SingleObjectMixin.get_queryset_SingleObjectMixin.get_queryset.3.1",
+      "distance": 1.4115411043167114,
+      "file_path": "django/views/generic/detail.py",
+      "start_line": 58,
+      "end_line": 76,
+      "tokens": 154,
+      "context_length": 57145
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_1_WhereNode.conditional.1",
+      "distance": 1.4129741191864014,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 167,
+      "context_length": 57312
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/contrib/postgres/aggregates/mixins.py_1_OrderableAggMixin.resolve_expression.2.1",
+      "distance": 1.4131463766098022,
+      "file_path": "django/contrib/postgres/aggregates/mixins.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 182,
+      "context_length": 57494
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/db/models/sql/datastructures.py_Join_Join.__init__.self.table_name.self.filtered_relation.1",
+      "distance": 1.413404941558838,
+      "file_path": "django/db/models/sql/datastructures.py",
+      "start_line": 24,
+      "end_line": 57,
+      "tokens": 354,
+      "context_length": 57848
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/db/models/query.py_ModelIterable_ModelIterable.__iter__.14.6",
+      "distance": 1.4139060974121094,
+      "file_path": "django/db/models/query.py",
+      "start_line": 42,
+      "end_line": 89,
+      "tokens": 457,
+      "context_length": 58305
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_select_SQLCompiler.ordering_parts.get_select.14.1",
+      "distance": 1.415356159210205,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 199,
+      "end_line": 269,
+      "tokens": 580,
+      "context_length": 58885
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_In_In.process_rhs.3.3.2.1",
+      "distance": 1.4155209064483643,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 371,
+      "end_line": 403,
+      "tokens": 294,
+      "context_length": 59179
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/db/models/query.py_InstanceCheckMeta_RawQuerySet.__init__.self._prefetch_done.1",
+      "distance": 1.4163806438446045,
+      "file_path": "django/db/models/query.py",
+      "start_line": 1402,
+      "end_line": 1433,
+      "tokens": 246,
+      "context_length": 59425
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/db/models/query_utils.py_check_rel_lookup_compatibility_check_rel_lookup_compatibility.12.1",
+      "distance": 1.4180629253387451,
+      "file_path": "django/db/models/query_utils.py",
+      "start_line": 284,
+      "end_line": 309,
+      "tokens": 293,
+      "context_length": 59718
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.combine_expression_DatabaseOperations.combine_expression.2.1",
+      "distance": 1.4184082746505737,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 278,
+      "end_line": 289,
+      "tokens": 165,
+      "context_length": 59883
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations._quote_params_for_last_executed_query_DatabaseOperations._quote_params_for_last_executed_query.14.2.1",
+      "distance": 1.4189382791519165,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 125,
+      "end_line": 150,
+      "tokens": 279,
+      "context_length": 60162
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.bulk_update_QuerySet.bulk_update.18.1.1",
+      "distance": 1.4199161529541016,
+      "file_path": "django/db/models/query.py",
+      "start_line": 527,
+      "end_line": 568,
+      "tokens": 495,
+      "context_length": 60657
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_select_for_update_of_arguments.result_SQLCompiler.ordering_parts.get_select_for_update_of_arguments.9.1",
+      "distance": 1.4211395978927612,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1047,
+      "end_line": 1087,
+      "tokens": 337,
+      "context_length": 60994
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/db/models/query.py_QuerySet.update_or_create_QuerySet.update_or_create.5.1",
+      "distance": 1.421508550643921,
+      "file_path": "django/db/models/query.py",
+      "start_line": 596,
+      "end_line": 614,
+      "tokens": 178,
+      "context_length": 61172
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/contrib/postgres/search.py_SearchVector.as_sql_CombinedSearchVector.__init__.2",
+      "distance": 1.421915888786316,
+      "file_path": "django/contrib/postgres/search.py",
+      "start_line": 95,
+      "end_line": 127,
+      "tokens": 277,
+      "context_length": 61449
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLCompiler.ordering_parts.get_select_for_update_of_arguments._get_field_choices_SQLCompiler.ordering_parts.get_select_for_update_of_arguments._get_field_choices.3.4",
+      "distance": 1.4221055507659912,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1025,
+      "end_line": 1046,
+      "tokens": 199,
+      "context_length": 61648
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/db/models/sql/where.py_WhereNode.relabeled_clone_WhereNode._resolve_leaf.2.1",
+      "distance": 1.4234580993652344,
+      "file_path": "django/db/models/sql/where.py",
+      "start_line": 157,
+      "end_line": 193,
+      "tokens": 243,
+      "context_length": 61891
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/models/query.py",
+      "position": 1,
+      "tokens": 17234,
+      "context_length": 17234
+    },
+    {
+      "file_path": "django/db/models/expressions.py",
+      "position": 2,
+      "tokens": 10848,
+      "context_length": 28082
+    },
+    {
+      "file_path": "django/db/models/sql/query.py",
+      "position": 3,
+      "tokens": 22458,
+      "context_length": 50540
+    },
+    {
+      "file_path": "django/db/models/query_utils.py",
+      "position": 4,
+      "tokens": 2706,
+      "context_length": 53246
+    },
+    {
+      "file_path": "django/db/models/sql/where.py",
+      "position": 5,
+      "tokens": 1814,
+      "context_length": 55060
+    },
+    {
+      "file_path": "django/db/models/sql/subqueries.py",
+      "position": 6,
+      "tokens": 1201,
+      "context_length": 56261
+    },
+    {
+      "file_path": "django/db/models/sql/compiler.py",
+      "position": 7,
+      "tokens": 14391,
+      "context_length": 70652
+    },
+    {
+      "file_path": "django/db/models/sql/datastructures.py",
+      "position": 8,
+      "tokens": 1468,
+      "context_length": 72120
+    },
+    {
+      "file_path": "django/contrib/postgres/search.py",
+      "position": 9,
+      "tokens": 2222,
+      "context_length": 74342
+    },
+    {
+      "file_path": "django/db/models/lookups.py",
+      "position": 10,
+      "tokens": 5027,
+      "context_length": 79369
+    },
+    {
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "position": 11,
+      "tokens": 1453,
+      "context_length": 80822
+    },
+    {
+      "file_path": "django/db/models/aggregates.py",
+      "position": 12,
+      "tokens": 1301,
+      "context_length": 82123
+    },
+    {
+      "file_path": "django/db/backends/oracle/operations.py",
+      "position": 13,
+      "tokens": 5971,
+      "context_length": 88094
+    },
+    {
+      "file_path": "django/contrib/postgres/constraints.py",
+      "position": 14,
+      "tokens": 1425,
+      "context_length": 89519
+    },
+    {
+      "file_path": "django/forms/models.py",
+      "position": 15,
+      "tokens": 11846,
+      "context_length": 101365
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 16,
+      "tokens": 13876,
+      "context_length": 115241
+    },
+    {
+      "file_path": "django/db/models/constraints.py",
+      "position": 17,
+      "tokens": 1615,
+      "context_length": 116856
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 18,
+      "tokens": 16673,
+      "context_length": 133529
+    },
+    {
+      "file_path": "django/db/models/deletion.py",
+      "position": 19,
+      "tokens": 3828,
+      "context_length": 137357
+    },
+    {
+      "file_path": "django/contrib/postgres/lookups.py",
+      "position": 20,
+      "tokens": 337,
+      "context_length": 137694
+    },
+    {
+      "file_path": "django/db/models/functions/comparison.py",
+      "position": 21,
+      "tokens": 1404,
+      "context_length": 139098
+    },
+    {
+      "file_path": "django/contrib/postgres/aggregates/mixins.py",
+      "position": 22,
+      "tokens": 438,
+      "context_length": 139536
+    },
+    {
+      "file_path": "django/contrib/gis/geos/geometry.py",
+      "position": 23,
+      "tokens": 5915,
+      "context_length": 145451
+    },
+    {
+      "file_path": "django/db/migrations/optimizer.py",
+      "position": 24,
+      "tokens": 590,
+      "context_length": 146041
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 25,
+      "tokens": 18593,
+      "context_length": 164634
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 26,
+      "tokens": 619,
+      "context_length": 165253
+    },
+    {
+      "file_path": "django/db/backends/postgresql/features.py",
+      "position": 27,
+      "tokens": 844,
+      "context_length": 166097
+    },
+    {
+      "file_path": "django/views/generic/detail.py",
+      "position": 28,
+      "tokens": 1315,
+      "context_length": 167412
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 29,
+      "tokens": 3704,
+      "context_length": 171116
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "position": 30,
+      "tokens": 3090,
+      "context_length": 174206
+    }
+  ]
+}

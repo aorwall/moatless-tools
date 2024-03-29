@@ -1,0 +1,818 @@
+{
+  "instance_id": "sphinx-doc__sphinx-7814",
+  "model_patch": "diff --git a/setup.py b/setup.py\nindex 3d499983f..60b760634 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -21,7 +21,7 @@ install_requires = [\n     'sphinxcontrib-htmlhelp',\n     'sphinxcontrib-serializinghtml',\n     'sphinxcontrib-qthelp',\n-    'Jinja2>=2.3',\n+    'Jinja2<3.1',\n     'Pygments>=2.0',\n     'docutils>=0.12',\n     'snowballstemmer>=1.1',\ndiff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\nindex fc1136ae2..6101de56a 100644\n--- a/sphinx/domains/python.py\n+++ b/sphinx/domains/python.py\n@@ -623,7 +623,7 @@ class PyVariable(PyObject):\n \n         typ = self.options.get('type')\n         if typ:\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *_parse_annotation(typ))\n \n         value = self.options.get('value')\n         if value:\n@@ -868,7 +868,7 @@ class PyAttribute(PyObject):\n \n         typ = self.options.get('type')\n         if typ:\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *_parse_annotation(typ))\n \n         value = self.options.get('value')\n         if value:\ndiff --git a/tox.ini b/tox.ini\nindex d9f040544..bf39854b6 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -28,7 +28,7 @@ extras =\n setenv =\n     PYTHONWARNINGS = all,ignore::ImportWarning:importlib._bootstrap_external,ignore::DeprecationWarning:site,ignore::DeprecationWarning:distutils\n commands=\n-    pytest --durations 25 {posargs}\n+    pytest -rA --durations 25 {posargs}\n \n [testenv:flake8]\n basepython = python3\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "setup.py",
+    "sphinx/domains/python.py",
+    "tox.ini"
+  ],
+  "repo": "sphinx-doc/sphinx",
+  "base_commit": "55fc097833ee1e0efc689ddc85bd2af2e77f4af7",
+  "patch": "diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\n--- a/sphinx/domains/python.py\n+++ b/sphinx/domains/python.py\n@@ -623,7 +623,8 @@ def handle_signature(self, sig: str, signode: desc_signature) -> Tuple[str, str]\n \n         typ = self.options.get('type')\n         if typ:\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\n+            annotations = _parse_annotation(typ)\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *annotations)\n \n         value = self.options.get('value')\n         if value:\n@@ -868,7 +869,8 @@ def handle_signature(self, sig: str, signode: desc_signature) -> Tuple[str, str]\n \n         typ = self.options.get('type')\n         if typ:\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\n+            annotations = _parse_annotation(typ)\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *annotations)\n \n         value = self.options.get('value')\n         if value:\n",
+  "test_patch": "diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py\n--- a/tests/test_domain_py.py\n+++ b/tests/test_domain_py.py\n@@ -679,7 +679,7 @@ def test_pyattribute(app):\n     text = (\".. py:class:: Class\\n\"\n             \"\\n\"\n             \"   .. py:attribute:: attr\\n\"\n-            \"      :type: str\\n\"\n+            \"      :type: Optional[str]\\n\"\n             \"      :value: ''\\n\")\n     domain = app.env.get_domain('py')\n     doctree = restructuredtext.parse(app, text)\n@@ -692,7 +692,10 @@ def test_pyattribute(app):\n                 entries=[('single', 'attr (Class attribute)', 'Class.attr', '', None)])\n     assert_node(doctree[1][1][1], ([desc_signature, ([desc_name, \"attr\"],\n                                                      [desc_annotation, (\": \",\n-                                                                        [pending_xref, \"str\"])],\n+                                                                        [pending_xref, \"Optional\"],\n+                                                                        [desc_sig_punctuation, \"[\"],\n+                                                                        [pending_xref, \"str\"],\n+                                                                        [desc_sig_punctuation, \"]\"])],\n                                                      [desc_annotation, \" = ''\"])],\n                                    [desc_content, ()]))\n     assert 'Class.attr' in domain.objects\n",
+  "problem_statement": "Warnings raised on variable and attribute type annotations\n**Describe the bug**\r\n\r\nautodoc signature for non-builtin types raises warning and thus fails nitpicking:\r\n\r\n```\r\n/path/to/foo.py:docstring of foo.Foo.a:: WARNING: py:class reference target not found: Optional[str]\r\n```\r\n\r\n**To Reproduce**\r\n\r\nSteps to reproduce the behavior:\r\n\r\nCreate a file `foo.py` with the following content:\r\n```python\r\nfrom typing import Optional\r\n\r\n\r\nclass Foo:\r\n    a: Optional[str] = None\r\n```\r\n\r\nUse sphinx-apidoc to generate an rst file, while enabling autodoc and intersphinx: `sphinx-apidoc --ext-autodoc --ext-intersphinx`\r\n\r\nMake sure the `intersphinx_mapping` in the Sphinx `conf.py` contains `\"python\": (\"https://docs.python.org/3.8/\", None),`\r\n\r\nRun `make html` with loud warnings and nitpicking: `SPHINXOPTS=\"-n -v -W --keep-going\" make html`.\r\n\r\nYou will get an error message\r\n```\r\n/path/to/foo.py:docstring of foo.Foo.a:: WARNING: py:class reference target not found: Optional[str]\r\n```\r\n\r\n**Expected behavior**\r\n\r\nI'd expect Sphinx to resolve the type annotation `Optional[str]` and possibly link both classes.\r\n\r\n**Environment info**\r\n- OS: Linux\r\n- Python version: 3.8.3\r\n- Sphinx version: 3.1.0\r\n- Sphinx extensions:  sphinx.ext.autodoc, sphinx.ext.intersphinx\r\n\r\n**Additional context**\r\n\r\nI think the issue stems from the change in 88e8ebbe199c151a14d7df814807172f7565a073 which appears to try to lookup the entire type annotation as a single class.\r\n\r\nUsing `_parse_annotation()` instead of `type_to_xref()` solves this particular issue:\r\n```diff\r\ndiff --git a/sphinx/domains/python.py b/sphinx/domains/python.py\r\nindex fc1136ae2..6101de56a 100644\r\n--- a/sphinx/domains/python.py\r\n+++ b/sphinx/domains/python.py\r\n@@ -623,7 +623,7 @@ class PyVariable(PyObject):\r\n \r\n         typ = self.options.get('type')\r\n         if typ:\r\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\r\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *_parse_annotation(typ))\r\n \r\n         value = self.options.get('value')\r\n         if value:\r\n@@ -868,7 +868,7 @@ class PyAttribute(PyObject):\r\n \r\n         typ = self.options.get('type')\r\n         if typ:\r\n-            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), type_to_xref(typ))\r\n+            signode += addnodes.desc_annotation(typ, '', nodes.Text(': '), *_parse_annotation(typ))\r\n \r\n         value = self.options.get('value')\r\n         if value:\r\n```\r\n\r\nHowever, it doesn't seem to work with custom classes. Take this snippet for example:\r\n```python\r\nclass Bar:\r\n    i: int\r\n\r\n\r\nclass Foo:\r\n    a: Bar\r\n```\r\nThis causes the following warning:\r\n```\r\nfoo.py:docstring of foo.Foo.a:: WARNING: py:class reference target not found: Bar\r\n```\n",
+  "hints_text": "We have a similar problem in the Trio project where we use annotations like \"str or list\", ThisType or None\" or even \"bytes-like\" in a number of place. Here's an example: https://github.com/python-trio/trio/blob/dependabot/pip/sphinx-3.1.0/trio/_subprocess.py#L75-L96\nTo clarify a bit on the Trio issue: we don't expect sphinx to magically do anything with `bytes-like`, but currently you can use something like this in a Google-style docstring:\r\n\r\n```\r\n    Attributes:\r\n      args (str or list): The ``command`` passed at construction time,\r\n          specifying the process to execute and its arguments.\r\n```\r\n\r\nAnd with previous versions of Sphinx, it renders like this:\r\n\r\n![image](https://user-images.githubusercontent.com/609896/84207125-73d55100-aa65-11ea-98e6-4b3b8f619be9.png)\r\n\r\nhttps://trio.readthedocs.io/en/v0.15.1/reference-io.html#trio.Process.args\r\n\r\nNotice that `str` and `list` are both hyperlinked appropriately.\r\n\r\nSo Sphinx used to be able to cope with this kind of \"or\" syntax, and if it can't anymore it's a regression.\nThis also occurs with built-in container classes and 'or'-types (in nitpick mode):\r\n```\r\nWARNING: py:class reference target not found: tuple[str]\r\nWARNING: py:class reference target not found: str or None\r\n```\r\n\r\nUnfortunately this breaks my CI pipeline at the moment. Does anyone know a work-around other than disabling nitpick mode?\r\n",
+  "created_at": "2020-06-10T14:00:51Z",
+  "version": "3.1",
+  "FAIL_TO_PASS": "[\"tests/test_domain_py.py::test_pyattribute\"]",
+  "PASS_TO_PASS": "[\"tests/test_domain_py.py::test_domain_py_find_obj\", \"tests/test_domain_py.py::test_domain_py_objects\", \"tests/test_domain_py.py::test_domain_py_xrefs\", \"tests/test_domain_py.py::test_exceptions_module_is_ignored\", \"tests/test_domain_py.py::test_function_signatures\", \"tests/test_domain_py.py::test_get_full_qualified_name\", \"tests/test_domain_py.py::test_modindex_common_prefix\", \"tests/test_domain_py.py::test_module_index\", \"tests/test_domain_py.py::test_module_index_not_collapsed\", \"tests/test_domain_py.py::test_module_index_submodule\", \"tests/test_domain_py.py::test_optional_pyfunction_signature\", \"tests/test_domain_py.py::test_parse_annotation\", \"tests/test_domain_py.py::test_pyclass_options\", \"tests/test_domain_py.py::test_pyclassmethod\", \"tests/test_domain_py.py::test_pydata\", \"tests/test_domain_py.py::test_pydata_signature\", \"tests/test_domain_py.py::test_pydata_signature_old\", \"tests/test_domain_py.py::test_pydecorator_signature\", \"tests/test_domain_py.py::test_pydecoratormethod_signature\", \"tests/test_domain_py.py::test_pyexception_signature\", \"tests/test_domain_py.py::test_pyfunction\", \"tests/test_domain_py.py::test_pyfunction_signature\", \"tests/test_domain_py.py::test_pyfunction_signature_full\", \"tests/test_domain_py.py::test_pyfunction_signature_full_py38\", \"tests/test_domain_py.py::test_pymethod_options\", \"tests/test_domain_py.py::test_pyobject_prefix\", \"tests/test_domain_py.py::test_pystaticmethod\", \"tests/test_domain_py.py::test_resolve_xref_for_properties\"]",
+  "environment_setup_commit": "5afc77ee27fc01c57165ab260d3a76751f9ddb35",
+  "patch_files": [
+    "sphinx/domains/python.py"
+  ],
+  "test_patch_files": [
+    "tests/test_domain_py.py"
+  ],
+  "patch_diff_details": {
+    "sphinx/domains/python.py": {
+      "diffs": [
+        {
+          "start_line_old": 626,
+          "end_line_old": 626,
+          "file_pos": 1,
+          "file_context_length": 11637,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyTypedField_PyTypedField.make_xref.2.1",
+          "closest_snippet_line_distance": 318
+        },
+        {
+          "start_line_old": 871,
+          "end_line_old": 871,
+          "file_pos": 1,
+          "file_context_length": 11637,
+          "closest_snippet_id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyTypedField_PyTypedField.make_xref.2.1",
+          "closest_snippet_line_distance": 563
+        }
+      ]
+    }
+  },
+  "vectors": 1487,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtin_resolver_",
+      "distance": 0.7817418575286865,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 1340,
+      "end_line": 1378,
+      "tokens": 304,
+      "context_length": 304,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sphinx/sphinx/deprecation.py_sys_deprecated_alias.3",
+      "distance": 0.8002798557281494,
+      "file_path": "sphinx/deprecation.py",
+      "start_line": 11,
+      "end_line": 34,
+      "tokens": 145,
+      "context_length": 449
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_builtins_type_to_xref.3.1",
+      "distance": 0.8036322593688965,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 11,
+      "end_line": 88,
+      "tokens": 598,
+      "context_length": 1047,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/post_transforms/__init__.py_ReferencesResolver.warn_missing_reference_ReferencesResolver.warn_missing_reference.5",
+      "distance": 0.8356231451034546,
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "start_line": 154,
+      "end_line": 177,
+      "tokens": 279,
+      "context_length": 1326
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sphinx/sphinx/util/inspect.py_builtins_memory_address_re.1",
+      "distance": 0.8716292977333069,
+      "file_path": "sphinx/util/inspect.py",
+      "start_line": 11,
+      "end_line": 46,
+      "tokens": 257,
+      "context_length": 1583
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/directive.py_warnings_DummyOptionSpec.__getitem__.1.1",
+      "distance": 0.8723360300064087,
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "start_line": 9,
+      "end_line": 49,
+      "tokens": 298,
+      "context_length": 1881
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/__init__.py_Autosummary.warn_strip_arg_typehint.2.1",
+      "distance": 0.8734357357025146,
+      "file_path": "sphinx/ext/autosummary/__init__.py",
+      "start_line": 412,
+      "end_line": 438,
+      "tokens": 217,
+      "context_length": 2098
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sphinx/sphinx/parsers.py_warnings_12.2",
+      "distance": 0.8839614987373352,
+      "file_path": "sphinx/parsers.py",
+      "start_line": 11,
+      "end_line": 28,
+      "tokens": 134,
+      "context_length": 2232
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_re_token_re.1",
+      "distance": 0.8864046335220337,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 11,
+      "end_line": 48,
+      "tokens": 323,
+      "context_length": 2555
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sphinx/sphinx/directives/code.py_sys_logger.1",
+      "distance": 0.8891594409942627,
+      "file_path": "sphinx/directives/code.py",
+      "start_line": 9,
+      "end_line": 31,
+      "tokens": 146,
+      "context_length": 2701
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/__init__.py_inspect_autosummary_toc.1",
+      "distance": 0.8916317820549011,
+      "file_path": "sphinx/ext/autosummary/__init__.py",
+      "start_line": 55,
+      "end_line": 106,
+      "tokens": 366,
+      "context_length": 3067
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ClassDocumenter.1_ClassDocumenter.2",
+      "distance": 0.894992470741272,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1276,
+      "end_line": 1522,
+      "tokens": 2333,
+      "context_length": 5400
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sphinx/sphinx/ext/todo.py_warnings_todolist.1",
+      "distance": 0.9182777404785156,
+      "file_path": "sphinx/ext/todo.py",
+      "start_line": 14,
+      "end_line": 44,
+      "tokens": 207,
+      "context_length": 5607
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sphinx/sphinx/writers/latex.py_re_UnsupportedError.category.1",
+      "distance": 0.9209206104278564,
+      "file_path": "sphinx/writers/latex.py",
+      "start_line": 14,
+      "end_line": 73,
+      "tokens": 453,
+      "context_length": 6060
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/typehints.py_modify_field_list_",
+      "distance": 0.9214955568313599,
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "start_line": 78,
+      "end_line": 134,
+      "tokens": 460,
+      "context_length": 6520
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_importlib_bool_option.2.1",
+      "distance": 0.9243634343147278,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 13,
+      "end_line": 122,
+      "tokens": 791,
+      "context_length": 7311
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autosummary/generate.py_argparse_logger.1",
+      "distance": 0.9256580471992493,
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "start_line": 20,
+      "end_line": 60,
+      "tokens": 283,
+      "context_length": 7594
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sphinx/sphinx/transforms/__init__.py_UnreferencedFootnotesDetector_UnreferencedFootnotesDetector.apply.2.1.1",
+      "distance": 0.9289063215255737,
+      "file_path": "sphinx/transforms/__init__.py",
+      "start_line": 252,
+      "end_line": 272,
+      "tokens": 192,
+      "context_length": 7786
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_MethodDocumenter_MethodDocumenter.2",
+      "distance": 0.9302809238433838,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1697,
+      "end_line": 1836,
+      "tokens": 1215,
+      "context_length": 9001
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_re_int_or_nothing.2.1",
+      "distance": 0.9339696168899536,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 9,
+      "end_line": 40,
+      "tokens": 238,
+      "context_length": 9239
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sphinx/sphinx/deprecation.py__ModuleWrapper__ModuleWrapper.__getattr__.2.1",
+      "distance": 0.935012698173523,
+      "file_path": "sphinx/deprecation.py",
+      "start_line": 37,
+      "end_line": 52,
+      "tokens": 145,
+      "context_length": 9384
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sphinx/sphinx/io.py_codecs_logger.1",
+      "distance": 0.9355412721633911,
+      "file_path": "sphinx/io.py",
+      "start_line": 10,
+      "end_line": 46,
+      "tokens": 275,
+      "context_length": 9659
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_TypeVarDocumenter.add_content_TypeVarDocumenter.add_content.6",
+      "distance": 0.9357120990753174,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1684,
+      "end_line": 1694,
+      "tokens": 128,
+      "context_length": 9787
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sphinx/sphinx/util/nodes.py_re_caption_ref_re.1",
+      "distance": 0.9358745813369751,
+      "file_path": "sphinx/util/nodes.py",
+      "start_line": 11,
+      "end_line": 41,
+      "tokens": 227,
+      "context_length": 10014
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_41_PyXrefMixin.make_xref.4.1",
+      "distance": 0.9409984946250916,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 242,
+      "end_line": 260,
+      "tokens": 214,
+      "context_length": 10228,
+      "file_pos": 18
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sphinx/sphinx/directives/__init__.py_23_29",
+      "distance": 0.946258544921875,
+      "file_path": "sphinx/directives/__init__.py",
+      "start_line": 269,
+      "end_line": 307,
+      "tokens": 273,
+      "context_length": 10501
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_FunctionDocumenter_FunctionDocumenter.2",
+      "distance": 0.9506575465202332,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1147,
+      "end_line": 1240,
+      "tokens": 770,
+      "context_length": 11271
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sphinx/sphinx/errors.py_SphinxWarning_ExtensionError.__str__.3.1",
+      "distance": 0.9537178874015808,
+      "file_path": "sphinx/errors.py",
+      "start_line": 38,
+      "end_line": 67,
+      "tokens": 213,
+      "context_length": 11484
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DataDeclarationDocumenter_DataDeclarationDocumenter.add_content.2",
+      "distance": 0.9555337429046631,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1593,
+      "end_line": 1628,
+      "tokens": 272,
+      "context_length": 11756
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sphinx/sphinx/util/cfamily.py_re_char_literal_re.1",
+      "distance": 0.9589027762413025,
+      "file_path": "sphinx/util/cfamily.py",
+      "start_line": 11,
+      "end_line": 80,
+      "tokens": 764,
+      "context_length": 12520
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sphinx/sphinx/deprecation.py_DeprecatedDict_",
+      "distance": 0.9636946320533752,
+      "file_path": "sphinx/deprecation.py",
+      "start_line": 55,
+      "end_line": 82,
+      "tokens": 261,
+      "context_length": 12781
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sphinx/sphinx/domains/std.py_GenericObject_GenericObject.handle_signature.2.1",
+      "distance": 0.9718221426010132,
+      "file_path": "sphinx/domains/std.py",
+      "start_line": 51,
+      "end_line": 66,
+      "tokens": 140,
+      "context_length": 12921
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sphinx/sphinx/domains/math.py_warnings_MathReferenceRole.result_nodes.2.1",
+      "distance": 0.9729865789413452,
+      "file_path": "sphinx/domains/math.py",
+      "start_line": 11,
+      "end_line": 40,
+      "tokens": 207,
+      "context_length": 13128
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/type_comment.py_update_annotations_using_type_comments_",
+      "distance": 0.9742146730422974,
+      "file_path": "sphinx/ext/autodoc/type_comment.py",
+      "start_line": 117,
+      "end_line": 139,
+      "tokens": 226,
+      "context_length": 13354
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sphinx/sphinx/directives/other.py_SeeAlso_TabularColumns.run.4.1",
+      "distance": 0.9752265214920044,
+      "file_path": "sphinx/directives/other.py",
+      "start_line": 187,
+      "end_line": 208,
+      "tokens": 141,
+      "context_length": 13495
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sphinx/sphinx/events.py_warnings_core_events.1",
+      "distance": 0.9838074445724487,
+      "file_path": "sphinx/events.py",
+      "start_line": 13,
+      "end_line": 54,
+      "tokens": 352,
+      "context_length": 13847
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/type_comment.py_2_not_suppressed.2.4.2.1",
+      "distance": 0.9873079061508179,
+      "file_path": "sphinx/ext/autodoc/type_comment.py",
+      "start_line": 11,
+      "end_line": 37,
+      "tokens": 247,
+      "context_length": 14094
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sphinx/sphinx/directives/__init__.py_ObjectDescription_ObjectDescription.19",
+      "distance": 0.9916899800300598,
+      "file_path": "sphinx/directives/__init__.py",
+      "start_line": 52,
+      "end_line": 74,
+      "tokens": 206,
+      "context_length": 14300
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/mock.py__make_subclass__MockModule.__repr__.1.1",
+      "distance": 0.9919227361679077,
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "start_line": 71,
+      "end_line": 93,
+      "tokens": 200,
+      "context_length": 14500
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.get_object_members_ModuleDocumenter.get_object_members.4.1",
+      "distance": 0.9949398636817932,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 926,
+      "end_line": 947,
+      "tokens": 192,
+      "context_length": 14692
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_ModuleDocumenter.add_directive_header_ModuleDocumenter.add_directive_header.6.1",
+      "distance": 0.9984461069107056,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 913,
+      "end_line": 924,
+      "tokens": 126,
+      "context_length": 14818
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_TypeVarDocumenter_TypeVarDocumenter.get_doc.2.2.1.1",
+      "distance": 0.9986811280250549,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1655,
+      "end_line": 1682,
+      "tokens": 237,
+      "context_length": 15055
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/importer.py_import_object_import_object.2.10.5",
+      "distance": 1.0001901388168335,
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "start_line": 39,
+      "end_line": 101,
+      "tokens": 582,
+      "context_length": 15637
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyCurrentModule_PyCurrentModule.run.3.1",
+      "distance": 1.0011813640594482,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 980,
+      "end_line": 998,
+      "tokens": 143,
+      "context_length": 15780,
+      "file_pos": 26
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sphinx/sphinx/util/pycompat.py_html_convert_with_2to3.6.1",
+      "distance": 1.0023080110549927,
+      "file_path": "sphinx/util/pycompat.py",
+      "start_line": 11,
+      "end_line": 53,
+      "tokens": 350,
+      "context_length": 16130
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sphinx/sphinx/domains/python.py_PyTypedField_PyTypedField.make_xref.2.1",
+      "distance": 1.0038468837738037,
+      "file_path": "sphinx/domains/python.py",
+      "start_line": 300,
+      "end_line": 308,
+      "tokens": 126,
+      "context_length": 16256,
+      "file_pos": 27
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sphinx/sphinx/registry.py_traceback_EXTENSION_BLACKLIST.1",
+      "distance": 1.004531741142273,
+      "file_path": "sphinx/registry.py",
+      "start_line": 11,
+      "end_line": 50,
+      "tokens": 307,
+      "context_length": 16563
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/typehints.py_re_record_typehints.2.2.1",
+      "distance": 1.004860281944275,
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "start_line": 11,
+      "end_line": 38,
+      "tokens": 200,
+      "context_length": 16763
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sphinx/sphinx/roles.py_re_generic_docroles.1",
+      "distance": 1.0058764219284058,
+      "file_path": "sphinx/roles.py",
+      "start_line": 11,
+      "end_line": 47,
+      "tokens": 285,
+      "context_length": 17048
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sphinx/sphinx/ext/doctest.py_doctest_doctest_encode.2.1",
+      "distance": 1.006272315979004,
+      "file_path": "sphinx/ext/doctest.py",
+      "start_line": 12,
+      "end_line": 51,
+      "tokens": 286,
+      "context_length": 17334
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sphinx/sphinx/registry.py_SphinxComponentRegistry.add_object_type_SphinxComponentRegistry.add_object_type.8",
+      "distance": 1.0069835186004639,
+      "file_path": "sphinx/registry.py",
+      "start_line": 211,
+      "end_line": 233,
+      "tokens": 283,
+      "context_length": 17617
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_DocstringSignatureMixin.get_doc_DocstringSignatureMixin.format_signature.4.2.1.1",
+      "distance": 1.009749174118042,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1106,
+      "end_line": 1126,
+      "tokens": 242,
+      "context_length": 17859
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sphinx/sphinx/util/typing.py_sys_is_system_TypeVar.4",
+      "distance": 1.0098884105682373,
+      "file_path": "sphinx/util/typing.py",
+      "start_line": 11,
+      "end_line": 45,
+      "tokens": 255,
+      "context_length": 18114
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sphinx/sphinx/domains/c.py_DefinitionParser._simple_fundamental_types._parse_declarator_CDomain.merge_domaindata.4.1.1.4.1",
+      "distance": 1.0106167793273926,
+      "file_path": "sphinx/domains/c.py",
+      "start_line": 2699,
+      "end_line": 3478,
+      "tokens": 6630,
+      "context_length": 24744
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sphinx/sphinx/ext/autodoc/__init__.py_InstanceAttributeDocumenter_InstanceAttributeDocumenter.add_content.2",
+      "distance": 1.0117018222808838,
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "start_line": 1963,
+      "end_line": 1993,
+      "tokens": 247,
+      "context_length": 24991
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sphinx/sphinx/domains/cpp.py_ASTDeclaratorPtr.get_modifiers_id_ASTDeclaratorPtr.describe_signature.9",
+      "distance": 1.0131769180297852,
+      "file_path": "sphinx/domains/cpp.py",
+      "start_line": 2388,
+      "end_line": 2445,
+      "tokens": 494,
+      "context_length": 25485
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sphinx/domains/python.py",
+      "position": 1,
+      "tokens": 11637,
+      "context_length": 11637
+    },
+    {
+      "file_path": "sphinx/deprecation.py",
+      "position": 2,
+      "tokens": 602,
+      "context_length": 12239
+    },
+    {
+      "file_path": "sphinx/transforms/post_transforms/__init__.py",
+      "position": 3,
+      "tokens": 1995,
+      "context_length": 14234
+    },
+    {
+      "file_path": "sphinx/util/inspect.py",
+      "position": 4,
+      "tokens": 5752,
+      "context_length": 19986
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/directive.py",
+      "position": 5,
+      "tokens": 1261,
+      "context_length": 21247
+    },
+    {
+      "file_path": "sphinx/ext/autosummary/__init__.py",
+      "position": 6,
+      "tokens": 6468,
+      "context_length": 27715
+    },
+    {
+      "file_path": "sphinx/parsers.py",
+      "position": 7,
+      "tokens": 868,
+      "context_length": 28583
+    },
+    {
+      "file_path": "sphinx/domains/std.py",
+      "position": 8,
+      "tokens": 10209,
+      "context_length": 38792
+    },
+    {
+      "file_path": "sphinx/directives/code.py",
+      "position": 9,
+      "tokens": 3897,
+      "context_length": 42689
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/__init__.py",
+      "position": 10,
+      "tokens": 18068,
+      "context_length": 60757
+    },
+    {
+      "file_path": "sphinx/ext/todo.py",
+      "position": 11,
+      "tokens": 2717,
+      "context_length": 63474
+    },
+    {
+      "file_path": "sphinx/writers/latex.py",
+      "position": 12,
+      "tokens": 19704,
+      "context_length": 83178
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/typehints.py",
+      "position": 13,
+      "tokens": 1020,
+      "context_length": 84198
+    },
+    {
+      "file_path": "sphinx/ext/autosummary/generate.py",
+      "position": 14,
+      "tokens": 5117,
+      "context_length": 89315
+    },
+    {
+      "file_path": "sphinx/transforms/__init__.py",
+      "position": 15,
+      "tokens": 3206,
+      "context_length": 92521
+    },
+    {
+      "file_path": "sphinx/directives/other.py",
+      "position": 16,
+      "tokens": 3157,
+      "context_length": 95678
+    },
+    {
+      "file_path": "sphinx/io.py",
+      "position": 17,
+      "tokens": 1693,
+      "context_length": 97371
+    },
+    {
+      "file_path": "sphinx/util/nodes.py",
+      "position": 18,
+      "tokens": 5421,
+      "context_length": 102792
+    },
+    {
+      "file_path": "sphinx/directives/__init__.py",
+      "position": 19,
+      "tokens": 2495,
+      "context_length": 105287
+    },
+    {
+      "file_path": "sphinx/errors.py",
+      "position": 20,
+      "tokens": 742,
+      "context_length": 106029
+    },
+    {
+      "file_path": "sphinx/util/cfamily.py",
+      "position": 21,
+      "tokens": 3500,
+      "context_length": 109529
+    },
+    {
+      "file_path": "sphinx/domains/math.py",
+      "position": 22,
+      "tokens": 1510,
+      "context_length": 111039
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/type_comment.py",
+      "position": 23,
+      "tokens": 1201,
+      "context_length": 112240
+    },
+    {
+      "file_path": "sphinx/events.py",
+      "position": 24,
+      "tokens": 1018,
+      "context_length": 113258
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/mock.py",
+      "position": 25,
+      "tokens": 1106,
+      "context_length": 114364
+    },
+    {
+      "file_path": "sphinx/ext/autodoc/importer.py",
+      "position": 26,
+      "tokens": 1549,
+      "context_length": 115913
+    },
+    {
+      "file_path": "sphinx/util/pycompat.py",
+      "position": 27,
+      "tokens": 785,
+      "context_length": 116698
+    },
+    {
+      "file_path": "sphinx/registry.py",
+      "position": 28,
+      "tokens": 4546,
+      "context_length": 121244
+    },
+    {
+      "file_path": "sphinx/roles.py",
+      "position": 29,
+      "tokens": 5650,
+      "context_length": 126894
+    },
+    {
+      "file_path": "sphinx/ext/doctest.py",
+      "position": 30,
+      "tokens": 4955,
+      "context_length": 131849
+    },
+    {
+      "file_path": "sphinx/util/typing.py",
+      "position": 31,
+      "tokens": 2010,
+      "context_length": 133859
+    },
+    {
+      "file_path": "sphinx/domains/c.py",
+      "position": 32,
+      "tokens": 28697,
+      "context_length": 162556
+    },
+    {
+      "file_path": "sphinx/domains/cpp.py",
+      "position": 33,
+      "tokens": 62426,
+      "context_length": 224982
+    }
+  ]
+}

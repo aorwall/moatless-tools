@@ -1,0 +1,1497 @@
+{
+  "instance_id": "matplotlib__matplotlib-25785",
+  "model_patch": "diff --git a/lib/matplotlib/backends/backend_ps.py b/lib/matplotlib/backends/backend_ps.py\nindex b425e1e5ba..41fe56c6f4 100644\n--- a/lib/matplotlib/backends/backend_ps.py\n+++ b/lib/matplotlib/backends/backend_ps.py\n@@ -80,10 +80,10 @@ papersize = {'letter': (8.5, 11),\n \n \n def _get_papertype(w, h):\n-    for key, (pw, ph) in sorted(papersize.items(), reverse=True):\n-        if key.startswith('l'):\n-            continue\n-        if w < pw and h < ph:\n+    sorted_keys = sorted(papersize, key=lambda key: (papersize[key][0], papersize[key][1]))\n+    for key in sorted_keys:\n+        pw, ph = papersize[key]\n+        if w <= pw and h <= ph:\n             return key\n     return 'a0'\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/backends/backend_ps.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "950d0db55ac04e663d523144882af0ec2d172420",
+  "patch": "diff --git a/lib/matplotlib/backends/backend_ps.py b/lib/matplotlib/backends/backend_ps.py\n--- a/lib/matplotlib/backends/backend_ps.py\n+++ b/lib/matplotlib/backends/backend_ps.py\n@@ -867,18 +867,24 @@ def _print_figure(\n         # find the appropriate papertype\n         width, height = self.figure.get_size_inches()\n         if papertype == 'auto':\n-            papertype = _get_papertype(\n-                *orientation.swap_if_landscape((width, height)))\n-        paper_width, paper_height = orientation.swap_if_landscape(\n-            papersize[papertype])\n+            _api.warn_deprecated(\"3.8\", name=\"papertype='auto'\",\n+                                 addendum=\"Pass an explicit paper type, or omit the \"\n+                                 \"*papertype* argument entirely.\")\n+            papertype = _get_papertype(*orientation.swap_if_landscape((width, height)))\n \n-        if mpl.rcParams['ps.usedistiller']:\n-            # distillers improperly clip eps files if pagesize is too small\n-            if width > paper_width or height > paper_height:\n-                papertype = _get_papertype(\n-                    *orientation.swap_if_landscape((width, height)))\n-                paper_width, paper_height = orientation.swap_if_landscape(\n-                    papersize[papertype])\n+        if is_eps:\n+            paper_width, paper_height = width, height\n+        else:\n+            paper_width, paper_height = orientation.swap_if_landscape(\n+                papersize[papertype])\n+\n+            if mpl.rcParams['ps.usedistiller']:\n+                # distillers improperly clip eps files if pagesize is too small\n+                if width > paper_width or height > paper_height:\n+                    papertype = _get_papertype(\n+                        *orientation.swap_if_landscape((width, height)))\n+                    paper_width, paper_height = orientation.swap_if_landscape(\n+                        papersize[papertype])\n \n         # center the figure on the paper\n         xo = 72 * 0.5 * (paper_width - width)\n@@ -1055,6 +1061,9 @@ def _print_figure_tex(\n                     self.figure.get_size_inches())\n             else:\n                 if papertype == 'auto':\n+                    _api.warn_deprecated(\"3.8\", name=\"papertype='auto'\",\n+                                         addendum=\"Pass an explicit paper type, or \"\n+                                         \"omit the *papertype* argument entirely.\")\n                     papertype = _get_papertype(width, height)\n                 paper_width, paper_height = papersize[papertype]\n \ndiff --git a/lib/matplotlib/rcsetup.py b/lib/matplotlib/rcsetup.py\n--- a/lib/matplotlib/rcsetup.py\n+++ b/lib/matplotlib/rcsetup.py\n@@ -438,6 +438,19 @@ def validate_ps_distiller(s):\n         return ValidateInStrings('ps.usedistiller', ['ghostscript', 'xpdf'])(s)\n \n \n+def _validate_papersize(s):\n+    # Re-inline this validator when the 'auto' deprecation expires.\n+    s = ValidateInStrings(\"ps.papersize\",\n+                          [\"auto\", \"letter\", \"legal\", \"ledger\",\n+                           *[f\"{ab}{i}\" for ab in \"ab\" for i in range(11)]],\n+                          ignorecase=True)(s)\n+    if s == \"auto\":\n+        _api.warn_deprecated(\"3.8\", name=\"ps.papersize='auto'\",\n+                             addendum=\"Pass an explicit paper type, or omit the \"\n+                             \"*ps.papersize* rcParam entirely.\")\n+    return s\n+\n+\n # A validator dedicated to the named line styles, based on the items in\n # ls_mapper, and a list of possible strings read from Line2D.set_linestyle\n _validate_named_linestyle = ValidateInStrings(\n@@ -1180,9 +1193,7 @@ def _convert_validator_spec(key, conv):\n     \"tk.window_focus\": validate_bool,  # Maintain shell focus for TkAgg\n \n     # Set the papersize/type\n-    \"ps.papersize\":       _ignorecase([\"auto\", \"letter\", \"legal\", \"ledger\",\n-                                      *[f\"{ab}{i}\"\n-                                        for ab in \"ab\" for i in range(11)]]),\n+    \"ps.papersize\":       _validate_papersize,\n     \"ps.useafm\":          validate_bool,\n     # use ghostscript or xpdf to distill ps output\n     \"ps.usedistiller\":    validate_ps_distiller,\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_backend_ps.py b/lib/matplotlib/tests/test_backend_ps.py\n--- a/lib/matplotlib/tests/test_backend_ps.py\n+++ b/lib/matplotlib/tests/test_backend_ps.py\n@@ -336,3 +336,12 @@ def test_colorbar_shift(tmp_path):\n     norm = mcolors.BoundaryNorm([-1, -0.5, 0.5, 1], cmap.N)\n     plt.scatter([0, 1], [1, 1], c=[0, 1], cmap=cmap, norm=norm)\n     plt.colorbar()\n+\n+\n+def test_auto_papersize_deprecation():\n+    fig = plt.figure()\n+    with pytest.warns(mpl.MatplotlibDeprecationWarning):\n+        fig.savefig(io.BytesIO(), format='eps', papertype='auto')\n+\n+    with pytest.warns(mpl.MatplotlibDeprecationWarning):\n+        mpl.rcParams['ps.papersize'] = 'auto'\n",
+  "problem_statement": "automatic papersize selection by ps backend is almost certainly broken\nNo minimal example, but the relevant chunk (`backend_ps.py`) is\r\n```python\r\npapersize = {'letter': (8.5,11),\r\n             'legal': (8.5,14),\r\n             'ledger': (11,17),\r\n             'a0': (33.11,46.81),\r\n             'a1': (23.39,33.11),\r\n             <elided>\r\n             'a10': (1.02,1.457),\r\n             'b0': (40.55,57.32),\r\n             'b1': (28.66,40.55),\r\n             <elided>\r\n             'b10': (1.26,1.76)}\r\n\r\ndef _get_papertype(w, h):\r\n    keys = list(six.iterkeys(papersize))\r\n    keys.sort()\r\n    keys.reverse()\r\n    for key in keys:\r\n        if key.startswith('l'): continue\r\n        pw, ph = papersize[key]\r\n        if (w < pw) and (h < ph): return key\r\n    else:\r\n        return 'a0'\r\n```\r\n\r\nNote that the sorting is by name, which means that the size is the first one among \"a9, a8, ..., a2, a10, a1, b9, b8, ..., b2, b10, b1\" (in that order) that is larger than the requested size -- which makes no sense.\r\n\n",
+  "hints_text": "Currently the code looks like:\r\nhttps://github.com/matplotlib/matplotlib/blob/9caa261595267001d75334a00698da500b0e4eef/lib/matplotlib/backends/backend_ps.py#L80-L85\r\nso slightly different sorting. I guess that\r\n`sorted(papersize.items(), key=lambda v: v[1])` will be better as it gives:\r\n```\r\n{'a10': (1.02, 1.46),\r\n 'b10': (1.26, 1.76),\r\n 'a9': (1.46, 2.05),\r\n 'b9': (1.76, 2.51),\r\n 'a8': (2.05, 2.91),\r\n 'b8': (2.51, 3.58),\r\n 'a7': (2.91, 4.13),\r\n 'b7': (3.58, 5.04),\r\n 'a6': (4.13, 5.83),\r\n 'b6': (5.04, 7.16),\r\n 'a5': (5.83, 8.27),\r\n 'b5': (7.16, 10.11),\r\n 'a4': (8.27, 11.69),\r\n 'letter': (8.5, 11),\r\n 'legal': (8.5, 14),\r\n 'b4': (10.11, 14.33),\r\n 'ledger': (11, 17),\r\n 'a3': (11.69, 16.54),\r\n 'b3': (14.33, 20.27),\r\n 'a2': (16.54, 23.39),\r\n 'b2': (20.27, 28.66),\r\n 'a1': (23.39, 33.11),\r\n 'b1': (28.66, 40.55),\r\n 'a0': (33.11, 46.81),\r\n 'b0': (40.55, 57.32)}\r\n```\nThis issue has been marked \"inactive\" because it has been 365 days since the last comment. If this issue is still present in recent Matplotlib releases, or the feature request is still wanted, please leave a comment and this label will be removed. If there are no updates in another 30 days, this issue will be automatically closed, but you are free to re-open or create a new issue if needed. We value issue reports, and this procedure is meant to help us resurface and prioritize issues that have not been addressed yet, not make them disappear.  Thanks for your help!\nBased on the discussions in #22796 this is very hard to fix in a back compatible way. (But easy to fix as such.)\r\n\r\nThere were some discussions if we actually require ps, as most people probably use eps anyway. One solution is to introduce a pending deprecation for ps and see the reactions?\nMy preference would be to completely deprecate and then drop papersize, and make ps output at the size of the figure, like all other backends.  We *could* (if there's really demand for it) additionally support `figsize=\"a4\"` (and similar), auto-translating these to the corresponding inches sizes (this would not be equivalent to papersize, as the axes would default to spanning the entire papersize minus the paddings).\nTalked about this on the call, the consensus was to remove the \"auto\" feature.",
+  "created_at": "2023-04-28T02:15:05Z",
+  "version": "3.7",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_backend_ps.py::test_auto_papersize_deprecation\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_backend_ps.py::test_bbox\", \"lib/matplotlib/tests/test_backend_ps.py::test_colorbar_shift[eps]\", \"lib/matplotlib/tests/test_backend_ps.py::test_colored_hatch_zero_linewidth[eps]\", \"lib/matplotlib/tests/test_backend_ps.py::test_d_glyph\", \"lib/matplotlib/tests/test_backend_ps.py::test_empty_line\", \"lib/matplotlib/tests/test_backend_ps.py::test_failing_latex\", \"lib/matplotlib/tests/test_backend_ps.py::test_fonttype[3]\", \"lib/matplotlib/tests/test_backend_ps.py::test_fonttype[42]\", \"lib/matplotlib/tests/test_backend_ps.py::test_linedash\", \"lib/matplotlib/tests/test_backend_ps.py::test_no_duplicate_definition\", \"lib/matplotlib/tests/test_backend_ps.py::test_path_collection[eps]\", \"lib/matplotlib/tests/test_backend_ps.py::test_patheffects\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[eps\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[eps-landscape]\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[eps-portrait]\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[ps\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[ps-landscape]\", \"lib/matplotlib/tests/test_backend_ps.py::test_savefig_to_stringio[ps-portrait]\", \"lib/matplotlib/tests/test_backend_ps.py::test_text_clip[eps]\", \"lib/matplotlib/tests/test_backend_ps.py::test_transparency[eps]\"]",
+  "environment_setup_commit": "0849036fd992a2dd133a0cffc3f84f58ccf1840f",
+  "patch_files": [
+    "lib/matplotlib/backends/backend_ps.py",
+    "lib/matplotlib/rcsetup.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_backend_ps.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/backends/backend_ps.py": {
+      "diffs": [
+        {
+          "start_line_old": 870,
+          "end_line_old": 881,
+          "file_pos": 1,
+          "file_context_length": 12045,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.get_image_magnification_RendererPS._convert_path.2.1",
+          "closest_snippet_line_distance": 478
+        },
+        {
+          "start_line_old": 1058,
+          "end_line_old": 1058,
+          "file_pos": 1,
+          "file_context_length": 12045,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.set_linedash_RendererPS.set_font.1.2.self.fontsize.1",
+          "closest_snippet_line_distance": 706,
+          "pos": 12,
+          "context_length": 5436
+        }
+      ]
+    },
+    "lib/matplotlib/rcsetup.py": {
+      "diffs": [
+        {
+          "start_line_old": 441,
+          "end_line_old": 441,
+          "file_pos": 19,
+          "file_context_length": 168676,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/rcsetup.py_validate_fonttype_validate_fonttype.3.3.2.1",
+          "closest_snippet_line_distance": 200,
+          "pos": 111,
+          "context_length": 49357
+        },
+        {
+          "start_line_old": 1183,
+          "end_line_old": 1185,
+          "file_pos": 19,
+          "file_context_length": 168676,
+          "closest_snippet_id": "/tmp/repos/matplotlib/lib/matplotlib/rcsetup.py_validate_whiskers__validate_named_linestyle.1",
+          "closest_snippet_line_distance": 739
+        }
+      ]
+    }
+  },
+  "vectors": 3893,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_1__get_papertype.2.1",
+      "distance": 0.7880518436431885,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1,
+      "end_line": 88,
+      "tokens": 763,
+      "context_length": 763,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_FigureCanvasPS_FigureCanvasPS._print_ps.16",
+      "distance": 0.9500924348831177,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 806,
+      "end_line": 854,
+      "tokens": 443,
+      "context_length": 1206,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_pdf_ps.py_RendererPDFPSBase.get_text_width_height_descent_",
+      "distance": 0.997466504573822,
+      "file_path": "lib/matplotlib/backends/_backend_pdf_ps.py",
+      "start_line": 109,
+      "end_line": 146,
+      "tokens": 383,
+      "context_length": 1589
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py__convert_psfrags__convert_psfrags.12.1",
+      "distance": 1.038238525390625,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1090,
+      "end_line": 1136,
+      "tokens": 589,
+      "context_length": 2178,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_FigureManagerPS_",
+      "distance": 1.0418267250061035,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1289,
+      "end_line": 1331,
+      "tokens": 397,
+      "context_length": 2575,
+      "file_pos": 2
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.set_color_RendererPS.set_linecap.1.2.self.linecap.1",
+      "distance": 1.0436561107635498,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 294,
+      "end_line": 333,
+      "tokens": 426,
+      "context_length": 3001,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_tex_RendererPS.draw_tex.2.17",
+      "distance": 1.0728741884231567,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 566,
+      "end_line": 606,
+      "tokens": 449,
+      "context_length": 3450,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_FigureCanvasPS._print_figure.print_figure_impl_FigureCanvasPS._print_figure.print_figure_impl.2.24",
+      "distance": 1.0738763809204102,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 913,
+      "end_line": 970,
+      "tokens": 601,
+      "context_length": 4051,
+      "file_pos": 2
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_pdf_ps.py_RendererPDFPSBase_RendererPDFPSBase.get_canvas_width_height.2.1",
+      "distance": 1.0872626304626465,
+      "file_path": "lib/matplotlib/backends/_backend_pdf_ps.py",
+      "start_line": 82,
+      "end_line": 107,
+      "tokens": 188,
+      "context_length": 4239
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.create_hatch_RendererPS.create_hatch.8.1",
+      "distance": 1.0883677005767822,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 354,
+      "end_line": 386,
+      "tokens": 231,
+      "context_length": 4470,
+      "file_pos": 2
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.set_linedash_RendererPS.set_font.1.2.self.fontsize.1",
+      "distance": 1.0892260074615479,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 335,
+      "end_line": 352,
+      "tokens": 205,
+      "context_length": 4675,
+      "file_pos": 2
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_FigureCanvasPS._print_figure_tex_FigureCanvasPS.draw.2.1",
+      "distance": 1.0915310382843018,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 993,
+      "end_line": 1087,
+      "tokens": 761,
+      "context_length": 5436,
+      "file_pos": 2
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_pdf_ps.py_1_get_glyphs_subset.7.6.1",
+      "distance": 1.0983911752700806,
+      "file_path": "lib/matplotlib/backends/_backend_pdf_ps.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 350,
+      "context_length": 5786
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_xpdf_distill_xpdf_distill.6.1",
+      "distance": 1.1013133525848389,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1180,
+      "end_line": 1208,
+      "tokens": 356,
+      "context_length": 6142,
+      "file_pos": 2
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_FigureCanvasPS._print_figure.25_FigureCanvasPS._print_figure.25.4.2.2",
+      "distance": 1.1146976947784424,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 972,
+      "end_line": 991,
+      "tokens": 281,
+      "context_length": 6423,
+      "file_pos": 2
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_text_RendererPS.draw_text.2.9.3",
+      "distance": 1.1208140850067139,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 608,
+      "end_line": 665,
+      "tokens": 516,
+      "context_length": 6939,
+      "file_pos": 2
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_gouraud_triangles_RendererPS.draw_gouraud_triangles.24",
+      "distance": 1.1288385391235352,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 699,
+      "end_line": 745,
+      "tokens": 448,
+      "context_length": 7387,
+      "file_pos": 2
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS._draw_ps__Orientation.swap_if_landscape.1.1",
+      "distance": 1.1338865756988525,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 747,
+      "end_line": 803,
+      "tokens": 440,
+      "context_length": 7827,
+      "file_pos": 2
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_image_RendererPS.draw_path.clip.4",
+      "distance": 1.1380819082260132,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 427,
+      "end_line": 466,
+      "tokens": 366,
+      "context_length": 8193,
+      "file_pos": 2
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/galleries/users_explain/text/usetex.py_1_",
+      "distance": 1.1390012502670288,
+      "file_path": "galleries/users_explain/text/usetex.py",
+      "start_line": 1,
+      "end_line": 178,
+      "tokens": 1786,
+      "context_length": 9979
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS._get_clip_cmd_RendererPS._get_clip_cmd.6.1",
+      "distance": 1.1478798389434814,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 405,
+      "end_line": 425,
+      "tokens": 182,
+      "context_length": 10161,
+      "file_pos": 3
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_PdfPages._write_header_PdfPages._write_header.3",
+      "distance": 1.149943232536316,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 920,
+      "end_line": 933,
+      "tokens": 165,
+      "context_length": 10326
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Hlist.hpack_Hlist.hpack.17.2.1",
+      "distance": 1.160322904586792,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 1164,
+      "end_line": 1226,
+      "tokens": 577,
+      "context_length": 10903
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_FigureCanvasPgf_FigureCanvasPgf._print_pgf_to_fh.24",
+      "distance": 1.163123369216919,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 726,
+      "end_line": 788,
+      "tokens": 573,
+      "context_length": 11476
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py__get_pdf_charprocs__get_pdf_charprocs.6.1",
+      "distance": 1.1635053157806396,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 615,
+      "end_line": 658,
+      "tokens": 703,
+      "context_length": 12179
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.createType1Descriptor_PdfFile.createType1Descriptor.fontdescObject.24.1",
+      "distance": 1.1657071113586426,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1047,
+      "end_line": 1108,
+      "tokens": 534,
+      "context_length": 12713
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py__try_distill_gs_distill.11.3",
+      "distance": 1.1662548780441284,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1139,
+      "end_line": 1177,
+      "tokens": 365,
+      "context_length": 13078,
+      "file_pos": 6
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_tex_RendererPdf.encode_string.2.1",
+      "distance": 1.167654275894165,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2243,
+      "end_line": 2329,
+      "tokens": 1039,
+      "context_length": 14117
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_markers_RendererPS.draw_markers.ps_color.15",
+      "distance": 1.1681532859802246,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 468,
+      "end_line": 519,
+      "tokens": 440,
+      "context_length": 14557,
+      "file_pos": 6
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.newTextnote_PdfFile._get_subsetted_psname",
+      "distance": 1.1683573722839355,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 798,
+      "end_line": 821,
+      "tokens": 212,
+      "context_length": 14769
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_FigureCanvasPdf_",
+      "distance": 1.1724252700805664,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2765,
+      "end_line": 2811,
+      "tokens": 296,
+      "context_length": 15065
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_mathtext_RendererPdf.draw_mathtext.2",
+      "distance": 1.1728297472000122,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2189,
+      "end_line": 2241,
+      "tokens": 522,
+      "context_length": 15587
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.draw_path_collection_RendererPS.draw_path_collection.len_path.8",
+      "distance": 1.1799969673156738,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 521,
+      "end_line": 564,
+      "tokens": 455,
+      "context_length": 16042,
+      "file_pos": 6
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py_get_margin_from_padding_get_margin_from_padding.13.1",
+      "distance": 1.1891504526138306,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 300,
+      "end_line": 335,
+      "tokens": 391,
+      "context_length": 16433
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_codecs__log.1",
+      "distance": 1.1929092407226562,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 7,
+      "end_line": 46,
+      "tokens": 261,
+      "context_length": 16694
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_text_RendererPdf.draw_text.3",
+      "distance": 1.1976771354675293,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2331,
+      "end_line": 2429,
+      "tokens": 1068,
+      "context_length": 17762
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf_RendererPdf.check_gc.gc._effective_alphas.1",
+      "distance": 1.201582908630371,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1944,
+      "end_line": 1983,
+      "tokens": 372,
+      "context_length": 18134
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_GraphicsContextPdf.paint_GraphicsContextPdf.pop.4.1",
+      "distance": 1.2028578519821167,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2488,
+      "end_line": 2557,
+      "tokens": 561,
+      "context_length": 18695
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_RendererPgf.get_text_width_height_descent_RendererPgf.points_to_pixels.2.1",
+      "distance": 1.2044817209243774,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 701,
+      "end_line": 723,
+      "tokens": 230,
+      "context_length": 18925
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/_backend_pdf_ps.py_CharacterTracker_CharacterTracker.track_glyph.2",
+      "distance": 1.2054252624511719,
+      "file_path": "lib/matplotlib/backends/_backend_pdf_ps.py",
+      "start_line": 60,
+      "end_line": 79,
+      "tokens": 168,
+      "context_length": 19093
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/doc/conf.py_copybutton_prompt_text_224",
+      "distance": 1.2058194875717163,
+      "file_path": "doc/conf.py",
+      "start_line": 509,
+      "end_line": 618,
+      "tokens": 809,
+      "context_length": 19902
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_BakomaFonts.6_BakomaFonts._size_alternatives.1",
+      "distance": 1.2061173915863037,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 404,
+      "end_line": 446,
+      "tokens": 743,
+      "context_length": 20645
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_LatexManager._setup_latex_process_LatexManager.get_width_height_descent.2.1",
+      "distance": 1.2086007595062256,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 266,
+      "end_line": 293,
+      "tokens": 299,
+      "context_length": 20944
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_GraphicsContextPdf.commands_GraphicsContextPdf.commands.1",
+      "distance": 1.2086985111236572,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2579,
+      "end_line": 2591,
+      "tokens": 138,
+      "context_length": 21082
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py__font_to_ps_type3__font_to_ps_type3.8.1",
+      "distance": 1.210422158241272,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 111,
+      "end_line": 189,
+      "tokens": 656,
+      "context_length": 21738,
+      "file_pos": 8
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_PdfPages._run_latex_PdfPages._run_latex.2.4",
+      "distance": 1.210699200630188,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 953,
+      "end_line": 962,
+      "tokens": 111,
+      "context_length": 21849
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS._is_transparent_RendererPS._is_transparent.1.4.2.1",
+      "distance": 1.21077561378479,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 280,
+      "end_line": 292,
+      "tokens": 132,
+      "context_length": 21981,
+      "file_pos": 8
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/galleries/examples/subplots_axes_and_figures/figure_size_units.py_1_",
+      "distance": 1.2119253873825073,
+      "file_path": "galleries/examples/subplots_axes_and_figures/figure_size_units.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 629,
+      "context_length": 22610
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_85__str_escapes.1",
+      "distance": 1.2162245512008667,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 291,
+      "end_line": 297,
+      "tokens": 120,
+      "context_length": 22730
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.writeExtGSTates_PdfFile.hatchPattern.2.9.1",
+      "distance": 1.2165019512176514,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1520,
+      "end_line": 1551,
+      "tokens": 224,
+      "context_length": 22954
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.writeFonts_PdfFile._write_afm_font.6.1",
+      "distance": 1.2166595458984375,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 956,
+      "end_line": 987,
+      "tokens": 310,
+      "context_length": 23264
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py__font_to_ps_type42__font_to_ps_type42.4.7.2",
+      "distance": 1.220546007156372,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 192,
+      "end_line": 227,
+      "tokens": 331,
+      "context_length": 23595,
+      "file_pos": 9
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.writeHatches_PdfFile.writeHatches.4",
+      "distance": 1.222815752029419,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1553,
+      "end_line": 1589,
+      "tokens": 364,
+      "context_length": 23959
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_tight_layout.py__auto_adjust_subplotpars.16__auto_adjust_subplotpars.25.1",
+      "distance": 1.2234606742858887,
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "start_line": 96,
+      "end_line": 157,
+      "tokens": 738,
+      "context_length": 24697
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_pstoeps_pstoeps.7",
+      "distance": 1.2248458862304688,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 1228,
+      "end_line": 1286,
+      "tokens": 503,
+      "context_length": 25200,
+      "file_pos": 10
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py__log_if_debug_on_RendererPS.__init__.4",
+      "distance": 1.225090742111206,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 230,
+      "end_line": 278,
+      "tokens": 412,
+      "context_length": 25612,
+      "file_pos": 10
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/font_manager.py_1_weight_dict.1",
+      "distance": 1.2265325784683228,
+      "file_path": "lib/matplotlib/font_manager.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 744,
+      "context_length": 26356
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_gouraud_triangles_RendererPdf.draw_gouraud_triangles.17.3.alpha.4",
+      "distance": 1.229856014251709,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2139,
+      "end_line": 2177,
+      "tokens": 357,
+      "context_length": 26713
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.get_image_magnification_RendererPdf.draw_path.2",
+      "distance": 1.2300684452056885,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1985,
+      "end_line": 2025,
+      "tokens": 368,
+      "context_length": 27081
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/animation.py_42_adjusted_figsize.7.1",
+      "distance": 1.2308945655822754,
+      "file_path": "lib/matplotlib/animation.py",
+      "start_line": 51,
+      "end_line": 92,
+      "tokens": 311,
+      "context_length": 27392
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf._setup_textpos_RendererPdf._setup_textpos.1.2.3",
+      "distance": 1.2318837642669678,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2179,
+      "end_line": 2187,
+      "tokens": 125,
+      "context_length": 27517
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_GraphicsContextPdf_GraphicsContextPdf.stroke.4.1",
+      "distance": 1.234595537185669,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2447,
+      "end_line": 2471,
+      "tokens": 234,
+      "context_length": 27751
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_27__writeln.3",
+      "distance": 1.234796404838562,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 62,
+      "end_line": 82,
+      "tokens": 177,
+      "context_length": 27928
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.embedTTF.embedTTFType42_PdfFile.embedTTF.embedTTFType42.unicode_bfrange.1",
+      "distance": 1.238513469696045,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1261,
+      "end_line": 1347,
+      "tokens": 807,
+      "context_length": 28735
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.writeMarkers_PdfFile.writeMarkers.1.bbox.7",
+      "distance": 1.2385414838790894,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1824,
+      "end_line": 1844,
+      "tokens": 265,
+      "context_length": 29000
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/matplotlib/galleries/examples/style_sheets/bmh.py_1_",
+      "distance": 1.2411069869995117,
+      "file_path": "galleries/examples/style_sheets/bmh.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 211,
+      "context_length": 29211
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.newPage_PdfFile.newPage.self.pageAnnotations.1",
+      "distance": 1.2447737455368042,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 769,
+      "end_line": 796,
+      "tokens": 267,
+      "context_length": 29478
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_markers_RendererPdf.draw_gouraud_triangle.1",
+      "distance": 1.2457367181777954,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2097,
+      "end_line": 2137,
+      "tokens": 391,
+      "context_length": 29869
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Parser._auto_sized_delimiter_Parser._auto_sized_delimiter.9.1",
+      "distance": 1.2507072687149048,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 2600,
+      "end_line": 2630,
+      "tokens": 263,
+      "context_length": 30132
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.pathCollectionObject_PdfFile.writePathCollectionTemplates.1.9",
+      "distance": 1.2507421970367432,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1846,
+      "end_line": 1873,
+      "tokens": 289,
+      "context_length": 30421
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.writeGouraudTriangles_PdfFile.writeGouraudTriangles.3",
+      "distance": 1.2540040016174316,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1614,
+      "end_line": 1656,
+      "tokens": 447,
+      "context_length": 30868
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.embedTTF.embedTTFType42.38_PdfFile.embedTTF.embedTTFType42.57.1",
+      "distance": 1.2546789646148682,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1348,
+      "end_line": 1403,
+      "tokens": 574,
+      "context_length": 31442
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_cairo.py_RendererCairo.get_text_width_height_descent_RendererCairo.points_to_pixels.2.1",
+      "distance": 1.2571532726287842,
+      "file_path": "lib/matplotlib/backends/backend_cairo.py",
+      "start_line": 243,
+      "end_line": 276,
+      "tokens": 281,
+      "context_length": 31723
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_cairo.py_FigureCanvasCairo._save_",
+      "distance": 1.2599633932113647,
+      "file_path": "lib/matplotlib/backends/backend_cairo.py",
+      "start_line": 439,
+      "end_line": 501,
+      "tokens": 532,
+      "context_length": 32255
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/matplotlib/doc/conf.py_225_260",
+      "distance": 1.260407567024231,
+      "file_path": "doc/conf.py",
+      "start_line": 619,
+      "end_line": 701,
+      "tokens": 761,
+      "context_length": 33016
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Hlist.4_Hlist.16",
+      "distance": 1.2606672048568726,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 1150,
+      "end_line": 1162,
+      "tokens": 147,
+      "context_length": 33163
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_type1font.py__StandardEncoding_",
+      "distance": 1.2616188526153564,
+      "file_path": "lib/matplotlib/_type1font.py",
+      "start_line": 777,
+      "end_line": 878,
+      "tokens": 808,
+      "context_length": 33971
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_type1font.py_Type1Font._parse_Type1Font._parse.self._pos.1",
+      "distance": 1.2638828754425049,
+      "file_path": "lib/matplotlib/_type1font.py",
+      "start_line": 491,
+      "end_line": 592,
+      "tokens": 853,
+      "context_length": 34824
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/offsetbox.py_HPacker_HPacker._get_bbox_and_child_offsets.dpicor.10.1",
+      "distance": 1.2648903131484985,
+      "file_path": "lib/matplotlib/offsetbox.py",
+      "start_line": 499,
+      "end_line": 524,
+      "tokens": 260,
+      "context_length": 35084
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_ps.py_RendererPS.get_image_magnification_RendererPS._convert_path.2.1",
+      "distance": 1.265946626663208,
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "start_line": 388,
+      "end_line": 403,
+      "tokens": 171,
+      "context_length": 35255,
+      "file_pos": 16
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/matplotlib/galleries/examples/lines_bars_and_markers/psd_demo.py_58_yrange_109.1",
+      "distance": 1.2672905921936035,
+      "file_path": "galleries/examples/lines_bars_and_markers/psd_demo.py",
+      "start_line": 84,
+      "end_line": 158,
+      "tokens": 758,
+      "context_length": 36013
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_RendererPdf.draw_path_collection_RendererPdf.draw_path_collection.can_do_optimization.21",
+      "distance": 1.2674033641815186,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 2027,
+      "end_line": 2095,
+      "tokens": 716,
+      "context_length": 36729
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.embedTTF.embedTTFType3.28_PdfFile.embedTTF.embedTTFType3.34.1",
+      "distance": 1.267778992652893,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1226,
+      "end_line": 1259,
+      "tokens": 369,
+      "context_length": 37098
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_BakomaFonts.10_BakomaFonts.get_sized_alternatives_for_symbol.1.1",
+      "distance": 1.2682547569274902,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 448,
+      "end_line": 461,
+      "tokens": 148,
+      "context_length": 37246
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_23__get_preamble.6.1",
+      "distance": 1.2713851928710938,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 31,
+      "end_line": 59,
+      "tokens": 369,
+      "context_length": 37615
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_wx.py_functools__create_wxapp.4.1",
+      "distance": 1.2720824480056763,
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "start_line": 10,
+      "end_line": 48,
+      "tokens": 264,
+      "context_length": 37879
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/matplotlib/galleries/examples/lines_bars_and_markers/psd_demo.py_1_57",
+      "distance": 1.273253321647644,
+      "file_path": "galleries/examples/lines_bars_and_markers/psd_demo.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 768,
+      "context_length": 38647
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/rcsetup.py_validate_fontsize_validate_fontsizelist.1",
+      "distance": 1.2734453678131104,
+      "file_path": "lib/matplotlib/rcsetup.py",
+      "start_line": 357,
+      "end_line": 371,
+      "tokens": 130,
+      "context_length": 38777,
+      "file_pos": 19
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_TruetypeFonts.get_xheight_TruetypeFonts.get_underline_thickness.4.1",
+      "distance": 1.2752628326416016,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 330,
+      "end_line": 346,
+      "tokens": 226,
+      "context_length": 39003
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile._embedTeXFont_PdfFile._embedTeXFont.24.1",
+      "distance": 1.2755956649780273,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 989,
+      "end_line": 1045,
+      "tokens": 572,
+      "context_length": 39575
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.embedTTF.embedTTFType3_PdfFile.embedTTF.embedTTFType3.charprocs.1",
+      "distance": 1.275899052619934,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1155,
+      "end_line": 1225,
+      "tokens": 654,
+      "context_length": 40229
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_tight_layout.py__auto_adjust_subplotpars__auto_adjust_subplotpars.15",
+      "distance": 1.2762857675552368,
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "start_line": 20,
+      "end_line": 95,
+      "tokens": 797,
+      "context_length": 41026
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.embedTTF.7_PdfFile.embedTTF.26.2.1.1",
+      "distance": 1.2766088247299194,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 1405,
+      "end_line": 1453,
+      "tokens": 490,
+      "context_length": 41516
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/matplotlib/galleries/examples/userdemo/pgf_fonts.py_1_",
+      "distance": 1.2792415618896484,
+      "file_path": "galleries/examples/userdemo/pgf_fonts.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 203,
+      "context_length": 41719
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/matplotlib/galleries/users_explain/axes/tight_layout_guide.py_1_57",
+      "distance": 1.279283881187439,
+      "file_path": "galleries/users_explain/axes/tight_layout_guide.py",
+      "start_line": 1,
+      "end_line": 108,
+      "tokens": 798,
+      "context_length": 42517
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Parser._space_widths_Parser.customspace.1.1",
+      "distance": 1.2796043157577515,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 2084,
+      "end_line": 2105,
+      "tokens": 359,
+      "context_length": 42876
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_LatexManager._get_box_metrics_LatexManager._get_box_metrics.9.1",
+      "distance": 1.2796881198883057,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 295,
+      "end_line": 324,
+      "tokens": 372,
+      "context_length": 43248
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_type1font.py_1__log.1",
+      "distance": 1.2798430919647217,
+      "file_path": "lib/matplotlib/_type1font.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 212,
+      "context_length": 43460
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Parser.subsuper_Parser.subsuper.lc_height.1",
+      "distance": 1.2822738885879517,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 2285,
+      "end_line": 2378,
+      "tokens": 849,
+      "context_length": 44309
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_agg.py_RendererAgg.get_text_width_height_descent_RendererAgg.get_text_width_height_descent.2",
+      "distance": 1.283989667892456,
+      "file_path": "lib/matplotlib/backends/backend_agg.py",
+      "start_line": 207,
+      "end_line": 226,
+      "tokens": 210,
+      "context_length": 44519
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/matplotlib/galleries/users_explain/axes/constrainedlayout_guide.py_92_152",
+      "distance": 1.2857924699783325,
+      "file_path": "galleries/users_explain/axes/constrainedlayout_guide.py",
+      "start_line": 184,
+      "end_line": 268,
+      "tokens": 863,
+      "context_length": 45382
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/dviread.py__fontfile_",
+      "distance": 1.287893295288086,
+      "file_path": "lib/matplotlib/dviread.py",
+      "start_line": 1114,
+      "end_line": 1150,
+      "tokens": 364,
+      "context_length": 45746
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/rcsetup.py_validate_fonttype_validate_fonttype.3.3.2.1",
+      "distance": 1.289271593093872,
+      "file_path": "lib/matplotlib/rcsetup.py",
+      "start_line": 221,
+      "end_line": 241,
+      "tokens": 148,
+      "context_length": 45894,
+      "file_pos": 24
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/matplotlib/galleries/users_explain/axes/constrainedlayout_guide.py_153_210",
+      "distance": 1.2917790412902832,
+      "file_path": "galleries/users_explain/axes/constrainedlayout_guide.py",
+      "start_line": 270,
+      "end_line": 351,
+      "tokens": 845,
+      "context_length": 46739
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/matplotlib/galleries/examples/userdemo/pgf_texsystem.py_1_",
+      "distance": 1.2948590517044067,
+      "file_path": "galleries/examples/userdemo/pgf_texsystem.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 196,
+      "context_length": 46935
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_TruetypeFonts._get_info_TruetypeFonts._get_info.7.1",
+      "distance": 1.2949204444885254,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 300,
+      "end_line": 328,
+      "tokens": 267,
+      "context_length": 47202
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pgf.py_RendererPgf._print_pgf_path_styles_RendererPgf._print_pgf_path_styles.capstyles.20.2.1",
+      "distance": 1.2950867414474487,
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "start_line": 475,
+      "end_line": 524,
+      "tokens": 539,
+      "context_length": 47741
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/matplotlib/galleries/examples/subplots_axes_and_figures/demo_tight_layout.py_1_bottom.1",
+      "distance": 1.295238733291626,
+      "file_path": "galleries/examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "start_line": 1,
+      "end_line": 116,
+      "tokens": 762,
+      "context_length": 48503
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/matplotlib/galleries/examples/axes_grid1/demo_fixed_size_axes.py_1_",
+      "distance": 1.2957613468170166,
+      "file_path": "galleries/examples/axes_grid1/demo_fixed_size_axes.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 355,
+      "context_length": 48858
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_Parser._genset_Parser.overset.underset.1",
+      "distance": 1.2967818975448608,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 2509,
+      "end_line": 2539,
+      "tokens": 291,
+      "context_length": 49149
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/rcsetup.py_validate_whiskers__validate_named_linestyle.1",
+      "distance": 1.2969452142715454,
+      "file_path": "lib/matplotlib/rcsetup.py",
+      "start_line": 421,
+      "end_line": 446,
+      "tokens": 208,
+      "context_length": 49357,
+      "file_pos": 27
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_tight_layout.py_get_tight_layout_figure.kwargs_",
+      "distance": 1.2972512245178223,
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "start_line": 266,
+      "end_line": 302,
+      "tokens": 362,
+      "context_length": 49719
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_mathtext.py_UnicodeFonts._get_glyph_UnicodeFonts.get_sized_alternatives_for_symbol.2.1",
+      "distance": 1.2975070476531982,
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "start_line": 523,
+      "end_line": 589,
+      "tokens": 630,
+      "context_length": 50349
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_pdfRepr_pdfRepr.3.32.1",
+      "distance": 1.2992969751358032,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 300,
+      "end_line": 370,
+      "tokens": 631,
+      "context_length": 50980
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_type1font.py_Type1Font._parse_encoding_Type1Font._parse_othersubrs.2.3.2.1.1",
+      "distance": 1.3009252548217773,
+      "file_path": "lib/matplotlib/_type1font.py",
+      "start_line": 655,
+      "end_line": 692,
+      "tokens": 310,
+      "context_length": 51290
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/dviread.py_PsfontsMap._parse_and_cache_line_PsfontsMap._parse_and_cache_line.24.1",
+      "distance": 1.3015341758728027,
+      "file_path": "lib/matplotlib/dviread.py",
+      "start_line": 912,
+      "end_line": 1005,
+      "tokens": 903,
+      "context_length": 52193
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py__font_supports_glyph__font_supports_glyph.4",
+      "distance": 1.3017208576202393,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 373,
+      "end_line": 385,
+      "tokens": 111,
+      "context_length": 52304
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backends/backend_pdf.py_PdfFile.dviFontName_PdfFile.dviFontName.10.1",
+      "distance": 1.302646517753601,
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "start_line": 926,
+      "end_line": 954,
+      "tokens": 292,
+      "context_length": 52596
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/typing.py_1_",
+      "distance": 1.3031541109085083,
+      "file_path": "lib/matplotlib/typing.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 534,
+      "context_length": 53130
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/matplotlib/galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py_1_6",
+      "distance": 1.303194522857666,
+      "file_path": "galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 409,
+      "context_length": 53539
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/backend_bases.py_FigureCanvasBase.print_figure.7_FigureCanvasBase.print_figure.7.9.1",
+      "distance": 1.3042051792144775,
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "start_line": 2122,
+      "end_line": 2193,
+      "tokens": 694,
+      "context_length": 54233
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/backends/backend_ps.py",
+      "position": 1,
+      "tokens": 12045,
+      "context_length": 12045
+    },
+    {
+      "file_path": "lib/matplotlib/backends/_backend_pdf_ps.py",
+      "position": 2,
+      "tokens": 1062,
+      "context_length": 13107
+    },
+    {
+      "file_path": "galleries/users_explain/text/usetex.py",
+      "position": 3,
+      "tokens": 1786,
+      "context_length": 14893
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_pgf.py",
+      "position": 4,
+      "tokens": 9708,
+      "context_length": 24601
+    },
+    {
+      "file_path": "lib/matplotlib/_mathtext.py",
+      "position": 5,
+      "tokens": 24303,
+      "context_length": 48904
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_pdf.py",
+      "position": 6,
+      "tokens": 24706,
+      "context_length": 73610
+    },
+    {
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "position": 7,
+      "tokens": 7563,
+      "context_length": 81173
+    },
+    {
+      "file_path": "doc/conf.py",
+      "position": 8,
+      "tokens": 6358,
+      "context_length": 87531
+    },
+    {
+      "file_path": "galleries/examples/subplots_axes_and_figures/figure_size_units.py",
+      "position": 9,
+      "tokens": 629,
+      "context_length": 88160
+    },
+    {
+      "file_path": "lib/matplotlib/_tight_layout.py",
+      "position": 10,
+      "tokens": 2929,
+      "context_length": 91089
+    },
+    {
+      "file_path": "lib/matplotlib/font_manager.py",
+      "position": 11,
+      "tokens": 12966,
+      "context_length": 104055
+    },
+    {
+      "file_path": "lib/matplotlib/animation.py",
+      "position": 12,
+      "tokens": 15509,
+      "context_length": 119564
+    },
+    {
+      "file_path": "galleries/examples/style_sheets/bmh.py",
+      "position": 13,
+      "tokens": 211,
+      "context_length": 119775
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_cairo.py",
+      "position": 14,
+      "tokens": 4132,
+      "context_length": 123907
+    },
+    {
+      "file_path": "lib/matplotlib/_type1font.py",
+      "position": 15,
+      "tokens": 6819,
+      "context_length": 130726
+    },
+    {
+      "file_path": "lib/matplotlib/offsetbox.py",
+      "position": 16,
+      "tokens": 12243,
+      "context_length": 142969
+    },
+    {
+      "file_path": "galleries/examples/lines_bars_and_markers/psd_demo.py",
+      "position": 17,
+      "tokens": 1709,
+      "context_length": 144678
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_wx.py",
+      "position": 18,
+      "tokens": 11694,
+      "context_length": 156372
+    },
+    {
+      "file_path": "lib/matplotlib/rcsetup.py",
+      "position": 19,
+      "tokens": 12304,
+      "context_length": 168676
+    },
+    {
+      "file_path": "galleries/examples/userdemo/pgf_fonts.py",
+      "position": 20,
+      "tokens": 203,
+      "context_length": 168879
+    },
+    {
+      "file_path": "galleries/users_explain/axes/tight_layout_guide.py",
+      "position": 21,
+      "tokens": 2176,
+      "context_length": 171055
+    },
+    {
+      "file_path": "lib/matplotlib/backends/backend_agg.py",
+      "position": 22,
+      "tokens": 4653,
+      "context_length": 175708
+    },
+    {
+      "file_path": "galleries/users_explain/axes/constrainedlayout_guide.py",
+      "position": 23,
+      "tokens": 6710,
+      "context_length": 182418
+    },
+    {
+      "file_path": "lib/matplotlib/dviread.py",
+      "position": 24,
+      "tokens": 10568,
+      "context_length": 192986
+    },
+    {
+      "file_path": "galleries/examples/userdemo/pgf_texsystem.py",
+      "position": 25,
+      "tokens": 196,
+      "context_length": 193182
+    },
+    {
+      "file_path": "galleries/examples/subplots_axes_and_figures/demo_tight_layout.py",
+      "position": 26,
+      "tokens": 874,
+      "context_length": 194056
+    },
+    {
+      "file_path": "galleries/examples/axes_grid1/demo_fixed_size_axes.py",
+      "position": 27,
+      "tokens": 355,
+      "context_length": 194411
+    },
+    {
+      "file_path": "lib/matplotlib/typing.py",
+      "position": 28,
+      "tokens": 534,
+      "context_length": 194945
+    },
+    {
+      "file_path": "galleries/examples/subplots_axes_and_figures/auto_subplots_adjust.py",
+      "position": 29,
+      "tokens": 700,
+      "context_length": 195645
+    },
+    {
+      "file_path": "lib/matplotlib/backend_bases.py",
+      "position": 30,
+      "tokens": 27349,
+      "context_length": 222994
+    }
+  ]
+}

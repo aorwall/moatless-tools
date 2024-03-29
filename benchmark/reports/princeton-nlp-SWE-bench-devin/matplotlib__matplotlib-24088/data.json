@@ -1,0 +1,839 @@
+{
+  "instance_id": "matplotlib__matplotlib-24088",
+  "model_patch": "diff --git a/lib/matplotlib/colorbar.py b/lib/matplotlib/colorbar.py\nindex c8f49c0ad9..edd04cf89e 100644\n--- a/lib/matplotlib/colorbar.py\n+++ b/lib/matplotlib/colorbar.py\n@@ -295,16 +295,18 @@ class Colorbar:\n         if isinstance(mappable, contour.ContourSet):\n             cs = mappable\n             alpha = cs.get_alpha()\n-            boundaries = cs._levels\n-            values = cs.cvalues\n+            boundaries = cs.levels\n+            # Since cs.cvalues is not accessible, we use cs.levels to infer the values\n+            # cs.levels contains the boundary levels, so we take the midpoints as values\n+            values = (cs.levels[:-1] + cs.levels[1:]) / 2\n             extend = cs.extend\n             filled = cs.filled\n             if ticks is None:\n-                ticks = ticker.FixedLocator(cs.levels, nbins=10)\n+                # Convert cs.levels to a list before passing to ticker.FixedLocator\n+                ticks = ticker.FixedLocator(list(cs.levels), nbins=10)\n         elif isinstance(mappable, martist.Artist):\n             alpha = mappable.get_alpha()\n \n-        mappable.colorbar = self\n         mappable.colorbar_cid = mappable.callbacks.connect(\n             'changed', self.update_normal)\n \n@@ -1032,13 +1034,21 @@ class Colorbar:\n         self.ax.callbacks.disconnect(self._extend_cid1)\n         self.ax.callbacks.disconnect(self._extend_cid2)\n \n-        try:\n-            ax = self.mappable.axes\n-        except AttributeError:\n+        # Attempt to retrieve the axes associated with the mappable object.\n+        # If the mappable object does not have an axes attribute, we return None.\n+        # This is a change from the previous behavior where an AttributeError would be raised.\n+        ax = getattr(self.mappable, 'axes', None)\n+        if ax is None:\n             return\n+\n         try:\n             gs = ax.get_subplotspec().get_gridspec()\n             subplotspec = gs.get_topmost_subplotspec()\n+        except AttributeError:\n+            # If an AttributeError is raised, it means that the mappable object's axes\n+            # do not have a subplotspec or gridspec. In this case, we cannot determine\n+            # the axes to steal space from, and thus we return None.\n+            return\n         except AttributeError:\n             # use_gridspec was False\n             pos = ax.get_position(original=True)\n@@ -1167,9 +1177,9 @@ class Colorbar:\n                 self._set_scale('function', functions=funcs)\n             elif self.spacing == 'proportional':\n                 self._set_scale('linear')\n-        elif getattr(self.norm, '_scale', None):\n+        elif getattr(self.norm, 'scale', None):\n             # use the norm's scale (if it exists and is not None):\n-            self._set_scale(self.norm._scale)\n+            self._set_scale(self.norm.scale)\n         elif type(self.norm) is colors.Normalize:\n             # plain Normalize:\n             self._set_scale('linear')\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "lib/matplotlib/colorbar.py"
+  ],
+  "repo": "matplotlib/matplotlib",
+  "base_commit": "0517187b9c91061d2ec87e70442615cf4f47b6f3",
+  "patch": "diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py\n--- a/lib/matplotlib/figure.py\n+++ b/lib/matplotlib/figure.py\n@@ -1253,11 +1253,13 @@ def colorbar(\n         # Store the value of gca so that we can set it back later on.\n         if cax is None:\n             if ax is None:\n-                raise ValueError(\n+                _api.warn_deprecated(\"3.6\", message=(\n                     'Unable to determine Axes to steal space for Colorbar. '\n+                    'Using gca(), but will raise in the future. '\n                     'Either provide the *cax* argument to use as the Axes for '\n                     'the Colorbar, provide the *ax* argument to steal space '\n-                    'from it, or add *mappable* to an Axes.')\n+                    'from it, or add *mappable* to an Axes.'))\n+                ax = self.gca()\n             current_ax = self.gca()\n             userax = False\n             if (use_gridspec and isinstance(ax, SubplotBase)):\n",
+  "test_patch": "diff --git a/lib/matplotlib/tests/test_colorbar.py b/lib/matplotlib/tests/test_colorbar.py\n--- a/lib/matplotlib/tests/test_colorbar.py\n+++ b/lib/matplotlib/tests/test_colorbar.py\n@@ -1,10 +1,12 @@\n import numpy as np\n import pytest\n \n+from matplotlib import _api\n from matplotlib import cm\n import matplotlib.colors as mcolors\n import matplotlib as mpl\n \n+\n from matplotlib import rc_context\n from matplotlib.testing.decorators import image_comparison\n import matplotlib.pyplot as plt\n@@ -319,7 +321,8 @@ def test_parentless_mappable():\n     pc = mpl.collections.PatchCollection([], cmap=plt.get_cmap('viridis'))\n     pc.set_array([])\n \n-    with pytest.raises(ValueError, match='Unable to determine Axes to steal'):\n+    with pytest.warns(_api.MatplotlibDeprecationWarning,\n+                      match='Unable to determine Axes to steal'):\n         plt.colorbar(pc)\n \n \n",
+  "problem_statement": "[Bug]: ValueError: Unable to determine Axes to steal space for Colorbar.\n### Bug summary\r\n\r\n`matplotlib==3.6.0` started raising an error when trying to add a colorbar to `plt.hist()`:\r\n\r\nValueError: Unable to determine Axes to steal space for Colorbar. Either provide the *cax* argument to use as the Axes for the Colorbar, provide the *ax* argument to steal space from it, or add *mappable* to an Axes.\r\n\r\n### Code for reproduction\r\n\r\n```python\r\nimport matplotlib.pyplot as plt\r\nimport numpy as np\r\n\r\nxs = np.random.rand(100)\r\n\r\n_, bin_edges, bars = plt.hist(xs)\r\ncolor_map = getattr(plt.cm, \"hot\")\r\nfor x_val, rect in zip(bin_edges, bars.patches):\r\n    rect.set_color(color_map(x_val))\r\n\r\ncbar = plt.colorbar(\r\n    plt.cm.ScalarMappable(cmap=color_map),\r\n    # cax=ax.inset_axes([0.95, 0.1, 0.05, 0.8]),\r\n)\r\n```\r\n\r\n### Actual outcome\r\n\r\nIn `matplotlib==3.6.0`:\r\n\r\n![mpl==3 6 0](https://user-images.githubusercontent.com/30958850/191547778-033472e7-e739-4beb-a1f4-eecdcb587e22.png)\r\n\r\n\r\n### Expected outcome\r\n\r\nIn `matplotlib==3.5.1`:\r\n\r\n![mpl==3 5 1](https://user-images.githubusercontent.com/30958850/191547733-cd4911a5-67c8-4070-a708-ce3399e8c0ba.png)\r\n\r\n### Operating system\r\n\r\nmacOS 12.6\r\n\r\n### Matplotlib Version\r\n\r\n3.6.0\r\n\r\n### Python version\r\n\r\n3.10\r\n\r\n### Installation\r\n\r\npip\n",
+  "hints_text": "The error disappears in 3.6.0 by following the error message and passing `cax=ax.inset_axes([0.95, 0.1, 0.05, 0.8])`.\nIf it is ambiguous what axes to use, pass in the axes directly: \r\n\r\n```\r\ncbar = plt.colorbar(\r\n    plt.cm.ScalarMappable(cmap=color_map),\r\n    ax=plt.gca()\r\n)\r\n```\r\n\r\nYou _could_ make an axes, and use that, but you will lose some layout convenience. \nGood to know I can keep auto-layout for the color bar.\r\n\r\n> If it is ambiguous what axes to use, pass in the axes directly:\r\n\r\nWhat changed between 3.5.1 and 3.6.0? Why wasn't it ambiguous before?\nThis happened in https://github.com/matplotlib/matplotlib/pull/23740.   However, I think we were under the impression this was deprecated, but it sounds like perhaps that was not the case?\nI had the problem when trying to use create a simple SHAP plot using the [shap package](https://shap.readthedocs.io/en/latest/index.html). \r\n\r\n```python\r\nimport shap\r\n\r\n# use SHAP (SHapley Additive exPlanations) to explain the output of the generated model\r\nexplainer = shap.TreeExplainer(model)\r\nshap_values = explainer.shap_values(X)\r\nshap.summary_plot(shap_values[1], X, feature_names=X.columns, show=False, max_display=20, plot_size=(15, 10))\r\n```\r\n\r\n`ValueError: Unable to determine Axes to steal space for Colorbar. Either provide the cax argument to use as the Axes for the Colorbar, provide the ax argument to steal space from it, or add mappable to an Axes.`\r\n\r\nI had to downgrade to matplotlib 3.5.1 to fix the issue.\nPlease report to shap\n\nI will put on the agenda for next weeks call what we should do about this.  It seems we screwed up the deprecation warning somehow, or a lot of downstream packages didn't see it.  \n\n\nThere was a deprecation warning here, but it was only triggered if the mappable had an axes that was different from the current axes:\r\n\r\nhttps://github.com/matplotlib/matplotlib/blob/a86271c139a056a5c217ec5820143dca9e19f9b8/lib/matplotlib/figure.py#L1182-L1191\r\n\r\nIn the OP's case, I think the mappable has no axes.\nI guess this should get fixed for the bug release, though maybe not the most critical thing in the world.  But we have probably broken a few libraries by doing this with no notice.",
+  "created_at": "2022-10-03T22:25:59Z",
+  "version": "3.6",
+  "FAIL_TO_PASS": "[\"lib/matplotlib/tests/test_colorbar.py::test_parentless_mappable\"]",
+  "PASS_TO_PASS": "[\"lib/matplotlib/tests/test_colorbar.py::test_anchored_cbar_position_using_specgrid\", \"lib/matplotlib/tests/test_colorbar.py::test_aspects\", \"lib/matplotlib/tests/test_colorbar.py::test_axes_handles_same_functions[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_boundaries[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_cbar_minorticks_for_rc_xyminortickvisible\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_autoticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_autotickslog\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_axes_kw\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_change_lim_scale[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_closed_patch[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extend_drawedges[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[both-expected2-horizontal]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[both-expected2-vertical]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[max-expected1-horizontal]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[max-expected1-vertical]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[min-expected0-horizontal]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_inverted_axis[min-expected0-vertical]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_length[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_extension_shape[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_format[%4.2e]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_format[{x:.2e}]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_get_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_get_ticks_2\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_int[clim0]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_int[clim1]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_inverted_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_label\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_log_minortick_labels\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[both]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[max]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_lognorm_extension[min]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_minorticks_on_off\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_no_warning_rcparams_grid_true\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_positioning[png-False]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_positioning[png-True]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_powernorm_extension\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_renorm\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_scale_reset\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_set_formatter_locator\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_single_ax_panchor_east[constrained]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_single_ax_panchor_east[standard]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_single_ax_panchor_false\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_single_scatter[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbar_ticks\", \"lib/matplotlib/tests/test_colorbar.py::test_colorbarbase\", \"lib/matplotlib/tests/test_colorbar.py::test_contour_colorbar[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_gridspec_make_colorbar[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_inset_colorbar_layout\", \"lib/matplotlib/tests/test_colorbar.py::test_keeping_xlabel[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_mappable_2d_alpha\", \"lib/matplotlib/tests/test_colorbar.py::test_mappable_no_alpha\", \"lib/matplotlib/tests/test_colorbar.py::test_negative_boundarynorm\", \"lib/matplotlib/tests/test_colorbar.py::test_offset_text_loc\", \"lib/matplotlib/tests/test_colorbar.py::test_proportional_colorbars[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_cb_whose_mappable_has_no_figure[png]\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure[no\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure[with\", \"lib/matplotlib/tests/test_colorbar.py::test_remove_from_figure_cl\", \"lib/matplotlib/tests/test_colorbar.py::test_title_text_loc\", \"lib/matplotlib/tests/test_colorbar.py::test_twoslope_colorbar[png]\"]",
+  "environment_setup_commit": "73909bcb408886a22e2b84581d6b9e6d9907c813",
+  "patch_files": [
+    "lib/matplotlib/figure.py"
+  ],
+  "test_patch_files": [
+    "lib/matplotlib/tests/test_colorbar.py"
+  ],
+  "patch_diff_details": {
+    "lib/matplotlib/figure.py": {
+      "diffs": [
+        {
+          "start_line_old": 1256,
+          "end_line_old": 1260,
+          "file_pos": 1,
+          "file_context_length": 28715,
+          "pos": 1,
+          "context_length": 323
+        }
+      ]
+    }
+  },
+  "vectors": 3935,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.colorbar.5_FigureBase.colorbar.12.1",
+      "distance": 0.6564286351203918,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1254,
+      "end_line": 1281,
+      "tokens": 323,
+      "context_length": 323,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/colorbar_placement.py_1_cmaps_40.1",
+      "distance": 0.6615514159202576,
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 738,
+      "context_length": 1061
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_121_colorbar.3.1",
+      "distance": 0.6645874977111816,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2043,
+      "end_line": 2056,
+      "tokens": 138,
+      "context_length": 1199
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.__init___Colorbar.__init__.self._extend_cid2.1",
+      "distance": 0.6764581799507141,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 264,
+      "end_line": 419,
+      "tokens": 1285,
+      "context_length": 2484
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_1__log.1",
+      "distance": 0.7105661630630493,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 213,
+      "context_length": 2697
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/matplotlib/tutorials/colors/colorbar_only.py_cmap_48_",
+      "distance": 0.7149123549461365,
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "start_line": 88,
+      "end_line": 131,
+      "tokens": 357,
+      "context_length": 3054
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/matplotlib/examples/subplots_axes_and_figures/colorbar_placement.py_41_",
+      "distance": 0.7284648418426514,
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "start_line": 83,
+      "end_line": 97,
+      "tokens": 131,
+      "context_length": 3185
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/matplotlib/examples/color/colorbar_basics.py_1_",
+      "distance": 0.7331878542900085,
+      "file_path": "examples/color/colorbar_basics.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 506,
+      "context_length": 3691
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._do_extends.21_Colorbar._do_extends.22",
+      "distance": 0.7474836707115173,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 690,
+      "end_line": 712,
+      "tokens": 268,
+      "context_length": 3959
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar_Colorbar.3",
+      "distance": 0.7482556700706482,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 199,
+      "end_line": 262,
+      "tokens": 513,
+      "context_length": 4472
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._add_solids_patches_Colorbar._add_solids_patches.self.solids_patches.1",
+      "distance": 0.7557543516159058,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 608,
+      "end_line": 622,
+      "tokens": 201,
+      "context_length": 4673
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py__set_ticks_on_axis_warn__ColorbarSpine.draw.3.1",
+      "distance": 0.7561817765235901,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 118,
+      "end_line": 144,
+      "tokens": 254,
+      "context_length": 4927
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/figure.py_FigureBase.colorbar_FigureBase.colorbar.4",
+      "distance": 0.7607537508010864,
+      "file_path": "lib/matplotlib/figure.py",
+      "start_line": 1176,
+      "end_line": 1253,
+      "tokens": 748,
+      "context_length": 5675,
+      "file_pos": 6
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_gridspec.10_",
+      "distance": 0.7705978155136108,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1505,
+      "end_line": 1566,
+      "tokens": 624,
+      "context_length": 6299
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_make_axes.cax.1",
+      "distance": 0.7717506289482117,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1356,
+      "end_line": 1437,
+      "tokens": 799,
+      "context_length": 7098
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/matplotlib/tutorials/colors/colorbar_only.py_1_47",
+      "distance": 0.7724100351333618,
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 734,
+      "context_length": 7832
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/simple_colorbar.py_1_",
+      "distance": 0.7794153690338135,
+      "file_path": "examples/axes_grid1/simple_colorbar.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 135,
+      "context_length": 7967
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/filled_step.py_10_",
+      "distance": 0.7794491052627563,
+      "file_path": "examples/lines_bars_and_markers/filled_step.py",
+      "start_line": 179,
+      "end_line": 237,
+      "tokens": 493,
+      "context_length": 8460
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/matplotlib/examples/ticks/colorbar_tick_labelling_demo.py_1_",
+      "distance": 0.7827012538909912,
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 303,
+      "context_length": 8763
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/demo_colorbar_of_inset_axes.py_1_",
+      "distance": 0.7850481271743774,
+      "file_path": "examples/axes_grid1/demo_colorbar_of_inset_axes.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 250,
+      "context_length": 9013
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes.28_make_axes.34.1",
+      "distance": 0.7866543531417847,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1438,
+      "end_line": 1455,
+      "tokens": 169,
+      "context_length": 9182
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/axes_grid1/axes_grid.py_CbarAxesBase__cbaraxes_class_factory.1",
+      "distance": 0.788640022277832,
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "start_line": 20,
+      "end_line": 49,
+      "tokens": 211,
+      "context_length": 9393
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_200_errorbar.1.1",
+      "distance": 0.791703462600708,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2475,
+      "end_line": 2487,
+      "tokens": 229,
+      "context_length": 9622
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.remove_Colorbar.remove.11.4.2",
+      "distance": 0.8116291761398315,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1013,
+      "end_line": 1048,
+      "tokens": 263,
+      "context_length": 9885
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._forward_boundaries_Colorbar._inverse_boundaries.b.2.1",
+      "distance": 0.8152269124984741,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1135,
+      "end_line": 1150,
+      "tokens": 191,
+      "context_length": 10076
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_188_clabel.1.1",
+      "distance": 0.818297266960144,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2415,
+      "end_line": 2426,
+      "tokens": 146,
+      "context_length": 10222
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._update_dividers_Colorbar._update_dividers.10",
+      "distance": 0.8214784860610962,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 584,
+      "end_line": 606,
+      "tokens": 246,
+      "context_length": 10468
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_14_14",
+      "distance": 0.8231573700904846,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 30,
+      "end_line": 115,
+      "tokens": 961,
+      "context_length": 11429
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._extend_lower_Colorbar._set_view.3",
+      "distance": 0.8336764574050903,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1279,
+      "end_line": 1309,
+      "tokens": 267,
+      "context_length": 11696
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._set_view_from_bbox_ColorbarBase.1",
+      "distance": 0.8385671377182007,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1311,
+      "end_line": 1332,
+      "tokens": 248,
+      "context_length": 11944
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_make_axes_gridspec_make_axes_gridspec.wh_space.1",
+      "distance": 0.8385729789733887,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1458,
+      "end_line": 1503,
+      "tokens": 398,
+      "context_length": 12342
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/scatter_hist.py_10_",
+      "distance": 0.8401304483413696,
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "start_line": 57,
+      "end_line": 123,
+      "tokens": 702,
+      "context_length": 13044
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._do_extends_Colorbar._do_extends.20.8",
+      "distance": 0.8410930037498474,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 624,
+      "end_line": 689,
+      "tokens": 684,
+      "context_length": 13728
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/matplotlib/tutorials/introductory/quick_start.py_443_518",
+      "distance": 0.8481026887893677,
+      "file_path": "tutorials/introductory/quick_start.py",
+      "start_line": 475,
+      "end_line": 561,
+      "tokens": 1039,
+      "context_length": 14767
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/demo_colorbar_with_inset_locator.py_1_",
+      "distance": 0.8519195318222046,
+      "file_path": "examples/axes_grid1/demo_colorbar_with_inset_locator.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 383,
+      "context_length": 15150
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/tight_layout_guide.py_lines_",
+      "distance": 0.8537766933441162,
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "start_line": 222,
+      "end_line": 293,
+      "tokens": 495,
+      "context_length": 15645
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/matplotlib/tutorials/intermediate/constrainedlayout_guide.py_norm_105",
+      "distance": 0.8580112457275391,
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "start_line": 113,
+      "end_line": 185,
+      "tokens": 781,
+      "context_length": 16426
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.update_normal_Colorbar.draw_all.2",
+      "distance": 0.858301043510437,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 474,
+      "end_line": 508,
+      "tokens": 310,
+      "context_length": 16736
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.locator_Colorbar.filled.1",
+      "distance": 0.859886884689331,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 421,
+      "end_line": 472,
+      "tokens": 384,
+      "context_length": 17120
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py__ColorbarAxesLocator__ColorbarAxesLocator.get_subplotspec.ss.3.1",
+      "distance": 0.8651776313781738,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 147,
+      "end_line": 196,
+      "tokens": 450,
+      "context_length": 17570
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/pcolor_demo.py_1_Z1.1",
+      "distance": 0.8661566972732544,
+      "file_path": "examples/images_contours_and_fields/pcolor_demo.py",
+      "start_line": 1,
+      "end_line": 97,
+      "tokens": 788,
+      "context_length": 18358
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/broken_barh.py_1_",
+      "distance": 0.869814932346344,
+      "file_path": "examples/lines_bars_and_markers/broken_barh.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 247,
+      "context_length": 18605
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/matplotlib/examples/specialty_plots/leftventricle_bulleye.py_6_",
+      "distance": 0.8709120750427246,
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "start_line": 133,
+      "end_line": 196,
+      "tokens": 708,
+      "context_length": 19313
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/matplotlib/plot_types/stats/errorbar_plot.py_1_",
+      "distance": 0.8738018870353699,
+      "file_path": "plot_types/stats/errorbar_plot.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 175,
+      "context_length": 19488
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_214_hist.1.1",
+      "distance": 0.874546229839325,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2556,
+      "end_line": 2568,
+      "tokens": 183,
+      "context_length": 19671
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/matplotlib/examples/statistics/errorbars_and_boxes.py_make_error_boxes_make_error_boxes.errorboxes.8.1",
+      "distance": 0.8772538900375366,
+      "file_path": "examples/statistics/errorbars_and_boxes.py",
+      "start_line": 42,
+      "end_line": 60,
+      "tokens": 189,
+      "context_length": 19860
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/pyplot.py_barbs_bar_label.1.1",
+      "distance": 0.8847172856330872,
+      "file_path": "lib/matplotlib/pyplot.py",
+      "start_line": 2363,
+      "end_line": 2387,
+      "tokens": 252,
+      "context_length": 20112
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.add_lines_Colorbar.add_lines.self.stale.1",
+      "distance": 0.8850290775299072,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 714,
+      "end_line": 792,
+      "tokens": 779,
+      "context_length": 20891
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_Axes.errorbar.10_Axes.boxplot",
+      "distance": 0.8874631524085999,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 3493,
+      "end_line": 3964,
+      "tokens": 2054,
+      "context_length": 22945
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/matplotlib/examples/axes_grid1/demo_colorbar_with_axes_divider.py_1_",
+      "distance": 0.8899580240249634,
+      "file_path": "examples/axes_grid1/demo_colorbar_with_axes_divider.py",
+      "start_line": 1,
+      "end_line": 35,
+      "tokens": 350,
+      "context_length": 23295
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._proportional_y_Colorbar._proportional_y.16.1",
+      "distance": 0.8901917934417725,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1216,
+      "end_line": 1252,
+      "tokens": 414,
+      "context_length": 23709
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._mesh_Colorbar._mesh.10.2.1.1",
+      "distance": 0.8909735083580017,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1103,
+      "end_line": 1133,
+      "tokens": 306,
+      "context_length": 24015
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.update_ticks_Colorbar._get_ticker_locator_formatter.11",
+      "distance": 0.8921358585357666,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 794,
+      "end_line": 850,
+      "tokens": 497,
+      "context_length": 24512
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar._process_values_Colorbar._process_values.14.self._values.1",
+      "distance": 0.8939627408981323,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 1050,
+      "end_line": 1101,
+      "tokens": 584,
+      "context_length": 25096
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/axes/_axes.py_functools__log.1",
+      "distance": 0.8941478133201599,
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 284,
+      "context_length": 25380
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/filled_step.py_1_filled_hist.13.3.1",
+      "distance": 0.8985053300857544,
+      "file_path": "examples/lines_bars_and_markers/filled_step.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 477,
+      "context_length": 25857
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/matplotlib/examples/statistics/errorbars_and_boxes.py_16_",
+      "distance": 0.8989900350570679,
+      "file_path": "examples/statistics/errorbars_and_boxes.py",
+      "start_line": 63,
+      "end_line": 81,
+      "tokens": 117,
+      "context_length": 25974
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.set_ticklabels_Colorbar.set_ticklabels.2",
+      "distance": 0.9020096063613892,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 893,
+      "end_line": 928,
+      "tokens": 313,
+      "context_length": 26287
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/colorbar.py_Colorbar.minorticks_on_Colorbar.set_label.self.stale.1",
+      "distance": 0.9038230180740356,
+      "file_path": "lib/matplotlib/colorbar.py",
+      "start_line": 930,
+      "end_line": 967,
+      "tokens": 301,
+      "context_length": 26588
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/matplotlib/examples/images_contours_and_fields/colormap_interactive_adjustment.py_1_",
+      "distance": 0.9047092795372009,
+      "file_path": "examples/images_contours_and_fields/colormap_interactive_adjustment.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 306,
+      "context_length": 26894
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/matplotlib/examples/lines_bars_and_markers/errorbar_limits_simple.py_1_",
+      "distance": 0.9081625938415527,
+      "file_path": "examples/lines_bars_and_markers/errorbar_limits_simple.py",
+      "start_line": 1,
+      "end_line": 64,
+      "tokens": 529,
+      "context_length": 27423
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/matplotlib/lib/matplotlib/_constrained_layout.py_get_cb_parent_spans_get_cb_parent_spans.9.1",
+      "distance": 0.9097204804420471,
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "start_line": 560,
+      "end_line": 577,
+      "tokens": 156,
+      "context_length": 27579
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/matplotlib/lib/mpl_toolkits/mplot3d/axes3d.py_Axes3D.bar3d_Axes3D.bar3d.12",
+      "distance": 0.911607027053833,
+      "file_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+      "start_line": 2275,
+      "end_line": 2351,
+      "tokens": 667,
+      "context_length": 28246
+    }
+  ],
+  "files": [
+    {
+      "file_path": "lib/matplotlib/figure.py",
+      "position": 1,
+      "tokens": 28715,
+      "context_length": 28715
+    },
+    {
+      "file_path": "examples/subplots_axes_and_figures/colorbar_placement.py",
+      "position": 2,
+      "tokens": 869,
+      "context_length": 29584
+    },
+    {
+      "file_path": "lib/matplotlib/pyplot.py",
+      "position": 3,
+      "tokens": 28011,
+      "context_length": 57595
+    },
+    {
+      "file_path": "lib/matplotlib/colorbar.py",
+      "position": 4,
+      "tokens": 14007,
+      "context_length": 71602
+    },
+    {
+      "file_path": "tutorials/colors/colorbar_only.py",
+      "position": 5,
+      "tokens": 1091,
+      "context_length": 72693
+    },
+    {
+      "file_path": "examples/color/colorbar_basics.py",
+      "position": 6,
+      "tokens": 506,
+      "context_length": 73199
+    },
+    {
+      "file_path": "examples/axes_grid1/simple_colorbar.py",
+      "position": 7,
+      "tokens": 135,
+      "context_length": 73334
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/filled_step.py",
+      "position": 8,
+      "tokens": 1645,
+      "context_length": 74979
+    },
+    {
+      "file_path": "examples/ticks/colorbar_tick_labelling_demo.py",
+      "position": 9,
+      "tokens": 303,
+      "context_length": 75282
+    },
+    {
+      "file_path": "examples/axes_grid1/demo_colorbar_of_inset_axes.py",
+      "position": 10,
+      "tokens": 250,
+      "context_length": 75532
+    },
+    {
+      "file_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+      "position": 11,
+      "tokens": 4977,
+      "context_length": 80509
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/scatter_hist.py",
+      "position": 12,
+      "tokens": 1111,
+      "context_length": 81620
+    },
+    {
+      "file_path": "tutorials/introductory/quick_start.py",
+      "position": 13,
+      "tokens": 5941,
+      "context_length": 87561
+    },
+    {
+      "file_path": "examples/axes_grid1/demo_colorbar_with_inset_locator.py",
+      "position": 14,
+      "tokens": 383,
+      "context_length": 87944
+    },
+    {
+      "file_path": "tutorials/intermediate/tight_layout_guide.py",
+      "position": 15,
+      "tokens": 2151,
+      "context_length": 90095
+    },
+    {
+      "file_path": "tutorials/intermediate/constrainedlayout_guide.py",
+      "position": 16,
+      "tokens": 6564,
+      "context_length": 96659
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/pcolor_demo.py",
+      "position": 17,
+      "tokens": 1045,
+      "context_length": 97704
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/broken_barh.py",
+      "position": 18,
+      "tokens": 247,
+      "context_length": 97951
+    },
+    {
+      "file_path": "examples/specialty_plots/leftventricle_bulleye.py",
+      "position": 19,
+      "tokens": 2177,
+      "context_length": 100128
+    },
+    {
+      "file_path": "plot_types/stats/errorbar_plot.py",
+      "position": 20,
+      "tokens": 175,
+      "context_length": 100303
+    },
+    {
+      "file_path": "examples/statistics/errorbars_and_boxes.py",
+      "position": 21,
+      "tokens": 646,
+      "context_length": 100949
+    },
+    {
+      "file_path": "lib/matplotlib/axes/_axes.py",
+      "position": 22,
+      "tokens": 74039,
+      "context_length": 174988
+    },
+    {
+      "file_path": "examples/axes_grid1/demo_colorbar_with_axes_divider.py",
+      "position": 23,
+      "tokens": 350,
+      "context_length": 175338
+    },
+    {
+      "file_path": "examples/images_contours_and_fields/colormap_interactive_adjustment.py",
+      "position": 24,
+      "tokens": 306,
+      "context_length": 175644
+    },
+    {
+      "file_path": "examples/lines_bars_and_markers/errorbar_limits_simple.py",
+      "position": 25,
+      "tokens": 529,
+      "context_length": 176173
+    },
+    {
+      "file_path": "lib/matplotlib/_constrained_layout.py",
+      "position": 26,
+      "tokens": 7401,
+      "context_length": 183574
+    },
+    {
+      "file_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+      "position": 27,
+      "tokens": 30302,
+      "context_length": 213876
+    }
+  ]
+}

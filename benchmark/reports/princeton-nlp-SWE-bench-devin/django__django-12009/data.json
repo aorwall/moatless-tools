@@ -1,0 +1,2631 @@
+{
+  "instance_id": "django__django-12009",
+  "model_patch": "diff --git a/setup.cfg b/setup.cfg\nindex d8fac7076f..6be8210dfd 100644\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -34,7 +34,6 @@ project_urls =\n [options]\n python_requires = >=3.6\n packages = find:\n-scripts = django/bin/django-admin.py\n include_package_data = true\n zip_safe = false\n install_requires =\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "setup.cfg"
+  ],
+  "repo": "django/django",
+  "base_commit": "82a88d2f48e13ef5d472741d5ed1c183230cfe4c",
+  "patch": "diff --git a/django/bin/django-admin.py b/django/bin/django-admin.py\n--- a/django/bin/django-admin.py\n+++ b/django/bin/django-admin.py\n@@ -1,5 +1,21 @@\n #!/usr/bin/env python\n+# When the django-admin.py deprecation ends, remove this script.\n+import warnings\n+\n from django.core import management\n \n+try:\n+    from django.utils.deprecation import RemovedInDjango40Warning\n+except ImportError:\n+    raise ImportError(\n+        'django-admin.py was deprecated in Django 3.1 and removed in Django '\n+        '4.0. Please manually remove this script from your virtual environment '\n+        'and use django-admin instead.'\n+    )\n+\n if __name__ == \"__main__\":\n+    warnings.warn(\n+        'django-admin.py is deprecated in favor of django-admin.',\n+        RemovedInDjango40Warning,\n+    )\n     management.execute_from_command_line()\n",
+  "test_patch": "diff --git a/tests/admin_scripts/test_django_admin_py.py b/tests/admin_scripts/test_django_admin_py.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/admin_scripts/test_django_admin_py.py\n@@ -0,0 +1,37 @@\n+import subprocess\n+import sys\n+from pathlib import Path\n+\n+import django\n+from django.test import SimpleTestCase\n+\n+\n+class DeprecationTests(SimpleTestCase):\n+    DEPRECATION_MESSAGE = (\n+        b'RemovedInDjango40Warning: django-admin.py is deprecated in favor of '\n+        b'django-admin.'\n+    )\n+\n+    def _run_test(self, args):\n+        p = subprocess.run(\n+            [sys.executable, *args],\n+            stdout=subprocess.PIPE,\n+            stderr=subprocess.PIPE,\n+            check=True,\n+        )\n+        return p.stdout, p.stderr\n+\n+    def test_django_admin_py_deprecated(self):\n+        django_admin_py = Path(django.__file__).parent / 'bin' / 'django-admin.py'\n+        _, err = self._run_test(['-Wd', django_admin_py, '--version'])\n+        self.assertIn(self.DEPRECATION_MESSAGE, err)\n+\n+    def test_main_not_deprecated(self):\n+        _, err = self._run_test(['-Wd', '-m', 'django', '--version'])\n+        self.assertNotIn(self.DEPRECATION_MESSAGE, err)\n+\n+    def test_django_admin_py_equivalent_main(self):\n+        django_admin_py = Path(django.__file__).parent / 'bin' / 'django-admin.py'\n+        django_admin_py_out, _ = self._run_test([django_admin_py, '--version'])\n+        django_out, _ = self._run_test(['-m', 'django', '--version'])\n+        self.assertEqual(django_admin_py_out, django_out)\ndiff --git a/tests/admin_scripts/tests.py b/tests/admin_scripts/tests.py\n--- a/tests/admin_scripts/tests.py\n+++ b/tests/admin_scripts/tests.py\n@@ -14,7 +14,6 @@\n from io import StringIO\n from unittest import mock\n \n-import django\n from django import conf, get_version\n from django.conf import settings\n from django.core.management import (\n@@ -46,8 +45,6 @@ def setUp(self):\n         # where `/var` is a symlink to `/private/var`.\n         self.test_dir = os.path.realpath(os.path.join(tmpdir.name, 'test_project'))\n         os.mkdir(self.test_dir)\n-        with open(os.path.join(self.test_dir, '__init__.py'), 'w'):\n-            pass\n \n     def write_settings(self, filename, apps=None, is_dir=False, sdict=None, extra=None):\n         if is_dir:\n@@ -95,7 +92,7 @@ def _ext_backend_paths(self):\n                 paths.append(os.path.dirname(backend_dir))\n         return paths\n \n-    def run_test(self, script, args, settings_file=None, apps=None):\n+    def run_test(self, args, settings_file=None, apps=None):\n         base_dir = os.path.dirname(self.test_dir)\n         # The base dir for Django's tests is one level up.\n         tests_dir = os.path.dirname(os.path.dirname(__file__))\n@@ -119,7 +116,7 @@ def run_test(self, script, args, settings_file=None, apps=None):\n         test_environ['PYTHONWARNINGS'] = ''\n \n         p = subprocess.run(\n-            [sys.executable, script] + args,\n+            [sys.executable, *args],\n             stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n             cwd=self.test_dir,\n             env=test_environ, universal_newlines=True,\n@@ -127,8 +124,7 @@ def run_test(self, script, args, settings_file=None, apps=None):\n         return p.stdout, p.stderr\n \n     def run_django_admin(self, args, settings_file=None):\n-        script_dir = os.path.abspath(os.path.join(os.path.dirname(django.__file__), 'bin'))\n-        return self.run_test(os.path.join(script_dir, 'django-admin.py'), args, settings_file)\n+        return self.run_test(['-m', 'django', *args], settings_file)\n \n     def run_manage(self, args, settings_file=None, manage_py=None):\n         template_manage_py = (\n@@ -146,7 +142,7 @@ def run_manage(self, args, settings_file=None, manage_py=None):\n         with open(test_manage_py, 'w') as fp:\n             fp.write(manage_py_contents)\n \n-        return self.run_test('./manage.py', args, settings_file)\n+        return self.run_test(['./manage.py', *args], settings_file)\n \n     def assertNoOutput(self, stream):\n         \"Utility assertion: assert that the given stream is empty\"\n@@ -1900,7 +1896,12 @@ def test_simple_project(self):\n         # running again..\n         out, err = self.run_django_admin(args)\n         self.assertNoOutput(out)\n-        self.assertOutput(err, \"already exists\")\n+        self.assertOutput(\n+            err,\n+            \"CommandError: 'testproject' conflicts with the name of an \"\n+            \"existing Python module and cannot be used as a project name. \"\n+            \"Please try another name.\",\n+        )\n \n     def test_invalid_project_name(self):\n         \"Make sure the startproject management command validates a project name\"\n@@ -2162,8 +2163,10 @@ def test_importable_target_name(self):\n         )\n \n     def test_overlaying_app(self):\n-        self.run_django_admin(['startapp', 'app1'])\n-        out, err = self.run_django_admin(['startapp', 'app2', 'app1'])\n+        # Use a subdirectory so it is outside the PYTHONPATH.\n+        os.makedirs(os.path.join(self.test_dir, 'apps/app1'))\n+        self.run_django_admin(['startapp', 'app1', 'apps/app1'])\n+        out, err = self.run_django_admin(['startapp', 'app2', 'apps/app1'])\n         self.assertOutput(\n             err,\n             \"already exists. Overlaying an app into an existing directory \"\n@@ -2263,13 +2266,8 @@ def test_pks_parsing(self):\n class MainModule(AdminScriptTestCase):\n     \"\"\"python -m django works like django-admin.\"\"\"\n \n-    def test_runs_django_admin(self):\n-        cmd_out, _ = self.run_django_admin(['--version'])\n-        mod_out, _ = self.run_test('-m', ['django', '--version'])\n-        self.assertEqual(mod_out, cmd_out)\n-\n     def test_program_name_in_help(self):\n-        out, err = self.run_test('-m', ['django', 'help'])\n+        out, err = self.run_test(['-m', 'django', 'help'])\n         self.assertOutput(out, \"Type 'python -m django help <subcommand>' for help on a specific subcommand.\")\n \n \n",
+  "problem_statement": "Django installs /usr/bin/django-admin and /usr/bin/django-admin.py\nDescription\n\t\nDjango (since 1.7) installs /usr/bin/django-admin and /usr/bin/django-admin.py.\nBoth of them execute django.core.management.execute_from_command_line().\n/usr/bin/django-admin.py does it directly, while /usr/bin/django-admin does it through pkg_resources module of Setuptools.\n/usr/bin/django-admin.py:\n#!/usr/bin/python3.4\nfrom django.core import management\nif __name__ == \"__main__\":\n\tmanagement.execute_from_command_line()\n/usr/bin/django-admin:\n#!/usr/bin/python3.4\n# EASY-INSTALL-ENTRY-SCRIPT: 'Django==1.7','console_scripts','django-admin'\n__requires__ = 'Django==1.7'\nimport sys\nfrom pkg_resources import load_entry_point\nif __name__ == '__main__':\n\tsys.exit(\n\t\tload_entry_point('Django==1.7', 'console_scripts', 'django-admin')()\n\t)\n/usr/lib64/python3.4/site-packages/Django-1.7-py3.4.egg-info/entry_points.txt:\n[console_scripts]\ndjango-admin = django.core.management:execute_from_command_line\nInstallation of /usr/bin/django-admin.py is caused by scripts=['django/bin/django-admin.py'] in setup.py.\nInstallation of /usr/bin/django-admin is caused by entry_points={'console_scripts': ['django-admin = django.core.management:execute_from_command_line',]} in setup.py.\nI think that it would suffice to install only one of these scripts.\n",
+  "hints_text": "We've introduced django-admin because commands don't usually have \"language extensions\". We're keeping django-admin.py for backwards-compatibility. There's little benefit to remove django-admin.py and it would be very disruptive. Maybe we'll do to at some point, but not soon.\nWe should wait until support for Django 1.6 ends to remove django-admin.py. Otherwise, it will become complicated to write version-independent test scripts (think tox.ini).\nIf we do remove it, we should officially deprecate it first, right?\nYes, the fast track would be to deprecate it in Django 1.8 and remove it in Django 2.0. However, there's almost no downside to keeping it for a few more years, and it will avoid making many tutorials obsolete (for example).\n\u200bPR",
+  "created_at": "2019-11-02T04:49:18Z",
+  "version": "3.1",
+  "FAIL_TO_PASS": "[\"test_django_admin_py_deprecated (admin_scripts.test_django_admin_py.DeprecationTests)\"]",
+  "PASS_TO_PASS": "[\"\\\"\", \"--help can be used on a specific command\", \"--help is equivalent to help\", \"--no-color prevent colorization of the output\", \"--output=unified emits settings diff in unified mode.\", \"--version is equivalent to version\", \"-h is handled as a short form of --help\", \"All errors/warnings should be sorted by level and by message.\", \"Make sure passing the wrong kinds of arguments outputs an error and prints usage\", \"Make sure template context variables are not html escaped\", \"Make sure template context variables are rendered with proper values\", \"Make sure the startproject management command creates a project\", \"Make sure the startproject management command creates a project in a specific directory\", \"Make sure the startproject management command is able to render custom files\", \"Make sure the startproject management command is able to use a different project template\", \"Make sure the startproject management command is able to use a different project template from a tarball\", \"Make sure the startproject management command validates a project name\", \"NoArg Commands can be executed\", \"NoArg Commands raise an error if an argument is provided\", \"Options are correctly handled when they are passed before and after\", \"Options passed after settings are correctly handled.\", \"Options passed before settings are correctly handled.\", \"Regression for #20509\", \"Runs without error and emits settings diff.\", \"Short options passed after settings are correctly handled.\", \"Short options passed before settings are correctly handled.\", \"Startproject can use a project template from a tarball and create it in a specified location\", \"Startproject management command handles project template tar/zip balls from non-canonical urls\", \"The all option also shows settings with the default value.\", \"Ticket 17475: Template dir passed has a trailing path separator\", \"User AppCommands can execute when a single app name is provided\", \"User AppCommands can execute when some of the provided app names are invalid\", \"User AppCommands raise an error when multiple app names are provided\", \"User AppCommands raise an error when no app name is provided\", \"User BaseCommands can execute when a label is provided\", \"User BaseCommands can execute when no labels are provided\", \"User BaseCommands can execute with multiple options when a label is provided\", \"User BaseCommands can execute with options when a label is provided\", \"User BaseCommands outputs command usage when wrong option is specified\", \"User LabelCommands are executed multiple times if multiple labels are provided\", \"User LabelCommands can execute when a label is provided\", \"User LabelCommands raise an error if no label is provided\", \"alternate: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"alternate: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"alternate: django-admin builtin commands fail with an error when no settings provided\", \"alternate: django-admin builtin commands succeed if settings are provided as argument\", \"alternate: django-admin builtin commands succeed if settings are provided in the environment\", \"alternate: django-admin can execute user commands if settings are provided as argument\", \"alternate: django-admin can execute user commands if settings are provided in environment\", \"alternate: django-admin can't execute user commands unless settings are provided\", \"alternate: manage.py builtin commands fail if settings file (from argument) doesn't exist\", \"alternate: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"alternate: manage.py builtin commands fail with an error when no default settings provided\", \"alternate: manage.py builtin commands work if settings are provided in the environment\", \"alternate: manage.py builtin commands work with settings provided as argument\", \"alternate: manage.py can execute user commands if settings are provided as argument\", \"alternate: manage.py can execute user commands if settings are provided in environment\", \"alternate: manage.py can't execute user commands without settings\", \"alternate: manage.py output syntax color can be deactivated with the `--no-color` option\", \"check reports an error on a nonexistent app in INSTALLED_APPS.\", \"default: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"default: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"default: django-admin builtin commands fail with an error when no settings provided\", \"default: django-admin builtin commands succeed if settings are provided as argument\", \"default: django-admin builtin commands succeed if settings are provided in the environment\", \"default: django-admin can execute user commands if settings are provided as argument\", \"default: django-admin can execute user commands if settings are provided in environment\", \"default: django-admin can't execute user commands if it isn't provided settings\", \"default: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"default: manage.py builtin commands succeed if settings are provided as argument\", \"default: manage.py builtin commands succeed if settings are provided in the environment\", \"default: manage.py builtin commands succeed if settings file (from argument) doesn't exist\", \"default: manage.py builtin commands succeed when default settings are appropriate\", \"default: manage.py can execute user commands when default settings are appropriate\", \"default: manage.py can execute user commands when settings are provided as argument\", \"default: manage.py can execute user commands when settings are provided in environment\", \"directory: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"directory: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"directory: django-admin builtin commands fail with an error when no settings provided\", \"directory: django-admin builtin commands succeed if settings are provided as argument\", \"directory: django-admin builtin commands succeed if settings are provided in the environment\", \"directory: django-admin can't execute user commands unless settings are provided\", \"directory: startapp creates the correct directory\", \"directory: startapp creates the correct directory with a custom template\", \"directory: startapp creates the correct directory with unicode characters\", \"fulldefault: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"fulldefault: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"fulldefault: django-admin builtin commands fail with an error when no settings provided\", \"fulldefault: django-admin builtin commands succeed if a settings file is provided\", \"fulldefault: django-admin builtin commands succeed if the environment contains settings\", \"fulldefault: django-admin can execute user commands if settings are provided as argument\", \"fulldefault: django-admin can execute user commands if settings are provided in environment\", \"fulldefault: django-admin can't execute user commands unless settings are provided\", \"fulldefault: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"fulldefault: manage.py builtin commands succeed if settings are provided as argument\", \"fulldefault: manage.py builtin commands succeed if settings are provided in the environment\", \"fulldefault: manage.py builtin commands succeed if settings file (from argument) doesn't exist\", \"fulldefault: manage.py builtin commands succeed when default settings are appropriate\", \"fulldefault: manage.py can execute user commands when default settings are appropriate\", \"fulldefault: manage.py can execute user commands when settings are provided as argument\", \"fulldefault: manage.py can execute user commands when settings are provided in environment\", \"help --commands shows the list of all available commands\", \"help is handled as a special case\", \"manage.py check does not raise an ImportError validating a\", \"manage.py check does not raise errors when an app imports a base\", \"manage.py check reports an ImportError if an app's models.py\", \"minimal: django-admin builtin commands fail if settings are provided as argument\", \"minimal: django-admin builtin commands fail if settings are provided in the environment\", \"minimal: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"minimal: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"minimal: django-admin builtin commands fail with an error when no settings provided\", \"minimal: django-admin can't execute user commands unless settings are provided\", \"minimal: django-admin can't execute user commands, even if settings are provided as argument\", \"minimal: django-admin can't execute user commands, even if settings are provided in environment\", \"minimal: manage.py builtin commands fail if settings are provided as argument\", \"minimal: manage.py builtin commands fail if settings are provided in the environment\", \"minimal: manage.py builtin commands fail if settings file (from argument) doesn't exist\", \"minimal: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"minimal: manage.py builtin commands fail with an error when no settings provided\", \"minimal: manage.py can't execute user commands without appropriate settings\", \"minimal: manage.py can't execute user commands, even if settings are provided as argument\", \"minimal: manage.py can't execute user commands, even if settings are provided in environment\", \"multiple: manage.py builtin commands fail if settings file (from argument) doesn't exist\", \"multiple: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"multiple: manage.py builtin commands fail with an error when no settings provided\", \"multiple: manage.py builtin commands succeed if settings are provided as argument\", \"multiple: manage.py can execute builtin commands if settings are provided in the environment\", \"multiple: manage.py can execute user commands if settings are provided as argument\", \"multiple: manage.py can execute user commands if settings are provided in environment\", \"multiple: manage.py can't execute user commands using default settings\", \"no settings: django-admin builtin commands fail if settings file (from argument) doesn't exist\", \"no settings: django-admin builtin commands fail if settings file (from environment) doesn't exist\", \"no settings: django-admin builtin commands fail with an error when no settings provided\", \"no settings: manage.py builtin commands fail if settings file (from argument) doesn't exist\", \"no settings: manage.py builtin commands fail if settings file (from environment) doesn't exist\", \"no settings: manage.py builtin commands fail with an error when no settings provided\", \"startapp validates that app name is a valid Python identifier.\", \"test_attribute_error (admin_scripts.tests.ManageSettingsWithSettingsErrors)\", \"test_base_run_from_argv (admin_scripts.tests.CommandTypes)\", \"test_color_style (admin_scripts.tests.CommandTypes)\", \"test_command_color (admin_scripts.tests.CommandTypes)\", \"test_custom_default (admin_scripts.tests.DiffSettings)\", \"test_custom_project_destination_missing (admin_scripts.tests.StartProject)\", \"test_custom_project_template_from_tarball_by_url (admin_scripts.tests.StartProject)\", \"test_custom_project_template_with_non_ascii_templates (admin_scripts.tests.StartProject)\", \"test_custom_stderr (admin_scripts.tests.CommandTypes)\", \"test_custom_stdout (admin_scripts.tests.CommandTypes)\", \"test_django_admin_py_equivalent_main (admin_scripts.test_django_admin_py.DeprecationTests)\", \"test_dynamic_settings_configured (admin_scripts.tests.DiffSettings)\", \"test_empty_allowed_hosts_error (admin_scripts.tests.ManageRunserverEmptyAllowedHosts)\", \"test_force_color_command_init (admin_scripts.tests.CommandTypes)\", \"test_force_color_execute (admin_scripts.tests.CommandTypes)\", \"test_help (admin_scripts.tests.ManageSettingsWithSettingsErrors)\", \"test_import_error (admin_scripts.tests.ManageSettingsWithSettingsErrors)\", \"test_importable_name (admin_scripts.tests.StartApp)\", \"test_importable_project_name (admin_scripts.tests.StartProject)\", \"test_importable_target_name (admin_scripts.tests.StartApp)\", \"test_invalid_target_name (admin_scripts.tests.StartApp)\", \"test_key_error (admin_scripts.tests.ManageSettingsWithSettingsErrors)\", \"test_main_not_deprecated (admin_scripts.test_django_admin_py.DeprecationTests)\", \"test_migration_warning_multiple_apps (admin_scripts.tests.ManageRunserverMigrationWarning)\", \"test_migration_warning_one_app (admin_scripts.tests.ManageRunserverMigrationWarning)\", \"test_no_color_force_color_mutually_exclusive_command_init (admin_scripts.tests.CommandTypes)\", \"test_no_color_force_color_mutually_exclusive_execute (admin_scripts.tests.CommandTypes)\", \"test_no_database (admin_scripts.tests.ManageRunserver)\", \"test_no_suggestions (admin_scripts.tests.DjangoAdminSuggestions)\", \"test_non_existent_command_output (admin_scripts.tests.ManageManuallyConfiguredSettings)\", \"test_overlaying_app (admin_scripts.tests.StartApp)\", \"test_params_to_runserver (admin_scripts.tests.ManageTestserver)\", \"test_precedence (admin_scripts.tests.Discovery)\", \"test_program_name_in_help (admin_scripts.tests.MainModule)\", \"test_readonly_database (admin_scripts.tests.ManageRunserver)\", \"test_run_from_argv_closes_connections (admin_scripts.tests.CommandTypes)\", \"test_run_from_argv_non_ascii_error (admin_scripts.tests.CommandTypes)\", \"test_runner_addrport_ipv6 (admin_scripts.tests.ManageRunserver)\", \"test_runner_ambiguous (admin_scripts.tests.ManageRunserver)\", \"test_runner_custom_defaults (admin_scripts.tests.ManageRunserver)\", \"test_runner_custom_defaults_ipv6 (admin_scripts.tests.ManageRunserver)\", \"test_runner_hostname (admin_scripts.tests.ManageRunserver)\", \"test_runner_hostname_ipv6 (admin_scripts.tests.ManageRunserver)\", \"test_runserver_addrport (admin_scripts.tests.ManageRunserver)\", \"test_settings_configured (admin_scripts.tests.DiffSettings)\", \"test_suggestions (admin_scripts.tests.DjangoAdminSuggestions)\", \"test_testserver_handle_params (admin_scripts.tests.ManageTestserver)\", \"test_unified_all (admin_scripts.tests.DiffSettings)\", \"test_warning_does_not_halt (admin_scripts.tests.ManageCheck)\", \"version is handled as a special case\"]",
+  "environment_setup_commit": "0668164b4ac93a5be79f5b87fae83c657124d9ab",
+  "patch_files": [
+    "django/bin/django-admin.py"
+  ],
+  "test_patch_files": [
+    "tests/admin_scripts/test_django_admin_py.py",
+    "tests/admin_scripts/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/bin/django-admin.py": {
+      "diffs": [
+        {
+          "start_line_old": 2,
+          "end_line_old": 2,
+          "file_pos": 1,
+          "file_context_length": 27,
+          "pos": 1,
+          "context_length": 27
+        }
+      ]
+    }
+  },
+  "vectors": 3425,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/bin/django-admin.py__",
+      "distance": 0.621290922164917,
+      "file_path": "django/bin/django-admin.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 27,
+      "context_length": 27,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_list_display_item_ModelAdminChecks._check_list_display_item.4.1",
+      "distance": 0.849208652973175,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 718,
+      "end_line": 749,
+      "tokens": 229,
+      "context_length": 256
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_ManagementUtility_ManagementUtility.main_help_text.3.1",
+      "distance": 0.8565822839736938,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 171,
+      "end_line": 213,
+      "tokens": 343,
+      "context_length": 599
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_ManagementUtility.execute_",
+      "distance": 0.884111762046814,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 321,
+      "end_line": 402,
+      "tokens": 743,
+      "context_length": 1342
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_check_dependencies_check_dependencies.11.1",
+      "distance": 0.9194526076316833,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 57,
+      "end_line": 126,
+      "tokens": 588,
+      "context_length": 1930
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_os_Command.bpython.2",
+      "distance": 0.9250552654266357,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 268,
+      "context_length": 2198
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_functools_load_command_class.3.1",
+      "distance": 0.9346907138824463,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 1,
+      "end_line": 38,
+      "tokens": 261,
+      "context_length": 2459
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.app_index_",
+      "distance": 0.9372134208679199,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 512,
+      "end_line": 546,
+      "tokens": 293,
+      "context_length": 2752
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/contrib/admin/bin/compress.py_1_",
+      "distance": 0.9414527416229248,
+      "file_path": "django/contrib/admin/bin/compress.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 482,
+      "context_length": 3234
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_1_sensitive_post_parameters_m.1",
+      "distance": 0.9421257376670837,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 188,
+      "context_length": 3422
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/contrib/admin/__init__.py_1_",
+      "distance": 0.943178653717041,
+      "file_path": "django/contrib/admin/__init__.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 245,
+      "context_length": 3667
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/setup.py_os_",
+      "distance": 0.9440900087356567,
+      "file_path": "setup.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 546,
+      "context_length": 4213
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/scripts/manage_translations.py_1_HAVE_JS.1",
+      "distance": 0.9446918368339539,
+      "file_path": "scripts/manage_translations.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 197,
+      "context_length": 4410
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/contrib/admin/utils.py_label_for_field_label_for_field.4.2.1.1",
+      "distance": 0.948833703994751,
+      "file_path": "django/contrib/admin/utils.py",
+      "start_line": 308,
+      "end_line": 365,
+      "tokens": 468,
+      "context_length": 4878
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_Command.handle_",
+      "distance": 0.9633358120918274,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 83,
+      "end_line": 103,
+      "tokens": 162,
+      "context_length": 5040
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand.add_arguments_BaseCommand.run_from_argv.9.3.1.2.3",
+      "distance": 0.9697650671005249,
+      "file_path": "django/core/management/base.py",
+      "start_line": 297,
+      "end_line": 345,
+      "tokens": 381,
+      "context_length": 5421
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/core/management/commands/shell.py_Command.python_Command.python.9",
+      "distance": 0.9705567359924316,
+      "file_path": "django/core/management/commands/shell.py",
+      "start_line": 42,
+      "end_line": 81,
+      "tokens": 401,
+      "context_length": 5822
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminReadonlyField_AdminReadonlyField.label_tag.4.1",
+      "distance": 0.983345627784729,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 152,
+      "end_line": 190,
+      "tokens": 343,
+      "context_length": 6165
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/core/management/commands/dbshell.py_1_",
+      "distance": 0.9894217848777771,
+      "file_path": "django/core/management/commands/dbshell.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 231,
+      "context_length": 6396
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/core/management/commands/check.py_Command.handle_",
+      "distance": 0.9946916103363037,
+      "file_path": "django/core/management/commands/check.py",
+      "start_line": 36,
+      "end_line": 66,
+      "tokens": 214,
+      "context_length": 6610
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand_BaseCommand.stealth_options.1",
+      "distance": 0.9962107539176941,
+      "file_path": "django/core/management/base.py",
+      "start_line": 148,
+      "end_line": 228,
+      "tokens": 751,
+      "context_length": 7361
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.get_app_list_AdminSite.index.5.1",
+      "distance": 0.9983246326446533,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 477,
+      "end_line": 510,
+      "tokens": 228,
+      "context_length": 7589
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle_Command.handle.28",
+      "distance": 0.9990319013595581,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 67,
+      "end_line": 160,
+      "tokens": 825,
+      "context_length": 8414
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/contrib/admin/apps.py_1_",
+      "distance": 1.0004773139953613,
+      "file_path": "django/contrib/admin/apps.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 148,
+      "context_length": 8562
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/core/management/commands/check.py_1_Command.add_arguments.5",
+      "distance": 1.0048296451568604,
+      "file_path": "django/core/management/commands/check.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 226,
+      "context_length": 8788
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command_Command._run_checks.3.1",
+      "distance": 1.0172159671783447,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 21,
+      "end_line": 65,
+      "tokens": 369,
+      "context_length": 9157
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/core/management/commands/runserver.py_Command.inner_run_",
+      "distance": 1.0181939601898193,
+      "file_path": "django/core/management/commands/runserver.py",
+      "start_line": 107,
+      "end_line": 159,
+      "tokens": 504,
+      "context_length": 9661
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command_Command.add_arguments.6",
+      "distance": 1.0199060440063477,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 32,
+      "end_line": 61,
+      "tokens": 261,
+      "context_length": 9922
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.get_urls_AdminSite.get_urls.16.1",
+      "distance": 1.0224393606185913,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 240,
+      "end_line": 289,
+      "tokens": 472,
+      "context_length": 10394
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_inline_instances_ModelAdmin.get_inline_instances.3.1",
+      "distance": 1.0232311487197876,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 587,
+      "end_line": 600,
+      "tokens": 122,
+      "context_length": 10516
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand.__init___BaseCommand.get_version.2.1",
+      "distance": 1.02434241771698,
+      "file_path": "django/core/management/base.py",
+      "start_line": 230,
+      "end_line": 247,
+      "tokens": 159,
+      "context_length": 10675
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand.execute_BaseCommand._run_checks.1.1",
+      "distance": 1.0295697450637817,
+      "file_path": "django/core/management/base.py",
+      "start_line": 347,
+      "end_line": 382,
+      "tokens": 292,
+      "context_length": 10967
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin_BaseModelAdmin.__init__.overrides.self.formfield_overrides.1",
+      "distance": 1.0309994220733643,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 99,
+      "end_line": 129,
+      "tokens": 223,
+      "context_length": 11190
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/contrib/admin/exceptions.py__",
+      "distance": 1.0311105251312256,
+      "file_path": "django/contrib/admin/exceptions.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 66,
+      "context_length": 11256
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/docs/_ext/djangodocs.py_setup_setup.16.1",
+      "distance": 1.0348381996154785,
+      "file_path": "docs/_ext/djangodocs.py",
+      "start_line": 26,
+      "end_line": 70,
+      "tokens": 385,
+      "context_length": 11641
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks_BaseModelAdminChecks.check.1.1",
+      "distance": 1.0397758483886719,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 129,
+      "end_line": 146,
+      "tokens": 155,
+      "context_length": 11796
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.loaddata_Command.loaddata.24.1.2.1",
+      "distance": 1.0410151481628418,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 81,
+      "end_line": 148,
+      "tokens": 593,
+      "context_length": 12389
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.has_add_permission_",
+      "distance": 1.0462933778762817,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2148,
+      "end_line": 2183,
+      "tokens": 315,
+      "context_length": 12704
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.response_action_ModelAdmin.response_action.15.15.3.1",
+      "distance": 1.048065185546875,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1337,
+      "end_line": 1402,
+      "tokens": 581,
+      "context_length": 13285
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/core/management/commands/dumpdata.py_Command.handle.18_",
+      "distance": 1.0491551160812378,
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "start_line": 170,
+      "end_line": 194,
+      "tokens": 224,
+      "context_length": 13509
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite_AdminSite.__init__.6",
+      "distance": 1.0534648895263672,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 32,
+      "end_line": 68,
+      "tokens": 298,
+      "context_length": 13807
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_ManagementUtility.fetch_command_ManagementUtility.fetch_command.6.1",
+      "distance": 1.0544450283050537,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 215,
+      "end_line": 245,
+      "tokens": 309,
+      "context_length": 14116
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_functools_READ_STDIN.1",
+      "distance": 1.0552055835723877,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 151,
+      "context_length": 14267
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/core/management/commands/showmigrations.py_Command.handle_Command._validate_app_names.3.1",
+      "distance": 1.0555624961853027,
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "start_line": 42,
+      "end_line": 63,
+      "tokens": 158,
+      "context_length": 14425
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/scripts/manage_translations.py_33_",
+      "distance": 1.0558803081512451,
+      "file_path": "scripts/manage_translations.py",
+      "start_line": 176,
+      "end_line": 186,
+      "tokens": 116,
+      "context_length": 14541
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/core/management/base.py_1_SystemCheckError.2",
+      "distance": 1.057831048965454,
+      "file_path": "django/core/management/base.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 223,
+      "context_length": 14764
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/core/management/commands/runserver.py_Command.handle_Command.run.3.2.1",
+      "distance": 1.059290885925293,
+      "file_path": "django/core/management/commands/runserver.py",
+      "start_line": 67,
+      "end_line": 105,
+      "tokens": 397,
+      "context_length": 15161
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/core/management/commands/startapp.py__",
+      "distance": 1.059589147567749,
+      "file_path": "django/core/management/commands/startapp.py",
+      "start_line": 1,
+      "end_line": 15,
+      "tokens": 101,
+      "context_length": 15262
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/contrib/gis/admin/__init__.py_1_",
+      "distance": 1.0600894689559937,
+      "file_path": "django/contrib/gis/admin/__init__.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 130,
+      "context_length": 15392
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_Command.handle_",
+      "distance": 1.0603693723678589,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 32,
+      "end_line": 69,
+      "tokens": 371,
+      "context_length": 15763
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_autocomplete_fields_BaseModelAdmin.get_sortable_by.2.1",
+      "distance": 1.0611212253570557,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 277,
+      "end_line": 366,
+      "tokens": 641,
+      "context_length": 16404
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.urls_ModelAdmin.media.3.1",
+      "distance": 1.0612293481826782,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 626,
+      "end_line": 643,
+      "tokens": 136,
+      "context_length": 16540
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_time_13",
+      "distance": 1.062448501586914,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 148,
+      "context_length": 16688
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/contrib/admin/migrations/0001_initial.py_django.contrib.admin.models_",
+      "distance": 1.0625760555267334,
+      "file_path": "django/contrib/admin/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 320,
+      "context_length": 17008
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/contrib/admindocs/urls.py_1_",
+      "distance": 1.0627620220184326,
+      "file_path": "django/contrib/admindocs/urls.py",
+      "start_line": 1,
+      "end_line": 51,
+      "tokens": 307,
+      "context_length": 17315
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/core/management/commands/runserver.py_Command_Command.add_arguments.4",
+      "distance": 1.063098669052124,
+      "file_path": "django/core/management/commands/runserver.py",
+      "start_line": 24,
+      "end_line": 53,
+      "tokens": 240,
+      "context_length": 17555
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/admin/models.py_json_ACTION_FLAG_CHOICES.1",
+      "distance": 1.0673534870147705,
+      "file_path": "django/contrib/admin/models.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 118,
+      "context_length": 17673
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py__boolean_icon__coerce_field_name.3.1",
+      "distance": 1.0680859088897705,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 197,
+      "end_line": 211,
+      "tokens": 136,
+      "context_length": 17809
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.admin_view.inner_AdminSite.admin_view.7.1",
+      "distance": 1.0688965320587158,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 219,
+      "end_line": 238,
+      "tokens": 221,
+      "context_length": 18030
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/core/management/base.py_AppCommand_AppCommand.handle_app_config.2",
+      "distance": 1.0692164897918701,
+      "file_path": "django/core/management/base.py",
+      "start_line": 486,
+      "end_line": 519,
+      "tokens": 291,
+      "context_length": 18321
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/core/management/commands/makemigrations.py_Command.handle_Command.handle.37",
+      "distance": 1.0696005821228027,
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "start_line": 60,
+      "end_line": 146,
+      "tokens": 788,
+      "context_length": 19109
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/core/management/utils.py_find_command_find_command.9.1",
+      "distance": 1.069962978363037,
+      "file_path": "django/core/management/utils.py",
+      "start_line": 52,
+      "end_line": 74,
+      "tokens": 204,
+      "context_length": 19313
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/core/management/commands/makemigrations.py_Command.handle.38_Command.handle.41.3.2.1",
+      "distance": 1.0707261562347412,
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "start_line": 147,
+      "end_line": 184,
+      "tokens": 302,
+      "context_length": 19615
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.check_AdminSite.check.8.1",
+      "distance": 1.0718529224395752,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 70,
+      "end_line": 84,
+      "tokens": 129,
+      "context_length": 19744
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._response_post_save_ModelAdmin.response_post_save_change.2.1",
+      "distance": 1.0722427368164062,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1310,
+      "end_line": 1335,
+      "tokens": 232,
+      "context_length": 19976
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_glob_check_programs.1.1.1",
+      "distance": 1.0723645687103271,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 260,
+      "context_length": 20236
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_urls_ModelAdmin.get_urls.4.1",
+      "distance": 1.0724656581878662,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 602,
+      "end_line": 624,
+      "tokens": 280,
+      "context_length": 20516
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/contrib/sites/admin.py__",
+      "distance": 1.0744149684906006,
+      "file_path": "django/contrib/sites/admin.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 46,
+      "context_length": 20562
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_urls.py_1_",
+      "distance": 1.0784077644348145,
+      "file_path": "django/contrib/admin/templatetags/admin_urls.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 405,
+      "context_length": 20967
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/core/management/base.py_handle_default_options_no_translations.3.1",
+      "distance": 1.079289436340332,
+      "file_path": "django/core/management/base.py",
+      "start_line": 64,
+      "end_line": 88,
+      "tokens": 161,
+      "context_length": 21128
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/core/management/commands/test.py_Command.add_arguments_",
+      "distance": 1.0797531604766846,
+      "file_path": "django/core/management/commands/test.py",
+      "start_line": 25,
+      "end_line": 57,
+      "tokens": 260,
+      "context_length": 21388
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.handle_Command.handle.12.1",
+      "distance": 1.0811423063278198,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 63,
+      "end_line": 79,
+      "tokens": 187,
+      "context_length": 21575
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command.handle_Command.handle.looks_like_locale.1",
+      "distance": 1.0812242031097412,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 283,
+      "end_line": 362,
+      "tokens": 816,
+      "context_length": 22391
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks_ModelAdminChecks.check.1.1",
+      "distance": 1.0815366506576538,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 620,
+      "end_line": 639,
+      "tokens": 183,
+      "context_length": 22574
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.fixture_dirs_Command.fixture_dirs.8.1",
+      "distance": 1.0832569599151611,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 275,
+      "end_line": 303,
+      "tokens": 246,
+      "context_length": 22820
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/contrib/admindocs/apps.py__",
+      "distance": 1.0838840007781982,
+      "file_path": "django/contrib/admindocs/apps.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 42,
+      "context_length": 22862
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/core/management/commands/dumpdata.py_Command.handle_Command.handle.16.2",
+      "distance": 1.085519552230835,
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "start_line": 67,
+      "end_line": 140,
+      "tokens": 626,
+      "context_length": 23488
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/core/management/commands/sendtestemail.py_Command.handle_",
+      "distance": 1.0885096788406372,
+      "file_path": "django/core/management/commands/sendtestemail.py",
+      "start_line": 26,
+      "end_line": 41,
+      "tokens": 121,
+      "context_length": 23609
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.handle.22_TemplateCommand.handle.23.2.1.2.1",
+      "distance": 1.0890802145004272,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 119,
+      "end_line": 182,
+      "tokens": 563,
+      "context_length": 24172
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/core/management/commands/makemigrations.py_Command_Command.add_arguments.8",
+      "distance": 1.0894496440887451,
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "start_line": 23,
+      "end_line": 58,
+      "tokens": 284,
+      "context_length": 24456
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/core/management/commands/testserver.py_Command.handle_",
+      "distance": 1.090569257736206,
+      "file_path": "django/core/management/commands/testserver.py",
+      "start_line": 29,
+      "end_line": 55,
+      "tokens": 234,
+      "context_length": 24690
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_actions_ModelAdmin.get_action_choices.4.1",
+      "distance": 1.0908281803131104,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 880,
+      "end_line": 901,
+      "tokens": 221,
+      "context_length": 24911
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/contrib/admin/tests.py_AdminSeleniumTestCase.admin_login_AdminSeleniumTestCase.admin_login.8.1",
+      "distance": 1.0914433002471924,
+      "file_path": "django/contrib/admin/tests.py",
+      "start_line": 126,
+      "end_line": 137,
+      "tokens": 153,
+      "context_length": 25064
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin.media_InlineModelAdmin.get_max_num.2.1",
+      "distance": 1.0926640033721924,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2009,
+      "end_line": 2030,
+      "tokens": 221,
+      "context_length": 25285
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command.handle.locale_dirs_Command.handle.34.4.1.1",
+      "distance": 1.0926828384399414,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 363,
+      "end_line": 392,
+      "tokens": 231,
+      "context_length": 25516
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.handle_TemplateCommand.handle.prefix_length.1",
+      "distance": 1.0932434797286987,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 58,
+      "end_line": 117,
+      "tokens": 527,
+      "context_length": 26043
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_inline_formsets_ModelAdmin.get_inline_formsets.can_edit_parent.4.1",
+      "distance": 1.0956122875213623,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1466,
+      "end_line": 1489,
+      "tokens": 319,
+      "context_length": 26362
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/contrib/admindocs/__init__.py__",
+      "distance": 1.0960654020309448,
+      "file_path": "django/contrib/admindocs/__init__.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 15,
+      "context_length": 26377
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/contrib/admin/actions.py_1_",
+      "distance": 1.0964853763580322,
+      "file_path": "django/contrib/admin/actions.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 609,
+      "context_length": 26986
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_datetime_DOT.1",
+      "distance": 1.0977039337158203,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 170,
+      "context_length": 27156
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/core/management/commands/flush.py_Command.handle_",
+      "distance": 1.0986382961273193,
+      "file_path": "django/core/management/commands/flush.py",
+      "start_line": 27,
+      "end_line": 83,
+      "tokens": 496,
+      "context_length": 27652
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/core/management/commands/testserver.py_1_Command.add_arguments.4",
+      "distance": 1.0994839668273926,
+      "file_path": "django/core/management/commands/testserver.py",
+      "start_line": 1,
+      "end_line": 27,
+      "tokens": 205,
+      "context_length": 27857
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/core/management/commands/showmigrations.py_sys_Command.add_arguments.6",
+      "distance": 1.0997260808944702,
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 292,
+      "context_length": 28149
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/utils/log.py_logging_configure_logging.1.logging_config_func.4.1",
+      "distance": 1.1003918647766113,
+      "file_path": "django/utils/log.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 484,
+      "context_length": 28633
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/migrations/operations/__init__.py_RenameField_",
+      "distance": 1.102339506149292,
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 195,
+      "context_length": 28828
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/contrib/admin/migrations/0002_logentry_remove_auto_add.py__",
+      "distance": 1.1024633646011353,
+      "file_path": "django/contrib/admin/migrations/0002_logentry_remove_auto_add.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 101,
+      "context_length": 28929
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/core/management/commands/sendtestemail.py_socket_Command.add_arguments.3",
+      "distance": 1.1033461093902588,
+      "file_path": "django/core/management/commands/sendtestemail.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 186,
+      "context_length": 29115
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/core/management/base.py_LabelCommand_",
+      "distance": 1.1036264896392822,
+      "file_path": "django/core/management/base.py",
+      "start_line": 522,
+      "end_line": 554,
+      "tokens": 240,
+      "context_length": 29355
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/createsuperuser.py_1_Command.execute.3.1",
+      "distance": 1.1038892269134521,
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "start_line": 1,
+      "end_line": 79,
+      "tokens": 577,
+      "context_length": 29932
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_call_command_call_command.26.1",
+      "distance": 1.1043004989624023,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 76,
+      "end_line": 168,
+      "tokens": 772,
+      "context_length": 30704
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/core/management/__init__.py_get_commands_get_commands.5.1",
+      "distance": 1.104528784751892,
+      "file_path": "django/core/management/__init__.py",
+      "start_line": 41,
+      "end_line": 73,
+      "tokens": 265,
+      "context_length": 30969
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_inspect_MODEL_METHODS_EXCLUDE.1",
+      "distance": 1.1045591831207275,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 223,
+      "context_length": 31192
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/contrib/auth/management/commands/createsuperuser.py_Command.handle_Command.handle.6.6.1",
+      "distance": 1.105182409286499,
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "start_line": 81,
+      "end_line": 202,
+      "tokens": 1155,
+      "context_length": 32347
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle.29_Command.handle.45",
+      "distance": 1.1057705879211426,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 161,
+      "end_line": 242,
+      "tokens": 793,
+      "context_length": 33140
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/contrib/auth/urls.py_1_",
+      "distance": 1.1060683727264404,
+      "file_path": "django/contrib/auth/urls.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 225,
+      "context_length": 33365
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/core/management/commands/compilemessages.py_Command.handle_Command.handle.22.1",
+      "distance": 1.1073641777038574,
+      "file_path": "django/core/management/commands/compilemessages.py",
+      "start_line": 58,
+      "end_line": 115,
+      "tokens": 504,
+      "context_length": 33869
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py_1_",
+      "distance": 1.1074384450912476,
+      "file_path": "django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 111,
+      "context_length": 33980
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/core/management/commands/inspectdb.py_keyword_Command.handle.1.2.1",
+      "distance": 1.1081600189208984,
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 272,
+      "context_length": 34252
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_action_ModelAdmin.get_action.5.1",
+      "distance": 1.1086323261260986,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 903,
+      "end_line": 931,
+      "tokens": 233,
+      "context_length": 34485
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite._build_app_dict_AdminSite._build_app_dict.6.1",
+      "distance": 1.1111271381378174,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 409,
+      "end_line": 475,
+      "tokens": 476,
+      "context_length": 34961
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.add_arguments_TemplateCommand.add_arguments.5",
+      "distance": 1.1130573749542236,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 40,
+      "end_line": 56,
+      "tokens": 181,
+      "context_length": 35142
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_json_checkbox.1",
+      "distance": 1.1142545938491821,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 198,
+      "context_length": 35340
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_re_NotRegistered.1",
+      "distance": 1.1155774593353271,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 175,
+      "context_length": 35515
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/management/commands/collectstatic.py_Command.handle_Command.handle.11.3.1",
+      "distance": 1.1160147190093994,
+      "file_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+      "start_line": 147,
+      "end_line": 205,
+      "tokens": 503,
+      "context_length": 36018
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.validate_name_TemplateCommand.validate_name.5.3.1",
+      "distance": 1.1164402961730957,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 210,
+      "end_line": 241,
+      "tokens": 236,
+      "context_length": 36254
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/management/commands/runserver.py_1_",
+      "distance": 1.117351770401001,
+      "file_path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "start_line": 1,
+      "end_line": 33,
+      "tokens": 252,
+      "context_length": 36506
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_1_check_admin_app.4.1",
+      "distance": 1.1183356046676636,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 1,
+      "end_line": 54,
+      "tokens": 329,
+      "context_length": 36835
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.changelist_view.24_ModelAdmin.changelist_view.32.1",
+      "distance": 1.1218006610870361,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1738,
+      "end_line": 1819,
+      "tokens": 744,
+      "context_length": 37579
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_InlineModelAdminChecks_InlineModelAdminChecks.check.2.1",
+      "distance": 1.12239670753479,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 999,
+      "end_line": 1011,
+      "tokens": 116,
+      "context_length": 37695
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/contrib/admin/models.py_LogEntryManager_LogEntryManager.log_action.2.1",
+      "distance": 1.1226743459701538,
+      "file_path": "django/contrib/admin/models.py",
+      "start_line": 23,
+      "end_line": 36,
+      "tokens": 111,
+      "context_length": 37806
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_inlines_item_ModelAdminChecks._check_inlines_item.4.4.1.1",
+      "distance": 1.1231521368026733,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 670,
+      "end_line": 704,
+      "tokens": 265,
+      "context_length": 38071
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_BIDI_125",
+      "distance": 1.1258111000061035,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 146,
+      "end_line": 261,
+      "tokens": 854,
+      "context_length": 38925
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.urls_AdminSite.each_context.4.1",
+      "distance": 1.1263251304626465,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 291,
+      "end_line": 312,
+      "tokens": 175,
+      "context_length": 39100
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_AdminForm_AdminForm.media.3.1",
+      "distance": 1.1267024278640747,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 33,
+      "end_line": 67,
+      "tokens": 230,
+      "context_length": 39330
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/contrib/redirects/admin.py__",
+      "distance": 1.1268606185913086,
+      "file_path": "django/contrib/redirects/admin.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 68,
+      "context_length": 39398
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/core/management/base.py_BaseCommand.check_BaseCommand.check.10.1.2.1",
+      "distance": 1.1270289421081543,
+      "file_path": "django/core/management/base.py",
+      "start_line": 384,
+      "end_line": 449,
+      "tokens": 614,
+      "context_length": 40012
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command_Command.xgettext_options.1",
+      "distance": 1.128180742263794,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 197,
+      "end_line": 214,
+      "tokens": 177,
+      "context_length": 40189
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_copy_csrf_protect_m.1",
+      "distance": 1.1287004947662354,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1,
+      "end_line": 96,
+      "tokens": 769,
+      "context_length": 40958
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view.context_ModelAdmin._changeform_view.21.1",
+      "distance": 1.130607008934021,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1608,
+      "end_line": 1632,
+      "tokens": 279,
+      "context_length": 41237
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/contrib/admin/helpers.py_InlineAdminForm.pk_field_InlineAdminForm.ordering_field.2.1",
+      "distance": 1.1314289569854736,
+      "file_path": "django/contrib/admin/helpers.py",
+      "start_line": 366,
+      "end_line": 382,
+      "tokens": 138,
+      "context_length": 41375
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._create_formsets_ModelAdmin._create_formsets.8.1",
+      "distance": 1.1316550970077515,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1930,
+      "end_line": 1973,
+      "tokens": 403,
+      "context_length": 41778
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.login_AdminSite.login.13.1",
+      "distance": 1.1327275037765503,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 375,
+      "end_line": 407,
+      "tokens": 288,
+      "context_length": 42066
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.render_change_form_ModelAdmin.render_change_form.11.1",
+      "distance": 1.1351664066314697,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1111,
+      "end_line": 1156,
+      "tokens": 482,
+      "context_length": 42548
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/contrib/sessions/management/commands/clearsessions.py_1_",
+      "distance": 1.1354312896728516,
+      "file_path": "django/contrib/sessions/management/commands/clearsessions.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 122,
+      "context_length": 42670
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/contrib/admindocs/utils.py_1_get_view_name.3.1",
+      "distance": 1.1358575820922852,
+      "file_path": "django/contrib/admindocs/utils.py",
+      "start_line": 1,
+      "end_line": 25,
+      "tokens": 151,
+      "context_length": 42821
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/urls/__init__.py_translate_url_",
+      "distance": 1.135979175567627,
+      "file_path": "django/urls/__init__.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 239,
+      "context_length": 43060
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_1_ChangeListSearchForm.__init__.self.fields.1",
+      "distance": 1.1366907358169556,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 319,
+      "context_length": 43379
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle.46_Command.handle.50",
+      "distance": 1.1379971504211426,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 243,
+      "end_line": 257,
+      "tokens": 170,
+      "context_length": 43549
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.migration_progress_callback_Command.migration_progress_callback.1.2.8.2",
+      "distance": 1.1387814283370972,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 259,
+      "end_line": 291,
+      "tokens": 349,
+      "context_length": 43898
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/core/management/commands/makemigrations.py_os_14",
+      "distance": 1.1415807008743286,
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 149,
+      "context_length": 44047
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/core/files/__init__.py__",
+      "distance": 1.1423184871673584,
+      "file_path": "django/core/files/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 15,
+      "context_length": 44062
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._changeform_view_ModelAdmin._changeform_view.15.3.title.1",
+      "distance": 1.1424509286880493,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1524,
+      "end_line": 1607,
+      "tokens": 746,
+      "context_length": 44808
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_1_Command.execute.4",
+      "distance": 1.1427384614944458,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 266,
+      "context_length": 45074
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/contrib/admin/models.py_LogEntry_LogEntry.__repr__.1.1",
+      "distance": 1.1429518461227417,
+      "file_path": "django/contrib/admin/models.py",
+      "start_line": 39,
+      "end_line": 72,
+      "tokens": 241,
+      "context_length": 45315
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin_ModelAdmin.__str__.1.1",
+      "distance": 1.1432418823242188,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 542,
+      "end_line": 585,
+      "tokens": 297,
+      "context_length": 45612
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/contrib/flatpages/admin.py_1_",
+      "distance": 1.1449952125549316,
+      "file_path": "django/contrib/flatpages/admin.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 144,
+      "context_length": 45756
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.has_view_or_change_permission_BaseModelAdmin.has_module_permission.2.1",
+      "distance": 1.1450567245483398,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 525,
+      "end_line": 539,
+      "tokens": 169,
+      "context_length": 45925
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin._filter_actions_by_permissions_ModelAdmin._filter_actions_by_permissions.4.1",
+      "distance": 1.1451836824417114,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 864,
+      "end_line": 878,
+      "tokens": 125,
+      "context_length": 46050
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlsequencereset.py_1_",
+      "distance": 1.1461708545684814,
+      "file_path": "django/core/management/commands/sqlsequencereset.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 194,
+      "context_length": 46244
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.autocomplete_view_ModelAdmin._get_edited_object_pks.3.1",
+      "distance": 1.146222710609436,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1634,
+      "end_line": 1648,
+      "tokens": 173,
+      "context_length": 46417
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/contrib/auth/management/__init__.py_1__get_builtin_permissions.4.1",
+      "distance": 1.1475707292556763,
+      "file_path": "django/contrib/auth/management/__init__.py",
+      "start_line": 1,
+      "end_line": 32,
+      "tokens": 196,
+      "context_length": 46613
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/template/__init__.py_1_",
+      "distance": 1.147615671157837,
+      "file_path": "django/template/__init__.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 360,
+      "context_length": 46973
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_autocomplete_fields_BaseModelAdminChecks._check_autocomplete_fields.2.2.1.1",
+      "distance": 1.148342490196228,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 148,
+      "end_line": 158,
+      "tokens": 123,
+      "context_length": 47096
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/core/management/commands/dumpdata.py_Command.handle.get_objects_Command.handle.get_objects.3.3.4.2.1",
+      "distance": 1.1483991146087646,
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "start_line": 142,
+      "end_line": 168,
+      "tokens": 239,
+      "context_length": 47335
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin._add_view_UserAdmin._add_view.7.7.1",
+      "distance": 1.1492184400558472,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 101,
+      "end_line": 126,
+      "tokens": 286,
+      "context_length": 47621
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/core/management/commands/diffsettings.py_Command.handle_Command.handle.8.1",
+      "distance": 1.1506245136260986,
+      "file_path": "django/core/management/commands/diffsettings.py",
+      "start_line": 41,
+      "end_line": 55,
+      "tokens": 134,
+      "context_length": 47755
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_GroupAdmin_GroupAdmin.formfield_for_manytomany.2.1",
+      "distance": 1.1506637334823608,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 25,
+      "end_line": 37,
+      "tokens": 128,
+      "context_length": 47883
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command.find_files_Command.process_files.4.1",
+      "distance": 1.1511410474777222,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 450,
+      "end_line": 495,
+      "tokens": 474,
+      "context_length": 48357
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/contrib/admin/tests.py_1_AdminSeleniumTestCase.wait_until.3",
+      "distance": 1.151221752166748,
+      "file_path": "django/contrib/admin/tests.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 264,
+      "context_length": 48621
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.log_addition_ModelAdmin.log_change.3.1",
+      "distance": 1.1544005870819092,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 796,
+      "end_line": 826,
+      "tokens": 216,
+      "context_length": 48837
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_1_8",
+      "distance": 1.1548480987548828,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 127,
+      "context_length": 48964
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.history_view_ModelAdmin.history_view.14.1",
+      "distance": 1.154922604560852,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1891,
+      "end_line": 1928,
+      "tokens": 330,
+      "context_length": 49294
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command.add_arguments_Command.add_arguments.13",
+      "distance": 1.1551363468170166,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 216,
+      "end_line": 281,
+      "tokens": 633,
+      "context_length": 49927
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/core/management/commands/squashmigrations.py_1_Command.add_arguments.7",
+      "distance": 1.1563630104064941,
+      "file_path": "django/core/management/commands/squashmigrations.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 350,
+      "context_length": 50277
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.get_field_queryset_BaseModelAdmin.get_field_queryset.4.1",
+      "distance": 1.158427119255066,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 206,
+      "end_line": 217,
+      "tokens": 135,
+      "context_length": 50412
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.handle_template_TemplateCommand.handle_template.3",
+      "distance": 1.1591053009033203,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 184,
+      "end_line": 208,
+      "tokens": 209,
+      "context_length": 50621
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/core/management/commands/runserver.py_errno_naiveip_re.1",
+      "distance": 1.1593916416168213,
+      "file_path": "django/core/management/commands/runserver.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 204,
+      "context_length": 50825
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_BaseModelAdmin.has_add_permission_BaseModelAdmin.has_change_permission.4.1",
+      "distance": 1.160536766052246,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 467,
+      "end_line": 489,
+      "tokens": 241,
+      "context_length": 51066
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin_UserAdmin.add_view.1.1.1",
+      "distance": 1.1628985404968262,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 40,
+      "end_line": 99,
+      "tokens": 504,
+      "context_length": 51570
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_search_results.use_distinct_ModelAdmin.get_search_results.7.1",
+      "distance": 1.1630353927612305,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1008,
+      "end_line": 1019,
+      "tokens": 149,
+      "context_length": 51719
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_InlineModelAdmin._get_form_for_get_fields_InlineModelAdmin._has_any_perms_for_target_model.5.1",
+      "distance": 1.1631540060043335,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 2121,
+      "end_line": 2146,
+      "tokens": 250,
+      "context_length": 51969
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/core/management/commands/runserver.py_Command.execute_Command.get_handler.2.1",
+      "distance": 1.16355299949646,
+      "file_path": "django/core/management/commands/runserver.py",
+      "start_line": 55,
+      "end_line": 65,
+      "tokens": 120,
+      "context_length": 52089
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/core/mail/__init__.py_mail_admins_mail_admins.6",
+      "distance": 1.1637349128723145,
+      "file_path": "django/core/mail/__init__.py",
+      "start_line": 89,
+      "end_line": 103,
+      "tokens": 175,
+      "context_length": 52264
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/core/management/commands/startproject.py_1_",
+      "distance": 1.164353609085083,
+      "file_path": "django/core/management/commands/startproject.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 137,
+      "context_length": 52401
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/contrib/auth/management/__init__.py_create_permissions_create_permissions.21.1.1",
+      "distance": 1.16497004032135,
+      "file_path": "django/contrib/auth/management/__init__.py",
+      "start_line": 35,
+      "end_line": 86,
+      "tokens": 471,
+      "context_length": 52872
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/contrib/auth/admin.py_UserAdmin.user_change_password_UserAdmin.user_change_password.9.1",
+      "distance": 1.1650876998901367,
+      "file_path": "django/contrib/auth/admin.py",
+      "start_line": 128,
+      "end_line": 189,
+      "tokens": 465,
+      "context_length": 53337
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/conf/__init__.py_1_SettingsReference.__init__.self.setting_name.1",
+      "distance": 1.1655943393707275,
+      "file_path": "django/conf/__init__.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 240,
+      "context_length": 53577
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/contrib/admin/decorators.py_register_",
+      "distance": 1.1660737991333008,
+      "file_path": "django/contrib/admin/decorators.py",
+      "start_line": 1,
+      "end_line": 31,
+      "tokens": 134,
+      "context_length": 53711
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/db/migrations/loader.py_MigrationLoader.load_disk_MigrationLoader.load_disk.5.2",
+      "distance": 1.166637897491455,
+      "file_path": "django/db/migrations/loader.py",
+      "start_line": 64,
+      "end_line": 122,
+      "tokens": 522,
+      "context_length": 54233
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/core/management/commands/squashmigrations.py_Command.handle_Command.handle.28.first_migration.1",
+      "distance": 1.1670829057693481,
+      "file_path": "django/core/management/commands/squashmigrations.py",
+      "start_line": 45,
+      "end_line": 134,
+      "tokens": 791,
+      "context_length": 55024
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/contrib/admin/views/main.py_ChangeList.get_query_string_ChangeList.get_results.self.paginator.1",
+      "distance": 1.1673500537872314,
+      "file_path": "django/contrib/admin/views/main.py",
+      "start_line": 206,
+      "end_line": 255,
+      "tokens": 423,
+      "context_length": 55447
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/utils/autoreload.py_sys_path_directories_get_child_arguments.5.1",
+      "distance": 1.1689549684524536,
+      "file_path": "django/utils/autoreload.py",
+      "start_line": 185,
+      "end_line": 218,
+      "tokens": 231,
+      "context_length": 55678
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/db/utils.py_pkgutil_NotSupportedError.1",
+      "distance": 1.16914701461792,
+      "file_path": "django/db/utils.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 154,
+      "context_length": 55832
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/core/management/utils.py_handle_extensions_handle_extensions.5.1",
+      "distance": 1.1700823307037354,
+      "file_path": "django/core/management/utils.py",
+      "start_line": 30,
+      "end_line": 49,
+      "tokens": 195,
+      "context_length": 56027
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlflush.py_1_",
+      "distance": 1.1702337265014648,
+      "file_path": "django/core/management/commands/sqlflush.py",
+      "start_line": 1,
+      "end_line": 26,
+      "tokens": 194,
+      "context_length": 56221
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/core/management/templates.py_TemplateCommand.download_TemplateCommand.download.21.1",
+      "distance": 1.1709600687026978,
+      "file_path": "django/core/management/templates.py",
+      "start_line": 243,
+      "end_line": 295,
+      "tokens": 405,
+      "context_length": 56626
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_deleted_objects_ModelAdmin._delete_view.16.1",
+      "distance": 1.1722793579101562,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 1821,
+      "end_line": 1889,
+      "tokens": 584,
+      "context_length": 57210
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.password_change_AdminSite.password_change.8.1",
+      "distance": 1.1723334789276123,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 314,
+      "end_line": 329,
+      "tokens": 158,
+      "context_length": 57368
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_readonly_fields_item_BaseModelAdminChecks._check_readonly_fields_item.1.4.1.3.1.1",
+      "distance": 1.173590898513794,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 596,
+      "end_line": 617,
+      "tokens": 162,
+      "context_length": 57530
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/contrib/staticfiles/management/commands/collectstatic.py_Command.add_arguments_Command.add_arguments.7",
+      "distance": 1.1746180057525635,
+      "file_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+      "start_line": 37,
+      "end_line": 68,
+      "tokens": 297,
+      "context_length": 57827
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/core/management/commands/loaddata.py_Command.find_fixtures_Command.find_fixtures.14.1",
+      "distance": 1.1751558780670166,
+      "file_path": "django/core/management/commands/loaddata.py",
+      "start_line": 217,
+      "end_line": 273,
+      "tokens": 549,
+      "context_length": 58376
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_date_hierarchy_tag_",
+      "distance": 1.1761460304260254,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 431,
+      "end_line": 489,
+      "tokens": 343,
+      "context_length": 58719
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/utils/module_loading.py_autodiscover_modules_autodiscover_modules.4.1.2.3.5.5.1",
+      "distance": 1.1764132976531982,
+      "file_path": "django/utils/module_loading.py",
+      "start_line": 27,
+      "end_line": 60,
+      "tokens": 300,
+      "context_length": 59019
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_BaseModelAdminChecks._check_prepopulated_fields_value_item_BaseModelAdminChecks._check_ordering.3.4.1.1",
+      "distance": 1.1767522096633911,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 521,
+      "end_line": 544,
+      "tokens": 230,
+      "context_length": 59249
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/core/management/commands/makemessages.py_Command.gettext_version_Command.settings_available.2.1",
+      "distance": 1.177109956741333,
+      "file_path": "django/core/management/commands/makemessages.py",
+      "start_line": 394,
+      "end_line": 416,
+      "tokens": 200,
+      "context_length": 59449
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.177146315574646,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 591,
+      "context_length": 60040
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.unregister_AdminSite.has_permission.2.1",
+      "distance": 1.1773791313171387,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 134,
+      "end_line": 194,
+      "tokens": 397,
+      "context_length": 60437
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/admin.py_GenericInlineModelAdmin_",
+      "distance": 1.1783332824707031,
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "start_line": 83,
+      "end_line": 130,
+      "tokens": 410,
+      "context_length": 60847
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/django/django/contrib/admin/checks.py_ModelAdminChecks._check_action_permission_methods_ModelAdminChecks._check_actions_uniqueness.4.1",
+      "distance": 1.178429126739502,
+      "file_path": "django/contrib/admin/checks.py",
+      "start_line": 960,
+      "end_line": 996,
+      "tokens": 281,
+      "context_length": 61128
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/django/django/core/management/commands/compilemessages.py_Command_Command.add_arguments.4",
+      "distance": 1.1790869235992432,
+      "file_path": "django/core/management/commands/compilemessages.py",
+      "start_line": 29,
+      "end_line": 56,
+      "tokens": 231,
+      "context_length": 61359
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/django/django/contrib/admin/sites.py_AdminSite.register_AdminSite.register.4.5.3.6",
+      "distance": 1.179243564605713,
+      "file_path": "django/contrib/admin/sites.py",
+      "start_line": 86,
+      "end_line": 132,
+      "tokens": 443,
+      "context_length": 61802
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/django/django/core/management/commands/showmigrations.py_Command.show_list_Command.show_list.9.5.1",
+      "distance": 1.1792962551116943,
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "start_line": 65,
+      "end_line": 103,
+      "tokens": 411,
+      "context_length": 62213
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/django/django/db/__init__.py_1_router.1",
+      "distance": 1.1799699068069458,
+      "file_path": "django/db/__init__.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 141,
+      "context_length": 62354
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/django/django/contrib/admindocs/views.py_ViewIndexView_ViewIndexView.get_context_data.5.1",
+      "distance": 1.1803699731826782,
+      "file_path": "django/contrib/admindocs/views.py",
+      "start_line": 118,
+      "end_line": 133,
+      "tokens": 154,
+      "context_length": 62508
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/django/django/db/backends/mysql/client.py_subprocess_",
+      "distance": 1.180976390838623,
+      "file_path": "django/db/backends/mysql/client.py",
+      "start_line": 1,
+      "end_line": 49,
+      "tokens": 424,
+      "context_length": 62932
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.log_deletion_ModelAdmin.log_deletion.3.1",
+      "distance": 1.1810359954833984,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 828,
+      "end_line": 842,
+      "tokens": 124,
+      "context_length": 63056
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/django/django/contrib/admin/options.py_ModelAdmin.get_model_perms_ModelAdmin._get_form_for_get_fields.1.1",
+      "distance": 1.182206630706787,
+      "file_path": "django/contrib/admin/options.py",
+      "start_line": 645,
+      "end_line": 659,
+      "tokens": 136,
+      "context_length": 63192
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/django/django/apps/registry.py_Apps.is_installed_Apps.get_containing_app_config.5.1.1",
+      "distance": 1.1830837726593018,
+      "file_path": "django/apps/registry.py",
+      "start_line": 234,
+      "end_line": 260,
+      "tokens": 219,
+      "context_length": 63411
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/bin/django-admin.py",
+      "position": 1,
+      "tokens": 27,
+      "context_length": 27
+    },
+    {
+      "file_path": "django/contrib/admin/checks.py",
+      "position": 2,
+      "tokens": 9016,
+      "context_length": 9043
+    },
+    {
+      "file_path": "django/core/management/__init__.py",
+      "position": 3,
+      "tokens": 3404,
+      "context_length": 12447
+    },
+    {
+      "file_path": "django/core/management/commands/shell.py",
+      "position": 4,
+      "tokens": 821,
+      "context_length": 13268
+    },
+    {
+      "file_path": "django/contrib/admin/sites.py",
+      "position": 5,
+      "tokens": 4191,
+      "context_length": 17459
+    },
+    {
+      "file_path": "django/contrib/admin/bin/compress.py",
+      "position": 6,
+      "tokens": 482,
+      "context_length": 17941
+    },
+    {
+      "file_path": "django/contrib/auth/admin.py",
+      "position": 7,
+      "tokens": 1726,
+      "context_length": 19667
+    },
+    {
+      "file_path": "django/contrib/admin/__init__.py",
+      "position": 8,
+      "tokens": 245,
+      "context_length": 19912
+    },
+    {
+      "file_path": "setup.py",
+      "position": 9,
+      "tokens": 525,
+      "context_length": 20437
+    },
+    {
+      "file_path": "scripts/manage_translations.py",
+      "position": 10,
+      "tokens": 1656,
+      "context_length": 22093
+    },
+    {
+      "file_path": "django/contrib/admin/utils.py",
+      "position": 11,
+      "tokens": 4117,
+      "context_length": 26210
+    },
+    {
+      "file_path": "django/core/management/base.py",
+      "position": 12,
+      "tokens": 4387,
+      "context_length": 30597
+    },
+    {
+      "file_path": "django/contrib/admin/helpers.py",
+      "position": 13,
+      "tokens": 3193,
+      "context_length": 33790
+    },
+    {
+      "file_path": "django/core/management/commands/dbshell.py",
+      "position": 14,
+      "tokens": 231,
+      "context_length": 34021
+    },
+    {
+      "file_path": "django/core/management/commands/check.py",
+      "position": 15,
+      "tokens": 435,
+      "context_length": 34456
+    },
+    {
+      "file_path": "django/core/management/commands/migrate.py",
+      "position": 16,
+      "tokens": 3158,
+      "context_length": 37614
+    },
+    {
+      "file_path": "django/contrib/admin/apps.py",
+      "position": 17,
+      "tokens": 148,
+      "context_length": 37762
+    },
+    {
+      "file_path": "django/core/management/commands/runserver.py",
+      "position": 18,
+      "tokens": 1450,
+      "context_length": 39212
+    },
+    {
+      "file_path": "django/core/management/commands/loaddata.py",
+      "position": 19,
+      "tokens": 2868,
+      "context_length": 42080
+    },
+    {
+      "file_path": "django/contrib/admin/options.py",
+      "position": 20,
+      "tokens": 18487,
+      "context_length": 60567
+    },
+    {
+      "file_path": "django/contrib/admin/exceptions.py",
+      "position": 21,
+      "tokens": 67,
+      "context_length": 60634
+    },
+    {
+      "file_path": "docs/_ext/djangodocs.py",
+      "position": 22,
+      "tokens": 3045,
+      "context_length": 63679
+    },
+    {
+      "file_path": "django/core/management/commands/dumpdata.py",
+      "position": 23,
+      "tokens": 1535,
+      "context_length": 65214
+    },
+    {
+      "file_path": "django/core/management/commands/showmigrations.py",
+      "position": 24,
+      "tokens": 1186,
+      "context_length": 66400
+    },
+    {
+      "file_path": "django/core/management/commands/startapp.py",
+      "position": 25,
+      "tokens": 101,
+      "context_length": 66501
+    },
+    {
+      "file_path": "django/contrib/gis/admin/__init__.py",
+      "position": 26,
+      "tokens": 130,
+      "context_length": 66631
+    },
+    {
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "position": 27,
+      "tokens": 632,
+      "context_length": 67263
+    },
+    {
+      "file_path": "django/contrib/admin/migrations/0001_initial.py",
+      "position": 28,
+      "tokens": 320,
+      "context_length": 67583
+    },
+    {
+      "file_path": "django/contrib/admindocs/urls.py",
+      "position": 29,
+      "tokens": 307,
+      "context_length": 67890
+    },
+    {
+      "file_path": "django/contrib/admin/models.py",
+      "position": 30,
+      "tokens": 1123,
+      "context_length": 69013
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "position": 31,
+      "tokens": 3829,
+      "context_length": 72842
+    },
+    {
+      "file_path": "django/core/management/commands/makemigrations.py",
+      "position": 32,
+      "tokens": 2749,
+      "context_length": 75591
+    },
+    {
+      "file_path": "django/core/management/utils.py",
+      "position": 33,
+      "tokens": 1114,
+      "context_length": 76705
+    },
+    {
+      "file_path": "django/core/management/commands/makemessages.py",
+      "position": 34,
+      "tokens": 5557,
+      "context_length": 82262
+    },
+    {
+      "file_path": "django/contrib/sites/admin.py",
+      "position": 35,
+      "tokens": 46,
+      "context_length": 82308
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_urls.py",
+      "position": 36,
+      "tokens": 405,
+      "context_length": 82713
+    },
+    {
+      "file_path": "django/core/management/commands/test.py",
+      "position": 37,
+      "tokens": 409,
+      "context_length": 83122
+    },
+    {
+      "file_path": "django/contrib/admindocs/apps.py",
+      "position": 38,
+      "tokens": 42,
+      "context_length": 83164
+    },
+    {
+      "file_path": "django/core/management/commands/sendtestemail.py",
+      "position": 39,
+      "tokens": 302,
+      "context_length": 83466
+    },
+    {
+      "file_path": "django/core/management/templates.py",
+      "position": 40,
+      "tokens": 2681,
+      "context_length": 86147
+    },
+    {
+      "file_path": "django/core/management/commands/testserver.py",
+      "position": 41,
+      "tokens": 434,
+      "context_length": 86581
+    },
+    {
+      "file_path": "django/contrib/admin/tests.py",
+      "position": 42,
+      "tokens": 1477,
+      "context_length": 88058
+    },
+    {
+      "file_path": "django/contrib/admindocs/__init__.py",
+      "position": 43,
+      "tokens": 15,
+      "context_length": 88073
+    },
+    {
+      "file_path": "django/contrib/admin/actions.py",
+      "position": 44,
+      "tokens": 609,
+      "context_length": 88682
+    },
+    {
+      "file_path": "django/core/management/commands/flush.py",
+      "position": 45,
+      "tokens": 697,
+      "context_length": 89379
+    },
+    {
+      "file_path": "django/utils/log.py",
+      "position": 46,
+      "tokens": 1625,
+      "context_length": 91004
+    },
+    {
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "position": 47,
+      "tokens": 195,
+      "context_length": 91199
+    },
+    {
+      "file_path": "django/contrib/admin/migrations/0002_logentry_remove_auto_add.py",
+      "position": 48,
+      "tokens": 101,
+      "context_length": 91300
+    },
+    {
+      "file_path": "django/contrib/auth/management/commands/createsuperuser.py",
+      "position": 49,
+      "tokens": 2060,
+      "context_length": 93360
+    },
+    {
+      "file_path": "django/contrib/admindocs/views.py",
+      "position": 50,
+      "tokens": 3308,
+      "context_length": 96668
+    },
+    {
+      "file_path": "django/contrib/auth/urls.py",
+      "position": 51,
+      "tokens": 225,
+      "context_length": 96893
+    },
+    {
+      "file_path": "django/core/management/commands/compilemessages.py",
+      "position": 52,
+      "tokens": 1266,
+      "context_length": 98159
+    },
+    {
+      "file_path": "django/contrib/admin/migrations/0003_logentry_add_action_flag_choices.py",
+      "position": 53,
+      "tokens": 111,
+      "context_length": 98270
+    },
+    {
+      "file_path": "django/core/management/commands/inspectdb.py",
+      "position": 54,
+      "tokens": 2617,
+      "context_length": 100887
+    },
+    {
+      "file_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+      "position": 55,
+      "tokens": 2844,
+      "context_length": 103731
+    },
+    {
+      "file_path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "position": 56,
+      "tokens": 253,
+      "context_length": 103984
+    },
+    {
+      "file_path": "django/conf/global_settings.py",
+      "position": 57,
+      "tokens": 5639,
+      "context_length": 109623
+    },
+    {
+      "file_path": "django/contrib/redirects/admin.py",
+      "position": 58,
+      "tokens": 68,
+      "context_length": 109691
+    },
+    {
+      "file_path": "django/contrib/sessions/management/commands/clearsessions.py",
+      "position": 59,
+      "tokens": 122,
+      "context_length": 109813
+    },
+    {
+      "file_path": "django/contrib/admindocs/utils.py",
+      "position": 60,
+      "tokens": 1906,
+      "context_length": 111719
+    },
+    {
+      "file_path": "django/urls/__init__.py",
+      "position": 61,
+      "tokens": 239,
+      "context_length": 111958
+    },
+    {
+      "file_path": "django/contrib/admin/views/main.py",
+      "position": 62,
+      "tokens": 4254,
+      "context_length": 116212
+    },
+    {
+      "file_path": "django/core/files/__init__.py",
+      "position": 63,
+      "tokens": 15,
+      "context_length": 116227
+    },
+    {
+      "file_path": "django/contrib/flatpages/admin.py",
+      "position": 64,
+      "tokens": 144,
+      "context_length": 116371
+    },
+    {
+      "file_path": "django/core/management/commands/sqlsequencereset.py",
+      "position": 65,
+      "tokens": 194,
+      "context_length": 116565
+    },
+    {
+      "file_path": "django/contrib/auth/management/__init__.py",
+      "position": 66,
+      "tokens": 1074,
+      "context_length": 117639
+    },
+    {
+      "file_path": "django/template/__init__.py",
+      "position": 67,
+      "tokens": 360,
+      "context_length": 117999
+    },
+    {
+      "file_path": "django/core/management/commands/diffsettings.py",
+      "position": 68,
+      "tokens": 691,
+      "context_length": 118690
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 69,
+      "tokens": 3734,
+      "context_length": 122424
+    },
+    {
+      "file_path": "django/core/management/commands/squashmigrations.py",
+      "position": 70,
+      "tokens": 1871,
+      "context_length": 124295
+    },
+    {
+      "file_path": "django/core/mail/__init__.py",
+      "position": 71,
+      "tokens": 1106,
+      "context_length": 125401
+    },
+    {
+      "file_path": "django/core/management/commands/startproject.py",
+      "position": 72,
+      "tokens": 137,
+      "context_length": 125538
+    },
+    {
+      "file_path": "django/conf/__init__.py",
+      "position": 73,
+      "tokens": 2059,
+      "context_length": 127597
+    },
+    {
+      "file_path": "django/contrib/admin/decorators.py",
+      "position": 74,
+      "tokens": 194,
+      "context_length": 127791
+    },
+    {
+      "file_path": "django/db/migrations/loader.py",
+      "position": 75,
+      "tokens": 2891,
+      "context_length": 130682
+    },
+    {
+      "file_path": "django/utils/autoreload.py",
+      "position": 76,
+      "tokens": 4717,
+      "context_length": 135399
+    },
+    {
+      "file_path": "django/db/utils.py",
+      "position": 77,
+      "tokens": 2146,
+      "context_length": 137545
+    },
+    {
+      "file_path": "django/core/management/commands/sqlflush.py",
+      "position": 78,
+      "tokens": 194,
+      "context_length": 137739
+    },
+    {
+      "file_path": "django/utils/module_loading.py",
+      "position": 79,
+      "tokens": 743,
+      "context_length": 138482
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 80,
+      "tokens": 591,
+      "context_length": 139073
+    },
+    {
+      "file_path": "django/contrib/contenttypes/admin.py",
+      "position": 81,
+      "tokens": 1025,
+      "context_length": 140098
+    },
+    {
+      "file_path": "django/db/__init__.py",
+      "position": 82,
+      "tokens": 393,
+      "context_length": 140491
+    },
+    {
+      "file_path": "django/db/backends/mysql/client.py",
+      "position": 83,
+      "tokens": 424,
+      "context_length": 140915
+    },
+    {
+      "file_path": "django/apps/registry.py",
+      "position": 84,
+      "tokens": 3407,
+      "context_length": 144322
+    }
+  ]
+}

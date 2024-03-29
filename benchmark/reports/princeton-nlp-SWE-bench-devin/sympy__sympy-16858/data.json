@@ -1,0 +1,1202 @@
+{
+  "instance_id": "sympy__sympy-16858",
+  "model_patch": "diff --git a/sympy/stats/crv_types.py b/sympy/stats/crv_types.py\nindex cb28935cca..3916b32412 100644\n--- a/sympy/stats/crv_types.py\n+++ b/sympy/stats/crv_types.py\n@@ -1205,6 +1205,11 @@ def FDistribution(name, d1, d2):\n class FisherZDistribution(SingleContinuousDistribution):\n     _argnames = ('d1', 'd2')\n \n+    @staticmethod\n+    def check(d1, d2):\n+        _value_check(d1 > 0, \"d1 must be positive.\")\n+        _value_check(d2 > 0, \"d2 must be positive.\")\n+\n     def pdf(self, x):\n         d1, d2 = self.d1, self.d2\n         return (2*d1**(d1/2)*d2**(d2/2) / beta_fn(d1/2, d2/2) *\n@@ -1274,6 +1279,12 @@ def FisherZ(name, d1, d2):\n class FrechetDistribution(SingleContinuousDistribution):\n     _argnames = ('a', 's', 'm')\n \n+    @staticmethod\n+    def check(a, s, m):\n+        _value_check(a > 0, \"Shape parameter a must be positive.\")\n+        _value_check(s > 0, \"Scale parameter s must be positive.\")\n+        _value_check(m.is_real, \"Location parameter m must be real.\")\n+\n     set = Interval(0, oo)\n \n     def __new__(cls, a, s=1, m=0):\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/stats/crv_types.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "6ffc2f04ad820e3f592b2107e66a16fd4585ac02",
+  "patch": "diff --git a/sympy/stats/crv_types.py b/sympy/stats/crv_types.py\n--- a/sympy/stats/crv_types.py\n+++ b/sympy/stats/crv_types.py\n@@ -163,6 +163,9 @@ def rv(symbol, cls, args):\n class ArcsinDistribution(SingleContinuousDistribution):\n     _argnames = ('a', 'b')\n \n+    def set(self):\n+        return Interval(self.a, self.b)\n+\n     def pdf(self, x):\n         return 1/(pi*sqrt((x - self.a)*(self.b - x)))\n \n@@ -871,6 +874,8 @@ def ChiSquared(name, k):\n class DagumDistribution(SingleContinuousDistribution):\n     _argnames = ('p', 'a', 'b')\n \n+    set = Interval(0, oo)\n+\n     @staticmethod\n     def check(p, a, b):\n         _value_check(p > 0, \"Shape parameter p must be positive.\")\n@@ -1205,6 +1210,13 @@ def FDistribution(name, d1, d2):\n class FisherZDistribution(SingleContinuousDistribution):\n     _argnames = ('d1', 'd2')\n \n+    set = Interval(-oo, oo)\n+\n+    @staticmethod\n+    def check(d1, d2):\n+        _value_check(d1 > 0, \"Degree of freedom d1 must be positive.\")\n+        _value_check(d2 > 0, \"Degree of freedom d2 must be positive.\")\n+\n     def pdf(self, x):\n         d1, d2 = self.d1, self.d2\n         return (2*d1**(d1/2)*d2**(d2/2) / beta_fn(d1/2, d2/2) *\n@@ -1276,6 +1288,11 @@ class FrechetDistribution(SingleContinuousDistribution):\n \n     set = Interval(0, oo)\n \n+    @staticmethod\n+    def check(a, s, m):\n+        _value_check(a > 0, \"Shape parameter alpha must be positive.\")\n+        _value_check(s > 0, \"Scale parameter s must be positive.\")\n+\n     def __new__(cls, a, s=1, m=0):\n         a, s, m = list(map(sympify, (a, s, m)))\n         return Basic.__new__(cls, a, s, m)\n@@ -1551,6 +1568,10 @@ class GumbelDistribution(SingleContinuousDistribution):\n \n     set = Interval(-oo, oo)\n \n+    @staticmethod\n+    def check(beta, mu):\n+        _value_check(beta > 0, \"Scale parameter beta must be positive.\")\n+\n     def pdf(self, x):\n         beta, mu = self.beta, self.mu\n         z = (x - mu)/beta\n@@ -1564,7 +1585,7 @@ def _characteristic_function(self, t):\n         return gamma(1 - I*self.beta*t) * exp(I*self.mu*t)\n \n     def _moment_generating_function(self, t):\n-        return gamma(1 - self.beta*t) * exp(I*self.mu*t)\n+        return gamma(1 - self.beta*t) * exp(self.mu*t)\n \n def Gumbel(name, beta, mu):\n     r\"\"\"\n@@ -1765,6 +1786,13 @@ def Kumaraswamy(name, a, b):\n class LaplaceDistribution(SingleContinuousDistribution):\n     _argnames = ('mu', 'b')\n \n+    set = Interval(-oo, oo)\n+\n+    @staticmethod\n+    def check(mu, b):\n+        _value_check(b > 0, \"Scale parameter b must be positive.\")\n+        _value_check(mu.is_real, \"Location parameter mu should be real\")\n+\n     def pdf(self, x):\n         mu, b = self.mu, self.b\n         return 1/(2*b)*exp(-Abs(x - mu)/b)\n@@ -1852,6 +1880,12 @@ def Laplace(name, mu, b):\n class LogisticDistribution(SingleContinuousDistribution):\n     _argnames = ('mu', 's')\n \n+    set = Interval(-oo, oo)\n+\n+    @staticmethod\n+    def check(mu, s):\n+        _value_check(s > 0, \"Scale parameter s must be positive.\")\n+\n     def pdf(self, x):\n         mu, s = self.mu, self.s\n         return exp(-(x - mu)/s)/(s*(1 + exp(-(x - mu)/s))**2)\n@@ -1864,7 +1898,7 @@ def _characteristic_function(self, t):\n         return Piecewise((exp(I*t*self.mu) * pi*self.s*t / sinh(pi*self.s*t), Ne(t, 0)), (S.One, True))\n \n     def _moment_generating_function(self, t):\n-        return exp(self.mu*t) * Beta(1 - self.s*t, 1 + self.s*t)\n+        return exp(self.mu*t) * beta_fn(1 - self.s*t, 1 + self.s*t)\n \n     def _quantile(self, p):\n         return self.mu - self.s*log(-S.One + S.One/p)\n@@ -2015,6 +2049,10 @@ class MaxwellDistribution(SingleContinuousDistribution):\n \n     set = Interval(0, oo)\n \n+    @staticmethod\n+    def check(a):\n+        _value_check(a > 0, \"Parameter a must be positive.\")\n+\n     def pdf(self, x):\n         a = self.a\n         return sqrt(2/pi)*x**2*exp(-x**2/(2*a**2))/a**3\n@@ -2085,6 +2123,11 @@ class NakagamiDistribution(SingleContinuousDistribution):\n \n     set = Interval(0, oo)\n \n+    @staticmethod\n+    def check(mu, omega):\n+        _value_check(mu >= S.Half, \"Shape parameter mu must be greater than equal to 1/2.\")\n+        _value_check(omega > 0, \"Spread parameter omega must be positive.\")\n+\n     def pdf(self, x):\n         mu, omega = self.mu, self.omega\n         return 2*mu**mu/(gamma(mu)*omega**mu)*x**(2*mu - 1)*exp(-mu/omega*x**2)\n@@ -2385,6 +2428,10 @@ class QuadraticUDistribution(SingleContinuousDistribution):\n     def set(self):\n         return Interval(self.a, self.b)\n \n+    @staticmethod\n+    def check(a, b):\n+        _value_check(b > a, \"Parameter b must be in range (%s, oo).\"%(a))\n+\n     def pdf(self, x):\n         a, b = self.a, self.b\n         alpha = 12 / (b-a)**3\n@@ -2553,6 +2600,10 @@ class RayleighDistribution(SingleContinuousDistribution):\n \n     set = Interval(0, oo)\n \n+    @staticmethod\n+    def check(sigma):\n+        _value_check(sigma > 0, \"Scale parameter sigma must be positive.\")\n+\n     def pdf(self, x):\n         sigma = self.sigma\n         return x/sigma**2*exp(-x**2/(2*sigma**2))\n@@ -2690,6 +2741,12 @@ def ShiftedGompertz(name, b, eta):\n class StudentTDistribution(SingleContinuousDistribution):\n     _argnames = ('nu',)\n \n+    set = Interval(-oo, oo)\n+\n+    @staticmethod\n+    def check(nu):\n+        _value_check(nu > 0, \"Degrees of freedom nu must be positive.\")\n+\n     def pdf(self, x):\n         nu = self.nu\n         return 1/(sqrt(nu)*beta_fn(S(1)/2, nu/2))*(1 + x**2/nu)**(-(nu + 1)/2)\n@@ -2770,6 +2827,19 @@ def StudentT(name, nu):\n class TrapezoidalDistribution(SingleContinuousDistribution):\n     _argnames = ('a', 'b', 'c', 'd')\n \n+    @property\n+    def set(self):\n+        return Interval(self.a, self.d)\n+\n+    @staticmethod\n+    def check(a, b, c, d):\n+        _value_check(a < d, \"Lower bound parameter a < %s. a = %s\"%(d, a))\n+        _value_check((a <= b, b < c),\n+        \"Level start parameter b must be in range [%s, %s). b = %s\"%(a, c, b))\n+        _value_check((b < c, c <= d),\n+        \"Level end parameter c must be in range (%s, %s]. c = %s\"%(b, d, c))\n+        _value_check(d >= c, \"Upper bound parameter d > %s. d = %s\"%(c, d))\n+\n     def pdf(self, x):\n         a, b, c, d = self.a, self.b, self.c, self.d\n         return Piecewise(\n@@ -2850,6 +2920,16 @@ def Trapezoidal(name, a, b, c, d):\n class TriangularDistribution(SingleContinuousDistribution):\n     _argnames = ('a', 'b', 'c')\n \n+    @property\n+    def set(self):\n+        return Interval(self.a, self.b)\n+\n+    @staticmethod\n+    def check(a, b, c):\n+        _value_check(b > a, \"Parameter b > %s. b = %s\"%(a, b))\n+        _value_check((a <= c, c <= b),\n+        \"Parameter c must be in range [%s, %s]. c = %s\"%(a, b, c))\n+\n     def pdf(self, x):\n         a, b, c = self.a, self.b, self.c\n         return Piecewise(\n@@ -2864,7 +2944,7 @@ def _characteristic_function(self, t):\n \n     def _moment_generating_function(self, t):\n         a, b, c = self.a, self.b, self.c\n-        return 2 * ((b - c) * exp(a * t) - (b - a) * exp(c * t) + (c + a) * exp(b * t)) / (\n+        return 2 * ((b - c) * exp(a * t) - (b - a) * exp(c * t) + (c - a) * exp(b * t)) / (\n         (b - a) * (c - a) * (b - c) * t ** 2)\n \n \n@@ -2940,6 +3020,14 @@ def Triangular(name, a, b, c):\n class UniformDistribution(SingleContinuousDistribution):\n     _argnames = ('left', 'right')\n \n+    @property\n+    def set(self):\n+        return Interval(self.left, self.right)\n+\n+    @staticmethod\n+    def check(left, right):\n+        _value_check(left < right, \"Lower limit should be less than Upper limit.\")\n+\n     def pdf(self, x):\n         left, right = self.left, self.right\n         return Piecewise(\n@@ -3047,6 +3135,11 @@ class UniformSumDistribution(SingleContinuousDistribution):\n     def set(self):\n         return Interval(0, self.n)\n \n+    @staticmethod\n+    def check(n):\n+        _value_check((n > 0, n.is_integer),\n+        \"Parameter n must be positive integer.\")\n+\n     def pdf(self, x):\n         n = self.n\n         k = Dummy(\"k\")\n@@ -3292,6 +3385,10 @@ class WignerSemicircleDistribution(SingleContinuousDistribution):\n     def set(self):\n         return Interval(-self.R, self.R)\n \n+    @staticmethod\n+    def check(R):\n+        _value_check(R > 0, \"Radius R must be positive.\")\n+\n     def pdf(self, x):\n         R = self.R\n         return 2/(pi*R**2)*sqrt(R**2 - x**2)\ndiff --git a/sympy/stats/joint_rv_types.py b/sympy/stats/joint_rv_types.py\n--- a/sympy/stats/joint_rv_types.py\n+++ b/sympy/stats/joint_rv_types.py\n@@ -76,7 +76,8 @@ def set(self):\n         k = len(self.mu)\n         return S.Reals**k\n \n-    def check(self, mu, sigma):\n+    @staticmethod\n+    def check(mu, sigma):\n         _value_check(len(mu) == len(sigma.col(0)),\n             \"Size of the mean vector and covariance matrix are incorrect.\")\n         #check if covariance matrix is positive definite or not.\n@@ -117,7 +118,8 @@ def set(self):\n         k = len(self.mu)\n         return S.Reals**k\n \n-    def check(self, mu, sigma):\n+    @staticmethod\n+    def check(mu, sigma):\n         _value_check(len(mu) == len(sigma.col(0)),\n             \"Size of the mean vector and covariance matrix are incorrect.\")\n         #check if covariance matrix is positive definite or not.\n@@ -151,7 +153,8 @@ def set(self):\n         k = len(self.mu)\n         return S.Reals**k\n \n-    def check(self, mu, sigma, v):\n+    @staticmethod\n+    def check(mu, sigma, v):\n         _value_check(len(mu) == len(sigma.col(0)),\n             \"Size of the location vector and shape matrix are incorrect.\")\n         #check if covariance matrix is positive definite or not.\n@@ -196,7 +199,8 @@ class NormalGammaDistribution(JointDistribution):\n     _argnames = ['mu', 'lamda', 'alpha', 'beta']\n     is_Continuous=True\n \n-    def check(self, mu, lamda, alpha, beta):\n+    @staticmethod\n+    def check(mu, lamda, alpha, beta):\n         _value_check(mu.is_real, \"Location must be real.\")\n         _value_check(lamda > 0, \"Lambda must be positive\")\n         _value_check(alpha > 0, \"alpha must be positive\")\n@@ -258,7 +262,8 @@ class MultivariateBetaDistribution(JointDistribution):\n     _argnames = ['alpha']\n     is_Continuous = True\n \n-    def check(self, alpha):\n+    @staticmethod\n+    def check(alpha):\n         _value_check(len(alpha) >= 2, \"At least two categories should be passed.\")\n         for a_k in alpha:\n             _value_check((a_k > 0) != False, \"Each concentration parameter\"\n@@ -331,7 +336,8 @@ class MultivariateEwensDistribution(JointDistribution):\n     is_Discrete = True\n     is_Continuous = False\n \n-    def check(self, n, theta):\n+    @staticmethod\n+    def check(n, theta):\n         _value_check(isinstance(n, Integer) and (n > 0) == True,\n                         \"sample size should be positive integer.\")\n         _value_check(theta.is_positive, \"mutation rate should be positive.\")\n@@ -403,7 +409,8 @@ class MultinomialDistribution(JointDistribution):\n     is_Continuous=False\n     is_Discrete = True\n \n-    def check(self, n, p):\n+    @staticmethod\n+    def check(n, p):\n         _value_check(n > 0,\n                         \"number of trials must be a positve integer\")\n         for p_k in p:\n@@ -471,7 +478,8 @@ class NegativeMultinomialDistribution(JointDistribution):\n     is_Continuous=False\n     is_Discrete = True\n \n-    def check(self, k0, p):\n+    @staticmethod\n+    def check(k0, p):\n         _value_check(k0 > 0,\n                         \"number of failures must be a positve integer\")\n         for p_k in p:\n",
+  "test_patch": "diff --git a/sympy/stats/tests/test_continuous_rv.py b/sympy/stats/tests/test_continuous_rv.py\n--- a/sympy/stats/tests/test_continuous_rv.py\n+++ b/sympy/stats/tests/test_continuous_rv.py\n@@ -1,13 +1,16 @@\n-from sympy import (Symbol, Abs, exp, S, N, pi, simplify, Interval, erf, erfc, Ne,\n-                   Eq, log, lowergamma, uppergamma, Sum, symbols, sqrt, And, gamma, beta,\n-                   Piecewise, Integral, sin, cos, tan, atan, besseli, factorial, binomial,\n-                   floor, expand_func, Rational, I, re, im, lambdify, hyper, diff, Or, Mul)\n+from sympy import (Symbol, Abs, exp, expint, S, N, pi, simplify, Interval, erf, erfc, Ne,\n+                   EulerGamma, Eq, log, lowergamma, uppergamma, Sum, symbols, sqrt, And,\n+                   gamma, beta, Piecewise, Integral, sin, cos, tan, atan, sinh, cosh,\n+                   besseli, factorial, binomial, floor, expand_func, Rational, I, re,\n+                   im, lambdify, hyper, diff, Or, Mul)\n from sympy.core.compatibility import range\n from sympy.external import import_module\n from sympy.functions.special.error_functions import erfinv\n+from sympy.functions.special.hyper import meijerg\n from sympy.sets.sets import Intersection, FiniteSet\n from sympy.stats import (P, E, where, density, variance, covariance, skewness,\n-                         given, pspace, cdf, characteristic_function, ContinuousRV, sample,\n+                         given, pspace, cdf, characteristic_function,\n+                         moment_generating_function, ContinuousRV, sample,\n                          Arcsin, Benini, Beta, BetaNoncentral, BetaPrime, Cauchy,\n                          Chi, ChiSquared,\n                          ChiNoncentral, Dagum, Erlang, Exponential,\n@@ -22,6 +25,7 @@\n from sympy.stats.joint_rv import JointPSpace\n from sympy.utilities.pytest import raises, XFAIL, slow, skip\n from sympy.utilities.randtest import verify_numerically as tn\n+from sympy import E as e\n \n oo = S.Infinity\n \n@@ -34,8 +38,8 @@ def test_single_normal():\n     X = Normal('x', 0, 1)\n     Y = X*sigma + mu\n \n-    assert simplify(E(Y)) == mu\n-    assert simplify(variance(Y)) == sigma**2\n+    assert E(Y) == mu\n+    assert variance(Y) == sigma**2\n     pdf = density(Y)\n     x = Symbol('x')\n     assert (pdf(x) ==\n@@ -46,12 +50,12 @@ def test_single_normal():\n     assert E(X, Eq(X, mu)) == mu\n \n \n-@XFAIL\n def test_conditional_1d():\n     X = Normal('x', 0, 1)\n     Y = given(X, X >= 0)\n+    z = Symbol('z')\n \n-    assert density(Y) == 2 * density(X)\n+    assert density(Y)(z) == 2 * density(X)(z)\n \n     assert Y.pspace.domain.set == Interval(0, oo)\n     assert E(Y) == sqrt(2) / sqrt(pi)\n@@ -108,7 +112,7 @@ def test_symbolic():\n     assert E(X + Y) == mu1 + mu2\n     assert E(a*X + b) == a*E(X) + b\n     assert variance(X) == s1**2\n-    assert simplify(variance(X + a*Y + b)) == variance(X) + a**2*variance(Y)\n+    assert variance(X + a*Y + b) == variance(X) + a**2*variance(Y)\n \n     assert E(Z) == 1/rate\n     assert E(a*Z + b) == a*E(Z) + b\n@@ -147,12 +151,144 @@ def test_characteristic_function():\n     Y = Normal('y', 1, 1)\n     cf = characteristic_function(Y)\n     assert cf(0) == 1\n-    assert simplify(cf(1)) == exp(I - S(1)/2)\n+    assert cf(1) == exp(I - S(1)/2)\n \n     Z = Exponential('z', 5)\n     cf = characteristic_function(Z)\n     assert cf(0) == 1\n-    assert simplify(cf(1)) == S(25)/26 + 5*I/26\n+    assert cf(1).expand() == S(25)/26 + 5*I/26\n+\n+def test_moment_generating_function():\n+    t = symbols('t', positive=True)\n+\n+    # Symbolic tests\n+    a, b, c = symbols('a b c')\n+\n+    mgf = moment_generating_function(Beta('x', a, b))(t)\n+    assert mgf == hyper((a,), (a + b,), t)\n+\n+    mgf = moment_generating_function(Chi('x', a))(t)\n+    assert mgf == sqrt(2)*t*gamma(a/2 + S(1)/2)*\\\n+        hyper((a/2 + S(1)/2,), (S(3)/2,), t**2/2)/gamma(a/2) +\\\n+        hyper((a/2,), (S(1)/2,), t**2/2)\n+\n+    mgf = moment_generating_function(ChiSquared('x', a))(t)\n+    assert mgf == (1 - 2*t)**(-a/2)\n+\n+    mgf = moment_generating_function(Erlang('x', a, b))(t)\n+    assert mgf == (1 - t/b)**(-a)\n+\n+    mgf = moment_generating_function(Exponential('x', a))(t)\n+    assert mgf == a/(a - t)\n+\n+    mgf = moment_generating_function(Gamma('x', a, b))(t)\n+    assert mgf == (-b*t + 1)**(-a)\n+\n+    mgf = moment_generating_function(Gumbel('x', a, b))(t)\n+    assert mgf == exp(b*t)*gamma(-a*t + 1)\n+\n+    mgf = moment_generating_function(Gompertz('x', a, b))(t)\n+    assert mgf == b*exp(b)*expint(t/a, b)\n+\n+    mgf = moment_generating_function(Laplace('x', a, b))(t)\n+    assert mgf == exp(a*t)/(-b**2*t**2 + 1)\n+\n+    mgf = moment_generating_function(Logistic('x', a, b))(t)\n+    assert mgf == exp(a*t)*beta(-b*t + 1, b*t + 1)\n+\n+    mgf = moment_generating_function(Normal('x', a, b))(t)\n+    assert mgf == exp(a*t + b**2*t**2/2)\n+\n+    mgf = moment_generating_function(Pareto('x', a, b))(t)\n+    assert mgf == b*(-a*t)**b*uppergamma(-b, -a*t)\n+\n+    mgf = moment_generating_function(QuadraticU('x', a, b))(t)\n+    assert str(mgf) == (\"(3*(t*(-4*b + (a + b)**2) + 4)*exp(b*t) - \"\n+    \"3*(t*(a**2 + 2*a*(b - 2) + b**2) + 4)*exp(a*t))/(t**2*(a - b)**3)\")\n+\n+    mgf = moment_generating_function(RaisedCosine('x', a, b))(t)\n+    assert mgf == pi**2*exp(a*t)*sinh(b*t)/(b*t*(b**2*t**2 + pi**2))\n+\n+    mgf = moment_generating_function(Rayleigh('x', a))(t)\n+    assert mgf == sqrt(2)*sqrt(pi)*a*t*(erf(sqrt(2)*a*t/2) + 1)\\\n+        *exp(a**2*t**2/2)/2 + 1\n+\n+    mgf = moment_generating_function(Triangular('x', a, b, c))(t)\n+    assert str(mgf) == (\"(-2*(-a + b)*exp(c*t) + 2*(-a + c)*exp(b*t) + \"\n+    \"2*(b - c)*exp(a*t))/(t**2*(-a + b)*(-a + c)*(b - c))\")\n+\n+    mgf = moment_generating_function(Uniform('x', a, b))(t)\n+    assert mgf == (-exp(a*t) + exp(b*t))/(t*(-a + b))\n+\n+    mgf = moment_generating_function(UniformSum('x', a))(t)\n+    assert mgf == ((exp(t) - 1)/t)**a\n+\n+    mgf = moment_generating_function(WignerSemicircle('x', a))(t)\n+    assert mgf == 2*besseli(1, a*t)/(a*t)\n+\n+    # Numeric tests\n+\n+    mgf = moment_generating_function(Beta('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == hyper((2,), (3,), 1)/2\n+\n+    mgf = moment_generating_function(Chi('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == sqrt(2)*hyper((1,), (S(3)/2,), S(1)/2\n+    )/sqrt(pi) + hyper((S(3)/2,), (S(3)/2,), S(1)/2) + 2*sqrt(2)*hyper((2,),\n+    (S(5)/2,), S(1)/2)/(3*sqrt(pi))\n+\n+    mgf = moment_generating_function(ChiSquared('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == I\n+\n+    mgf = moment_generating_function(Erlang('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == 1\n+\n+    mgf = moment_generating_function(Exponential('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == 1\n+\n+    mgf = moment_generating_function(Gamma('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == 1\n+\n+    mgf = moment_generating_function(Gumbel('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == EulerGamma + 1\n+\n+    mgf = moment_generating_function(Gompertz('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == -e*meijerg(((), (1, 1)),\n+    ((0, 0, 0), ()), 1)\n+\n+    mgf = moment_generating_function(Laplace('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == 1\n+\n+    mgf = moment_generating_function(Logistic('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == beta(1, 1)\n+\n+    mgf = moment_generating_function(Normal('x', 0, 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == exp(S(1)/2)\n+\n+    mgf = moment_generating_function(Pareto('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == expint(1, 0)\n+\n+    mgf = moment_generating_function(QuadraticU('x', 1, 2))(t)\n+    assert mgf.diff(t).subs(t, 1) == -12*e - 3*exp(2)\n+\n+    mgf = moment_generating_function(RaisedCosine('x', 1, 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == -2*e*pi**2*sinh(1)/\\\n+    (1 + pi**2)**2 + e*pi**2*cosh(1)/(1 + pi**2)\n+\n+    mgf = moment_generating_function(Rayleigh('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 0) == sqrt(2)*sqrt(pi)/2\n+\n+    mgf = moment_generating_function(Triangular('x', 1, 3, 2))(t)\n+    assert mgf.diff(t).subs(t, 1) == -e + exp(3)\n+\n+    mgf = moment_generating_function(Uniform('x', 0, 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == 1\n+\n+    mgf = moment_generating_function(UniformSum('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == 1\n+\n+    mgf = moment_generating_function(WignerSemicircle('x', 1))(t)\n+    assert mgf.diff(t).subs(t, 1) == -2*besseli(1, 1) + besseli(2, 1) +\\\n+        besseli(0, 1)\n \n \n def test_sample_continuous():\n@@ -451,7 +587,7 @@ def test_gamma():\n     X = Gamma('x', k, theta)\n     assert E(X) == k*theta\n     assert variance(X) == k*theta**2\n-    assert simplify(skewness(X)) == 2/sqrt(k)\n+    assert skewness(X).expand() == 2/sqrt(k)\n \n \n def test_gamma_inverse():\n@@ -554,7 +690,7 @@ def test_maxwell():\n     assert density(X)(x) == (sqrt(2)*x**2*exp(-x**2/(2*a**2))/\n         (sqrt(pi)*a**3))\n     assert E(X) == 2*sqrt(2)*a/sqrt(pi)\n-    assert simplify(variance(X)) == a**2*(-8 + 3*pi)/pi\n+    assert variance(X) == -8*a**2/pi + 3*a**2\n     assert cdf(X)(x) == erf(sqrt(2)*x/(2*a)) - sqrt(2)*x*exp(-x**2/(2*a**2))/(sqrt(pi)*a)\n     assert diff(cdf(X)(x), x) == density(X)(x)\n \n@@ -653,18 +789,14 @@ def test_trapezoidal():\n     assert variance(X) == S(5)/12\n     assert P(X < 2) == S(3)/4\n \n-@XFAIL\n def test_triangular():\n     a = Symbol(\"a\")\n     b = Symbol(\"b\")\n     c = Symbol(\"c\")\n \n     X = Triangular('x', a, b, c)\n-    assert density(X)(x) == Piecewise(\n-                 ((2*x - 2*a)/((-a + b)*(-a + c)), And(a <= x, x < c)),\n-                 (2/(-a + b), x == c),\n-                 ((-2*x + 2*b)/((-a + b)*(b - c)), And(x <= b, c < x)),\n-                 (0, True))\n+    assert str(density(X)(x)) == (\"Piecewise(((-2*a + 2*x)/((-a + b)*(-a + c)), (a <= x) & (c > x)), \"\n+    \"(2/(-a + b), Eq(c, x)), ((2*b - 2*x)/((-a + b)*(b - c)), (b >= x) & (c < x)), (0, True))\")\n \n \n def test_quadratic_u():\n@@ -681,8 +813,8 @@ def test_uniform():\n     w = Symbol('w', positive=True, finite=True)\n     X = Uniform('x', l, l + w)\n \n-    assert simplify(E(X)) == l + w/2\n-    assert simplify(variance(X)) == w**2/12\n+    assert E(X) == l + w/2\n+    assert variance(X).expand() == w**2/12\n \n     # With numbers all is well\n     X = Uniform('x', 3, 5)\n@@ -700,7 +832,7 @@ def test_uniform():\n     assert c(S(7)/2) == S(1)/4\n     assert c(5) == 1 and c(6) == 1\n \n-\n+@XFAIL\n def test_uniform_P():\n     \"\"\" This stopped working because SingleContinuousPSpace.compute_density no\n     longer calls integrate on a DiracDelta but rather just solves directly.\n@@ -738,8 +870,8 @@ def test_weibull():\n     a, b = symbols('a b', positive=True)\n     X = Weibull('x', a, b)\n \n-    assert simplify(E(X)) == simplify(a * gamma(1 + 1/b))\n-    assert simplify(variance(X)) == simplify(a**2 * gamma(1 + 2/b) - E(X)**2)\n+    assert E(X).expand() == a * gamma(1 + 1/b)\n+    assert variance(X).expand() == (a**2 * gamma(1 + 2/b) - E(X)**2).expand()\n     assert simplify(skewness(X)) == (2*gamma(1 + 1/b)**3 - 3*gamma(1 + 1/b)*gamma(1 + 2/b) + gamma(1 + 3/b))/(-gamma(1 + 1/b)**2 + gamma(1 + 2/b))**(S(3)/2)\n \n def test_weibull_numeric():\n@@ -795,22 +927,18 @@ def test_input_value_assertions():\n         fn('x', p, q)  # No error raised\n \n \n-@XFAIL\n def test_unevaluated():\n     X = Normal('x', 0, 1)\n-    assert E(X, evaluate=False) == (\n-        Integral(sqrt(2)*x*exp(-x**2/2)/(2*sqrt(pi)), (x, -oo, oo)))\n+    assert str(E(X, evaluate=False)) == (\"Integral(sqrt(2)*x*exp(-x**2/2)/\"\n+    \"(2*sqrt(pi)), (x, -oo, oo))\")\n \n-    assert E(X + 1, evaluate=False) == (\n-        Integral(sqrt(2)*x*exp(-x**2/2)/(2*sqrt(pi)), (x, -oo, oo)) + 1)\n+    assert str(E(X + 1, evaluate=False)) == (\"Integral(sqrt(2)*x*exp(-x**2/2)/\"\n+    \"(2*sqrt(pi)), (x, -oo, oo)) + 1\")\n \n-    assert P(X > 0, evaluate=False) == (\n-        Integral(sqrt(2)*exp(-x**2/2)/(2*sqrt(pi)), (x, 0, oo)))\n+    assert str(P(X > 0, evaluate=False)) == (\"Integral(sqrt(2)*exp(-_z**2/2)/\"\n+    \"(2*sqrt(pi)), (_z, 0, oo))\")\n \n-    assert P(X > 0, X**2 < 1, evaluate=False) == (\n-        Integral(sqrt(2)*exp(-x**2/2)/(2*sqrt(pi)*\n-            Integral(sqrt(2)*exp(-x**2/2)/(2*sqrt(pi)),\n-                (x, -1, 1))), (x, 0, 1)))\n+    assert P(X > 0, X**2 < 1, evaluate=False) == S(1)/2\n \n \n def test_probability_unevaluated():\n",
+  "problem_statement": "Added missing checks and attributes to sympy.stats\n<!-- Your title above should be a short description of what\r\nwas changed. Do not include the issue number in the title. -->\r\n\r\n#### References to other Issues or PRs\r\n<!-- If this pull request fixes an issue, write \"Fixes #NNNN\" in that exact\r\nformat, e.g. \"Fixes #1234\". See\r\nhttps://github.com/blog/1506-closing-issues-via-pull-requests . Please also\r\nwrite a comment on that issue linking back to this pull request once it is\r\nopen. -->\r\nN/A\r\n\r\n\r\n#### Brief description of what is fixed or changed\r\nMissing checks for parameters and set\r\nattributes have been added to various\r\ndistributions to enhance consistency\r\nand correctness.\r\n\r\n\r\n#### Other comments\r\nThese changes are made for enhancement of the code. This PR is made for receiving regular feedback on the code additions.\r\nStatus - Work In Progress\r\nPlease discuss with me on the changes I have made, so that I can present my view if I haven't made satisfactory changes. \r\n\r\n#### Release Notes\r\n\r\n<!-- Write the release notes for this release below. See\r\nhttps://github.com/sympy/sympy/wiki/Writing-Release-Notes for more information\r\non how to write release notes. The bot will check your release notes\r\nautomatically to see if they are formatted correctly. -->\r\n\r\n<!-- BEGIN RELEASE NOTES -->\r\n* stats\r\n  * missing checks and attributes added to sympy.stats for distributions.\r\n<!-- END RELEASE NOTES -->\r\n\n",
+  "hints_text": ":white_check_mark:\n\nHi, I am the [SymPy bot](https://github.com/sympy/sympy-bot) (v147). I'm here to help you write a release notes entry. Please read the [guide on how to write release notes](https://github.com/sympy/sympy/wiki/Writing-Release-Notes).\n\n\n\nYour release notes are in good order.\n\nHere is what the release notes will look like:\n* stats\n  * missing checks and attributes added to sympy.stats for distributions. ([#16571](https://github.com/sympy/sympy/pull/16571) by [@czgdp1807](https://github.com/czgdp1807))\n\nThis will be added to https://github.com/sympy/sympy/wiki/Release-Notes-for-1.5.\n\nNote: This comment will be updated with the latest check if you edit the pull request. You need to reload the page to see it. <details><summary>Click here to see the pull request description that was parsed.</summary>\n\n    <!-- Your title above should be a short description of what\r\n    was changed. Do not include the issue number in the title. -->\r\n\r\n    #### References to other Issues or PRs\r\n    <!-- If this pull request fixes an issue, write \"Fixes #NNNN\" in that exact\r\n    format, e.g. \"Fixes #1234\". See\r\n    https://github.com/blog/1506-closing-issues-via-pull-requests . Please also\r\n    write a comment on that issue linking back to this pull request once it is\r\n    open. -->\r\n    N/A\r\n\r\n\r\n    #### Brief description of what is fixed or changed\r\n    Missing checks for parameters and set\r\n    attributes have been added to various\r\n    distributions to enhance consistency\r\n    and correctness.\r\n\r\n\r\n    #### Other comments\r\n    These changes are made for enhancement of the code. This PR is made for receiving regular feedback on the code additions.\r\n    Status - Work In Progress\r\n    Please discuss with me on the changes I have made, so that I can present my view if I haven't made satisfactory changes. \r\n\r\n    #### Release Notes\r\n\r\n    <!-- Write the release notes for this release below. See\r\n    https://github.com/sympy/sympy/wiki/Writing-Release-Notes for more information\r\n    on how to write release notes. The bot will check your release notes\r\n    automatically to see if they are formatted correctly. -->\r\n\r\n    <!-- BEGIN RELEASE NOTES -->\r\n    * stats\r\n      * missing checks and attributes added to sympy.stats for distributions.\r\n    <!-- END RELEASE NOTES -->\r\n\n\n</details><p>\n\n# [Codecov](https://codecov.io/gh/sympy/sympy/pull/16571?src=pr&el=h1) Report\n> Merging [#16571](https://codecov.io/gh/sympy/sympy/pull/16571?src=pr&el=desc) into [master](https://codecov.io/gh/sympy/sympy/commit/fa19fc79ed1053b67c761962b1c13d22806c5de8?src=pr&el=desc) will **increase** coverage by `0.07%`.\n> The diff coverage is `94.871%`.\n\n```diff\n@@             Coverage Diff              @@\n##            master    #16571      +/-   ##\n============================================\n+ Coverage   73.748%   73.819%   +0.07%     \n============================================\n  Files          619       619              \n  Lines       158656    159426     +770     \n  Branches     37185     37400     +215     \n============================================\n+ Hits        117006    117687     +681     \n- Misses       36236     36282      +46     \n- Partials      5414      5457      +43\n```\n\n@czgdp1807 \r\nI have also added some tests for the same module in  #16557\r\nAlso done some documentation work. Currently, improving the documentation \r\nbut do check thos  out.\r\nWe can improve the tests for the module togather. It will be more effective.\r\n\n@jksuom Any reviews/comments on my additions, [this](https://github.com/sympy/sympy/pull/16571/commits/7586750516e43c9c07cd8041e54a177838624c84) and [this](https://github.com/sympy/sympy/pull/16571/commits/6bbb90102e5e68290434ee53263ae94c9999fb72). I am adding commits in chunks so that it's easier to review.\nI have corrected the tests for sampling according to [#16741 (comment)](https://github.com/sympy/sympy/issues/16741#issuecomment-487299356) in [the latest commit](https://github.com/sympy/sympy/pull/16571/commits/8ce1aa8ffcb87cd684f1bf5ae643820916448340). Please let me know if any changes are required.\n@jksuom Please review the [latest commit](https://github.com/sympy/sympy/pull/16571/commits/cdc6df358644c2c79792e75e1b7e03f883592d3b). \r\nNote:\r\nI cannot add `set` property to `UnifromDistribution` because it results in the following `NotImplemented` error. It would be great if you can tell me the reason behind this. I will be able to investigate only after a few days.\r\n```\r\n>>> from sympy import *\r\n>>> from sympy.stats import *\r\n>>> l = Symbol('l', real=True, finite=True)\r\n>>> w = Symbol('w', positive=True, finite=True)\r\n>>> X = Uniform('x', l, l + w)\r\n>>> P(X < l)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/gagandeep/sympy/sympy/stats/rv.py\", line 756, in probability\r\n    return result.doit()\r\n  File \"/home/gagandeep/sympy/sympy/integrals/integrals.py\", line 636, in doit\r\n    evalued_pw = piecewise_fold(Add(*piecewises))._eval_interval(x, a, b)\r\n  File \"/home/gagandeep/sympy/sympy/functions/elementary/piecewise.py\", line 621, in _eval_interval\r\n    return super(Piecewise, self)._eval_interval(sym, a, b)\r\n  File \"/home/gagandeep/sympy/sympy/core/expr.py\", line 887, in _eval_interval\r\n    B = self.subs(x, b)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 997, in subs\r\n    rv = rv._subs(old, new, **kwargs)\r\n  File \"/home/gagandeep/sympy/sympy/core/cache.py\", line 94, in wrapper\r\n    retval = cfunc(*args, **kwargs)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 1109, in _subs\r\n    rv = self._eval_subs(old, new)\r\n  File \"/home/gagandeep/sympy/sympy/functions/elementary/piecewise.py\", line 873, in _eval_subs\r\n    c = c._subs(old, new)\r\n  File \"/home/gagandeep/sympy/sympy/core/cache.py\", line 94, in wrapper\r\n    retval = cfunc(*args, **kwargs)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 1111, in _subs\r\n    rv = fallback(self, old, new)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 1083, in fallback\r\n    arg = arg._subs(old, new, **hints)\r\n  File \"/home/gagandeep/sympy/sympy/core/cache.py\", line 94, in wrapper\r\n    retval = cfunc(*args, **kwargs)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 1111, in _subs\r\n    rv = fallback(self, old, new)\r\n  File \"/home/gagandeep/sympy/sympy/core/basic.py\", line 1088, in fallback\r\n    rv = self.func(*args)\r\n  File \"/home/gagandeep/sympy/sympy/core/relational.py\", line 637, in __new__\r\n    r = cls._eval_relation(lhs, rhs)\r\n  File \"/home/gagandeep/sympy/sympy/core/relational.py\", line 916, in _eval_relation\r\n    return _sympify(lhs.__ge__(rhs))\r\n  File \"/home/gagandeep/sympy/sympy/core/sympify.py\", line 417, in _sympify\r\n    return sympify(a, strict=True)\r\n  File \"/home/gagandeep/sympy/sympy/core/sympify.py\", line 339, in sympify\r\n    raise SympifyError(a)\r\nsympy.core.sympify.SympifyError: SympifyError: NotImplemented\r\n\r\n``` \n@supreet11agrawal @smichr Thanks for the comments and reviews. I will complete it after few clarifications in other PRs.",
+  "created_at": "2019-05-18T10:10:04Z",
+  "version": "1.5",
+  "FAIL_TO_PASS": "[\"test_moment_generating_function\"]",
+  "PASS_TO_PASS": "[\"test_ContinuousDomain\", \"test_ContinuousRV\", \"test_FiniteSet_prob\", \"test_NormalDistribution\", \"test_Or\", \"test_arcsin\", \"test_benini\", \"test_beta\", \"test_beta_noncentral\", \"test_betaprime\", \"test_cauchy\", \"test_cdf\", \"test_characteristic_function\", \"test_chi\", \"test_chi_noncentral\", \"test_chi_squared\", \"test_conditional_1d\", \"test_conjugate_priors\", \"test_dagum\", \"test_density_unevaluated\", \"test_difficult_univariate\", \"test_erlang\", \"test_exponential\", \"test_f_distribution\", \"test_fisher_z\", \"test_frechet\", \"test_gamma\", \"test_gamma_inverse\", \"test_gompertz\", \"test_gumbel\", \"test_input_value_assertions\", \"test_issue_10003\", \"test_issue_13324\", \"test_kumaraswamy\", \"test_laplace\", \"test_logistic\", \"test_lognormal\", \"test_long_precomputed_cdf\", \"test_maxwell\", \"test_nakagami\", \"test_pareto\", \"test_pareto_numeric\", \"test_prefab_sampling\", \"test_prob_neq\", \"test_probability_unevaluated\", \"test_quadratic_u\", \"test_raised_cosine\", \"test_random_parameters\", \"test_random_parameters_given\", \"test_rayleigh\", \"test_sample_continuous\", \"test_shiftedgompertz\", \"test_single_normal\", \"test_studentt\", \"test_symbolic\", \"test_trapezoidal\", \"test_triangular\", \"test_unevaluated\", \"test_uniform\", \"test_uniformsum\", \"test_union\", \"test_von_mises\", \"test_weibull\", \"test_weibull_numeric\", \"test_wignersemicircle\"]",
+  "environment_setup_commit": "70381f282f2d9d039da860e391fe51649df2779d",
+  "patch_files": [
+    "sympy/stats/crv_types.py",
+    "sympy/stats/joint_rv_types.py"
+  ],
+  "test_patch_files": [
+    "sympy/stats/tests/test_continuous_rv.py"
+  ],
+  "patch_diff_details": {
+    "sympy/stats/crv_types.py": {
+      "diffs": [
+        {
+          "start_line_old": 166,
+          "end_line_old": 166,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 469
+        },
+        {
+          "start_line_old": 874,
+          "end_line_old": 874,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_24_BeniniDistribution._moment_generating_function.1",
+          "closest_snippet_line_distance": 620,
+          "pos": 13,
+          "context_length": 6578
+        },
+        {
+          "start_line_old": 1208,
+          "end_line_old": 1208,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 550
+        },
+        {
+          "start_line_old": 1279,
+          "end_line_old": 1279,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_159_UniformSumDistribution._moment_generating_function.1.1",
+          "closest_snippet_line_distance": 1760,
+          "pos": 34,
+          "context_length": 14456
+        },
+        {
+          "start_line_old": 1554,
+          "end_line_old": 1554,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_67_FDistributionDistribution._moment_generating_function.1",
+          "closest_snippet_line_distance": 411,
+          "pos": 49,
+          "context_length": 17992
+        },
+        {
+          "start_line_old": 1567,
+          "end_line_old": 1567,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_67_FDistributionDistribution._moment_generating_function.1",
+          "closest_snippet_line_distance": 424,
+          "pos": 49,
+          "context_length": 17992
+        },
+        {
+          "start_line_old": 1768,
+          "end_line_old": 1768,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 1110
+        },
+        {
+          "start_line_old": 1855,
+          "end_line_old": 1855,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 1197
+        },
+        {
+          "start_line_old": 1867,
+          "end_line_old": 1867,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 1209
+        },
+        {
+          "start_line_old": 2018,
+          "end_line_old": 2018,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 1360
+        },
+        {
+          "start_line_old": 2088,
+          "end_line_old": 2088,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_40_CauchyDistribution._quantile.1.1",
+          "closest_snippet_line_distance": 1500,
+          "pos": 57,
+          "context_length": 19793
+        },
+        {
+          "start_line_old": 2388,
+          "end_line_old": 2388,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 1730
+        },
+        {
+          "start_line_old": 2556,
+          "end_line_old": 2556,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_63_ExponentialDistribution._quantile.1.1",
+          "closest_snippet_line_distance": 1510,
+          "pos": 55,
+          "context_length": 19425
+        },
+        {
+          "start_line_old": 2693,
+          "end_line_old": 2693,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_36_BetaPrimeDistribution.pdf.2.1",
+          "closest_snippet_line_distance": 2184,
+          "pos": 40,
+          "context_length": 16069
+        },
+        {
+          "start_line_old": 2773,
+          "end_line_old": 2773,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 2115
+        },
+        {
+          "start_line_old": 2853,
+          "end_line_old": 2853,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 2195
+        },
+        {
+          "start_line_old": 2867,
+          "end_line_old": 2867,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 2209
+        },
+        {
+          "start_line_old": 2943,
+          "end_line_old": 2943,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_143_StudentTDistribution._moment_generating_function.1",
+          "closest_snippet_line_distance": 240,
+          "pos": 42,
+          "context_length": 16583
+        },
+        {
+          "start_line_old": 3050,
+          "end_line_old": 3050,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_139_ShiftedGompertzDistribution.pdf.2.1",
+          "closest_snippet_line_distance": 410,
+          "pos": 30,
+          "context_length": 13039
+        },
+        {
+          "start_line_old": 3295,
+          "end_line_old": 3295,
+          "file_pos": 8,
+          "file_context_length": 63160,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+          "closest_snippet_line_distance": 2637
+        }
+      ]
+    },
+    "sympy/stats/joint_rv_types.py": {
+      "diffs": [
+        {
+          "start_line_old": 79,
+          "end_line_old": 79,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_16_MultivariateLaplaceDistribution.check.3",
+          "closest_snippet_line_distance": 29,
+          "pos": 39,
+          "context_length": 15894
+        },
+        {
+          "start_line_old": 120,
+          "end_line_old": 120,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "pos": 25,
+          "context_length": 10721
+        },
+        {
+          "start_line_old": 154,
+          "end_line_old": 154,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_Dirichlet_MultivariateEwensDistribution.set.3.1",
+          "closest_snippet_line_distance": 169
+        },
+        {
+          "start_line_old": 199,
+          "end_line_old": 199,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_13_MultivariateNormalDistribution.pdf.5.1",
+          "closest_snippet_line_distance": 106,
+          "pos": 60,
+          "context_length": 20299
+        },
+        {
+          "start_line_old": 261,
+          "end_line_old": 261,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_Dirichlet_MultivariateEwensDistribution.set.3.1",
+          "closest_snippet_line_distance": 62
+        },
+        {
+          "start_line_old": 334,
+          "end_line_old": 334,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_23_NormalGammaDistribution.pdf.3.1",
+          "closest_snippet_line_distance": 119,
+          "pos": 65,
+          "context_length": 21863
+        },
+        {
+          "start_line_old": 406,
+          "end_line_old": 406,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_Dirichlet_MultivariateEwensDistribution.set.3.1",
+          "closest_snippet_line_distance": 62
+        },
+        {
+          "start_line_old": 474,
+          "end_line_old": 474,
+          "file_pos": 14,
+          "file_context_length": 109264,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_Dirichlet_MultivariateEwensDistribution.set.3.1",
+          "closest_snippet_line_distance": 130
+        }
+      ]
+    }
+  },
+  "vectors": 8096,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/setup.py_23_28.long_description.1",
+      "distance": 0.8895117044448853,
+      "file_path": "setup.py",
+      "start_line": 307,
+      "end_line": 382,
+      "tokens": 738,
+      "context_length": 738
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/__init__.py_1_",
+      "distance": 0.9413838386535645,
+      "file_path": "sympy/__init__.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 616,
+      "context_length": 1354
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/setup.py_modules_modules.1",
+      "distance": 0.9600116014480591,
+      "file_path": "setup.py",
+      "start_line": 79,
+      "end_line": 163,
+      "tokens": 782,
+      "context_length": 2136
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/release/fabfile.py_update_sympy_org_update_sympy_org.18",
+      "distance": 0.9658093452453613,
+      "file_path": "release/fabfile.py",
+      "start_line": 851,
+      "end_line": 895,
+      "tokens": 552,
+      "context_length": 2688
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/release/fabfile.py_update_docs_update_docs.31",
+      "distance": 0.9802044630050659,
+      "file_path": "release/fabfile.py",
+      "start_line": 797,
+      "end_line": 849,
+      "tokens": 612,
+      "context_length": 3300
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/stats/frv.py_SingleFiniteDistribution_SingleFiniteDistribution.__contains__.1.1",
+      "distance": 0.9845898747444153,
+      "file_path": "sympy/stats/frv.py",
+      "start_line": 189,
+      "end_line": 231,
+      "tokens": 310,
+      "context_length": 3610
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/setup.py_29_",
+      "distance": 0.9859143495559692,
+      "file_path": "setup.py",
+      "start_line": 384,
+      "end_line": 434,
+      "tokens": 476,
+      "context_length": 4086
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/integrals/risch.py_DifferentialExtension._important_attrs_DifferentialExtension.__eq__.2.1",
+      "distance": 0.9969502687454224,
+      "file_path": "sympy/integrals/risch.py",
+      "start_line": 600,
+      "end_line": 637,
+      "tokens": 393,
+      "context_length": 4479
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/stats/__init__.py_1_",
+      "distance": 0.9973917007446289,
+      "file_path": "sympy/stats/__init__.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 708,
+      "context_length": 5187
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/release/fabfile.py_44_52",
+      "distance": 0.998972475528717,
+      "file_path": "release/fabfile.py",
+      "start_line": 356,
+      "end_line": 431,
+      "tokens": 765,
+      "context_length": 5952
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/stats/drv.py_1_DiscreteDistribution.__call__.1.1",
+      "distance": 1.0119141340255737,
+      "file_path": "sympy/stats/drv.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 221,
+      "context_length": 6173
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_24_BeniniDistribution._moment_generating_function.1",
+      "distance": 1.0213377475738525,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 230,
+      "end_line": 254,
+      "tokens": 203,
+      "context_length": 6376,
+      "file_pos": 8
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_56_DagumDistribution._cdf.2.1",
+      "distance": 1.025357723236084,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 867,
+      "end_line": 887,
+      "tokens": 202,
+      "context_length": 6578,
+      "file_pos": 8
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/core/add.py_Add._eval_is_polynomial_Add._eval_is_commutative.1",
+      "distance": 1.0260443687438965,
+      "file_path": "sympy/core/add.py",
+      "start_line": 486,
+      "end_line": 513,
+      "tokens": 391,
+      "context_length": 6969
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_28_BetaDistribution._moment_generating_function.1.1",
+      "distance": 1.0283911228179932,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 318,
+      "end_line": 343,
+      "tokens": 199,
+      "context_length": 7168,
+      "file_pos": 9
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/stats/joint_rv.py_MarginalDistribution.check_MarginalDistribution.symbols.2.1",
+      "distance": 1.038839340209961,
+      "file_path": "sympy/stats/joint_rv.py",
+      "start_line": 294,
+      "end_line": 310,
+      "tokens": 136,
+      "context_length": 7304
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SPLIT_DENSITY_SLOW_future_flags.1",
+      "distance": 1.040168046951294,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 64,
+      "end_line": 77,
+      "tokens": 224,
+      "context_length": 7528
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/doc/src/conf.py_1_77",
+      "distance": 1.0469188690185547,
+      "file_path": "doc/src/conf.py",
+      "start_line": 1,
+      "end_line": 103,
+      "tokens": 832,
+      "context_length": 8360
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_1_SPLIT_DENSITY.1",
+      "distance": 1.0476651191711426,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 695,
+      "context_length": 9055
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_119_NormalDistribution._quantile.2.1",
+      "distance": 1.0478322505950928,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2167,
+      "end_line": 2198,
+      "tokens": 262,
+      "context_length": 9317,
+      "file_pos": 12
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/release/fabfile.py_print_authors_print_authors.7",
+      "distance": 1.0484347343444824,
+      "file_path": "release/fabfile.py",
+      "start_line": 725,
+      "end_line": 748,
+      "tokens": 173,
+      "context_length": 9490
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/core/compatibility.py_1_PY3.1",
+      "distance": 1.0493834018707275,
+      "file_path": "sympy/core/compatibility.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 585,
+      "context_length": 10075
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/setup.py_audit_audit.run.6.1",
+      "distance": 1.0525413751602173,
+      "file_path": "setup.py",
+      "start_line": 165,
+      "end_line": 194,
+      "tokens": 231,
+      "context_length": 10306
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/stats/drv.py_SingleDiscretePSpace.compute_cdf_",
+      "distance": 1.0530741214752197,
+      "file_path": "sympy/stats/drv.py",
+      "start_line": 341,
+      "end_line": 373,
+      "tokens": 275,
+      "context_length": 10581
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_16_MultivariateLaplaceDistribution.check.3",
+      "distance": 1.054693579673767,
+      "file_path": "sympy/stats/joint_rv_types.py",
+      "start_line": 108,
+      "end_line": 125,
+      "tokens": 140,
+      "context_length": 10721,
+      "file_pos": 14
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/isympy.py_sys_main.17",
+      "distance": 1.0567736625671387,
+      "file_path": "isympy.py",
+      "start_line": 171,
+      "end_line": 283,
+      "tokens": 811,
+      "context_length": 11532
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/stats/rv_interface.py_1___all__.1",
+      "distance": 1.0596375465393066,
+      "file_path": "sympy/stats/rv_interface.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 197,
+      "context_length": 11729
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_139_ShiftedGompertzDistribution.pdf.2.1",
+      "distance": 1.0628567934036255,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2624,
+      "end_line": 2640,
+      "tokens": 132,
+      "context_length": 11861,
+      "file_pos": 16
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/bin/coverage_doctest.py_27_",
+      "distance": 1.0636813640594482,
+      "file_path": "bin/coverage_doctest.py",
+      "start_line": 582,
+      "end_line": 674,
+      "tokens": 930,
+      "context_length": 12791
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_159_UniformSumDistribution._moment_generating_function.1.1",
+      "distance": 1.065349817276001,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 3039,
+      "end_line": 3068,
+      "tokens": 248,
+      "context_length": 13039,
+      "file_pos": 17
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/doc/api/conf.py_1_",
+      "distance": 1.0677103996276855,
+      "file_path": "doc/api/conf.py",
+      "start_line": 1,
+      "end_line": 135,
+      "tokens": 927,
+      "context_length": 13966
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/stats/drv_types.py_31_ZetaDistribution.sample.2",
+      "distance": 1.0678004026412964,
+      "file_path": "sympy/stats/drv_types.py",
+      "start_line": 449,
+      "end_line": 472,
+      "tokens": 167,
+      "context_length": 14133
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/release/fabfile.py_check_tag_exists_update_websites.3",
+      "distance": 1.0680055618286133,
+      "file_path": "release/fabfile.py",
+      "start_line": 750,
+      "end_line": 772,
+      "tokens": 130,
+      "context_length": 14263
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_75_FrechetDistribution._cdf.2.1",
+      "distance": 1.0682969093322754,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 1271,
+      "end_line": 1290,
+      "tokens": 193,
+      "context_length": 14456,
+      "file_pos": 19
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_131_RaisedCosineDistribution._moment_generating_function.2.1",
+      "distance": 1.0684843063354492,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2463,
+      "end_line": 2492,
+      "tokens": 287,
+      "context_length": 14743,
+      "file_pos": 19
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/integrals/risch.py_DifferentialExtension._rewrite_exps_pows.34_DifferentialExtension._rewrite_exps_pows.35.1",
+      "distance": 1.0686930418014526,
+      "file_path": "sympy/integrals/risch.py",
+      "start_line": 340,
+      "end_line": 391,
+      "tokens": 624,
+      "context_length": 15367
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_36_BetaPrimeDistribution.pdf.2.1",
+      "distance": 1.0689151287078857,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 493,
+      "end_line": 509,
+      "tokens": 125,
+      "context_length": 15492,
+      "file_pos": 19
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/stats/frv_types.py_BinomialDistribution_BinomialDistribution.dict.3.1",
+      "distance": 1.0693206787109375,
+      "file_path": "sympy/stats/frv_types.py",
+      "start_line": 263,
+      "end_line": 279,
+      "tokens": 186,
+      "context_length": 15678
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_13_MultivariateNormalDistribution.pdf.5.1",
+      "distance": 1.0702478885650635,
+      "file_path": "sympy/stats/joint_rv_types.py",
+      "start_line": 66,
+      "end_line": 93,
+      "tokens": 216,
+      "context_length": 15894,
+      "file_pos": 20
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_143_StudentTDistribution._moment_generating_function.1",
+      "distance": 1.0719733238220215,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2686,
+      "end_line": 2703,
+      "tokens": 175,
+      "context_length": 16069,
+      "file_pos": 20
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/stats/drv_types.py_11_GeometricDistribution._moment_generating_function.2.1",
+      "distance": 1.0787568092346191,
+      "file_path": "sympy/stats/drv_types.py",
+      "start_line": 44,
+      "end_line": 64,
+      "tokens": 167,
+      "context_length": 16236
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_155_UniformDistribution.sample.1.1",
+      "distance": 1.0815752744674683,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2936,
+      "end_line": 2977,
+      "tokens": 347,
+      "context_length": 16583,
+      "file_pos": 20
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/core/add.py_1__addsort.2",
+      "distance": 1.0820659399032593,
+      "file_path": "sympy/core/add.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 137,
+      "context_length": 16720
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_167_WeibullDistribution.sample.1.1",
+      "distance": 1.0822453498840332,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 3208,
+      "end_line": 3227,
+      "tokens": 145,
+      "context_length": 16865,
+      "file_pos": 20
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_123_ParetoDistribution._characteristic_function.2.1",
+      "distance": 1.0827730894088745,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2291,
+      "end_line": 2327,
+      "tokens": 279,
+      "context_length": 17144,
+      "file_pos": 20
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests._enhance_asserts_SymPyTests._enhance_asserts.ops.1",
+      "distance": 1.0832172632217407,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1136,
+      "end_line": 1142,
+      "tokens": 130,
+      "context_length": 17274
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_67_FDistributionDistribution._moment_generating_function.1",
+      "distance": 1.083854079246521,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 1120,
+      "end_line": 1143,
+      "tokens": 208,
+      "context_length": 17482,
+      "file_pos": 20
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/core/numbers.py_1__LOG2.1",
+      "distance": 1.085210919380188,
+      "file_path": "sympy/core/numbers.py",
+      "start_line": 1,
+      "end_line": 39,
+      "tokens": 340,
+      "context_length": 17822
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_87_GumbelDistribution._moment_generating_function.1.1",
+      "distance": 1.0858923196792603,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 1545,
+      "end_line": 1567,
+      "tokens": 170,
+      "context_length": 17992,
+      "file_pos": 21
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/integrals/risch.py_DifferentialExtension._rewrite_logs_DifferentialExtension._rewrite_logs.12.1",
+      "distance": 1.086294412612915,
+      "file_path": "sympy/integrals/risch.py",
+      "start_line": 393,
+      "end_line": 425,
+      "tokens": 370,
+      "context_length": 18362
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyTests._enhance_asserts.Transform_SymPyTests._enhance_asserts.6.1",
+      "distance": 1.0864661931991577,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1144,
+      "end_line": 1165,
+      "tokens": 268,
+      "context_length": 18630
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/core/add.py_Add._eval_is_positive_Add._eval_is_positive.10.6.1.1",
+      "distance": 1.0873761177062988,
+      "file_path": "sympy/core/add.py",
+      "start_line": 594,
+      "end_line": 646,
+      "tokens": 383,
+      "context_length": 19013
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/assumptions/__init__.py__",
+      "distance": 1.0874990224838257,
+      "file_path": "sympy/assumptions/__init__.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 19013
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_63_ExponentialDistribution._quantile.1.1",
+      "distance": 1.089918851852417,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 1012,
+      "end_line": 1046,
+      "tokens": 201,
+      "context_length": 19214,
+      "file_pos": 22
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_135_RayleighDistribution._moment_generating_function.2.1",
+      "distance": 1.0899245738983154,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2547,
+      "end_line": 2570,
+      "tokens": 211,
+      "context_length": 19425,
+      "file_pos": 22
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_40_CauchyDistribution._quantile.1.1",
+      "distance": 1.0900933742523193,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 562,
+      "end_line": 588,
+      "tokens": 220,
+      "context_length": 19645,
+      "file_pos": 22
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_115_NakagamiDistribution._cdf.2.1",
+      "distance": 1.0910017490386963,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 2079,
+      "end_line": 2096,
+      "tokens": 148,
+      "context_length": 19793,
+      "file_pos": 22
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/core/add.py_Add._eval_is_nonnegative_Add._eval_is_nonnegative.2.2.2.3.2.1.1",
+      "distance": 1.0911394357681274,
+      "file_path": "sympy/core/add.py",
+      "start_line": 648,
+      "end_line": 661,
+      "tokens": 139,
+      "context_length": 19932
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/integrals/risch.py_DifferentialExtension._auto_attrs_DifferentialExtension._auto_attrs.self.case.1",
+      "distance": 1.0916260480880737,
+      "file_path": "sympy/integrals/risch.py",
+      "start_line": 427,
+      "end_line": 440,
+      "tokens": 133,
+      "context_length": 20065
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_23_NormalGammaDistribution.pdf.3.1",
+      "distance": 1.0923857688903809,
+      "file_path": "sympy/stats/joint_rv_types.py",
+      "start_line": 191,
+      "end_line": 215,
+      "tokens": 234,
+      "context_length": 20299,
+      "file_pos": 22
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/sympy/sympy/core/compatibility.py_lru_cache.decorating_function.cache_info_",
+      "distance": 1.092858076095581,
+      "file_path": "sympy/core/compatibility.py",
+      "start_line": 927,
+      "end_line": 957,
+      "tokens": 240,
+      "context_length": 20539
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/sympy/sympy/stats/drv_types.py_27_YuleSimonDistribution.sample.2",
+      "distance": 1.092944622039795,
+      "file_path": "sympy/stats/drv_types.py",
+      "start_line": 370,
+      "end_line": 398,
+      "tokens": 253,
+      "context_length": 20792
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/sympy/sympy/core/add.py_Add._eval_is_nonpositive_Add._eval_is_nonpositive.2.2.2.3.2.1.1",
+      "distance": 1.0929489135742188,
+      "file_path": "sympy/core/add.py",
+      "start_line": 663,
+      "end_line": 676,
+      "tokens": 139,
+      "context_length": 20931
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/sympy/bin/authors_update.py_35_51",
+      "distance": 1.093111276626587,
+      "file_path": "bin/authors_update.py",
+      "start_line": 71,
+      "end_line": 135,
+      "tokens": 766,
+      "context_length": 21697
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/sympy/sympy/stats/joint_rv_types.py_Dirichlet_MultivariateEwensDistribution.set.3.1",
+      "distance": 1.0932319164276123,
+      "file_path": "sympy/stats/joint_rv_types.py",
+      "start_line": 323,
+      "end_line": 344,
+      "tokens": 166,
+      "context_length": 21863,
+      "file_pos": 23
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_52_ChiSquaredDistribution._moment_generating_function.1.1",
+      "distance": 1.095273494720459,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 782,
+      "end_line": 811,
+      "tokens": 238,
+      "context_length": 22101,
+      "file_pos": 23
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_32_BetaNoncentralDistribution.pdf.3.1",
+      "distance": 1.095739483833313,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 402,
+      "end_line": 421,
+      "tokens": 214,
+      "context_length": 22315,
+      "file_pos": 23
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/sympy/sympy/core/mul.py_1__mulsort.2",
+      "distance": 1.096408486366272,
+      "file_path": "sympy/core/mul.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 205,
+      "context_length": 22520
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/sympy/sympy/utilities/runtests.py_SymPyDocTests.test_file_SymPyDocTests.test_file.20",
+      "distance": 1.096684217453003,
+      "file_path": "sympy/utilities/runtests.py",
+      "start_line": 1363,
+      "end_line": 1454,
+      "tokens": 802,
+      "context_length": 23322
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/sympy/sympy/stats/crv_types.py_44_ChiDistribution._characteristic_function.5.1",
+      "distance": 1.0971457958221436,
+      "file_path": "sympy/stats/crv_types.py",
+      "start_line": 635,
+      "end_line": 658,
+      "tokens": 234,
+      "context_length": 23556,
+      "file_pos": 24
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/sympy/sympy/stats/symbolic_probability.py_Variance.doit_Variance.doit.6.1",
+      "distance": 1.098433017730713,
+      "file_path": "sympy/stats/symbolic_probability.py",
+      "start_line": 228,
+      "end_line": 259,
+      "tokens": 249,
+      "context_length": 23805
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/sympy/release/fabfile.py_GitHub_release_GitHub_release.32",
+      "distance": 1.0993660688400269,
+      "file_path": "release/fabfile.py",
+      "start_line": 987,
+      "end_line": 1062,
+      "tokens": 652,
+      "context_length": 24457
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/sympy/sympy/polys/subresultants_qq_zz.py_1_3",
+      "distance": 1.0994675159454346,
+      "file_path": "sympy/polys/subresultants_qq_zz.py",
+      "start_line": 1,
+      "end_line": 247,
+      "tokens": 2344,
+      "context_length": 26801
+    }
+  ],
+  "files": [
+    {
+      "file_path": "setup.py",
+      "position": 1,
+      "tokens": 3544,
+      "context_length": 3544
+    },
+    {
+      "file_path": "sympy/__init__.py",
+      "position": 2,
+      "tokens": 616,
+      "context_length": 4160
+    },
+    {
+      "file_path": "release/fabfile.py",
+      "position": 3,
+      "tokens": 11182,
+      "context_length": 15342
+    },
+    {
+      "file_path": "sympy/stats/frv.py",
+      "position": 4,
+      "tokens": 2756,
+      "context_length": 18098
+    },
+    {
+      "file_path": "sympy/integrals/risch.py",
+      "position": 5,
+      "tokens": 17805,
+      "context_length": 35903
+    },
+    {
+      "file_path": "sympy/stats/__init__.py",
+      "position": 6,
+      "tokens": 708,
+      "context_length": 36611
+    },
+    {
+      "file_path": "sympy/stats/drv.py",
+      "position": 7,
+      "tokens": 2830,
+      "context_length": 39441
+    },
+    {
+      "file_path": "sympy/stats/crv_types.py",
+      "position": 8,
+      "tokens": 23719,
+      "context_length": 63160
+    },
+    {
+      "file_path": "sympy/core/add.py",
+      "position": 9,
+      "tokens": 8657,
+      "context_length": 71817
+    },
+    {
+      "file_path": "sympy/stats/joint_rv.py",
+      "position": 10,
+      "tokens": 2757,
+      "context_length": 74574
+    },
+    {
+      "file_path": "sympy/utilities/runtests.py",
+      "position": 11,
+      "tokens": 20367,
+      "context_length": 94941
+    },
+    {
+      "file_path": "doc/src/conf.py",
+      "position": 12,
+      "tokens": 1746,
+      "context_length": 96687
+    },
+    {
+      "file_path": "sympy/core/compatibility.py",
+      "position": 13,
+      "tokens": 7852,
+      "context_length": 104539
+    },
+    {
+      "file_path": "sympy/stats/joint_rv_types.py",
+      "position": 14,
+      "tokens": 4725,
+      "context_length": 109264
+    },
+    {
+      "file_path": "isympy.py",
+      "position": 15,
+      "tokens": 2720,
+      "context_length": 111984
+    },
+    {
+      "file_path": "sympy/stats/rv_interface.py",
+      "position": 16,
+      "tokens": 1857,
+      "context_length": 113841
+    },
+    {
+      "file_path": "bin/coverage_doctest.py",
+      "position": 17,
+      "tokens": 5597,
+      "context_length": 119438
+    },
+    {
+      "file_path": "doc/api/conf.py",
+      "position": 18,
+      "tokens": 995,
+      "context_length": 120433
+    },
+    {
+      "file_path": "sympy/stats/drv_types.py",
+      "position": 19,
+      "tokens": 3134,
+      "context_length": 123567
+    },
+    {
+      "file_path": "sympy/stats/frv_types.py",
+      "position": 20,
+      "tokens": 2715,
+      "context_length": 126282
+    },
+    {
+      "file_path": "sympy/core/numbers.py",
+      "position": 21,
+      "tokens": 29981,
+      "context_length": 156263
+    },
+    {
+      "file_path": "sympy/assumptions/__init__.py",
+      "position": 22,
+      "tokens": 37,
+      "context_length": 156300
+    },
+    {
+      "file_path": "bin/authors_update.py",
+      "position": 23,
+      "tokens": 1526,
+      "context_length": 157826
+    },
+    {
+      "file_path": "sympy/core/mul.py",
+      "position": 24,
+      "tokens": 14752,
+      "context_length": 172578
+    },
+    {
+      "file_path": "sympy/stats/symbolic_probability.py",
+      "position": 25,
+      "tokens": 3280,
+      "context_length": 175858
+    },
+    {
+      "file_path": "sympy/polys/subresultants_qq_zz.py",
+      "position": 26,
+      "tokens": 26294,
+      "context_length": 202152
+    }
+  ]
+}

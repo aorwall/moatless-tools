@@ -1,0 +1,413 @@
+{
+  "instance_id": "pydata__xarray-6461",
+  "model_patch": "diff --git a/xarray/core/computation.py b/xarray/core/computation.py\nindex 7676d8e5..bc143a4a 100644\n--- a/xarray/core/computation.py\n+++ b/xarray/core/computation.py\n@@ -1827,9 +1827,7 @@ def where(cond, x, y, keep_attrs=None):\n         keep_attrs = _get_keep_attrs(default=False)\n \n     if keep_attrs is True:\n-        # keep the attributes of x, the second parameter, by default to\n-        # be consistent with the `where` method of `DataArray` and `Dataset`\n-        keep_attrs = lambda attrs, context: attrs[1]\n+        keep_attrs = lambda attrs, context: attrs[1] if isinstance(attrs, list) and len(attrs) > 1 else (attrs[0] if attrs else {})\n \n     # alignment for three arguments is complicated, so don't support it yet\n     return apply_ufunc(\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "xarray/core/computation.py"
+  ],
+  "repo": "pydata/xarray",
+  "base_commit": "851dadeb0338403e5021c3fbe80cbc9127ee672d",
+  "patch": "diff --git a/xarray/core/computation.py b/xarray/core/computation.py\n--- a/xarray/core/computation.py\n+++ b/xarray/core/computation.py\n@@ -1825,11 +1825,10 @@ def where(cond, x, y, keep_attrs=None):\n     \"\"\"\n     if keep_attrs is None:\n         keep_attrs = _get_keep_attrs(default=False)\n-\n     if keep_attrs is True:\n         # keep the attributes of x, the second parameter, by default to\n         # be consistent with the `where` method of `DataArray` and `Dataset`\n-        keep_attrs = lambda attrs, context: attrs[1]\n+        keep_attrs = lambda attrs, context: getattr(x, \"attrs\", {})\n \n     # alignment for three arguments is complicated, so don't support it yet\n     return apply_ufunc(\n",
+  "test_patch": "diff --git a/xarray/tests/test_computation.py b/xarray/tests/test_computation.py\n--- a/xarray/tests/test_computation.py\n+++ b/xarray/tests/test_computation.py\n@@ -1928,6 +1928,10 @@ def test_where_attrs() -> None:\n     expected = xr.DataArray([1, 0], dims=\"x\", attrs={\"attr\": \"x\"})\n     assert_identical(expected, actual)\n \n+    # ensure keep_attrs can handle scalar values\n+    actual = xr.where(cond, 1, 0, keep_attrs=True)\n+    assert actual.attrs == {}\n+\n \n @pytest.mark.parametrize(\"use_dask\", [True, False])\n @pytest.mark.parametrize(\"use_datetime\", [True, False])\n",
+  "problem_statement": "xr.where with scalar as second argument fails with keep_attrs=True\n### What happened?\n\n``` python\r\nimport xarray as xr\r\n\r\nxr.where(xr.DataArray([1, 2, 3]) > 0, 1, 0)\r\n```\r\n\r\nfails with\r\n\r\n```\r\n   1809 if keep_attrs is True:\r\n   1810     # keep the attributes of x, the second parameter, by default to\r\n   1811     # be consistent with the `where` method of `DataArray` and `Dataset`\r\n-> 1812     keep_attrs = lambda attrs, context: attrs[1]\r\n   1814 # alignment for three arguments is complicated, so don't support it yet\r\n   1815 return apply_ufunc(\r\n   1816     duck_array_ops.where,\r\n   1817     cond,\r\n   (...)\r\n   1823     keep_attrs=keep_attrs,\r\n   1824 )\r\n\r\nIndexError: list index out of range\r\n```\r\n\r\nThe workaround is to pass `keep_attrs=False`\n\n### What did you expect to happen?\n\n_No response_\n\n### Minimal Complete Verifiable Example\n\n_No response_\n\n### Relevant log output\n\n_No response_\n\n### Anything else we need to know?\n\n_No response_\n\n### Environment\n\nxarray 2022.3.0\n",
+  "hints_text": "",
+  "created_at": "2022-04-09T03:02:40Z",
+  "version": "2022.03",
+  "FAIL_TO_PASS": "[\"xarray/tests/test_computation.py::test_where_attrs\"]",
+  "PASS_TO_PASS": "[\"xarray/tests/test_computation.py::test_apply_1d_and_0d\", \"xarray/tests/test_computation.py::test_apply_exclude\", \"xarray/tests/test_computation.py::test_apply_groupby_add\", \"xarray/tests/test_computation.py::test_apply_identity\", \"xarray/tests/test_computation.py::test_apply_input_core_dimension\", \"xarray/tests/test_computation.py::test_apply_output_core_dimension\", \"xarray/tests/test_computation.py::test_apply_two_inputs\", \"xarray/tests/test_computation.py::test_apply_two_outputs\", \"xarray/tests/test_computation.py::test_autocov[None-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[None-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[dim3-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[time-da_a4]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a0]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a1]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a2]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a3]\", \"xarray/tests/test_computation.py::test_autocov[x-da_a4]\", \"xarray/tests/test_computation.py::test_broadcast_compat_data_1d\", \"xarray/tests/test_computation.py::test_broadcast_compat_data_2d\", \"xarray/tests/test_computation.py::test_collect_dict_values\", \"xarray/tests/test_computation.py::test_corr[None-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_corr[None-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_corr[None-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_corr[time-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_corr[time-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_corr[time-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_corr_only_dataarray\", \"xarray/tests/test_computation.py::test_cov[None-da_a0-da_b0-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a0-da_b0-1]\", \"xarray/tests/test_computation.py::test_cov[None-da_a1-da_b1-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a1-da_b1-1]\", \"xarray/tests/test_computation.py::test_cov[None-da_a2-da_b2-0]\", \"xarray/tests/test_computation.py::test_cov[None-da_a2-da_b2-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a0-da_b0-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a0-da_b0-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a1-da_b1-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a1-da_b1-1]\", \"xarray/tests/test_computation.py::test_cov[time-da_a2-da_b2-0]\", \"xarray/tests/test_computation.py::test_cov[time-da_a2-da_b2-1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[None-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[time-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a0-da_b0]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a1-da_b1]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a2-da_b2]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a3-da_b3]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a4-da_b4]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a5-da_b5]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a6-da_b6]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a7-da_b7]\", \"xarray/tests/test_computation.py::test_covcorr_consistency[x-da_a8-da_b8]\", \"xarray/tests/test_computation.py::test_cross[a0-b0-ae0-be0-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a1-b1-ae1-be1-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a2-b2-ae2-be2-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a3-b3-ae3-be3-dim_0--1-False]\", \"xarray/tests/test_computation.py::test_cross[a4-b4-ae4-be4-cartesian-1-False]\", \"xarray/tests/test_computation.py::test_cross[a5-b5-ae5-be5-cartesian--1-False]\", \"xarray/tests/test_computation.py::test_cross[a6-b6-ae6-be6-cartesian--1-False]\", \"xarray/tests/test_computation.py::test_dataset_join\", \"xarray/tests/test_computation.py::test_dot[False]\", \"xarray/tests/test_computation.py::test_dot_align_coords[False]\", \"xarray/tests/test_computation.py::test_join_dict_keys\", \"xarray/tests/test_computation.py::test_keep_attrs\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray[override]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[False-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[False-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[True-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[True-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[default-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[default-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[drop_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[no_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[no_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[override-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataarray_variables[override-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset[override]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[False-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[True-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[default-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[drop_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[no_conflicts-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-coord]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-data]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_dataset_variables[override-dim]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[False]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[True]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[default]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[drop]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[drop_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[no_conflicts]\", \"xarray/tests/test_computation.py::test_keep_attrs_strategies_variable[override]\", \"xarray/tests/test_computation.py::test_ordered_set_intersection\", \"xarray/tests/test_computation.py::test_ordered_set_union\", \"xarray/tests/test_computation.py::test_output_wrong_dim_size\", \"xarray/tests/test_computation.py::test_output_wrong_dims\", \"xarray/tests/test_computation.py::test_output_wrong_number\", \"xarray/tests/test_computation.py::test_polyval[False-False]\", \"xarray/tests/test_computation.py::test_polyval[True-False]\", \"xarray/tests/test_computation.py::test_result_name\", \"xarray/tests/test_computation.py::test_signature_properties\", \"xarray/tests/test_computation.py::test_unified_dim_sizes\", \"xarray/tests/test_computation.py::test_vectorize\", \"xarray/tests/test_computation.py::test_vectorize_exclude_dims\", \"xarray/tests/test_computation.py::test_where\"]",
+  "environment_setup_commit": "d7931f9014a26e712ff5f30c4082cf0261f045d3",
+  "patch_files": [
+    "xarray/core/computation.py"
+  ],
+  "test_patch_files": [
+    "xarray/tests/test_computation.py"
+  ],
+  "patch_diff_details": {
+    "xarray/core/computation.py": {
+      "diffs": [
+        {
+          "start_line_old": 1828,
+          "end_line_old": 1832,
+          "file_pos": 1,
+          "file_context_length": 17109,
+          "pos": 1,
+          "context_length": 149
+        }
+      ]
+    }
+  },
+  "vectors": 1308,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_where.2_where.5.1",
+      "distance": 0.6508520245552063,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 1826,
+      "end_line": 1844,
+      "tokens": 149,
+      "context_length": 149,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/xarray/xarray/core/computation.py_where_where.1",
+      "distance": 0.8768153190612793,
+      "file_path": "xarray/core/computation.py",
+      "start_line": 1743,
+      "end_line": 1825,
+      "tokens": 904,
+      "context_length": 1053,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.where.align_DataWithCoords.where.7.1",
+      "distance": 0.901889979839325,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1259,
+      "end_line": 1291,
+      "tokens": 279,
+      "context_length": 1332
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.where_DataWithCoords.where.1",
+      "distance": 0.9640246033668518,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1184,
+      "end_line": 1258,
+      "tokens": 832,
+      "context_length": 2164
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray._unary_op_DataArray._unary_op.3.5.1",
+      "distance": 1.0004831552505493,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 3113,
+      "end_line": 3126,
+      "tokens": 161,
+      "context_length": 2325
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/indexing.py_os_vectorized_assignment_values.1",
+      "distance": 1.0062788724899292,
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 738,
+      "context_length": 3063
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.resample.2_DataWithCoords.resample.18.1",
+      "distance": 1.011301875114441,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1121,
+      "end_line": 1182,
+      "tokens": 636,
+      "context_length": 3699
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_62__mean.1",
+      "distance": 1.0116462707519531,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 351,
+      "end_line": 375,
+      "tokens": 292,
+      "context_length": 3991
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/xarray/xarray/__init__.py_ufuncs_",
+      "distance": 1.0350672006607056,
+      "file_path": "xarray/__init__.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 701,
+      "context_length": 4692
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/xarray/xarray/core/merge.py_merge.1_merge.1",
+      "distance": 1.0380198955535889,
+      "file_path": "xarray/core/merge.py",
+      "start_line": 762,
+      "end_line": 976,
+      "tokens": 2805,
+      "context_length": 7497
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.notnull_DataWithCoords.notnull.4.1",
+      "distance": 1.0387792587280273,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1351,
+      "end_line": 1385,
+      "tokens": 240,
+      "context_length": 7737
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/xarray/xarray/ufuncs.py_1__dispatch_priority.2.1",
+      "distance": 1.040687918663025,
+      "file_path": "xarray/ufuncs.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 239,
+      "context_length": 7976
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/xarray/asv_bench/benchmarks/dataarray_missing.py_pd_make_bench_data.5.1",
+      "distance": 1.0413413047790527,
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "start_line": 1,
+      "end_line": 16,
+      "tokens": 114,
+      "context_length": 8090
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_1_around.__doc___39.1",
+      "distance": 1.0431172847747803,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 1,
+      "end_line": 95,
+      "tokens": 785,
+      "context_length": 8875
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/xarray/xarray/core/duck_array_ops.py_count__ignore_warnings_if.1.2.1",
+      "distance": 1.043264389038086,
+      "file_path": "xarray/core/duck_array_ops.py",
+      "start_line": 261,
+      "end_line": 301,
+      "tokens": 288,
+      "context_length": 9163
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/xarray/xarray/core/dataarray.py_DataArray._inplace_binary_op_DataArray._inplace_binary_op.9.1",
+      "distance": 1.0474357604980469,
+      "file_path": "xarray/core/dataarray.py",
+      "start_line": 3152,
+      "end_line": 3173,
+      "tokens": 254,
+      "context_length": 9417
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.isnull_DataWithCoords.isnull.4.1",
+      "distance": 1.0492165088653564,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1315,
+      "end_line": 1349,
+      "tokens": 239,
+      "context_length": 9656
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/xarray/xarray/core/combine.py_combine_by_coords.1_combine_by_coords.1",
+      "distance": 1.0534971952438354,
+      "file_path": "xarray/core/combine.py",
+      "start_line": 671,
+      "end_line": 919,
+      "tokens": 3129,
+      "context_length": 12785
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_DataWithCoords.pipe_DataWithCoords.pipe.2.5.1.1",
+      "distance": 1.055516242980957,
+      "file_path": "xarray/core/common.py",
+      "start_line": 537,
+      "end_line": 667,
+      "tokens": 1158,
+      "context_length": 13943
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/xarray/xarray/core/common.py_1_T.1",
+      "distance": 1.0565710067749023,
+      "file_path": "xarray/core/common.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 243,
+      "context_length": 14186
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/xarray/xarray/core/ops.py_where_method_where_method.5.1",
+      "distance": 1.0581363439559937,
+      "file_path": "xarray/core/ops.py",
+      "start_line": 157,
+      "end_line": 185,
+      "tokens": 197,
+      "context_length": 14383
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/xarray/xarray/core/dataset.py_1__DATETIMEINDEX_COMPONENTS.1",
+      "distance": 1.0655994415283203,
+      "file_path": "xarray/core/dataset.py",
+      "start_line": 1,
+      "end_line": 132,
+      "tokens": 691,
+      "context_length": 15074
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_interp_func.4_interp_func.5.1",
+      "distance": 1.0659315586090088,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 696,
+      "end_line": 763,
+      "tokens": 566,
+      "context_length": 15640
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/xarray/xarray/core/missing.py_dt_broadcast_variables",
+      "distance": 1.0722777843475342,
+      "file_path": "xarray/core/missing.py",
+      "start_line": 1,
+      "end_line": 18,
+      "tokens": 139,
+      "context_length": 15779
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/xarray/xarray/core/indexing.py_enum_19.Variable",
+      "distance": 1.0769565105438232,
+      "file_path": "xarray/core/indexing.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 189,
+      "context_length": 15968
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/xarray/xarray/core/types.py_1_",
+      "distance": 1.0772013664245605,
+      "file_path": "xarray/core/types.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 317,
+      "context_length": 16285
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/xarray/xarray/core/variable.py_1_MissingDimensionsError.3",
+      "distance": 1.0782684087753296,
+      "file_path": "xarray/core/variable.py",
+      "start_line": 1,
+      "end_line": 69,
+      "tokens": 394,
+      "context_length": 16679
+    }
+  ],
+  "files": [
+    {
+      "file_path": "xarray/core/computation.py",
+      "position": 1,
+      "tokens": 17109,
+      "context_length": 17109
+    },
+    {
+      "file_path": "xarray/core/common.py",
+      "position": 2,
+      "tokens": 15854,
+      "context_length": 32963
+    },
+    {
+      "file_path": "xarray/core/dataarray.py",
+      "position": 3,
+      "tokens": 42367,
+      "context_length": 75330
+    },
+    {
+      "file_path": "asv_bench/benchmarks/indexing.py",
+      "position": 4,
+      "tokens": 1501,
+      "context_length": 76831
+    },
+    {
+      "file_path": "xarray/core/duck_array_ops.py",
+      "position": 5,
+      "tokens": 5478,
+      "context_length": 82309
+    },
+    {
+      "file_path": "xarray/__init__.py",
+      "position": 6,
+      "tokens": 701,
+      "context_length": 83010
+    },
+    {
+      "file_path": "xarray/core/merge.py",
+      "position": 7,
+      "tokens": 8909,
+      "context_length": 91919
+    },
+    {
+      "file_path": "xarray/ufuncs.py",
+      "position": 8,
+      "tokens": 1213,
+      "context_length": 93132
+    },
+    {
+      "file_path": "asv_bench/benchmarks/dataarray_missing.py",
+      "position": 9,
+      "tokens": 501,
+      "context_length": 93633
+    },
+    {
+      "file_path": "xarray/core/combine.py",
+      "position": 10,
+      "tokens": 8972,
+      "context_length": 102605
+    },
+    {
+      "file_path": "xarray/core/ops.py",
+      "position": 11,
+      "tokens": 2381,
+      "context_length": 104986
+    },
+    {
+      "file_path": "xarray/core/dataset.py",
+      "position": 12,
+      "tokens": 69240,
+      "context_length": 174226
+    },
+    {
+      "file_path": "xarray/core/missing.py",
+      "position": 13,
+      "tokens": 6191,
+      "context_length": 180417
+    },
+    {
+      "file_path": "xarray/core/indexing.py",
+      "position": 14,
+      "tokens": 12255,
+      "context_length": 192672
+    },
+    {
+      "file_path": "xarray/core/types.py",
+      "position": 15,
+      "tokens": 317,
+      "context_length": 192989
+    },
+    {
+      "file_path": "xarray/core/variable.py",
+      "position": 16,
+      "tokens": 23961,
+      "context_length": 216950
+    }
+  ]
+}

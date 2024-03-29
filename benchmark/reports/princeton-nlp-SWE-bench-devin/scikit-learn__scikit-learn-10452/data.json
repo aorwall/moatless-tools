@@ -1,0 +1,1316 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-10452",
+  "model_patch": "diff --git a/sklearn/preprocessing/data.py b/sklearn/preprocessing/data.py\nindex 705ffef51..73a700a50 100644\n--- a/sklearn/preprocessing/data.py\n+++ b/sklearn/preprocessing/data.py\n@@ -135,7 +135,7 @@ def scale(X, axis=0, with_mean=True, with_std=True, copy=True):\n         (e.g. as part of a preprocessing :class:`sklearn.pipeline.Pipeline`).\n \n     \"\"\"  # noqa\n-    X = check_array(X, accept_sparse='csc', copy=copy, ensure_2d=False,\n+    X = check_array(X, accept_sparse=['csc'], copy=copy, ensure_2d=False, dtype=FLOAT_DTYPES)\n                     warn_on_dtype=True, estimator='the scale function',\n                     dtype=FLOAT_DTYPES)\n     if sparse.issparse(X):\n@@ -1342,31 +1342,47 @@ class PolynomialFeatures(BaseEstimator, TransformerMixin):\n \n         Parameters\n         ----------\n-        X : array-like, shape [n_samples, n_features]\n+        X : array-like or sparse matrix, shape [n_samples, n_features]\n             The data to transform, row by row.\n \n         Returns\n         -------\n-        XP : np.ndarray shape [n_samples, NP]\n+        XP : np.ndarray or sparse matrix, shape [n_samples, NP]\n             The matrix of features, where NP is the number of polynomial\n             features generated from the combination of inputs.\n         \"\"\"\n         check_is_fitted(self, ['n_input_features_', 'n_output_features_'])\n \n-        X = check_array(X, dtype=FLOAT_DTYPES)\n+        # Check if X is a sparse matrix\n+        if sparse.isspmatrix(X):\n+            X = check_array(X, accept_sparse=['csr', 'csc'], dtype=FLOAT_DTYPES)\n+        else:\n+            X = check_array(X, dtype=FLOAT_DTYPES)\n+\n         n_samples, n_features = X.shape\n \n         if n_features != self.n_input_features_:\n             raise ValueError(\"X shape does not match training shape\")\n \n-        # allocate output data\n-        XP = np.empty((n_samples, self.n_output_features_), dtype=X.dtype)\n-\n+        # Generate the combinations of features\n         combinations = self._combinations(n_features, self.degree,\n                                           self.interaction_only,\n                                           self.include_bias)\n-        for i, c in enumerate(combinations):\n-            XP[:, i] = X[:, c].prod(1)\n+        # Allocate output data\n+        if sparse.isspmatrix(X):\n+            columns = []\n+            for c in combinations:\n+                # Multiply the features for the current combination\n+                # Use .multiply method for sparse matrices\n+                out_col = X[:, c[0]]\n+                for feature_idx in c[1:]:\n+                    out_col = out_col.multiply(X[:, feature_idx])\n+                columns.append(out_col)\n+            XP = sparse.hstack(columns, format='csr')\n+        else:\n+            XP = np.empty((n_samples, self.n_output_features_), dtype=X.dtype)\n+            for i, c in enumerate(combinations):\n+                XP[:, i] = X[:, c].prod(1)\n \n         return XP\n \n@@ -1431,7 +1447,7 @@ def normalize(X, norm='l2', axis=1, copy=True, return_norm=False):\n     else:\n         raise ValueError(\"'%d' is not a supported axis\" % axis)\n \n-    X = check_array(X, sparse_format, copy=copy,\n+    X = check_array(X, accept_sparse=sparse_format, copy=copy,\n                     estimator='the normalize function', dtype=FLOAT_DTYPES)\n     if axis == 0:\n         X = X.T\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/preprocessing/data.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "3e5469eda719956c076ae8e685ec1183bfd98569",
+  "patch": "diff --git a/sklearn/preprocessing/data.py b/sklearn/preprocessing/data.py\n--- a/sklearn/preprocessing/data.py\n+++ b/sklearn/preprocessing/data.py\n@@ -1325,7 +1325,7 @@ def fit(self, X, y=None):\n         -------\n         self : instance\n         \"\"\"\n-        n_samples, n_features = check_array(X).shape\n+        n_samples, n_features = check_array(X, accept_sparse=True).shape\n         combinations = self._combinations(n_features, self.degree,\n                                           self.interaction_only,\n                                           self.include_bias)\n@@ -1338,31 +1338,42 @@ def transform(self, X):\n \n         Parameters\n         ----------\n-        X : array-like, shape [n_samples, n_features]\n+        X : array-like or sparse matrix, shape [n_samples, n_features]\n             The data to transform, row by row.\n+            Sparse input should preferably be in CSC format.\n \n         Returns\n         -------\n-        XP : np.ndarray shape [n_samples, NP]\n+        XP : np.ndarray or CSC sparse matrix, shape [n_samples, NP]\n             The matrix of features, where NP is the number of polynomial\n             features generated from the combination of inputs.\n         \"\"\"\n         check_is_fitted(self, ['n_input_features_', 'n_output_features_'])\n \n-        X = check_array(X, dtype=FLOAT_DTYPES)\n+        X = check_array(X, dtype=FLOAT_DTYPES, accept_sparse='csc')\n         n_samples, n_features = X.shape\n \n         if n_features != self.n_input_features_:\n             raise ValueError(\"X shape does not match training shape\")\n \n-        # allocate output data\n-        XP = np.empty((n_samples, self.n_output_features_), dtype=X.dtype)\n-\n         combinations = self._combinations(n_features, self.degree,\n                                           self.interaction_only,\n                                           self.include_bias)\n-        for i, c in enumerate(combinations):\n-            XP[:, i] = X[:, c].prod(1)\n+        if sparse.isspmatrix(X):\n+            columns = []\n+            for comb in combinations:\n+                if comb:\n+                    out_col = 1\n+                    for col_idx in comb:\n+                        out_col = X[:, col_idx].multiply(out_col)\n+                    columns.append(out_col)\n+                else:\n+                    columns.append(sparse.csc_matrix(np.ones((X.shape[0], 1))))\n+            XP = sparse.hstack(columns, dtype=X.dtype).tocsc()\n+        else:\n+            XP = np.empty((n_samples, self.n_output_features_), dtype=X.dtype)\n+            for i, comb in enumerate(combinations):\n+                XP[:, i] = X[:, comb].prod(1)\n \n         return XP\n \n",
+  "test_patch": "diff --git a/sklearn/preprocessing/tests/test_data.py b/sklearn/preprocessing/tests/test_data.py\n--- a/sklearn/preprocessing/tests/test_data.py\n+++ b/sklearn/preprocessing/tests/test_data.py\n@@ -7,10 +7,12 @@\n \n import warnings\n import re\n+\n import numpy as np\n import numpy.linalg as la\n from scipy import sparse, stats\n from distutils.version import LooseVersion\n+import pytest\n \n from sklearn.utils import gen_batches\n \n@@ -155,6 +157,28 @@ def test_polynomial_feature_names():\n                        feature_names)\n \n \n+@pytest.mark.parametrize(['deg', 'include_bias', 'interaction_only', 'dtype'],\n+                         [(1, True, False, int),\n+                          (2, True, False, int),\n+                          (2, True, False, np.float32),\n+                          (2, True, False, np.float64),\n+                          (3, False, False, np.float64),\n+                          (3, False, True, np.float64)])\n+def test_polynomial_features_sparse_X(deg, include_bias, interaction_only,\n+                                      dtype):\n+    rng = np.random.RandomState(0)\n+    X = rng.randint(0, 2, (100, 2))\n+    X_sparse = sparse.csr_matrix(X)\n+\n+    est = PolynomialFeatures(deg, include_bias=include_bias)\n+    Xt_sparse = est.fit_transform(X_sparse.astype(dtype))\n+    Xt_dense = est.fit_transform(X.astype(dtype))\n+\n+    assert isinstance(Xt_sparse, sparse.csc_matrix)\n+    assert Xt_sparse.dtype == Xt_dense.dtype\n+    assert_array_almost_equal(Xt_sparse.A, Xt_dense)\n+\n+\n def test_standard_scaler_1d():\n     # Test scaling of dataset along single axis\n     for X in [X_1row, X_1col, X_list_1row, X_list_1row]:\n",
+  "problem_statement": "Polynomial Features for sparse data\nI'm not sure if that came up before but PolynomialFeatures doesn't support sparse data, which is not great. Should be easy but I haven't checked ;)\n",
+  "hints_text": "I'll take this up.\n@dalmia @amueller any news on this feature? We're eagerly anticipating it ;-)\r\n\nSee also #3512, #3514\nFor the benefit of @amueller, my [comment](https://github.com/scikit-learn/scikit-learn/pull/8380#issuecomment-299164291) on #8380:\r\n\r\n>  [@jnothman] closed both #3512 and #3514 at the time, in favor of #4286, but sparsity is still not conserved. Is there some way to get attention back to the issue of sparse polynomial features?\n@jnothman Thanks! :smiley: \nThis should be pretty straightforward to solve. I've given a couple of options at https://github.com/scikit-learn/scikit-learn/pull/8380#issuecomment-299120531.\r\n\r\nWould a contributor like to take it up? @SebastinSanty, perhaps?\n@jnothman Yes, I would like to take it up.\nIt will be very useful for me, @SebastinSanty when will it be available, even your develop branch:)\nDoes \"Polynomial Features for sparse data\" implemented? \r\nI also asked a question about this in [Stackoverflow](https://stackoverflow.com/questions/48199391/how-to-make-polynomial-features-using-sparse-matrix-in-scikit-learn)\nI've had enough of people asking for this and it not getting closed, despite almost all the work having been done. I'll open a PR soon.",
+  "created_at": "2018-01-11T06:56:51Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[1-True-False-int]\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[2-True-False-float32]\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[2-True-False-float64]\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[2-True-False-int]\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[3-False-False-float64]\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features_sparse_X[3-False-True-float64]\"]",
+  "PASS_TO_PASS": "[\"sklearn/preprocessing/tests/test_data.py::test_add_dummy_feature\", \"sklearn/preprocessing/tests/test_data.py::test_add_dummy_feature_coo\", \"sklearn/preprocessing/tests/test_data.py::test_add_dummy_feature_csc\", \"sklearn/preprocessing/tests/test_data.py::test_add_dummy_feature_csr\", \"sklearn/preprocessing/tests/test_data.py::test_binarizer\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_categories\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_dtypes\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_dtypes_pandas\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_handle_unknown\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_onehot\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_onehot_inverse\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_ordinal\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_ordinal_inverse\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_pandas\", \"sklearn/preprocessing/tests/test_data.py::test_categorical_encoder_specified_categories\", \"sklearn/preprocessing/tests/test_data.py::test_center_kernel\", \"sklearn/preprocessing/tests/test_data.py::test_cv_pipeline_precomputed\", \"sklearn/preprocessing/tests/test_data.py::test_fit_cold_start\", \"sklearn/preprocessing/tests/test_data.py::test_fit_transform\", \"sklearn/preprocessing/tests/test_data.py::test_handle_zeros_in_scale\", \"sklearn/preprocessing/tests/test_data.py::test_maxabs_scaler_1d\", \"sklearn/preprocessing/tests/test_data.py::test_maxabs_scaler_large_negative_value\", \"sklearn/preprocessing/tests/test_data.py::test_maxabs_scaler_partial_fit\", \"sklearn/preprocessing/tests/test_data.py::test_maxabs_scaler_transform_one_row_csr\", \"sklearn/preprocessing/tests/test_data.py::test_maxabs_scaler_zero_variance_features\", \"sklearn/preprocessing/tests/test_data.py::test_min_max_scaler_1d\", \"sklearn/preprocessing/tests/test_data.py::test_min_max_scaler_iris\", \"sklearn/preprocessing/tests/test_data.py::test_min_max_scaler_zero_variance_features\", \"sklearn/preprocessing/tests/test_data.py::test_minmax_scale_axis1\", \"sklearn/preprocessing/tests/test_data.py::test_minmax_scaler_partial_fit\", \"sklearn/preprocessing/tests/test_data.py::test_normalize\", \"sklearn/preprocessing/tests/test_data.py::test_normalizer_l1\", \"sklearn/preprocessing/tests/test_data.py::test_normalizer_l2\", \"sklearn/preprocessing/tests/test_data.py::test_normalizer_max\", \"sklearn/preprocessing/tests/test_data.py::test_one_hot_encoder_categorical_features\", \"sklearn/preprocessing/tests/test_data.py::test_one_hot_encoder_dense\", \"sklearn/preprocessing/tests/test_data.py::test_one_hot_encoder_sparse\", \"sklearn/preprocessing/tests/test_data.py::test_one_hot_encoder_unknown_transform\", \"sklearn/preprocessing/tests/test_data.py::test_partial_fit_sparse_input\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_feature_names\", \"sklearn/preprocessing/tests/test_data.py::test_polynomial_features\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_1d\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_2d\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_lambda_zero\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_method_exception\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_notfitted\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_shape_exception\", \"sklearn/preprocessing/tests/test_data.py::test_power_transformer_strictly_positive_exception\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_and_inverse\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_axis1\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_bounds\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_check_error\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_dense_toy\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_iris\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_sparse_ignore_zeros\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_sparse_toy\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_subsampling\", \"sklearn/preprocessing/tests/test_data.py::test_quantile_transform_valid_axis\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scale_1d_array\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scale_axis1\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_2d_arrays\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_invalid_range\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_iris\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_iris_quantiles\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_transform_one_row_csr\", \"sklearn/preprocessing/tests/test_data.py::test_robust_scaler_zero_variance_features\", \"sklearn/preprocessing/tests/test_data.py::test_scale_1d\", \"sklearn/preprocessing/tests/test_data.py::test_scale_function_without_centering\", \"sklearn/preprocessing/tests/test_data.py::test_scale_input_finiteness_validation\", \"sklearn/preprocessing/tests/test_data.py::test_scale_sparse_with_mean_raise_exception\", \"sklearn/preprocessing/tests/test_data.py::test_scaler_2d_arrays\", \"sklearn/preprocessing/tests/test_data.py::test_scaler_int\", \"sklearn/preprocessing/tests/test_data.py::test_scaler_without_centering\", \"sklearn/preprocessing/tests/test_data.py::test_scaler_without_copy\", \"sklearn/preprocessing/tests/test_data.py::test_standard_scaler_1d\", \"sklearn/preprocessing/tests/test_data.py::test_standard_scaler_numerical_stability\", \"sklearn/preprocessing/tests/test_data.py::test_standard_scaler_partial_fit\", \"sklearn/preprocessing/tests/test_data.py::test_standard_scaler_partial_fit_numerical_stability\", \"sklearn/preprocessing/tests/test_data.py::test_standard_scaler_trasform_with_partial_fit\", \"sklearn/preprocessing/tests/test_data.py::test_transform_selected\", \"sklearn/preprocessing/tests/test_data.py::test_transform_selected_copy_arg\", \"sklearn/preprocessing/tests/test_data.py::test_warning_scaling_integers\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/preprocessing/data.py"
+  ],
+  "test_patch_files": [
+    "sklearn/preprocessing/tests/test_data.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/preprocessing/data.py": {
+      "diffs": [
+        {
+          "start_line_old": 1328,
+          "end_line_old": 1328,
+          "file_pos": 1,
+          "file_context_length": 25777,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PolynomialFeatures_PolynomialFeatures._combinations.3.1",
+          "closest_snippet_line_distance": 52,
+          "pos": 3,
+          "context_length": 1107
+        },
+        {
+          "start_line_old": 1341,
+          "end_line_old": 1365,
+          "file_pos": 1,
+          "file_context_length": 25777,
+          "pos": 1,
+          "context_length": 235
+        }
+      ]
+    }
+  },
+  "vectors": 2883,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PolynomialFeatures.transform_PolynomialFeatures.transform.10.1",
+      "distance": 0.9900417923927307,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1340,
+      "end_line": 1371,
+      "tokens": 235,
+      "context_length": 235,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PolynomialFeatures_PolynomialFeatures._combinations.3.1",
+      "distance": 1.0941636562347412,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1203,
+      "end_line": 1276,
+      "tokens": 743,
+      "context_length": 978,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PolynomialFeatures.fit_PolynomialFeatures.fit.6.1",
+      "distance": 1.1173107624053955,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1318,
+      "end_line": 1338,
+      "tokens": 129,
+      "context_length": 1107,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ols_3d.py_1_19",
+      "distance": 1.1395347118377686,
+      "file_path": "examples/linear_model/plot_ols_3d.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 214,
+      "context_length": 1321
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_polynomial_interpolation.py_1_",
+      "distance": 1.1519055366516113,
+      "file_path": "examples/linear_model/plot_polynomial_interpolation.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 512,
+      "context_length": 1833
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_PolynomialFeatures.powers__PolynomialFeatures.get_feature_names.6.1",
+      "distance": 1.1552492380142212,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1278,
+      "end_line": 1316,
+      "tokens": 294,
+      "context_length": 2127,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/examples/model_selection/plot_underfitting_overfitting.py_1_",
+      "distance": 1.1702736616134644,
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 631,
+      "context_length": 2758
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_dense_vs_sparse_data.py_1_",
+      "distance": 1.181074857711792,
+      "file_path": "examples/linear_model/plot_lasso_dense_vs_sparse_data.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 511,
+      "context_length": 3269
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_1_ConvergenceWarning",
+      "distance": 1.2122644186019897,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 171,
+      "context_length": 3440
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sparsify.py_1_31",
+      "distance": 1.2291642427444458,
+      "file_path": "benchmarks/bench_sparsify.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 754,
+      "context_length": 4194
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_estimator_sparse_data_check_estimator_sparse_data.10.5.5.2",
+      "distance": 1.233245611190796,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 406,
+      "end_line": 447,
+      "tokens": 427,
+      "context_length": 4621
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py__sparse_encode.7__sparse_encode.9.1",
+      "distance": 1.2363343238830566,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 107,
+      "end_line": 167,
+      "tokens": 632,
+      "context_length": 5253
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_sparsify_coefficients_check_sparsify_coefficients.15",
+      "distance": 1.2463669776916504,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1742,
+      "end_line": 1762,
+      "tokens": 233,
+      "context_length": 5486
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_ard.py_clf_poly_",
+      "distance": 1.2466657161712646,
+      "file_path": "examples/linear_model/plot_ard.py",
+      "start_line": 102,
+      "end_line": 117,
+      "tokens": 155,
+      "context_length": 5641
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_sparsify.py_32_",
+      "distance": 1.2560220956802368,
+      "file_path": "benchmarks/bench_sparsify.py",
+      "start_line": 83,
+      "end_line": 106,
+      "tokens": 153,
+      "context_length": 5794
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer._count_vocab_CountVectorizer._count_vocab.16.1",
+      "distance": 1.261157512664795,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 776,
+      "end_line": 836,
+      "tokens": 467,
+      "context_length": 6261
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/examples/covariance/plot_sparse_cov.py_1_prec_.1",
+      "distance": 1.2639278173446655,
+      "file_path": "examples/covariance/plot_sparse_cov.py",
+      "start_line": 1,
+      "end_line": 89,
+      "tokens": 754,
+      "context_length": 7015
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_sparse_encode.2_sparse_encode.14.1",
+      "distance": 1.2645840644836426,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 255,
+      "end_line": 309,
+      "tokens": 479,
+      "context_length": 7494
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_omp.py_1_",
+      "distance": 1.2660436630249023,
+      "file_path": "examples/linear_model/plot_omp.py",
+      "start_line": 1,
+      "end_line": 83,
+      "tokens": 557,
+      "context_length": 8051
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/feature_selection/plot_feature_selection.py_1_",
+      "distance": 1.2717294692993164,
+      "file_path": "examples/feature_selection/plot_feature_selection.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 616,
+      "context_length": 8667
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_fit2d_1feature_check_fit2d_1feature.rnd.16.2.1.1",
+      "distance": 1.2783305644989014,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 727,
+      "end_line": 758,
+      "tokens": 297,
+      "context_length": 8964
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/sparse_pca.py_1_SparsePCA.__init__.self.random_state.1",
+      "distance": 1.2797627449035645,
+      "file_path": "sklearn/decomposition/sparse_pca.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 683,
+      "context_length": 9647
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_58_PAIRWISE_KERNEL_FUNCTIONS.1",
+      "distance": 1.2820894718170166,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1254,
+      "end_line": 1280,
+      "tokens": 192,
+      "context_length": 9839
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_1_models.1",
+      "distance": 1.287319302558899,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 462,
+      "context_length": 10301
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic_l1_l2_sparsity.py_1_",
+      "distance": 1.2888538837432861,
+      "file_path": "examples/linear_model/plot_logistic_l1_l2_sparsity.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 698,
+      "context_length": 10999
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/examples/decomposition/plot_sparse_coding.py_1_5",
+      "distance": 1.2910658121109009,
+      "file_path": "examples/decomposition/plot_sparse_coding.py",
+      "start_line": 1,
+      "end_line": 22,
+      "tokens": 172,
+      "context_length": 11171
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_multi_task_lasso_support.py_1_",
+      "distance": 1.293266773223877,
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 587,
+      "context_length": 11758
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_robust_fit.py_1_x_plot.1",
+      "distance": 1.29434335231781,
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 509,
+      "context_length": 12267
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_KERNEL_PARAMS_KERNEL_PARAMS.1",
+      "distance": 1.296475887298584,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1310,
+      "end_line": 1320,
+      "tokens": 107,
+      "context_length": 12374
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_20_sparse_encode.1",
+      "distance": 1.2973127365112305,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 170,
+      "end_line": 254,
+      "tokens": 771,
+      "context_length": 13145
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py_72_",
+      "distance": 1.2980434894561768,
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "start_line": 94,
+      "end_line": 109,
+      "tokens": 187,
+      "context_length": 13332
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_lasso.py_7_",
+      "distance": 1.2985591888427734,
+      "file_path": "benchmarks/bench_lasso.py",
+      "start_line": 60,
+      "end_line": 97,
+      "tokens": 382,
+      "context_length": 13714
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_SparseCodingMixin_SparseCodingMixin.transform.6.1",
+      "distance": 1.3012032508850098,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 791,
+      "end_line": 841,
+      "tokens": 365,
+      "context_length": 14079
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/sparse_pca.py_SparsePCA.transform_SparsePCA.transform.9.1",
+      "distance": 1.302170991897583,
+      "file_path": "sklearn/decomposition/sparse_pca.py",
+      "start_line": 140,
+      "end_line": 186,
+      "tokens": 390,
+      "context_length": 14469
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_incremental_pca.py_plot_feature_errors_plot_feature_errors.8",
+      "distance": 1.3028028011322021,
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "start_line": 48,
+      "end_line": 58,
+      "tokens": 147,
+      "context_length": 14616
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_incremental_pca.py_fixed_batch_size_comparison_fixed_batch_size_comparison.8",
+      "distance": 1.3062258958816528,
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "start_line": 86,
+      "end_line": 106,
+      "tokens": 229,
+      "context_length": 14845
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_random_projections.py_18_print_row.1",
+      "distance": 1.3075857162475586,
+      "file_path": "benchmarks/bench_random_projections.py",
+      "start_line": 70,
+      "end_line": 86,
+      "tokens": 174,
+      "context_length": 15019
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_ElasticNet.sparse_coef__ElasticNet._decision_function.3.2.1.1",
+      "distance": 1.3117979764938354,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 771,
+      "end_line": 793,
+      "tokens": 170,
+      "context_length": 15189
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_svm_kernels.py_1_",
+      "distance": 1.313113808631897,
+      "file_path": "examples/svm/plot_svm_kernels.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 631,
+      "context_length": 15820
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_NotAnArray_pairwise_estimator_convert_X.3.1",
+      "distance": 1.314158320426941,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 347,
+      "end_line": 403,
+      "tokens": 300,
+      "context_length": 16120
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_model_complexity_influence.py_generate_data_generate_data.12.1",
+      "distance": 1.3150429725646973,
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "start_line": 45,
+      "end_line": 66,
+      "tokens": 213,
+      "context_length": 16333
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_SparseCoefMixin.sparsify_SparseCoefMixin.sparsify.5.1",
+      "distance": 1.3159873485565186,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 375,
+      "end_line": 402,
+      "tokens": 257,
+      "context_length": 16590
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_scaling_importance.py_1_31",
+      "distance": 1.3172019720077515,
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "start_line": 1,
+      "end_line": 82,
+      "tokens": 762,
+      "context_length": 17352
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_incremental_pca.py_plot_feature_times_plot_feature_times.8",
+      "distance": 1.3175963163375854,
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "start_line": 35,
+      "end_line": 45,
+      "tokens": 146,
+      "context_length": 17498
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/examples/plot_johnson_lindenstrauss_bound.py_47_",
+      "distance": 1.3210463523864746,
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "start_line": 162,
+      "end_line": 200,
+      "tokens": 376,
+      "context_length": 17874
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_1_55",
+      "distance": 1.3216948509216309,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 121,
+      "tokens": 783,
+      "context_length": 18657
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/text.py_CountVectorizer._limit_features_CountVectorizer._limit_features.16.1",
+      "distance": 1.3218894004821777,
+      "file_path": "sklearn/feature_extraction/text.py",
+      "start_line": 735,
+      "end_line": 774,
+      "tokens": 376,
+      "context_length": 19033
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/examples/plot_johnson_lindenstrauss_bound.py_sys_dists_46.1",
+      "distance": 1.3225457668304443,
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "start_line": 94,
+      "end_line": 160,
+      "tokens": 646,
+      "context_length": 19679
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_polynomial_kernel_polynomial_kernel.8.1",
+      "distance": 1.3227365016937256,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 745,
+      "end_line": 778,
+      "tokens": 236,
+      "context_length": 19915
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_incremental_pca.py_variable_batch_size_comparison_",
+      "distance": 1.323106050491333,
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "start_line": 109,
+      "end_line": 157,
+      "tokens": 485,
+      "context_length": 20400
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py_SparseCoder_SparseCoder.fit.2.1",
+      "distance": 1.3275448083877563,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 844,
+      "end_line": 938,
+      "tokens": 734,
+      "context_length": 21134
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_CIFAR_FOLDER_handle_missing_dataset.1.2.1",
+      "distance": 1.3285324573516846,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 111,
+      "end_line": 128,
+      "tokens": 156,
+      "context_length": 21290
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/dict_learning.py__sparse_encode__sparse_encode.6.copy_cov.cov.1",
+      "distance": 1.3289703130722046,
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "start_line": 27,
+      "end_line": 105,
+      "tokens": 677,
+      "context_length": 21967
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_clf_poly_",
+      "distance": 1.329697847366333,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 100,
+      "end_line": 115,
+      "tokens": 149,
+      "context_length": 22116
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/partial_dependence.py_plot_partial_dependence.4_plot_partial_dependence.pdp_lim.1",
+      "distance": 1.3298300504684448,
+      "file_path": "sklearn/ensemble/partial_dependence.py",
+      "start_line": 242,
+      "end_line": 322,
+      "tokens": 767,
+      "context_length": 22883
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/hashing.py_FeatureHasher._validate_params_FeatureHasher.fit.4.1",
+      "distance": 1.3301467895507812,
+      "file_path": "sklearn/feature_extraction/hashing.py",
+      "start_line": 102,
+      "end_line": 133,
+      "tokens": 262,
+      "context_length": 23145
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/examples/classification/plot_lda.py_18_",
+      "distance": 1.3306533098220825,
+      "file_path": "examples/classification/plot_lda.py",
+      "start_line": 41,
+      "end_line": 72,
+      "tokens": 325,
+      "context_length": 23470
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/sklearn/random_projection.py_sparse_random_matrix.5_sparse_random_matrix.5.3.indices.10.1",
+      "distance": 1.3316662311553955,
+      "file_path": "sklearn/random_projection.py",
+      "start_line": 264,
+      "end_line": 292,
+      "tokens": 292,
+      "context_length": 23762
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_hashing_vs_dict_vectorizer.py_1_",
+      "distance": 1.3337526321411133,
+      "file_path": "examples/text/plot_hashing_vs_dict_vectorizer.py",
+      "start_line": 1,
+      "end_line": 112,
+      "tokens": 802,
+      "context_length": 24564
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_feature_transformation.py_1_50",
+      "distance": 1.3343582153320312,
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 765,
+      "context_length": 25329
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/examples/decomposition/plot_sparse_coding.py_ricker_matrix_",
+      "distance": 1.3349097967147827,
+      "file_path": "examples/decomposition/plot_sparse_coding.py",
+      "start_line": 34,
+      "end_line": 101,
+      "tokens": 741,
+      "context_length": 26070
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/decomposition/sparse_pca.py_SparsePCA.fit_SparsePCA.fit.10.1",
+      "distance": 1.3350790739059448,
+      "file_path": "sklearn/decomposition/sparse_pca.py",
+      "start_line": 101,
+      "end_line": 138,
+      "tokens": 277,
+      "context_length": 26347
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_approximation.py_fourier_approx_svm_pca.1",
+      "distance": 1.3351861238479614,
+      "file_path": "examples/plot_kernel_approximation.py",
+      "start_line": 88,
+      "end_line": 170,
+      "tokens": 777,
+      "context_length": 27124
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_svm_regression.py_1_",
+      "distance": 1.3367153406143188,
+      "file_path": "examples/svm/plot_svm_regression.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 356,
+      "context_length": 27480
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_22__resample_model.9.1",
+      "distance": 1.3369195461273193,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 32,
+      "end_line": 60,
+      "tokens": 260,
+      "context_length": 27740
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_1__sparse_manhattan",
+      "distance": 1.339228630065918,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1,
+      "end_line": 30,
+      "tokens": 131,
+      "context_length": 27871
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/examples/plot_kernel_approximation.py_1_feature_map_nystroem.1",
+      "distance": 1.3396785259246826,
+      "file_path": "examples/plot_kernel_approximation.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 735,
+      "context_length": 28606
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/data.py_add_dummy_feature_add_dummy_feature.5.2.1.1",
+      "distance": 1.3403587341308594,
+      "file_path": "sklearn/preprocessing/data.py",
+      "start_line": 1752,
+      "end_line": 1808,
+      "tokens": 552,
+      "context_length": 29158,
+      "file_pos": 42
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/examples/preprocessing/plot_all_scaling.py_43_132",
+      "distance": 1.343831181526184,
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "start_line": 219,
+      "end_line": 320,
+      "tokens": 895,
+      "context_length": 30053
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_model_complexity_influence.py__count_nonzero_coefficients_",
+      "distance": 1.3450610637664795,
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "start_line": 121,
+      "end_line": 170,
+      "tokens": 540,
+      "context_length": 30593
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/partial_dependence.py_plot_partial_dependence.27_plot_partial_dependence.axs.1",
+      "distance": 1.3472473621368408,
+      "file_path": "sklearn/ensemble/partial_dependence.py",
+      "start_line": 323,
+      "end_line": 343,
+      "tokens": 277,
+      "context_length": 30870
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/svm/plot_svm_anova.py_1_",
+      "distance": 1.3494682312011719,
+      "file_path": "examples/svm/plot_svm_anova.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 426,
+      "context_length": 31296
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/examples/covariance/plot_sparse_cov.py_33_",
+      "distance": 1.3522670269012451,
+      "file_path": "examples/covariance/plot_sparse_cov.py",
+      "start_line": 91,
+      "end_line": 136,
+      "tokens": 411,
+      "context_length": 31707
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/feature_extraction/dict_vectorizer.py_DictVectorizer.transform_DictVectorizer.get_feature_names.2.1",
+      "distance": 1.3530124425888062,
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "start_line": 274,
+      "end_line": 318,
+      "tokens": 314,
+      "context_length": 32021
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_lasso.py_compute_bench_compute_bench.5.1",
+      "distance": 1.3532905578613281,
+      "file_path": "benchmarks/bench_lasso.py",
+      "start_line": 21,
+      "end_line": 57,
+      "tokens": 300,
+      "context_length": 32321
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_randomized_svd.py_1_30",
+      "distance": 1.3534572124481201,
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "start_line": 1,
+      "end_line": 110,
+      "tokens": 951,
+      "context_length": 33272
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/pairwise.py_pairwise_kernels.4_",
+      "distance": 1.3542721271514893,
+      "file_path": "sklearn/metrics/pairwise.py",
+      "start_line": 1394,
+      "end_line": 1410,
+      "tokens": 187,
+      "context_length": 33459
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/partial_dependence.py_plot_partial_dependence.34_",
+      "distance": 1.35556960105896,
+      "file_path": "sklearn/ensemble/partial_dependence.py",
+      "start_line": 344,
+      "end_line": 396,
+      "tokens": 669,
+      "context_length": 34128
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_and_elasticnet.py_1_",
+      "distance": 1.3575366735458374,
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 535,
+      "context_length": 34663
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/cross_decomposition/plot_compare_cross_decomposition.py_49_",
+      "distance": 1.3577485084533691,
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "start_line": 83,
+      "end_line": 156,
+      "tokens": 759,
+      "context_length": 35422
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_31_partial_fit_classifiers.1",
+      "distance": 1.3596810102462769,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 188,
+      "end_line": 215,
+      "tokens": 234,
+      "context_length": 35656
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/fixes.py_24_parallel_helper.2.1",
+      "distance": 1.3600280284881592,
+      "file_path": "sklearn/utils/fixes.py",
+      "start_line": 153,
+      "end_line": 257,
+      "tokens": 776,
+      "context_length": 36432
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/examples/hetero_feature_union.py_1_17",
+      "distance": 1.3610669374465942,
+      "file_path": "examples/hetero_feature_union.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 311,
+      "context_length": 36743
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/svm/base.py_BaseLibSVM._sparse_decision_function_BaseLibSVM._sparse_decision_function.5.1",
+      "distance": 1.3610985279083252,
+      "file_path": "sklearn/svm/base.py",
+      "start_line": 412,
+      "end_line": 432,
+      "tokens": 209,
+      "context_length": 36952
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_1_MULTI_OUTPUT.1",
+      "distance": 1.3618438243865967,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 625,
+      "context_length": 37577
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py_1_71",
+      "distance": 1.3618547916412354,
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "start_line": 1,
+      "end_line": 93,
+      "tokens": 777,
+      "context_length": 38354
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/preprocessing/imputation.py_Imputer._sparse_fit_Imputer._sparse_fit.8.7.columns_all.7.5.3.1",
+      "distance": 1.3627909421920776,
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "start_line": 169,
+      "end_line": 247,
+      "tokens": 635,
+      "context_length": 38989
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_nmf.py_load_20news_",
+      "distance": 1.364445686340332,
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "start_line": 371,
+      "end_line": 423,
+      "tokens": 514,
+      "context_length": 39503
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/datasets/samples_generator.py_make_sparse_coded_signal_make_sparse_coded_signal.11.1",
+      "distance": 1.364806890487671,
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "start_line": 1057,
+      "end_line": 1117,
+      "tokens": 462,
+      "context_length": 39965
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_plot_omp_lars.py_1_compute_bench.11.1",
+      "distance": 1.3652675151824951,
+      "file_path": "benchmarks/bench_plot_omp_lars.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 858,
+      "context_length": 40823
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/scikit-learn/sklearn/svm/base.py_BaseLibSVM._validate_for_predict_BaseLibSVM._validate_for_predict.8.1",
+      "distance": 1.3652732372283936,
+      "file_path": "sklearn/svm/base.py",
+      "start_line": 434,
+      "end_line": 458,
+      "tokens": 273,
+      "context_length": 41096
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/scikit-learn/examples/feature_selection/plot_select_from_model_boston.py_1_",
+      "distance": 1.3653926849365234,
+      "file_path": "examples/feature_selection/plot_select_from_model_boston.py",
+      "start_line": 1,
+      "end_line": 52,
+      "tokens": 351,
+      "context_length": 41447
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sklearn/preprocessing/data.py",
+      "position": 1,
+      "tokens": 25777,
+      "context_length": 25777
+    },
+    {
+      "file_path": "examples/linear_model/plot_ols_3d.py",
+      "position": 2,
+      "tokens": 555,
+      "context_length": 26332
+    },
+    {
+      "file_path": "examples/linear_model/plot_polynomial_interpolation.py",
+      "position": 3,
+      "tokens": 535,
+      "context_length": 26867
+    },
+    {
+      "file_path": "examples/model_selection/plot_underfitting_overfitting.py",
+      "position": 4,
+      "tokens": 631,
+      "context_length": 27498
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_dense_vs_sparse_data.py",
+      "position": 5,
+      "tokens": 511,
+      "context_length": 28009
+    },
+    {
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "position": 6,
+      "tokens": 5771,
+      "context_length": 33780
+    },
+    {
+      "file_path": "benchmarks/bench_sparsify.py",
+      "position": 7,
+      "tokens": 907,
+      "context_length": 34687
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 8,
+      "tokens": 17917,
+      "context_length": 52604
+    },
+    {
+      "file_path": "sklearn/decomposition/dict_learning.py",
+      "position": 9,
+      "tokens": 10684,
+      "context_length": 63288
+    },
+    {
+      "file_path": "examples/linear_model/plot_ard.py",
+      "position": 10,
+      "tokens": 923,
+      "context_length": 64211
+    },
+    {
+      "file_path": "sklearn/feature_extraction/text.py",
+      "position": 11,
+      "tokens": 11513,
+      "context_length": 75724
+    },
+    {
+      "file_path": "examples/covariance/plot_sparse_cov.py",
+      "position": 12,
+      "tokens": 1199,
+      "context_length": 76923
+    },
+    {
+      "file_path": "examples/linear_model/plot_omp.py",
+      "position": 13,
+      "tokens": 557,
+      "context_length": 77480
+    },
+    {
+      "file_path": "examples/feature_selection/plot_feature_selection.py",
+      "position": 14,
+      "tokens": 616,
+      "context_length": 78096
+    },
+    {
+      "file_path": "sklearn/decomposition/sparse_pca.py",
+      "position": 15,
+      "tokens": 2195,
+      "context_length": 80291
+    },
+    {
+      "file_path": "sklearn/metrics/pairwise.py",
+      "position": 16,
+      "tokens": 11532,
+      "context_length": 91823
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "position": 17,
+      "tokens": 988,
+      "context_length": 92811
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic_l1_l2_sparsity.py",
+      "position": 18,
+      "tokens": 752,
+      "context_length": 93563
+    },
+    {
+      "file_path": "examples/decomposition/plot_sparse_coding.py",
+      "position": 19,
+      "tokens": 1027,
+      "context_length": 94590
+    },
+    {
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "position": 20,
+      "tokens": 612,
+      "context_length": 95202
+    },
+    {
+      "file_path": "examples/linear_model/plot_robust_fit.py",
+      "position": 21,
+      "tokens": 794,
+      "context_length": 95996
+    },
+    {
+      "file_path": "examples/cluster/plot_feature_agglomeration_vs_univariate_selection.py",
+      "position": 22,
+      "tokens": 989,
+      "context_length": 96985
+    },
+    {
+      "file_path": "benchmarks/bench_lasso.py",
+      "position": 23,
+      "tokens": 795,
+      "context_length": 97780
+    },
+    {
+      "file_path": "benchmarks/bench_plot_incremental_pca.py",
+      "position": 24,
+      "tokens": 1458,
+      "context_length": 99238
+    },
+    {
+      "file_path": "benchmarks/bench_random_projections.py",
+      "position": 25,
+      "tokens": 1760,
+      "context_length": 100998
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 26,
+      "tokens": 20396,
+      "context_length": 121394
+    },
+    {
+      "file_path": "examples/svm/plot_svm_kernels.py",
+      "position": 27,
+      "tokens": 639,
+      "context_length": 122033
+    },
+    {
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "position": 28,
+      "tokens": 1524,
+      "context_length": 123557
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 29,
+      "tokens": 4968,
+      "context_length": 128525
+    },
+    {
+      "file_path": "examples/preprocessing/plot_scaling_importance.py",
+      "position": 30,
+      "tokens": 1206,
+      "context_length": 129731
+    },
+    {
+      "file_path": "examples/plot_johnson_lindenstrauss_bound.py",
+      "position": 31,
+      "tokens": 1780,
+      "context_length": 131511
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 32,
+      "tokens": 2557,
+      "context_length": 134068
+    },
+    {
+      "file_path": "benchmarks/bench_plot_randomized_svd.py",
+      "position": 33,
+      "tokens": 4384,
+      "context_length": 138452
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "position": 34,
+      "tokens": 920,
+      "context_length": 139372
+    },
+    {
+      "file_path": "sklearn/ensemble/partial_dependence.py",
+      "position": 35,
+      "tokens": 3749,
+      "context_length": 143121
+    },
+    {
+      "file_path": "sklearn/feature_extraction/hashing.py",
+      "position": 36,
+      "tokens": 1537,
+      "context_length": 144658
+    },
+    {
+      "file_path": "examples/classification/plot_lda.py",
+      "position": 37,
+      "tokens": 591,
+      "context_length": 145249
+    },
+    {
+      "file_path": "sklearn/random_projection.py",
+      "position": 38,
+      "tokens": 4973,
+      "context_length": 150222
+    },
+    {
+      "file_path": "examples/text/plot_hashing_vs_dict_vectorizer.py",
+      "position": 39,
+      "tokens": 819,
+      "context_length": 151041
+    },
+    {
+      "file_path": "examples/ensemble/plot_feature_transformation.py",
+      "position": 40,
+      "tokens": 1123,
+      "context_length": 152164
+    },
+    {
+      "file_path": "examples/plot_kernel_approximation.py",
+      "position": 41,
+      "tokens": 1941,
+      "context_length": 154105
+    },
+    {
+      "file_path": "examples/svm/plot_svm_regression.py",
+      "position": 42,
+      "tokens": 356,
+      "context_length": 154461
+    },
+    {
+      "file_path": "examples/preprocessing/plot_all_scaling.py",
+      "position": 43,
+      "tokens": 3102,
+      "context_length": 157563
+    },
+    {
+      "file_path": "examples/svm/plot_svm_anova.py",
+      "position": 44,
+      "tokens": 426,
+      "context_length": 157989
+    },
+    {
+      "file_path": "sklearn/feature_extraction/dict_vectorizer.py",
+      "position": 45,
+      "tokens": 2728,
+      "context_length": 160717
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_and_elasticnet.py",
+      "position": 46,
+      "tokens": 535,
+      "context_length": 161252
+    },
+    {
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "position": 47,
+      "tokens": 1483,
+      "context_length": 162735
+    },
+    {
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "position": 48,
+      "tokens": 3309,
+      "context_length": 166044
+    },
+    {
+      "file_path": "sklearn/utils/fixes.py",
+      "position": 49,
+      "tokens": 2396,
+      "context_length": 168440
+    },
+    {
+      "file_path": "examples/hetero_feature_union.py",
+      "position": 50,
+      "tokens": 1329,
+      "context_length": 169769
+    },
+    {
+      "file_path": "sklearn/svm/base.py",
+      "position": 51,
+      "tokens": 7836,
+      "context_length": 177605
+    },
+    {
+      "file_path": "sklearn/preprocessing/imputation.py",
+      "position": 52,
+      "tokens": 2980,
+      "context_length": 180585
+    },
+    {
+      "file_path": "benchmarks/bench_plot_nmf.py",
+      "position": 53,
+      "tokens": 3913,
+      "context_length": 184498
+    },
+    {
+      "file_path": "sklearn/datasets/samples_generator.py",
+      "position": 54,
+      "tokens": 13822,
+      "context_length": 198320
+    },
+    {
+      "file_path": "benchmarks/bench_plot_omp_lars.py",
+      "position": 55,
+      "tokens": 1166,
+      "context_length": 199486
+    },
+    {
+      "file_path": "examples/feature_selection/plot_select_from_model_boston.py",
+      "position": 56,
+      "tokens": 375,
+      "context_length": 199861
+    }
+  ]
+}

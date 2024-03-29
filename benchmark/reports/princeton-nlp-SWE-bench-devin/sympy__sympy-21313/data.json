@@ -1,0 +1,625 @@
+{
+  "instance_id": "sympy__sympy-21313",
+  "model_patch": "diff --git a/sympy/sets/fancysets.py b/sympy/sets/fancysets.py\nindex b1af4372be..829909c75f 100644\n--- a/sympy/sets/fancysets.py\n+++ b/sympy/sets/fancysets.py\n@@ -5,7 +5,7 @@\n from sympy.core.expr import Expr\n from sympy.core.function import Lambda\n from sympy.core.logic import fuzzy_not, fuzzy_or, fuzzy_and\n-from sympy.core.numbers import oo\n+from sympy.core.numbers import oo, Float\n from sympy.core.relational import Eq\n from sympy.core.singleton import Singleton, S\n from sympy.core.symbol import Dummy, symbols, Symbol\n@@ -349,6 +349,15 @@ def __new__(cls, flambda, *sets):\n             elif is_empty == False:\n                 return FiniteSet(flambda.expr)\n \n+        # Check if any of the sets are Floats\n+        if any(isinstance(arg, Float) for s in sets for arg in s):\n+            # Create a FiniteSet by applying flambda to each element of the sets\n+            elements = []\n+            for s in sets:\n+                for elem in s:\n+                    elements.append(flambda(elem))\n+            return FiniteSet(*elements)\n+\n         return Basic.__new__(cls, flambda, *sets)\n \n     lamda = property(lambda self: self.args[0])\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/sets/fancysets.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "546e10799fe55b3e59dea8fa6b3a6d6e71843d33",
+  "patch": "diff --git a/sympy/sets/handlers/functions.py b/sympy/sets/handlers/functions.py\n--- a/sympy/sets/handlers/functions.py\n+++ b/sympy/sets/handlers/functions.py\n@@ -1,4 +1,4 @@\n-from sympy import Set, symbols, exp, log, S, Wild, Dummy, oo\n+from sympy import Set, symbols, exp, log, S, Wild, Dummy, oo, Float\n from sympy.core import Expr, Add\n from sympy.core.function import Lambda, _coeff_isneg, FunctionClass\n from sympy.logic.boolalg import true\n@@ -192,7 +192,9 @@ def _set_function(f, self): # noqa:F811\n     a = Wild('a', exclude=[n])\n     b = Wild('b', exclude=[n])\n     match = expr.match(a*n + b)\n-    if match and match[a]:\n+    if match and match[a] and (\n+            not match[a].atoms(Float) and\n+            not match[b].atoms(Float)):\n         # canonical shift\n         a, b = match[a], match[b]\n         if a in [1, -1]:\n",
+  "test_patch": "diff --git a/sympy/sets/tests/test_fancysets.py b/sympy/sets/tests/test_fancysets.py\n--- a/sympy/sets/tests/test_fancysets.py\n+++ b/sympy/sets/tests/test_fancysets.py\n@@ -480,6 +480,9 @@ def test_Integers_eval_imageset():\n     y = Symbol('y')\n     L = imageset(x, 2*x + y, S.Integers)\n     assert y + 4 in L\n+    a, b, c = 0.092, 0.433, 0.341\n+    assert a in imageset(x, a + c*x, S.Integers)\n+    assert b in imageset(x, b + c*x, S.Integers)\n \n     _x = symbols('x', negative=True)\n     eq = _x**2 - _x + 1\n",
+  "problem_statement": "don't canonicalize imageset based on Float\nWhile writing this [answer](https://stackoverflow.com/a/67053708/1089161) about how to get something resembling a float-version for range to work, I tried to think about how I would do this in SymPy. Although Floats present their own difficulties, there is canonicalization being done with `imageset` expressions that makes this even worse:\r\n```\r\n>>> a,b,c = 0.092, 0.433, 0.341\r\n>>> a in imageset(x,a+c*x,Integers)\r\nTrue\r\n>>> a in imageset(x,b+c*x,Integers)\r\nFalse  <- expected based on nature of floats\r\n>>> b in imageset(x,b+c*x,Integers)  # this should not be expected\r\nFalse <- not expected\r\n```\r\nThat last result should represent an error. The reason it happens is because `b` is replaced with `b%c`:\r\n```\r\n>>> b, round(b%c,3), imageset(x,b+c*x,Integers)\r\n(0.433, 0.092, ImageSet(Lambda(x, 0.341*x + 0.092), Integers))\r\n```\r\nSo while canonicalization is OK for Rationals, it should not be done to Floats.\r\n\r\nWorking around this issue, here is a version of `frange` that might work for SymPy:\r\n```python\r\ndef frange(A, a, step, rational=None, _str=True):\r\n    \"\"\"return all values between `a` and `A` that are separated by `step`\r\n    and that include `A`.\r\n\r\n    EXAMPLES\r\n    ========\r\n\r\n    >>> frange(1, 3, .6)\r\n    FiniteSet(1.0, 1.6, 2.2, 2.8)\r\n    >>> frange(3, 1, .6)\r\n    FiniteSet(1.2, 1.8, 2.4, 3.0)\r\n    >>> frange(1, 3, .6, rational=True)\r\n    FiniteSet(1, 8/5, 11/5, 14/5)\r\n\r\n    >>> a, b, c = 0.092, 0.433, 0.341\r\n    >>> frange(a, b, c) == frange(b, a, c) == FiniteSet(0.092, 0.433)\r\n\r\n    Input values are parsed in WYSIWYG fashion by using Rational\r\n    equivalents of the `str` values of the input. Note the difference\r\n    between the last example above and those below when this is\r\n    disabled:\r\n\r\n    >>> frange(a, b, c, _str=False)\r\n    FiniteSet(0.092)\r\n    >>> frange(b, a, c, _str=False)\r\n    FiniteSet(0.433)\r\n\r\n    The binary representations of `a` and `b` are such that the\r\n    difference is not `c` unless the fraction corresponding to the\r\n    `str` values is used:\r\n\r\n    >>> b - a == c\r\n    False\r\n    >>> Rational(str(b)) - Rational(str(a)) == Rational(str(c))\r\n    True\r\n    \"\"\"\r\n    from sympy.functions.special.gamma_functions import intlike\r\n    if A == a:\r\n        return S.EmptySet\r\n    v = A, a, step\r\n    A, B, C = [Rational(str(i) if _str else i) for i in v]\r\n    inf = min(A, B)\r\n    sup = max(A, B)\r\n    rv = Interval(inf, sup).intersection(\r\n    imageset(x, A + x*C, Integers))\r\n    if not rational and not all(intlike(i) for i in v):\r\n        rv = rv.func(*[float(i) for i in rv])\r\n    return rv\r\n```\n",
+  "hints_text": "",
+  "created_at": "2021-04-13T17:15:18Z",
+  "version": "1.9",
+  "FAIL_TO_PASS": "[\"test_Integers_eval_imageset\"]",
+  "PASS_TO_PASS": "[\"test_Complex\", \"test_ComplexRegion_FiniteSet\", \"test_ComplexRegion_contains\", \"test_ComplexRegion_from_real\", \"test_ComplexRegion_intersect\", \"test_ComplexRegion_measure\", \"test_ComplexRegion_union\", \"test_ImageSet\", \"test_ImageSet_contains\", \"test_ImageSet_iterator_not_injective\", \"test_ImageSet_simplification\", \"test_NZQRC_unions\", \"test_Range_eval_imageset\", \"test_Range_set\", \"test_Range_symbolic\", \"test_Rationals\", \"test_Reals\", \"test_fun\", \"test_halfcircle\", \"test_image_is_ImageSet\", \"test_imageset_intersect_diophantine\", \"test_imageset_intersect_interval\", \"test_imageset_intersect_real\", \"test_imageset_intersection\", \"test_inf_Range_len\", \"test_infinitely_indexed_set_1\", \"test_infinitely_indexed_set_2\", \"test_infinitely_indexed_set_3\", \"test_integers\", \"test_intersections\", \"test_issue_11730\", \"test_issue_11732\", \"test_issue_11914\", \"test_issue_11938\", \"test_issue_16871\", \"test_issue_17858\", \"test_issue_18050\", \"test_issue_9543\", \"test_issue_9980\", \"test_naturals\", \"test_naturals0\", \"test_normalize_theta_set\", \"test_range_interval_intersection\", \"test_range_is_finite_set\", \"test_range_range_intersection\", \"test_union_RealSubSet\"]",
+  "environment_setup_commit": "f9a6f50ec0c74d935c50a6e9c9b2cb0469570d91",
+  "patch_files": [
+    "sympy/sets/handlers/functions.py"
+  ],
+  "test_patch_files": [
+    "sympy/sets/tests/test_fancysets.py"
+  ],
+  "patch_diff_details": {
+    "sympy/sets/handlers/functions.py": {
+      "diffs": [
+        {
+          "start_line_old": 1,
+          "end_line_old": 1,
+          "file_pos": 2,
+          "file_context_length": 6469,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/handlers/functions.py__set_function_20__set_function_20.expr.16.1.1",
+          "closest_snippet_line_distance": 172
+        },
+        {
+          "start_line_old": 195,
+          "end_line_old": 195,
+          "file_pos": 2,
+          "file_context_length": 6469,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/sets/handlers/functions.py__set_function_13__set_function_13.2",
+          "closest_snippet_line_distance": 78,
+          "pos": 26,
+          "context_length": 12962
+        }
+      ]
+    }
+  },
+  "vectors": 9273,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_15_intersection_sets_16.2.1",
+      "distance": 0.8496284484863281,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 105,
+      "end_line": 220,
+      "tokens": 985,
+      "context_length": 985
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/functions.py__set_function_13__set_function_13.2",
+      "distance": 0.8723808526992798,
+      "file_path": "sympy/sets/handlers/functions.py",
+      "start_line": 25,
+      "end_line": 117,
+      "tokens": 822,
+      "context_length": 1807,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__new___Range.__new__.12.1",
+      "distance": 0.8781263828277588,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 579,
+      "end_line": 641,
+      "tokens": 533,
+      "context_length": 2340
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range_Range.is_iterable.1",
+      "distance": 0.8997305631637573,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 494,
+      "end_line": 577,
+      "tokens": 674,
+      "context_length": 3014
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem__.9_Range.__getitem__.9.2.9.1",
+      "distance": 0.9015541672706604,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 746,
+      "end_line": 874,
+      "tokens": 1098,
+      "context_length": 4112
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_17_intersection_sets_17.2",
+      "distance": 0.9135574102401733,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 223,
+      "end_line": 368,
+      "tokens": 1317,
+      "context_length": 5429
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_20_",
+      "distance": 0.934209406375885,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 425,
+      "end_line": 477,
+      "tokens": 497,
+      "context_length": 5926
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_12_intersection_sets_14.2.1",
+      "distance": 0.9677823781967163,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 77,
+      "end_line": 103,
+      "tokens": 250,
+      "context_length": 6176
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._contains_Range._contains.8.3.2.1",
+      "distance": 0.9849896430969238,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 665,
+      "end_line": 691,
+      "tokens": 206,
+      "context_length": 6382
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/calculus/util.py_function_range.10_function_range.11.1",
+      "distance": 0.986909806728363,
+      "file_path": "sympy/calculus/util.py",
+      "start_line": 173,
+      "end_line": 222,
+      "tokens": 347,
+      "context_length": 6729
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/sets/sets.py_imageset_imageset.8.2",
+      "distance": 0.9899654388427734,
+      "file_path": "sympy/sets/sets.py",
+      "start_line": 2178,
+      "end_line": 2271,
+      "tokens": 772,
+      "context_length": 7501
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/issubset.py_is_subset_sets_15_",
+      "distance": 0.9975450038909912,
+      "file_path": "sympy/sets/handlers/issubset.py",
+      "start_line": 103,
+      "end_line": 140,
+      "tokens": 357,
+      "context_length": 7858
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/issubset.py_is_subset_sets_12_is_subset_sets_13.2.3.1",
+      "distance": 1.0051147937774658,
+      "file_path": "sympy/sets/handlers/issubset.py",
+      "start_line": 50,
+      "end_line": 67,
+      "tokens": 197,
+      "context_length": 8055
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range._inf_Range._boundary.1.1",
+      "distance": 1.0078374147415161,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 876,
+      "end_line": 908,
+      "tokens": 185,
+      "context_length": 8240
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__getitem___Range.__getitem__.ambiguous.1",
+      "distance": 1.0103988647460938,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 736,
+      "end_line": 745,
+      "tokens": 151,
+      "context_length": 8391
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet_ImageSet.1",
+      "distance": 1.01044499874115,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 268,
+      "end_line": 324,
+      "tokens": 459,
+      "context_length": 8850
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py_radsimp_radsimp.1",
+      "distance": 1.0141979455947876,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 750,
+      "end_line": 825,
+      "tokens": 756,
+      "context_length": 9606
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.as_relational_23",
+      "distance": 1.0143368244171143,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 910,
+      "end_line": 934,
+      "tokens": 218,
+      "context_length": 9824
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py_Piecewise._eval_interval_Piecewise._eval_interval.8.3.1",
+      "distance": 1.0152161121368408,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 530,
+      "end_line": 543,
+      "tokens": 207,
+      "context_length": 10031
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ComplexRegion.a_interval_ComplexRegion.a_interval.5.1",
+      "distance": 1.017255425453186,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 1160,
+      "end_line": 1187,
+      "tokens": 209,
+      "context_length": 10240
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.__iter___Range.__bool__.1.1",
+      "distance": 1.0185232162475586,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 693,
+      "end_line": 734,
+      "tokens": 286,
+      "context_length": 10526
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/issubset.py_is_subset_sets_14_is_subset_sets_14.2.3.3.a_set.8.1",
+      "distance": 1.018785834312439,
+      "file_path": "sympy/sets/handlers/issubset.py",
+      "start_line": 69,
+      "end_line": 101,
+      "tokens": 293,
+      "context_length": 10819
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/concrete/guess.py_rationalize_rationalize.6.1",
+      "distance": 1.020033597946167,
+      "file_path": "sympy/concrete/guess.py",
+      "start_line": 110,
+      "end_line": 169,
+      "tokens": 553,
+      "context_length": 11372
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_1_intersection_sets_10.2.1",
+      "distance": 1.0209074020385742,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 298,
+      "context_length": 11670
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py_Piecewise._eval_interval.9_Piecewise._eval_interval.oo.1",
+      "distance": 1.0233519077301025,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 545,
+      "end_line": 629,
+      "tokens": 854,
+      "context_length": 12524
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/functions.py__set_function_20__set_function_20.expr.16.1.1",
+      "distance": 1.0302356481552124,
+      "file_path": "sympy/sets/handlers/functions.py",
+      "start_line": 173,
+      "end_line": 220,
+      "tokens": 438,
+      "context_length": 12962,
+      "file_pos": 9
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Rationals_Rationals._boundary.1.1",
+      "distance": 1.0327239036560059,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 20,
+      "end_line": 64,
+      "tokens": 319,
+      "context_length": 13281
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/polys/modulargcd.py__integer_rational_reconstruction__integer_rational_reconstruction.11.1",
+      "distance": 1.032852053642273,
+      "file_path": "sympy/polys/modulargcd.py",
+      "start_line": 1705,
+      "end_line": 1766,
+      "tokens": 410,
+      "context_length": 13691
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py__clip__clip.10.1",
+      "distance": 1.0340815782546997,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 1139,
+      "end_line": 1182,
+      "tokens": 404,
+      "context_length": 14095
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/functions/elementary/piecewise.py_Piecewise._intervals_Piecewise._intervals.4",
+      "distance": 1.0449228286743164,
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "start_line": 657,
+      "end_line": 676,
+      "tokens": 219,
+      "context_length": 14314
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/simplify/radsimp.py__split_gcd_",
+      "distance": 1.049551010131836,
+      "file_path": "sympy/simplify/radsimp.py",
+      "start_line": 1182,
+      "end_line": 1206,
+      "tokens": 216,
+      "context_length": 14530
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_ImageSet._contains.get_equations_ImageSet._contains.30.1",
+      "distance": 1.0550014972686768,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 426,
+      "end_line": 476,
+      "tokens": 444,
+      "context_length": 14974
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/sets/__init__.py_DisjointUnion_",
+      "distance": 1.056214451789856,
+      "file_path": "sympy/sets/__init__.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 287,
+      "context_length": 15261
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/plotting/pygletplot/plot_interval.py_PlotInterval.vrange2_",
+      "distance": 1.0572201013565063,
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "start_line": 164,
+      "end_line": 180,
+      "tokens": 142,
+      "context_length": 15403
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/issubset.py_is_subset_sets_9_is_subset_sets_10.4.1.1",
+      "distance": 1.0603463649749756,
+      "file_path": "sympy/sets/handlers/issubset.py",
+      "start_line": 15,
+      "end_line": 32,
+      "tokens": 198,
+      "context_length": 15601
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/solvers/solvers.py_unrad.48.3.1_unrad.48.3.4",
+      "distance": 1.060403823852539,
+      "file_path": "sympy/solvers/solvers.py",
+      "start_line": 3366,
+      "end_line": 3483,
+      "tokens": 1593,
+      "context_length": 17194
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/polys/modulargcd.py__rational_function_reconstruction__rational_function_reconstruction.15.1",
+      "distance": 1.0615437030792236,
+      "file_path": "sympy/polys/modulargcd.py",
+      "start_line": 1219,
+      "end_line": 1282,
+      "tokens": 480,
+      "context_length": 17674
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/sympy/ntheory/continued_fraction.py_1_continued_fraction.4",
+      "distance": 1.063833236694336,
+      "file_path": "sympy/ntheory/continued_fraction.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 630,
+      "context_length": 18304
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/sets/sets.py_imageset.9_imageset.10.1",
+      "distance": 1.0669291019439697,
+      "file_path": "sympy/sets/sets.py",
+      "start_line": 2273,
+      "end_line": 2304,
+      "tokens": 255,
+      "context_length": 18559
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/sets/sets.py_Interval.__new___Interval.__new__.16.1",
+      "distance": 1.0676504373550415,
+      "file_path": "sympy/sets/sets.py",
+      "start_line": 917,
+      "end_line": 955,
+      "tokens": 339,
+      "context_length": 18898
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/core/function.py_nfloat_",
+      "distance": 1.0721747875213623,
+      "file_path": "sympy/core/function.py",
+      "start_line": 3285,
+      "end_line": 3374,
+      "tokens": 789,
+      "context_length": 19687
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/sets/handlers/intersection.py_intersection_sets_18_intersection_sets_19.infty.8.1",
+      "distance": 1.0734494924545288,
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "start_line": 371,
+      "end_line": 423,
+      "tokens": 417,
+      "context_length": 20104
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/plotting/intervalmath/interval_arithmetic.py_interval.__truediv___interval.__truediv__.2.3.3.1.1",
+      "distance": 1.0736944675445557,
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "start_line": 280,
+      "end_line": 319,
+      "tokens": 342,
+      "context_length": 20446
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/series/formal.py_rational_algorithm.7_rational_algorithm.8.1",
+      "distance": 1.0756380558013916,
+      "file_path": "sympy/series/formal.py",
+      "start_line": 109,
+      "end_line": 165,
+      "tokens": 427,
+      "context_length": 20873
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py_meijerint_definite.20_meijerint_definite.22.1.1",
+      "distance": 1.0757073163986206,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1824,
+      "end_line": 1908,
+      "tokens": 807,
+      "context_length": 21680
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/sets/fancysets.py_Range.start_Range.reversed.4.1",
+      "distance": 1.076048731803894,
+      "file_path": "sympy/sets/fancysets.py",
+      "start_line": 643,
+      "end_line": 663,
+      "tokens": 143,
+      "context_length": 21823
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/sets/handlers/intersection.py",
+      "position": 1,
+      "tokens": 4183,
+      "context_length": 4183
+    },
+    {
+      "file_path": "sympy/sets/handlers/functions.py",
+      "position": 2,
+      "tokens": 2286,
+      "context_length": 6469
+    },
+    {
+      "file_path": "sympy/sets/fancysets.py",
+      "position": 3,
+      "tokens": 10890,
+      "context_length": 17359
+    },
+    {
+      "file_path": "sympy/calculus/util.py",
+      "position": 4,
+      "tokens": 11883,
+      "context_length": 29242
+    },
+    {
+      "file_path": "sympy/sets/sets.py",
+      "position": 5,
+      "tokens": 17621,
+      "context_length": 46863
+    },
+    {
+      "file_path": "sympy/sets/handlers/issubset.py",
+      "position": 6,
+      "tokens": 1378,
+      "context_length": 48241
+    },
+    {
+      "file_path": "sympy/simplify/radsimp.py",
+      "position": 7,
+      "tokens": 10331,
+      "context_length": 58572
+    },
+    {
+      "file_path": "sympy/functions/elementary/piecewise.py",
+      "position": 8,
+      "tokens": 11373,
+      "context_length": 69945
+    },
+    {
+      "file_path": "sympy/concrete/guess.py",
+      "position": 9,
+      "tokens": 4969,
+      "context_length": 74914
+    },
+    {
+      "file_path": "sympy/polys/modulargcd.py",
+      "position": 10,
+      "tokens": 18476,
+      "context_length": 93390
+    },
+    {
+      "file_path": "sympy/sets/__init__.py",
+      "position": 11,
+      "tokens": 287,
+      "context_length": 93677
+    },
+    {
+      "file_path": "sympy/plotting/pygletplot/plot_interval.py",
+      "position": 12,
+      "tokens": 1303,
+      "context_length": 94980
+    },
+    {
+      "file_path": "sympy/solvers/solvers.py",
+      "position": 13,
+      "tokens": 31691,
+      "context_length": 126671
+    },
+    {
+      "file_path": "sympy/ntheory/continued_fraction.py",
+      "position": 14,
+      "tokens": 2746,
+      "context_length": 129417
+    },
+    {
+      "file_path": "sympy/core/function.py",
+      "position": 15,
+      "tokens": 28225,
+      "context_length": 157642
+    },
+    {
+      "file_path": "sympy/plotting/intervalmath/interval_arithmetic.py",
+      "position": 16,
+      "tokens": 3167,
+      "context_length": 160809
+    },
+    {
+      "file_path": "sympy/series/formal.py",
+      "position": 17,
+      "tokens": 14195,
+      "context_length": 175004
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 18,
+      "tokens": 24403,
+      "context_length": 199407
+    }
+  ]
+}

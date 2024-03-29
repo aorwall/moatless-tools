@@ -1,0 +1,1806 @@
+{
+  "instance_id": "django__django-16254",
+  "model_patch": "diff --git a/django/db/backends/sqlite3/schema.py b/django/db/backends/sqlite3/schema.py\nindex 6c106ae868..39029a39ec 100644\n--- a/django/db/backends/sqlite3/schema.py\n+++ b/django/db/backends/sqlite3/schema.py\n@@ -379,18 +379,13 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):\n \n     def add_field(self, model, field):\n         \"\"\"Create a field on a model.\"\"\"\n-        if (\n-            # Primary keys and unique fields are not supported in ALTER TABLE\n-            # ADD COLUMN.\n-            field.primary_key\n-            or field.unique\n-            or\n-            # Fields with default values cannot by handled by ALTER TABLE ADD\n-            # COLUMN statement because DROP DEFAULT is not supported in\n-            # ALTER TABLE.\n-            not field.null\n-            or self.effective_default(field) is not None\n-        ):\n+        # Special-case implicit M2M tables\n+        if field.many_to_many and field.remote_field.through._meta.auto_created:\n+            return self.create_model(field.remote_field.through)\n+        # Fields with default values cannot by handled by ALTER TABLE ADD\n+        # COLUMN statement because DROP DEFAULT is not supported in\n+        # ALTER TABLE.\n+        if not field.null or self.effective_default(field) is not None:\n             self._remake_table(model, create_field=field)\n         else:\n             super().add_field(model, field)\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "django/db/backends/sqlite3/schema.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "e580b891cb5ae31eb0571c88428afb9bf69e47f2",
+  "patch": "diff --git a/django/db/backends/sqlite3/schema.py b/django/db/backends/sqlite3/schema.py\n--- a/django/db/backends/sqlite3/schema.py\n+++ b/django/db/backends/sqlite3/schema.py\n@@ -379,7 +379,10 @@ def delete_model(self, model, handle_autom2m=True):\n \n     def add_field(self, model, field):\n         \"\"\"Create a field on a model.\"\"\"\n-        if (\n+        # Special-case implicit M2M tables.\n+        if field.many_to_many and field.remote_field.through._meta.auto_created:\n+            self.create_model(field.remote_field.through)\n+        elif (\n             # Primary keys and unique fields are not supported in ALTER TABLE\n             # ADD COLUMN.\n             field.primary_key\n",
+  "test_patch": "diff --git a/tests/schema/tests.py b/tests/schema/tests.py\n--- a/tests/schema/tests.py\n+++ b/tests/schema/tests.py\n@@ -2200,8 +2200,25 @@ class Meta:\n         with self.assertRaises(DatabaseError):\n             self.column_classes(new_field.remote_field.through)\n         # Add the field\n-        with connection.schema_editor() as editor:\n+        with CaptureQueriesContext(\n+            connection\n+        ) as ctx, connection.schema_editor() as editor:\n             editor.add_field(LocalAuthorWithM2M, new_field)\n+        # Table is not rebuilt.\n+        self.assertEqual(\n+            len(\n+                [\n+                    query[\"sql\"]\n+                    for query in ctx.captured_queries\n+                    if \"CREATE TABLE\" in query[\"sql\"]\n+                ]\n+            ),\n+            1,\n+        )\n+        self.assertIs(\n+            any(\"DROP TABLE\" in query[\"sql\"] for query in ctx.captured_queries),\n+            False,\n+        )\n         # Ensure there is now an m2m table there\n         columns = self.column_classes(new_field.remote_field.through)\n         self.assertEqual(\n",
+  "problem_statement": "Adding ManyToManyField on SQLite rebuilds table.\nDescription\n\t\nHey there,\nWhile updating the \u200bdjango-migration-linter for Django 4.1 (yeah, a bit late to the party, but I was busy eh :P), I bumped into what seems to be a regression.\nOn SQLite, when adding a ManyToManyField to a table, it seems to rebuild the table - whereas it did not in Django 4.0.\nFrom my understanding, rebuilding the table is not necessary in this case. Or perhaps I'm missing something.\nSteps to reproduce:\n1/ Before models:\nclass A(models.Model):\n\tpass\nclass B(models.Model):\n\tpass\n(with it's boring migration)\n2/ After models:\nclass A(models.Model):\n\tpass\nclass B(models.Model):\n\tmany_to_many = models.ManyToManyField(A)\nWhich, expectedly, generates the migration:\nfrom django.db import migrations, models\nclass Migration(migrations.Migration):\n\tdependencies = [(\"app_add_manytomany_field\", \"0001_initial\")]\n\toperations = [\n\t\tmigrations.AddField(\n\t\t\tmodel_name=\"b\",\n\t\t\tname=\"many_to_many\",\n\t\t\tfield=models.ManyToManyField(to=\"app_add_manytomany_field.A\"),\n\t\t)\n\t]\nAll good up until here.\nNow the \"regression\", in Django 4.0, a sqlmigrate generates:\nBEGIN;\n--\n-- Add field many_to_many to b\n--\nCREATE TABLE \"app_add_manytomany_field_b_many_to_many\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"b_id\" integer NOT NULL REFERENCES \"app_add_manytomany_field_b\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"a_id\" integer NOT NULL REFERENCES \"app_add_manytomany_field_a\" (\"id\") DEFERRABLE INITIALLY DEFERRED);\nCREATE UNIQUE INDEX \"app_add_manytomany_field_b_many_to_many_b_id_a_id_3e15251d_uniq\" ON \"app_add_manytomany_field_b_many_to_many\" (\"b_id\", \"a_id\");\nCREATE INDEX \"app_add_manytomany_field_b_many_to_many_b_id_953b185b\" ON \"app_add_manytomany_field_b_many_to_many\" (\"b_id\");\nCREATE INDEX \"app_add_manytomany_field_b_many_to_many_a_id_4b44832a\" ON \"app_add_manytomany_field_b_many_to_many\" (\"a_id\");\nCOMMIT;\nwhereas in Django 4.1:\nBEGIN;\n--\n-- Add field many_to_many to b\n--\nCREATE TABLE \"new__app_add_manytomany_field_b\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"x\" integer NOT NULL);\nCREATE TABLE \"app_add_manytomany_field_b_many_to_many\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"b_id\" integer NOT NULL REFERENCES \"app_add_manytomany_field_b\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"a_id\" integer NOT NULL REFERENCES \"app_add_manytomany_field_a\" (\"id\") DEFERRABLE INITIALLY DEFERRED);\nINSERT INTO \"new__app_add_manytomany_field_b\" (\"id\", \"x\") SELECT \"id\", \"x\" FROM \"app_add_manytomany_field_b\";\nDROP TABLE \"app_add_manytomany_field_b\";\nALTER TABLE \"new__app_add_manytomany_field_b\" RENAME TO \"app_add_manytomany_field_b\";\nCREATE UNIQUE INDEX \"app_add_manytomany_field_b_many_to_many_b_id_a_id_3e15251d_uniq\" ON \"app_add_manytomany_field_b_many_to_many\" (\"b_id\", \"a_id\");\nCREATE INDEX \"app_add_manytomany_field_b_many_to_many_b_id_953b185b\" ON \"app_add_manytomany_field_b_many_to_many\" (\"b_id\");\nCREATE INDEX \"app_add_manytomany_field_b_many_to_many_a_id_4b44832a\" ON \"app_add_manytomany_field_b_many_to_many\" (\"a_id\");\nCOMMIT;\nI could bisect it down to this commit 2f73e5406d54cb8945e187eff302a3a3373350be (from #32502 and this \u200bPR).\nIn the diff we see that the # Special-case implicit M2M tables comment and its code were removed.\nThat's potentially a lead for a fix here I guess :)\n(On a side note, this commit introduced another regression #33408. But that's not related to the issue at hand)\nThank you!\n",
+  "hints_text": "",
+  "created_at": "2022-11-04T04:58:15Z",
+  "version": "4.2",
+  "FAIL_TO_PASS": "[\"test_m2m (schema.tests.SchemaTests)\", \"test_m2m_custom (schema.tests.SchemaTests)\", \"test_m2m_inherited (schema.tests.SchemaTests)\"]",
+  "PASS_TO_PASS": "[\"#23065 - Constraint names must be quoted if they contain capital letters.\", \"#23609 - Tests handling of default values when altering from NULL to NOT NULL.\", \"#23738 - Can change a nullable field with default to non-nullable\", \"#23987 - effective_default() should be used as the field default when\", \"#24163 - Tests altering of ForeignKey to OneToOneField\", \"#24163 - Tests altering of OneToOneField to ForeignKey\", \"#24307 - Should skip an alter statement on databases with\", \"#24447 - Tests adding a FK constraint for an existing column\", \"#25002 - Test conversion of text field to date field.\", \"#25002 - Test conversion of text field to datetime field.\", \"#25002 - Test conversion of text field to time field.\", \"#25492 - Altering a foreign key's structure and data in the same\", \"Adding a field and removing it removes all deferred sql referring to it.\", \"Changing a field type shouldn't affect the not null status.\", \"Changing db_index to False doesn't remove indexes from Meta.indexes.\", \"Changing the primary key field name of a model with a self-referential\", \"Creating a FK to a proxy model creates database constraints.\", \"Creating tables out of FK order, then repointing, works\", \"Ensures transaction is correctly closed when an error occurs\", \"Foreign keys without database level constraint don't prevent the field\", \"Foreign keys without database level constraint don't prevent the table\", \"Indexes defined with ordering (ASC/DESC) defined on column\", \"No queries are performed when changing field attributes that don't\", \"Regression test for #21497.\", \"Regression test for #23009.\", \"Renaming a field shouldn't affect the not null status.\", \"Should be able to convert an implicit \\\"id\\\" field to an explicit \\\"id\\\"\", \"Should be able to rename an IntegerField(primary_key=True) to\", \"Should be able to rename an SmallIntegerField(primary_key=True) to\", \"Table names are stripped of their namespace/schema before being used to\", \"Tests adding fields to models\", \"Tests adding fields to models with a default that is not directly\", \"Tests adding fields to models with a temporary default\", \"Tests adding fields to models with a temporary default where\", \"Tests altering of FKs\", \"Tests altering of the primary key\", \"Tests binary fields get a sane default (#22851)\", \"Tests creating models with index_together already defined\", \"Tests creating/deleting CHECK constraints\", \"Tests creation/altering of indexes\", \"Tests index addition and removal\", \"Tests removing and adding index_together constraints on a model.\", \"Tests removing and adding index_together constraints that include\", \"Tests removing and adding unique constraints to a single column.\", \"Tests removing and adding unique_together constraints on a model.\", \"Tests removing and adding unique_together constraints that include\", \"Tests renaming of the table\", \"Tests simple altering of fields\", \"The db_constraint parameter is respected\", \"Tries creating a model's table, and then deleting it when it has a\", \"Tries creating a model's table, and then deleting it.\", \"When a primary key that's pointed to by a ForeignKey with\", \"effective_default() should be used for DateField, DateTimeField, and\", \"test_add_auto_field (schema.tests.SchemaTests)\", \"test_add_field_db_collation (schema.tests.SchemaTests)\", \"test_add_field_default_dropped (schema.tests.SchemaTests)\", \"test_add_field_default_nullable (schema.tests.SchemaTests)\", \"test_add_field_durationfield_with_default (schema.tests.SchemaTests)\", \"test_add_field_o2o_nullable (schema.tests.SchemaTests)\", \"test_add_foreign_key_quoted_db_table (schema.tests.SchemaTests)\", \"test_add_foreign_object (schema.tests.SchemaTests)\", \"test_add_textfield_default_nullable (schema.tests.SchemaTests)\", \"test_add_textfield_unhashable_default (schema.tests.SchemaTests)\", \"test_alter_auto_field_quoted_db_column (schema.tests.SchemaTests)\", \"test_alter_auto_field_to_char_field (schema.tests.SchemaTests)\", \"test_alter_auto_field_to_integer_field (schema.tests.SchemaTests)\", \"test_alter_autofield_pk_to_bigautofield_pk (schema.tests.SchemaTests)\", \"test_alter_autofield_pk_to_smallautofield_pk (schema.tests.SchemaTests)\", \"test_alter_db_table_case (schema.tests.SchemaTests)\", \"test_alter_field_add_index_to_integerfield (schema.tests.SchemaTests)\", \"test_alter_field_choices_noop (schema.tests.SchemaTests)\", \"test_alter_field_db_collation (schema.tests.SchemaTests)\", \"test_alter_field_default_dropped (schema.tests.SchemaTests)\", \"test_alter_field_fk_keeps_index (schema.tests.SchemaTests)\", \"test_alter_field_fk_to_o2o (schema.tests.SchemaTests)\", \"test_alter_field_o2o_keeps_unique (schema.tests.SchemaTests)\", \"test_alter_field_o2o_to_fk (schema.tests.SchemaTests)\", \"test_alter_field_type_and_db_collation (schema.tests.SchemaTests)\", \"test_alter_not_unique_field_to_primary_key (schema.tests.SchemaTests)\", \"test_alter_null_with_default_value_deferred_constraints (schema.tests.SchemaTests)\", \"test_alter_primary_key_db_collation (schema.tests.SchemaTests)\", \"test_alter_primary_key_quoted_db_table (schema.tests.SchemaTests)\", \"test_alter_primary_key_the_same_name (schema.tests.SchemaTests)\", \"test_alter_text_field (schema.tests.SchemaTests)\", \"test_alter_text_field_to_not_null_with_default_value (schema.tests.SchemaTests)\", \"test_autofield_to_o2o (schema.tests.SchemaTests)\", \"test_char_field_pk_to_auto_field (schema.tests.SchemaTests)\", \"test_char_field_with_db_index_to_fk (schema.tests.SchemaTests)\", \"test_check_constraint_timedelta_param (schema.tests.SchemaTests)\", \"test_ci_cs_db_collation (schema.tests.SchemaTests)\", \"test_composed_check_constraint_with_fk (schema.tests.SchemaTests)\", \"test_composed_constraint_with_fk (schema.tests.SchemaTests)\", \"test_composed_desc_func_index_with_fk (schema.tests.SchemaTests)\", \"test_composed_desc_index_with_fk (schema.tests.SchemaTests)\", \"test_composed_func_index_with_fk (schema.tests.SchemaTests)\", \"test_composed_func_transform_index_with_fk (schema.tests.SchemaTests)\", \"test_composed_index_with_fk (schema.tests.SchemaTests)\", \"test_composite_func_index (schema.tests.SchemaTests)\", \"test_composite_func_index_field_and_expression (schema.tests.SchemaTests)\", \"test_composite_func_unique_constraint (schema.tests.SchemaTests)\", \"test_db_collation_charfield (schema.tests.SchemaTests)\", \"test_db_collation_textfield (schema.tests.SchemaTests)\", \"test_func_index (schema.tests.SchemaTests)\", \"test_func_index_calc (schema.tests.SchemaTests)\", \"test_func_index_cast (schema.tests.SchemaTests)\", \"test_func_index_collate (schema.tests.SchemaTests)\", \"test_func_index_collate_f_ordered (schema.tests.SchemaTests)\", \"test_func_index_f (schema.tests.SchemaTests)\", \"test_func_index_f_decimalfield (schema.tests.SchemaTests)\", \"test_func_index_invalid_topmost_expressions (schema.tests.SchemaTests)\", \"test_func_index_json_key_transform (schema.tests.SchemaTests)\", \"test_func_index_json_key_transform_cast (schema.tests.SchemaTests)\", \"test_func_index_lookups (schema.tests.SchemaTests)\", \"test_func_index_multiple_wrapper_references (schema.tests.SchemaTests)\", \"test_func_index_nondeterministic (schema.tests.SchemaTests)\", \"test_func_index_nonexistent_field (schema.tests.SchemaTests)\", \"test_func_unique_constraint (schema.tests.SchemaTests)\", \"test_func_unique_constraint_collate (schema.tests.SchemaTests)\", \"test_func_unique_constraint_lookups (schema.tests.SchemaTests)\", \"test_func_unique_constraint_nondeterministic (schema.tests.SchemaTests)\", \"test_func_unique_constraint_nonexistent_field (schema.tests.SchemaTests)\", \"test_func_unique_constraint_partial (schema.tests.SchemaTests)\", \"test_m2m_create (schema.tests.SchemaTests)\", \"test_m2m_create_custom (schema.tests.SchemaTests)\", \"test_m2m_create_inherited (schema.tests.SchemaTests)\", \"test_m2m_create_through (schema.tests.SchemaTests)\", \"test_m2m_create_through_custom (schema.tests.SchemaTests)\", \"test_m2m_create_through_inherited (schema.tests.SchemaTests)\", \"test_m2m_db_constraint (schema.tests.SchemaTests)\", \"test_m2m_db_constraint_custom (schema.tests.SchemaTests)\", \"test_m2m_db_constraint_inherited (schema.tests.SchemaTests)\", \"test_m2m_rename_field_in_target_model (schema.tests.SchemaTests)\", \"test_m2m_repoint (schema.tests.SchemaTests)\", \"test_m2m_repoint_custom (schema.tests.SchemaTests)\", \"test_m2m_repoint_inherited (schema.tests.SchemaTests)\", \"test_m2m_through_alter (schema.tests.SchemaTests)\", \"test_m2m_through_alter_custom (schema.tests.SchemaTests)\", \"test_m2m_through_alter_inherited (schema.tests.SchemaTests)\", \"test_m2m_through_remove (schema.tests.SchemaTests)\", \"test_remove_field (schema.tests.SchemaTests)\", \"test_remove_field_check_does_not_remove_meta_constraints (schema.tests.SchemaTests)\", \"test_remove_field_unique_does_not_remove_meta_constraints (schema.tests.SchemaTests)\", \"test_remove_index_together_does_not_remove_meta_indexes (schema.tests.SchemaTests)\", \"test_remove_indexed_field (schema.tests.SchemaTests)\", \"test_remove_unique_together_does_not_remove_meta_constraints (schema.tests.SchemaTests)\", \"test_rename_referenced_field (schema.tests.SchemaTests)\", \"test_rename_table_renames_deferred_sql_references (schema.tests.SchemaTests)\", \"test_text_field_with_db_index (schema.tests.SchemaTests)\", \"test_text_field_with_db_index_to_fk (schema.tests.SchemaTests)\", \"test_unique_constraint (schema.tests.SchemaTests)\", \"test_unique_constraint_field_and_expression (schema.tests.SchemaTests)\", \"test_unique_name_quoting (schema.tests.SchemaTests)\"]",
+  "environment_setup_commit": "0fbdb9784da915fce5dcc1fe82bac9b4785749e5",
+  "patch_files": [
+    "django/db/backends/sqlite3/schema.py"
+  ],
+  "test_patch_files": [
+    "tests/schema/tests.py"
+  ],
+  "patch_diff_details": {
+    "django/db/backends/sqlite3/schema.py": {
+      "diffs": [
+        {
+          "start_line_old": 382,
+          "end_line_old": 382,
+          "file_pos": 1,
+          "file_context_length": 4583,
+          "closest_snippet_id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.remove_field_DatabaseSchemaEditor.remove_field.3.5.2.2",
+          "closest_snippet_line_distance": 16,
+          "pos": 139,
+          "context_length": 55302
+        }
+      ]
+    }
+  },
+  "vectors": 3734,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._alter_many_to_many_DatabaseSchemaEditor._alter_many_to_many.8",
+      "distance": 0.8484197854995728,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 485,
+      "end_line": 535,
+      "tokens": 395,
+      "context_length": 395,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_field_DatabaseSchemaEditor.alter_field.5.6.1",
+      "distance": 0.8511298894882202,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 123,
+      "end_line": 174,
+      "tokens": 527,
+      "context_length": 922,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.contribute_to_class_ManyToManyField.contribute_to_class.7.self.m2m_db_table.1",
+      "distance": 0.8573119640350342,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1882,
+      "end_line": 1929,
+      "tokens": 505,
+      "context_length": 1427
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model_ManyToManyField._check_relationship_model.3.3.9.3.seen_from.5.1",
+      "distance": 0.8604207634925842,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1450,
+      "end_line": 1579,
+      "tokens": 984,
+      "context_length": 2411
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.contribute_to_related_class_ManyToManyField.contribute_to_related_class.3.self.m2m_reverse_target_field_name.1",
+      "distance": 0.8914376497268677,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1931,
+      "end_line": 1958,
+      "tokens": 305,
+      "context_length": 2716
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.alter_db_table_DatabaseSchemaEditor.alter_db_table.1.5.1",
+      "distance": 0.8925590515136719,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 100,
+      "end_line": 121,
+      "tokens": 195,
+      "context_length": 2911,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_many_to_many_BaseDatabaseSchemaEditor._alter_many_to_many.6",
+      "distance": 0.9044220447540283,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1249,
+      "end_line": 1279,
+      "tokens": 318,
+      "context_length": 3229
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_table_uniqueness_ManyToManyField._check_table_uniqueness.8.1",
+      "distance": 0.908531665802002,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1681,
+      "end_line": 1731,
+      "tokens": 431,
+      "context_length": 3660
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._remake_table.apps_DatabaseSchemaEditor._remake_table.67.restore_pk_field.primary_key.1",
+      "distance": 0.9093403220176697,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 265,
+      "end_line": 360,
+      "tokens": 807,
+      "context_length": 4467,
+      "file_pos": 3
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py__all_related_fields__related_non_m2m_objects.related_fields.2.2",
+      "distance": 0.9149341583251953,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 39,
+      "end_line": 72,
+      "tokens": 214,
+      "context_length": 4681
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._remake_table_DatabaseSchemaEditor._remake_table.23",
+      "distance": 0.9222174286842346,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 176,
+      "end_line": 264,
+      "tokens": 822,
+      "context_length": 5503,
+      "file_pos": 3
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_altered_fields_MigrationAutodetector.generate_altered_fields.2.old_model_name.15.3.3.2",
+      "distance": 0.9228497743606567,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1101,
+      "end_line": 1218,
+      "tokens": 982,
+      "context_length": 6485
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor._alter_field_DatabaseSchemaEditor._alter_field.10.5.1",
+      "distance": 0.9230996370315552,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 426,
+      "end_line": 483,
+      "tokens": 488,
+      "context_length": 6973,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field.23_BaseDatabaseSchemaEditor._alter_field.needs_database_default.1",
+      "distance": 0.9242303371429443,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 890,
+      "end_line": 974,
+      "tokens": 778,
+      "context_length": 7751
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_MigrationQuestioner.ask_not_null_addition_MigrationQuestioner.ask_unique_callable_default_addition.3.1",
+      "distance": 0.926710844039917,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 57,
+      "end_line": 87,
+      "tokens": 255,
+      "context_length": 8006
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field.rels_to_update_BaseDatabaseSchemaEditor._alter_field.84.1",
+      "distance": 0.9272741675376892,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1063,
+      "end_line": 1143,
+      "tokens": 779,
+      "context_length": 8785
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.deconstruct_ManyToManyField.deconstruct.12.1",
+      "distance": 0.9329109191894531,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1733,
+      "end_line": 1771,
+      "tokens": 413,
+      "context_length": 9198
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._alter_column_type_sql_DatabaseSchemaEditor.sql_update_with_default._alter_column_type_sql.old_db_params.14.5.1.1",
+      "distance": 0.9411072731018066,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 140,
+      "end_line": 246,
+      "tokens": 866,
+      "context_length": 10064
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_removed_altered_unique_together_MigrationAutodetector.generate_altered_index_together.1",
+      "distance": 0.9443725943565369,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1504,
+      "end_line": 1532,
+      "tokens": 235,
+      "context_length": 10299
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes.39_RelatedField._check_clashes.40.1",
+      "distance": 0.9445192813873291,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 302,
+      "end_line": 339,
+      "tokens": 296,
+      "context_length": 10595
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_NonInteractiveMigrationQuestioner_",
+      "distance": 0.944797694683075,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 291,
+      "end_line": 342,
+      "tokens": 367,
+      "context_length": 10962
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._generate_added_field_MigrationAutodetector._generate_added_field.12",
+      "distance": 0.9450737237930298,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1027,
+      "end_line": 1076,
+      "tokens": 384,
+      "context_length": 11346
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._field_should_be_indexed_BaseDatabaseSchemaEditor._rename_field_sql.1.1",
+      "distance": 0.948317289352417,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1457,
+      "end_line": 1476,
+      "tokens": 175,
+      "context_length": 11521
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/models/sql/compiler.py_SQLUpdateCompiler.pre_sql_setup_SQLUpdateCompiler.pre_sql_setup.23",
+      "distance": 0.95176100730896,
+      "file_path": "django/db/models/sql/compiler.py",
+      "start_line": 1964,
+      "end_line": 2025,
+      "tokens": 588,
+      "context_length": 12109
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field.45_BaseDatabaseSchemaEditor._alter_field.67",
+      "distance": 0.9547151327133179,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 975,
+      "end_line": 1062,
+      "tokens": 822,
+      "context_length": 12931
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_RenameModel.database_forwards_RenameModel.database_forwards.2.8.2.8",
+      "distance": 0.9564993381500244,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 370,
+      "end_line": 424,
+      "tokens": 501,
+      "context_length": 13432
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_1_DatabaseSchemaEditor.sql_delete_check.2.1",
+      "distance": 0.9572033286094666,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 471,
+      "context_length": 13903
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_created_models.6_MigrationAutodetector.generate_created_models.6.37.1.2.1",
+      "distance": 0.959458589553833,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 600,
+      "end_line": 776,
+      "tokens": 1231,
+      "context_length": 15134
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/migrations/operations/__init__.py_RenameField_",
+      "distance": 0.9595269560813904,
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 227,
+      "context_length": 15361
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.4.1",
+      "distance": 0.9601308107376099,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 68,
+      "end_line": 115,
+      "tokens": 383,
+      "context_length": 15744
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_altered_db_table_MigrationAutodetector.generate_altered_db_table.2.6.1",
+      "distance": 0.9633140563964844,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1534,
+      "end_line": 1553,
+      "tokens": 187,
+      "context_length": 15931
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations._references_graph_DatabaseOperations.sql_flush.4.1",
+      "distance": 0.9660766124725342,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 216,
+      "end_line": 241,
+      "tokens": 218,
+      "context_length": 16149
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._alter_field_BaseDatabaseSchemaEditor._alter_field.22",
+      "distance": 0.9670770764350891,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 799,
+      "end_line": 889,
+      "tokens": 773,
+      "context_length": 16922
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._alter_field_DatabaseSchemaEditor.sql_update_with_default._alter_field.5.2",
+      "distance": 0.9681470990180969,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 267,
+      "end_line": 301,
+      "tokens": 277,
+      "context_length": 17199
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_DatabaseFeatures.supports_atomic_references_rename_",
+      "distance": 0.9743744134902954,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 117,
+      "end_line": 151,
+      "tokens": 245,
+      "context_length": 17444
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_DatabaseSchemaEditor.alter_field_DatabaseSchemaEditor.alter_field.1.2.4.11.1",
+      "distance": 0.9745849370956421,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 75,
+      "end_line": 103,
+      "tokens": 344,
+      "context_length": 17788
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_operator_DatabaseFeatures.create_test_table_with_composite_primary_key.1",
+      "distance": 0.97536301612854,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 671,
+      "context_length": 18459
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_altered_order_with_respect_to_MigrationAutodetector.generate_altered_order_with_respect_to.1.4.dependencies.4",
+      "distance": 0.9756672978401184,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1595,
+      "end_line": 1627,
+      "tokens": 258,
+      "context_length": 18717
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_DatabaseSchemaEditor.add_field_DatabaseSchemaEditor.add_field.4.2",
+      "distance": 0.9771345853805542,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 105,
+      "end_line": 119,
+      "tokens": 144,
+      "context_length": 18861
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.__enter___DatabaseSchemaEditor.__exit__.3",
+      "distance": 0.9784375429153442,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 25,
+      "end_line": 41,
+      "tokens": 168,
+      "context_length": 19029,
+      "file_pos": 13
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager.add.alters_data_create_reverse_many_to_one_manager.RelatedManager.19._clear.alters_data.1",
+      "distance": 0.9796522259712219,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 786,
+      "end_line": 861,
+      "tokens": 592,
+      "context_length": 19621
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.on_conflict_suffix_sql_",
+      "distance": 0.9807203412055969,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 436,
+      "end_line": 465,
+      "tokens": 274,
+      "context_length": 19895
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_added_constraints_MigrationAutodetector.generate_removed_constraints.1.1.1",
+      "distance": 0.9818931818008423,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1369,
+      "end_line": 1395,
+      "tokens": 144,
+      "context_length": 20039
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ProjectState.update_model_field_relation_ProjectState.update_model_field_relation.4.5.2.1",
+      "distance": 0.9822366237640381,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 437,
+      "end_line": 458,
+      "tokens": 204,
+      "context_length": 20243
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_AddField.database_backwards_AddField.migration_name_fragment.1.1",
+      "distance": 0.9829539060592651,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 115,
+      "end_line": 127,
+      "tokens": 131,
+      "context_length": 20374
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._get_altered_foo_together_operations_MigrationAutodetector._get_altered_foo_together_operations.1.9.3",
+      "distance": 0.9843332767486572,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1432,
+      "end_line": 1477,
+      "tokens": 318,
+      "context_length": 20692
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/db/models/options.py_bisect_DEFAULT_NAMES.1",
+      "distance": 0.9845216870307922,
+      "file_path": "django/db/models/options.py",
+      "start_line": 1,
+      "end_line": 57,
+      "tokens": 347,
+      "context_length": 21039
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/db/backends/mysql/compiler.py_SQLUpdateCompiler_",
+      "distance": 0.9861750602722168,
+      "file_path": "django/db/backends/mysql/compiler.py",
+      "start_line": 51,
+      "end_line": 81,
+      "tokens": 240,
+      "context_length": 21279
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.on_conflict_suffix_sql_",
+      "distance": 0.9869431257247925,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 417,
+      "end_line": 437,
+      "tokens": 148,
+      "context_length": 21427
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures.django_test_skips_DatabaseFeatures.django_test_skips.6.1",
+      "distance": 0.9878692626953125,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 84,
+      "end_line": 158,
+      "tokens": 597,
+      "context_length": 22024
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/db/migrations/loader.py_MigrationLoader.build_graph_MigrationLoader.build_graph.18",
+      "distance": 0.9902572631835938,
+      "file_path": "django/db/migrations/loader.py",
+      "start_line": 222,
+      "end_line": 305,
+      "tokens": 791,
+      "context_length": 22815
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_relationship_model.4_ManyToManyField._check_relationship_model.6.1",
+      "distance": 0.9913343191146851,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1581,
+      "end_line": 1679,
+      "tokens": 655,
+      "context_length": 23470
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/contrib/redirects/migrations/0001_initial.py_1_",
+      "distance": 0.9914525747299194,
+      "file_path": "django/contrib/redirects/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 309,
+      "context_length": 23779
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.create_altered_indexes_MigrationAutodetector.create_altered_indexes.3.19",
+      "distance": 0.9915452599525452,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1220,
+      "end_line": 1307,
+      "tokens": 719,
+      "context_length": 24498
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_logging__is_relevant_relation.6.1",
+      "distance": 0.9917988777160645,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1,
+      "end_line": 36,
+      "tokens": 223,
+      "context_length": 24721
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._generate_removed_altered_foo_together_MigrationAutodetector._generate_removed_altered_foo_together.1.3.1",
+      "distance": 0.9929550886154175,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1479,
+      "end_line": 1502,
+      "tokens": 161,
+      "context_length": 24882
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/contrib/admin/migrations/0001_initial.py_django.contrib.admin.models_",
+      "distance": 0.9958524107933044,
+      "file_path": "django/contrib/admin/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 363,
+      "context_length": 25245
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField.db_type_RelatedField.contribute_to_class.3.5",
+      "distance": 0.9970397353172302,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 341,
+      "end_line": 378,
+      "tokens": 294,
+      "context_length": 25539
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_AddField.database_forwards_AddField.database_forwards.2.5.field.default.1",
+      "distance": 0.9976779222488403,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 101,
+      "end_line": 113,
+      "tokens": 130,
+      "context_length": 25669
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedLookupMixin.as_sql_",
+      "distance": 0.9992737174034119,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 170,
+      "end_line": 210,
+      "tokens": 250,
+      "context_length": 25919
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor_BaseDatabaseSchemaEditor.39",
+      "distance": 1.0008922815322876,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 75,
+      "end_line": 152,
+      "tokens": 798,
+      "context_length": 26717
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.create_altered_constraints_MigrationAutodetector.create_altered_constraints.2.8",
+      "distance": 1.0016552209854126,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1346,
+      "end_line": 1367,
+      "tokens": 197,
+      "context_length": 26914
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_copy_DatabaseSchemaEditor.sql_create_index.1",
+      "distance": 1.0018362998962402,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 289,
+      "context_length": 27203
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.set.alters_data_create_forward_many_to_many_manager.ManyRelatedManager.update_or_create.alters_data.1",
+      "distance": 1.0027726888656616,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1184,
+      "end_line": 1218,
+      "tokens": 341,
+      "context_length": 27544
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignObject.contribute_to_related_class_33",
+      "distance": 1.0028513669967651,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 871,
+      "end_line": 898,
+      "tokens": 237,
+      "context_length": 27781
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_deleted_models_MigrationAutodetector.generate_deleted_models.6.26",
+      "distance": 1.0034747123718262,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 811,
+      "end_line": 906,
+      "tokens": 712,
+      "context_length": 28493
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._using_sql_DatabaseSchemaEditor.sql_update_with_default._get_sequence_name.2.1",
+      "distance": 1.0040056705474854,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 119,
+      "end_line": 138,
+      "tokens": 234,
+      "context_length": 28727
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_related_query_name_is_valid_RelatedField._check_related_query_name_is_valid.6.1",
+      "distance": 1.004523754119873,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 154,
+      "end_line": 185,
+      "tokens": 209,
+      "context_length": 28936
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/contrib/flatpages/migrations/0001_initial.py_1_",
+      "distance": 1.0053961277008057,
+      "file_path": "django/contrib/flatpages/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 355,
+      "context_length": 29291
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/spatialite/schema.py_SpatialiteSchemaEditor.alter_db_table_",
+      "distance": 1.0060014724731445,
+      "file_path": "django/contrib/gis/db/backends/spatialite/schema.py",
+      "start_line": 137,
+      "end_line": 192,
+      "tokens": 404,
+      "context_length": 29695
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ProjectState.add_field_ProjectState.remove_field.7",
+      "distance": 1.0064753293991089,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 240,
+      "end_line": 263,
+      "tokens": 247,
+      "context_length": 29942
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_added_indexes_MigrationAutodetector.generate_renamed_indexes.1.1.1",
+      "distance": 1.0069416761398315,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1309,
+      "end_line": 1344,
+      "tokens": 232,
+      "context_length": 30174
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_DatabaseFeatures._mysql_storage_engine_DatabaseFeatures.supports_explain_analyze.1.1",
+      "distance": 1.0077424049377441,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 160,
+      "end_line": 267,
+      "tokens": 728,
+      "context_length": 30902
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_RelatedIn.as_sql_RelatedIn.as_sql.2.1",
+      "distance": 1.0080469846725464,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 110,
+      "end_line": 148,
+      "tokens": 324,
+      "context_length": 31226
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField._check_ignored_options_ManyToManyField._check_ignored_options.5.1",
+      "distance": 1.0101672410964966,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1418,
+      "end_line": 1448,
+      "tokens": 172,
+      "context_length": 31398
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.0104914903640747,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 357,
+      "context_length": 31755
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager._add_items_create_forward_many_to_many_manager.ManyRelatedManager._add_items.5.8.4.1",
+      "distance": 1.0113604068756104,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1304,
+      "end_line": 1373,
+      "tokens": 522,
+      "context_length": 32277
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_rename_InteractiveMigrationQuestioner.ask_merge.1.1",
+      "distance": 1.0122251510620117,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 217,
+      "end_line": 247,
+      "tokens": 252,
+      "context_length": 32529
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey._check_unique_ForeignKey.deconstruct.10.1",
+      "distance": 1.0132033824920654,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1018,
+      "end_line": 1054,
+      "tokens": 261,
+      "context_length": 32790
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/core/management/commands/sqlmigrate.py_Command.handle_",
+      "distance": 1.013311743736267,
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "start_line": 40,
+      "end_line": 84,
+      "tokens": 395,
+      "context_length": 33185
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_RenameField_RenameField.references_field.1.1",
+      "distance": 1.0139729976654053,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 270,
+      "end_line": 337,
+      "tokens": 521,
+      "context_length": 33706
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.add_constraint_",
+      "distance": 1.0142368078231812,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 537,
+      "end_line": 561,
+      "tokens": 162,
+      "context_length": 33868,
+      "file_pos": 28
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.__foreign_key_constraints_DatabaseOperations.integer_field_ranges._foreign_key_constraints.3.1",
+      "distance": 1.0161540508270264,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 407,
+      "end_line": 453,
+      "tokens": 385,
+      "context_length": 34253
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model_Model.__init__.cls.20",
+      "distance": 1.0166593790054321,
+      "file_path": "django/db/models/base.py",
+      "start_line": 459,
+      "end_line": 572,
+      "tokens": 953,
+      "context_length": 35206
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_referencing_to_swapped_model_RelatedField._check_referencing_to_swapped_model.2.1",
+      "distance": 1.017198085784912,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 208,
+      "end_line": 224,
+      "tokens": 142,
+      "context_length": 35348
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ManyToManyField.set_attributes_from_rel_",
+      "distance": 1.0173920392990112,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1960,
+      "end_line": 1994,
+      "tokens": 266,
+      "context_length": 35614
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ProjectState.rename_field_ProjectState.rename_field.16",
+      "distance": 1.0183305740356445,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 291,
+      "end_line": 345,
+      "tokens": 476,
+      "context_length": 36090
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.delete_model_DatabaseSchemaEditor.delete_model.1.2.2",
+      "distance": 1.0184845924377441,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 362,
+      "end_line": 378,
+      "tokens": 132,
+      "context_length": 36222,
+      "file_pos": 29
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/db/models/fields/related_lookups.py_warnings_MultiColSource.resolve_expression.1.1",
+      "distance": 1.0186200141906738,
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 221,
+      "context_length": 36443
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey_ForeignKey.check.1.1",
+      "distance": 1.0188556909561157,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 901,
+      "end_line": 990,
+      "tokens": 583,
+      "context_length": 37026
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_forward_many_to_many_manager.ManyRelatedManager.add_create_forward_many_to_many_manager.ManyRelatedManager.remove.alters_data.1",
+      "distance": 1.0203090906143188,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 1096,
+      "end_line": 1122,
+      "tokens": 220,
+      "context_length": 37246
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_removed_fields_MigrationAutodetector._generate_removed_field.1",
+      "distance": 1.0207271575927734,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 1078,
+      "end_line": 1099,
+      "tokens": 188,
+      "context_length": 37434
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_renamed_models_MigrationAutodetector.generate_renamed_models.5.4.1.3.1.10",
+      "distance": 1.0234527587890625,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 516,
+      "end_line": 581,
+      "tokens": 482,
+      "context_length": 37916
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_renamed_fields_MigrationAutodetector.generate_added_fields.2.1",
+      "distance": 1.0239670276641846,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 983,
+      "end_line": 1025,
+      "tokens": 297,
+      "context_length": 38213
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector.generate_deleted_proxies_MigrationAutodetector.create_renamed_fields.4.7.1.6.1.5",
+      "distance": 1.0240263938903809,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 908,
+      "end_line": 981,
+      "tokens": 623,
+      "context_length": 38836
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/db/models/base.py_ModelBase.__new__.45_ModelBase.__new__.52.1",
+      "distance": 1.0250073671340942,
+      "file_path": "django/db/models/base.py",
+      "start_line": 250,
+      "end_line": 367,
+      "tokens": 874,
+      "context_length": 39710
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_DatabaseSchemaEditor.remove_constraint_DatabaseSchemaEditor.remove_index.2",
+      "distance": 1.0255334377288818,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 121,
+      "end_line": 136,
+      "tokens": 116,
+      "context_length": 39826
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.convert_uuidfield_value_DatabaseOperations.return_insert_columns.2.3.1",
+      "distance": 1.026210069656372,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 356,
+      "end_line": 415,
+      "tokens": 577,
+      "context_length": 40403
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._fk_constraint_name_BaseDatabaseSchemaEditor._deferrable_constraint_sql.3.1.1",
+      "distance": 1.026942253112793,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1499,
+      "end_line": 1521,
+      "tokens": 199,
+      "context_length": 40602
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_clashes_RelatedField._check_clashes.potential_clashes_38.1",
+      "distance": 1.0269649028778076,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 226,
+      "end_line": 301,
+      "tokens": 696,
+      "context_length": 41298
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._index_columns_DatabaseSchemaEditor.sql_update_with_default._delete_index_sql.2.1",
+      "distance": 1.0275352001190186,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 303,
+      "end_line": 328,
+      "tokens": 235,
+      "context_length": 41533
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle_Command.handle.24.5.targets.1",
+      "distance": 1.027762770652771,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 96,
+      "end_line": 189,
+      "tokens": 765,
+      "context_length": 42298
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.remove_field_DatabaseSchemaEditor.remove_field.3.5.2.2",
+      "distance": 1.027775764465332,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 398,
+      "end_line": 424,
+      "tokens": 256,
+      "context_length": 42554,
+      "file_pos": 30
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._prepare_related_fields_for_save_Model._prepare_related_fields_for_save.5.6.2.2.1",
+      "distance": 1.0293755531311035,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1064,
+      "end_line": 1116,
+      "tokens": 516,
+      "context_length": 43070
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/migrations/state.py_ProjectState.alter_field_ProjectState.alter_field.10",
+      "distance": 1.029404640197754,
+      "file_path": "django/db/migrations/state.py",
+      "start_line": 265,
+      "end_line": 289,
+      "tokens": 238,
+      "context_length": 43308
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.check_Model.check.3.1",
+      "distance": 1.0316792726516724,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1521,
+      "end_line": 1556,
+      "tokens": 273,
+      "context_length": 43581
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_AlterField.database_forwards_AlterField.database_forwards.2.6.to_field.default.1",
+      "distance": 1.0318948030471802,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 227,
+      "end_line": 237,
+      "tokens": 146,
+      "context_length": 43727
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/core/management/commands/migrate.py_Command.handle.33_Command.handle.47",
+      "distance": 1.032602071762085,
+      "file_path": "django/core/management/commands/migrate.py",
+      "start_line": 270,
+      "end_line": 368,
+      "tokens": 813,
+      "context_length": 44540
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_psycopg2_DatabaseSchemaEditor.sql_update_with_default._field_base_data_types.2.2.1",
+      "distance": 1.032725214958191,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 711,
+      "context_length": 45251
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._optimize_migrations_MigrationAutodetector._optimize_migrations.2.5.1.migration.operations.1",
+      "distance": 1.0332688093185425,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 403,
+      "end_line": 419,
+      "tokens": 141,
+      "context_length": 45392
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/db/backends/mysql/schema.py_DatabaseSchemaEditor._field_should_be_indexed_DatabaseSchemaEditor._field_should_be_indexed.7.1",
+      "distance": 1.033359408378601,
+      "file_path": "django/db/backends/mysql/schema.py",
+      "start_line": 138,
+      "end_line": 154,
+      "tokens": 144,
+      "context_length": 45536
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/db/migrations/utils.py_datetime_get_migration_name_timestamp.1.1",
+      "distance": 1.0347909927368164,
+      "file_path": "django/db/migrations/utils.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 134,
+      "context_length": 45670
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/db/models/__init__.py_1_",
+      "distance": 1.0349125862121582,
+      "file_path": "django/db/models/__init__.py",
+      "start_line": 1,
+      "end_line": 116,
+      "tokens": 682,
+      "context_length": 46352
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_AlterOrderWithRespectTo.database_forwards_AlterOrderWithRespectTo.database_forwards.2.3.4.3",
+      "distance": 1.0353424549102783,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 644,
+      "end_line": 668,
+      "tokens": 231,
+      "context_length": 46583
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/db/migrations/autodetector.py_MigrationAutodetector._build_migration_list.5_MigrationAutodetector._build_migration_list.5.7.num_ops.1",
+      "distance": 1.0361806154251099,
+      "file_path": "django/db/migrations/autodetector.py",
+      "start_line": 280,
+      "end_line": 378,
+      "tokens": 806,
+      "context_length": 47389
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._alter_column_collation_sql_DatabaseSchemaEditor.sql_update_with_default._alter_column_collation_sql.4.1",
+      "distance": 1.0365500450134277,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 248,
+      "end_line": 265,
+      "tokens": 170,
+      "context_length": 47559
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/db/backends/mysql/features.py_operator_DatabaseFeatures.minimum_database_version.1.2.1.1",
+      "distance": 1.037096619606018,
+      "file_path": "django/db/backends/mysql/features.py",
+      "start_line": 1,
+      "end_line": 62,
+      "tokens": 443,
+      "context_length": 48002
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.on_conflict_suffix_sql_",
+      "distance": 1.0376639366149902,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 338,
+      "end_line": 357,
+      "tokens": 150,
+      "context_length": 48152
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_not_null_addition_InteractiveMigrationQuestioner.ask_not_null_addition.3.1",
+      "distance": 1.0380370616912842,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 166,
+      "end_line": 187,
+      "tokens": 188,
+      "context_length": 48340
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_constraints_Model._check_constraints.3.1",
+      "distance": 1.0382691621780396,
+      "file_path": "django/db/models/base.py",
+      "start_line": 2254,
+      "end_line": 2445,
+      "tokens": 1302,
+      "context_length": 49642
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/introspection.py_DatabaseIntrospection._parse_table_constraints_DatabaseIntrospection._parse_table_constraints.statement.9.1",
+      "distance": 1.03884756565094,
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "start_line": 265,
+      "end_line": 302,
+      "tokens": 294,
+      "context_length": 49936
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/contrib/contenttypes/migrations/0001_initial.py_django.contrib.contenttypes.models_",
+      "distance": 1.0391802787780762,
+      "file_path": "django/contrib/contenttypes/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 47,
+      "tokens": 225,
+      "context_length": 50161
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/db/migrations/operations/fields.py_AlterField.database_backwards_AlterField.reduce.2.1",
+      "distance": 1.039417028427124,
+      "file_path": "django/db/migrations/operations/fields.py",
+      "start_line": 239,
+      "end_line": 267,
+      "tokens": 206,
+      "context_length": 50367
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_RelatedField._check_relation_model_exists_RelatedField._check_relation_model_exists.5.1",
+      "distance": 1.0394744873046875,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 187,
+      "end_line": 206,
+      "tokens": 155,
+      "context_length": 50522
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_functools_RECURSIVE_RELATIONSHIP_CONSTANT.1",
+      "distance": 1.0399314165115356,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1,
+      "end_line": 40,
+      "tokens": 251,
+      "context_length": 50773
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_uuid_DatabaseOperations._extract_format_re.1",
+      "distance": 1.0403474569320679,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 354,
+      "context_length": 51127
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/db/backends/oracle/creation.py_DatabaseCreation._handle_objects_preventing_db_destruction_DatabaseCreation._handle_objects_preventing_db_destruction.3",
+      "distance": 1.041386365890503,
+      "file_path": "django/db/backends/oracle/creation.py",
+      "start_line": 159,
+      "end_line": 201,
+      "tokens": 411,
+      "context_length": 51538
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._check_property_name_related_field_accessor_clashes_Model.61",
+      "distance": 1.0417475700378418,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1807,
+      "end_line": 1842,
+      "tokens": 242,
+      "context_length": 51780
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_AlterTogetherOptionOperation.database_backwards_AlterTogetherOptionOperation.can_reduce_through.1.1",
+      "distance": 1.0418145656585693,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 570,
+      "end_line": 594,
+      "tokens": 213,
+      "context_length": 51993
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/db/migrations/questioner.py_InteractiveMigrationQuestioner.ask_auto_now_add_addition_InteractiveMigrationQuestioner.ask_auto_now_add_addition.3.1",
+      "distance": 1.041872501373291,
+      "file_path": "django/db/migrations/questioner.py",
+      "start_line": 249,
+      "end_line": 267,
+      "tokens": 177,
+      "context_length": 52170
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor.alter_unique_together_BaseDatabaseSchemaEditor.alter_unique_together.7.2",
+      "distance": 1.0426561832427979,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 523,
+      "end_line": 542,
+      "tokens": 196,
+      "context_length": 52366
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/contrib/auth/migrations/0001_initial.py_django.contrib.auth.models_",
+      "distance": 1.0432889461517334,
+      "file_path": "django/contrib/auth/migrations/0001_initial.py",
+      "start_line": 1,
+      "end_line": 206,
+      "tokens": 1007,
+      "context_length": 53373
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor._create_fk_sql_BaseDatabaseSchemaEditor._create_fk_sql.7.1",
+      "distance": 1.0433661937713623,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 1478,
+      "end_line": 1497,
+      "tokens": 176,
+      "context_length": 53549
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/db/models/fields/related.py_ForeignKey.resolve_related_fields_ForeignKey.resolve_related_fields.3.1",
+      "distance": 1.0436064004898071,
+      "file_path": "django/db/models/fields/related.py",
+      "start_line": 1103,
+      "end_line": 1120,
+      "tokens": 133,
+      "context_length": 53682
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/db/backends/base/schema.py_BaseDatabaseSchemaEditor.alter_db_table_BaseDatabaseSchemaEditor.alter_db_tablespace.2",
+      "distance": 1.0438671112060547,
+      "file_path": "django/db/backends/base/schema.py",
+      "start_line": 599,
+      "end_line": 627,
+      "tokens": 245,
+      "context_length": 53927
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_create_reverse_many_to_one_manager.RelatedManager.set_create_reverse_many_to_one_manager.3.1",
+      "distance": 1.044334888458252,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 863,
+      "end_line": 891,
+      "tokens": 229,
+      "context_length": 54156
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/db/backends/oracle/features.py_DatabaseFeatures.django_test_skips_",
+      "distance": 1.044345736503601,
+      "file_path": "django/db/backends/oracle/features.py",
+      "start_line": 88,
+      "end_line": 152,
+      "tokens": 604,
+      "context_length": 54760
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/core/serializers/xml_serializer.py_Serializer.handle_m2m_field_Serializer._start_relational_field.3",
+      "distance": 1.044746994972229,
+      "file_path": "django/core/serializers/xml_serializer.py",
+      "start_line": 127,
+      "end_line": 179,
+      "tokens": 404,
+      "context_length": 55164
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/schema.py_DatabaseSchemaEditor.add_field_DatabaseSchemaEditor.add_field.2.2.1",
+      "distance": 1.0454784631729126,
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "start_line": 380,
+      "end_line": 396,
+      "tokens": 138,
+      "context_length": 55302,
+      "file_pos": 39
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/db/backends/oracle/schema.py_DatabaseSchemaEditor._alter_column_type_sql_DatabaseSchemaEditor._alter_column_type_sql.4.1",
+      "distance": 1.0457266569137573,
+      "file_path": "django/db/backends/oracle/schema.py",
+      "start_line": 172,
+      "end_line": 181,
+      "tokens": 142,
+      "context_length": 55444
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_AlterOrderWithRespectTo.database_backwards_AlterOrderWithRespectTo.migration_name_fragment.1.1",
+      "distance": 1.0458656549453735,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 670,
+      "end_line": 686,
+      "tokens": 159,
+      "context_length": 55603
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/db/migrations/operations/models.py_AddConstraint_AddConstraint.migration_name_fragment.1.1",
+      "distance": 1.0460727214813232,
+      "file_path": "django/db/migrations/operations/models.py",
+      "start_line": 1027,
+      "end_line": 1065,
+      "tokens": 283,
+      "context_length": 55886
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_datetime_DatabaseOperations.bulk_batch_size.2.3.1.1",
+      "distance": 1.0472358465194702,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 314,
+      "context_length": 56200
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/schema.py_DatabaseSchemaEditor.sql_update_with_default._create_index_sql_",
+      "distance": 1.0473796129226685,
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "start_line": 330,
+      "end_line": 366,
+      "tokens": 210,
+      "context_length": 56410
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/contrib/gis/db/backends/mysql/schema.py_MySQLGISSchemaEditor.remove_field_",
+      "distance": 1.0473825931549072,
+      "file_path": "django/contrib/gis/db/backends/mysql/schema.py",
+      "start_line": 57,
+      "end_line": 88,
+      "tokens": 247,
+      "context_length": 56657
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/db/models/fields/related_descriptors.py_ReverseOneToOneDescriptor.RelatedObjectDoesNotExist_ReverseOneToOneDescriptor.get_queryset.1.1",
+      "distance": 1.0476350784301758,
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "start_line": 404,
+      "end_line": 425,
+      "tokens": 158,
+      "context_length": 56815
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_Field._check_deprecation_details_Field._check_deprecation_details.2.1",
+      "distance": 1.048363208770752,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 443,
+      "end_line": 468,
+      "tokens": 198,
+      "context_length": 57013
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/core/management/commands/squashmigrations.py_Command.handle.30_Command.handle.43.2.2.1",
+      "distance": 1.048390507698059,
+      "file_path": "django/core/management/commands/squashmigrations.py",
+      "start_line": 162,
+      "end_line": 254,
+      "tokens": 766,
+      "context_length": 57779
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/db/models/sql/query.py_Query.resolve_ref_Query.resolve_ref.2.3.12.1",
+      "distance": 1.0484554767608643,
+      "file_path": "django/db/models/sql/query.py",
+      "start_line": 1908,
+      "end_line": 1956,
+      "tokens": 445,
+      "context_length": 58224
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/backends/sqlite3/schema.py",
+      "position": 1,
+      "tokens": 4583,
+      "context_length": 4583
+    },
+    {
+      "file_path": "django/db/models/fields/related.py",
+      "position": 2,
+      "tokens": 14607,
+      "context_length": 19190
+    },
+    {
+      "file_path": "django/db/backends/base/schema.py",
+      "position": 3,
+      "tokens": 13864,
+      "context_length": 33054
+    },
+    {
+      "file_path": "django/db/migrations/autodetector.py",
+      "position": 4,
+      "tokens": 13461,
+      "context_length": 46515
+    },
+    {
+      "file_path": "django/db/migrations/questioner.py",
+      "position": 5,
+      "tokens": 2696,
+      "context_length": 49211
+    },
+    {
+      "file_path": "django/db/backends/postgresql/schema.py",
+      "position": 6,
+      "tokens": 2741,
+      "context_length": 51952
+    },
+    {
+      "file_path": "django/db/models/sql/compiler.py",
+      "position": 7,
+      "tokens": 16571,
+      "context_length": 68523
+    },
+    {
+      "file_path": "django/db/migrations/operations/models.py",
+      "position": 8,
+      "tokens": 7713,
+      "context_length": 76236
+    },
+    {
+      "file_path": "django/db/backends/mysql/schema.py",
+      "position": 9,
+      "tokens": 1954,
+      "context_length": 78190
+    },
+    {
+      "file_path": "django/db/migrations/operations/__init__.py",
+      "position": 10,
+      "tokens": 227,
+      "context_length": 78417
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "position": 11,
+      "tokens": 1286,
+      "context_length": 79703
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "position": 12,
+      "tokens": 3487,
+      "context_length": 83190
+    },
+    {
+      "file_path": "django/db/backends/oracle/schema.py",
+      "position": 13,
+      "tokens": 2342,
+      "context_length": 85532
+    },
+    {
+      "file_path": "django/db/models/fields/related_descriptors.py",
+      "position": 14,
+      "tokens": 11078,
+      "context_length": 96610
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 15,
+      "tokens": 4178,
+      "context_length": 100788
+    },
+    {
+      "file_path": "django/db/migrations/state.py",
+      "position": 16,
+      "tokens": 8168,
+      "context_length": 108956
+    },
+    {
+      "file_path": "django/db/migrations/operations/fields.py",
+      "position": 17,
+      "tokens": 2512,
+      "context_length": 111468
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 18,
+      "tokens": 7683,
+      "context_length": 119151
+    },
+    {
+      "file_path": "django/db/backends/mysql/compiler.py",
+      "position": 19,
+      "tokens": 636,
+      "context_length": 119787
+    },
+    {
+      "file_path": "django/db/backends/mysql/features.py",
+      "position": 20,
+      "tokens": 2424,
+      "context_length": 122211
+    },
+    {
+      "file_path": "django/db/migrations/loader.py",
+      "position": 21,
+      "tokens": 3153,
+      "context_length": 125364
+    },
+    {
+      "file_path": "django/contrib/redirects/migrations/0001_initial.py",
+      "position": 22,
+      "tokens": 309,
+      "context_length": 125673
+    },
+    {
+      "file_path": "django/contrib/admin/migrations/0001_initial.py",
+      "position": 23,
+      "tokens": 363,
+      "context_length": 126036
+    },
+    {
+      "file_path": "django/db/models/fields/related_lookups.py",
+      "position": 24,
+      "tokens": 1600,
+      "context_length": 127636
+    },
+    {
+      "file_path": "django/contrib/flatpages/migrations/0001_initial.py",
+      "position": 25,
+      "tokens": 355,
+      "context_length": 127991
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/spatialite/schema.py",
+      "position": 26,
+      "tokens": 1394,
+      "context_length": 129385
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 27,
+      "tokens": 18531,
+      "context_length": 147916
+    },
+    {
+      "file_path": "django/core/management/commands/sqlmigrate.py",
+      "position": 28,
+      "tokens": 666,
+      "context_length": 148582
+    },
+    {
+      "file_path": "django/db/backends/oracle/operations.py",
+      "position": 29,
+      "tokens": 6220,
+      "context_length": 154802
+    },
+    {
+      "file_path": "django/core/management/commands/migrate.py",
+      "position": 30,
+      "tokens": 3926,
+      "context_length": 158728
+    },
+    {
+      "file_path": "django/db/migrations/utils.py",
+      "position": 31,
+      "tokens": 871,
+      "context_length": 159599
+    },
+    {
+      "file_path": "django/db/models/__init__.py",
+      "position": 32,
+      "tokens": 682,
+      "context_length": 160281
+    },
+    {
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "position": 33,
+      "tokens": 2989,
+      "context_length": 163270
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/introspection.py",
+      "position": 34,
+      "tokens": 3325,
+      "context_length": 166595
+    },
+    {
+      "file_path": "django/contrib/contenttypes/migrations/0001_initial.py",
+      "position": 35,
+      "tokens": 225,
+      "context_length": 166820
+    },
+    {
+      "file_path": "django/db/backends/oracle/creation.py",
+      "position": 36,
+      "tokens": 4015,
+      "context_length": 170835
+    },
+    {
+      "file_path": "django/contrib/auth/migrations/0001_initial.py",
+      "position": 37,
+      "tokens": 1007,
+      "context_length": 171842
+    },
+    {
+      "file_path": "django/db/backends/oracle/features.py",
+      "position": 38,
+      "tokens": 1336,
+      "context_length": 173178
+    },
+    {
+      "file_path": "django/core/serializers/xml_serializer.py",
+      "position": 39,
+      "tokens": 3634,
+      "context_length": 176812
+    },
+    {
+      "file_path": "django/contrib/gis/db/backends/mysql/schema.py",
+      "position": 40,
+      "tokens": 657,
+      "context_length": 177469
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 41,
+      "tokens": 18735,
+      "context_length": 196204
+    },
+    {
+      "file_path": "django/core/management/commands/squashmigrations.py",
+      "position": 42,
+      "tokens": 2040,
+      "context_length": 198244
+    },
+    {
+      "file_path": "django/db/models/sql/query.py",
+      "position": 43,
+      "tokens": 22970,
+      "context_length": 221214
+    }
+  ]
+}

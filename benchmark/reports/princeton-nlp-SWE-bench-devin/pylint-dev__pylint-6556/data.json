@@ -1,0 +1,3266 @@
+{
+  "instance_id": "pylint-dev__pylint-6556",
+  "model_patch": "diff --git a/pylint/config/option_manager_mixin.py b/pylint/config/option_manager_mixin.py\nindex 2f0aac75f..9986a01d6 100644\n--- a/pylint/config/option_manager_mixin.py\n+++ b/pylint/config/option_manager_mixin.py\n@@ -21,6 +21,7 @@ from pylint import utils\n from pylint.config.option import Option\n from pylint.config.option_parser import OptionParser\n from pylint.typing import OptionDict\n+from pylint.message.message_id_store import MessageIdStore\n \n if sys.version_info >= (3, 11):\n     import tomllib\n@@ -307,6 +308,14 @@ class OptionsManagerMixIn:\n         option's provider.\n         \"\"\"\n         parser = self.cfgfile_parser\n+        # Check for disabled messages in the configuration\n+        for section in parser.sections():\n+            if section == \"MESSAGES CONTROL\":\n+                for option, value in parser.items(section):\n+                    if option == \"disable\":\n+                        disabled_ids = utils._splitstrip(value)\n+                        message_id_store = MessageIdStore()\n+                        message_id_store.update_disabled_msgids(disabled_ids)\n         for section in parser.sections():\n             for option, value in parser.items(section):\n                 try:\ndiff --git a/pylint/message/message_id_store.py b/pylint/message/message_id_store.py\nindex 9b89c876f..b303e0fe1 100644\n--- a/pylint/message/message_id_store.py\n+++ b/pylint/message/message_id_store.py\n@@ -18,6 +18,7 @@ class MessageIdStore:\n         self.__symbol_to_msgid: dict[str, str] = {}\n         self.__old_names: dict[str, list[str]] = {}\n         self.__active_msgids: dict[str, list[str]] = {}\n+        self.__disabled_msgids: set[str] = set()  # New attribute to store disabled message IDs and symbols\n \n     def __len__(self) -> int:\n         return len(self.__msgid_to_symbol)\n@@ -108,6 +109,27 @@ class MessageIdStore:\n         )\n         raise InvalidMessageError(error_message)\n \n+    def is_message_disabled(self, msgid_or_symbol: str) -> bool:\n+        \"\"\"\n+        Check if a message ID or symbol is disabled.\n+\n+        Args:\n+            msgid_or_symbol: The message ID or symbol to check.\n+\n+        Returns:\n+            True if the message is disabled, False otherwise.\n+        \"\"\"\n+        return msgid_or_symbol in self.__disabled_msgids\n+\n+    def update_disabled_msgids(self, disabled_ids: list[str]) -> None:\n+        \"\"\"\n+        Update the set of disabled message IDs and symbols.\n+\n+        Args:\n+            disabled_ids: A list of message IDs and symbols to disable.\n+        \"\"\"\n+        self.__disabled_msgids.update(disabled_ids)\n+\n     def get_active_msgids(self, msgid_or_symbol: str) -> list[str]:\n         \"\"\"Return msgids but the input can be a symbol.\n \n@@ -128,8 +150,14 @@ class MessageIdStore:\n             msgid = self.__symbol_to_msgid.get(msgid_or_symbol)\n             symbol = msgid_or_symbol\n         if not msgid or not symbol:\n-            error_msg = f\"No such message id or symbol '{msgid_or_symbol}'.\"\n-            raise UnknownMessageError(error_msg)\n+            # Check if the message ID or symbol has been disabled\n+            if self.is_message_disabled(msgid_or_symbol):\n+                # Handle the disabled message ID or symbol\n+                # Return an empty list or a special value indicating it's disabled\n+                return []\n+            else:\n+                error_msg = f\"No such message id or symbol '{msgid_or_symbol}'.\"\n+                raise UnknownMessageError(error_msg)\n         ids = self.__old_names.get(msgid, [msgid])\n \n         # Add to cache\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "pylint/config/option_manager_mixin.py",
+    "pylint/message/message_id_store.py"
+  ],
+  "repo": "pylint-dev/pylint",
+  "base_commit": "fa183c7d15b5f3c7dd8dee86fc74caae42c3926c",
+  "patch": "diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\n--- a/pylint/lint/pylinter.py\n+++ b/pylint/lint/pylinter.py\n@@ -937,8 +937,6 @@ def _check_astroid_module(\n             self.process_tokens(tokens)\n             if self._ignore_file:\n                 return False\n-            # walk ast to collect line numbers\n-            self.file_state.collect_block_lines(self.msgs_store, node)\n             # run raw and tokens checkers\n             for raw_checker in rawcheckers:\n                 raw_checker.process_module(node)\ndiff --git a/pylint/utils/file_state.py b/pylint/utils/file_state.py\n--- a/pylint/utils/file_state.py\n+++ b/pylint/utils/file_state.py\n@@ -74,25 +74,32 @@ def collect_block_lines(\n         self, msgs_store: MessageDefinitionStore, module_node: nodes.Module\n     ) -> None:\n         \"\"\"Walk the AST to collect block level options line numbers.\"\"\"\n+        warnings.warn(\n+            \"'collect_block_lines' has been deprecated and will be removed in pylint 3.0.\",\n+            DeprecationWarning,\n+        )\n         for msg, lines in self._module_msgs_state.items():\n             self._raw_module_msgs_state[msg] = lines.copy()\n         orig_state = self._module_msgs_state.copy()\n         self._module_msgs_state = {}\n         self._suppression_mapping = {}\n         self._effective_max_line_number = module_node.tolineno\n-        self._collect_block_lines(msgs_store, module_node, orig_state)\n+        for msgid, lines in orig_state.items():\n+            for msgdef in msgs_store.get_message_definitions(msgid):\n+                self._set_state_on_block_lines(msgs_store, module_node, msgdef, lines)\n \n-    def _collect_block_lines(\n+    def _set_state_on_block_lines(\n         self,\n         msgs_store: MessageDefinitionStore,\n         node: nodes.NodeNG,\n-        msg_state: MessageStateDict,\n+        msg: MessageDefinition,\n+        msg_state: dict[int, bool],\n     ) -> None:\n         \"\"\"Recursively walk (depth first) AST to collect block level options\n-        line numbers.\n+        line numbers and set the state correctly.\n         \"\"\"\n         for child in node.get_children():\n-            self._collect_block_lines(msgs_store, child, msg_state)\n+            self._set_state_on_block_lines(msgs_store, child, msg, msg_state)\n         # first child line number used to distinguish between disable\n         # which are the first child of scoped node with those defined later.\n         # For instance in the code below:\n@@ -115,9 +122,7 @@ def _collect_block_lines(\n             firstchildlineno = node.body[0].fromlineno\n         else:\n             firstchildlineno = node.tolineno\n-        for msgid, lines in msg_state.items():\n-            for msg in msgs_store.get_message_definitions(msgid):\n-                self._set_message_state_in_block(msg, lines, node, firstchildlineno)\n+        self._set_message_state_in_block(msg, msg_state, node, firstchildlineno)\n \n     def _set_message_state_in_block(\n         self,\n@@ -139,18 +144,61 @@ def _set_message_state_in_block(\n                 if lineno > firstchildlineno:\n                     state = True\n                 first_, last_ = node.block_range(lineno)\n+                # pylint: disable=useless-suppression\n+                # For block nodes first_ is their definition line. For example, we\n+                # set the state of line zero for a module to allow disabling\n+                # invalid-name for the module. For example:\n+                # 1. # pylint: disable=invalid-name\n+                # 2. ...\n+                # OR\n+                # 1. \"\"\"Module docstring\"\"\"\n+                # 2. # pylint: disable=invalid-name\n+                # 3. ...\n+                #\n+                # But if we already visited line 0 we don't need to set its state again\n+                # 1. # pylint: disable=invalid-name\n+                # 2. # pylint: enable=invalid-name\n+                # 3. ...\n+                # The state should come from line 1, not from line 2\n+                # Therefore, if the 'fromlineno' is already in the states we just start\n+                # with the lineno we were originally visiting.\n+                # pylint: enable=useless-suppression\n+                if (\n+                    first_ == node.fromlineno\n+                    and first_ >= firstchildlineno\n+                    and node.fromlineno in self._module_msgs_state.get(msg.msgid, ())\n+                ):\n+                    first_ = lineno\n+\n             else:\n                 first_ = lineno\n                 last_ = last\n             for line in range(first_, last_ + 1):\n-                # do not override existing entries\n-                if line in self._module_msgs_state.get(msg.msgid, ()):\n+                # Do not override existing entries. This is especially important\n+                # when parsing the states for a scoped node where some line-disables\n+                # have already been parsed.\n+                if (\n+                    (\n+                        isinstance(node, nodes.Module)\n+                        and node.fromlineno <= line < lineno\n+                    )\n+                    or (\n+                        not isinstance(node, nodes.Module)\n+                        and node.fromlineno < line < lineno\n+                    )\n+                ) and line in self._module_msgs_state.get(msg.msgid, ()):\n                     continue\n                 if line in lines:  # state change in the same block\n                     state = lines[line]\n                     original_lineno = line\n+\n+                # Update suppression mapping\n                 if not state:\n                     self._suppression_mapping[(msg.msgid, line)] = original_lineno\n+                else:\n+                    self._suppression_mapping.pop((msg.msgid, line), None)\n+\n+                # Update message state for respective line\n                 try:\n                     self._module_msgs_state[msg.msgid][line] = state\n                 except KeyError:\n@@ -160,10 +208,20 @@ def _set_message_state_in_block(\n     def set_msg_status(self, msg: MessageDefinition, line: int, status: bool) -> None:\n         \"\"\"Set status (enabled/disable) for a given message at a given line.\"\"\"\n         assert line > 0\n+        assert self._module\n+        # TODO: 3.0: Remove unnecessary assertion\n+        assert self._msgs_store\n+\n+        # Expand the status to cover all relevant block lines\n+        self._set_state_on_block_lines(\n+            self._msgs_store, self._module, msg, {line: status}\n+        )\n+\n+        # Store the raw value\n         try:\n-            self._module_msgs_state[msg.msgid][line] = status\n+            self._raw_module_msgs_state[msg.msgid][line] = status\n         except KeyError:\n-            self._module_msgs_state[msg.msgid] = {line: status}\n+            self._raw_module_msgs_state[msg.msgid] = {line: status}\n \n     def handle_ignored_message(\n         self, state_scope: Literal[0, 1, 2] | None, msgid: str, line: int | None\n",
+  "test_patch": "diff --git a/tests/functional/b/bad_option_value_disable.py b/tests/functional/b/bad_option_value_disable.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/functional/b/bad_option_value_disable.py\n@@ -0,0 +1,14 @@\n+\"\"\"Tests for the disabling of bad-option-value.\"\"\"\n+# pylint: disable=invalid-name\n+\n+# pylint: disable=bad-option-value\n+\n+var = 1  # pylint: disable=a-removed-option\n+\n+# pylint: enable=bad-option-value\n+\n+var = 1  # pylint: disable=a-removed-option # [bad-option-value]\n+\n+# bad-option-value needs to be disabled before the bad option\n+var = 1  # pylint: disable=a-removed-option, bad-option-value # [bad-option-value]\n+var = 1  # pylint: disable=bad-option-value, a-removed-option\ndiff --git a/tests/functional/b/bad_option_value_disable.txt b/tests/functional/b/bad_option_value_disable.txt\nnew file mode 100644\n--- /dev/null\n+++ b/tests/functional/b/bad_option_value_disable.txt\n@@ -0,0 +1,2 @@\n+bad-option-value:10:0:None:None::Bad option value for disable. Don't recognize message a-removed-option.:UNDEFINED\n+bad-option-value:13:0:None:None::Bad option value for disable. Don't recognize message a-removed-option.:UNDEFINED\ndiff --git a/tests/lint/unittest_lint.py b/tests/lint/unittest_lint.py\n--- a/tests/lint/unittest_lint.py\n+++ b/tests/lint/unittest_lint.py\n@@ -190,8 +190,14 @@ def reporter():\n @pytest.fixture\n def initialized_linter(linter: PyLinter) -> PyLinter:\n     linter.open()\n-    linter.set_current_module(\"toto\", \"mydir/toto\")\n-    linter.file_state = FileState(\"toto\", linter.msgs_store)\n+    linter.set_current_module(\"long_test_file\", \"long_test_file\")\n+    linter.file_state = FileState(\n+        \"long_test_file\",\n+        linter.msgs_store,\n+        linter.get_ast(\n+            str(join(REGRTEST_DATA_DIR, \"long_test_file.py\")), \"long_test_file\"\n+        ),\n+    )\n     return linter\n \n \n@@ -271,9 +277,9 @@ def test_enable_message_block(initialized_linter: PyLinter) -> None:\n     filepath = join(REGRTEST_DATA_DIR, \"func_block_disable_msg.py\")\n     linter.set_current_module(\"func_block_disable_msg\")\n     astroid = linter.get_ast(filepath, \"func_block_disable_msg\")\n+    linter.file_state = FileState(\"func_block_disable_msg\", linter.msgs_store, astroid)\n     linter.process_tokens(tokenize_module(astroid))\n     fs = linter.file_state\n-    fs.collect_block_lines(linter.msgs_store, astroid)\n     # global (module level)\n     assert linter.is_message_enabled(\"W0613\")\n     assert linter.is_message_enabled(\"E1101\")\n@@ -310,7 +316,6 @@ def test_enable_message_block(initialized_linter: PyLinter) -> None:\n     assert linter.is_message_enabled(\"E1101\", 75)\n     assert linter.is_message_enabled(\"E1101\", 77)\n \n-    fs = linter.file_state\n     assert fs._suppression_mapping[\"W0613\", 18] == 17\n     assert fs._suppression_mapping[\"E1101\", 33] == 30\n     assert (\"E1101\", 46) not in fs._suppression_mapping\ndiff --git a/tests/regrtest_data/long_test_file.py b/tests/regrtest_data/long_test_file.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/regrtest_data/long_test_file.py\n@@ -0,0 +1,100 @@\n+\"\"\"\n+This file is used for bad-option-value's test. We needed a module that isn\u2019t restricted by line numbers\n+as the tests use various line numbers to test the behaviour.\n+\n+Using an empty module creates issue as you can\u2019t disable something on line 10 if it doesn\u2019t exist. Thus, we created an extra long file so we never run into an issue with that.\n+\"\"\"\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+\n+print(1)\ndiff --git a/tests/test_deprecation.py b/tests/test_deprecation.py\n--- a/tests/test_deprecation.py\n+++ b/tests/test_deprecation.py\n@@ -9,6 +9,7 @@\n from typing import Any\n \n import pytest\n+from astroid import nodes\n \n from pylint.checkers import BaseChecker\n from pylint.checkers.mapreduce_checker import MapReduceMixin\n@@ -100,3 +101,10 @@ def test_filestate() -> None:\n     with pytest.warns(DeprecationWarning):\n         FileState(msg_store=MessageDefinitionStore())\n     FileState(\"foo\", MessageDefinitionStore())\n+\n+\n+def test_collectblocklines() -> None:\n+    \"\"\"Test FileState.collect_block_lines.\"\"\"\n+    state = FileState(\"foo\", MessageDefinitionStore())\n+    with pytest.warns(DeprecationWarning):\n+        state.collect_block_lines(MessageDefinitionStore(), nodes.Module(\"foo\"))\n",
+  "problem_statement": "Can't disable bad-option-value\n### Steps to reproduce\r\n1. Write code on a computer with a somewhat new pylint (2.4.3 in my example). Get a warning like `useless-object-inheritance` that I want to ignore, as I'm writing code compatible with python2 and python3.\r\n2. Disable said warning with `# pylint: disable=useless-object-inheritance`.\r\n3. Get a \"Bad option value\" when other people run their pylint version (example: 2.3.1; and by people, sometimes I mean docker instances ran from Jenkins that I would rather not rebuild or that depend on other people and I can't modify)\r\n4. Try to disable said error with a global `# pylint: disable=bad-option-value`\r\n\r\n### Current behavior\r\n`# pylint: disable=bad-option-value` is ignored\r\n`# pylint: disable=E0012` is ignored\r\n\r\n### Expected behavior\r\nTo be able to write code that works on several versions of pylint and not having to make sure every computer in the company and every docker container has the same pylint version.\r\n\r\n\n",
+  "hints_text": "Thanks for the report, this is definitely something we should be able to fix.\nHi. It seems to work when it's on the same line but not globally (which could be useful but I didn't found anything on the documentation). So I have to do:\r\n`# pylint: disable=bad-option-value,useless-object-inheritance`\r\nIf I later want to use another option, I have to repeat it again:\r\n`# pylint: disable=bad-option-value,consider-using-sys-exit`\nMy (unwarranted) two cents: I don't quite see the point of allowing to run different versions of pylint on the same code base.\r\n\r\nDifferent versions of pylint are likely to yield different warnings, because checks are added (and sometimes removed) between versions, and bugs (such as false positives) are fixed. So if your teammate does not run the same version as you do, they may have a \"perfect pylint score\", while your version gets warnings. Surely you'd rather have a reproducible output, and the best way to achieve that is to warrant a specific version of pylint across the team and your CI environment.\n@dbaty Running different versions of pylint helps when porting code from Python2 to Python3\nSo, what's the status ?\nDropping support for an option, and also having a bad-option-value be an error makes pylint not backwards compatible. It looks like you expect everyone to be able to atomically update their pylint version *and* all of their code annotations in all of their environments at the same time.\r\n\r\nI maintain packages supporting python 2.7, 3.4-3.10, and since pylint no longer supports all of those, I'm forced to use older versions of pylint in some environments, which now are not compatible with the latest. I don't know if this is a new behavior or has always been this way, but today was the first time I've had any problem with pylint , and am going to have to disable it in CI now.\r\n\n@jacobtylerwalls I have a fix, but it requires changing the signature of `PyLinter.process_tokens`. Do we consider that public API?\r\n\r\nThe issue is that we need to call `file_state.collect_block_lines` to expand a block-level disable over its respective block. This can only be done with access to the `ast` node. Changing `PyLinter.disable` to have access to `node` seems like a very breaking change, although it would be much better to do the expansion immediately upon disabling instead of somewhere later.\r\nMy approach does it every time we find a `disable` pragma. We can explore whether we can do something like `collect_block_lines_one_message` instead of iterating over the complete `_module_msgs_state` every time. Still, whatever we do we require access to `node` inside of `process_tokens`.\r\nHow likely is it that plugins are calling `PyLinter.process_tokens`?\r\n\r\n```diff\r\ndiff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\r\nindex 7c40f4bf2..4b00ba5ac 100644\r\n--- a/pylint/lint/pylinter.py\r\n+++ b/pylint/lint/pylinter.py\r\n@@ -527,7 +527,9 @@ class PyLinter(\r\n     # block level option handling #############################################\r\n     # see func_block_disable_msg.py test case for expected behaviour\r\n \r\n-    def process_tokens(self, tokens: list[tokenize.TokenInfo]) -> None:\r\n+    def process_tokens(\r\n+        self, tokens: list[tokenize.TokenInfo], node: nodes.Module\r\n+    ) -> None:\r\n         \"\"\"Process tokens from the current module to search for module/block level\r\n         options.\r\n         \"\"\"\r\n@@ -595,6 +597,7 @@ class PyLinter(\r\n                             l_start -= 1\r\n                         try:\r\n                             meth(msgid, \"module\", l_start)\r\n+                            self.file_state.collect_block_lines(self.msgs_store, node)\r\n                         except exceptions.UnknownMessageError:\r\n                             msg = f\"{pragma_repr.action}. Don't recognize message {msgid}.\"\r\n                             self.add_message(\r\n@@ -1043,7 +1046,7 @@ class PyLinter(\r\n             # assert astroid.file.endswith('.py')\r\n             # invoke ITokenChecker interface on self to fetch module/block\r\n             # level options\r\n-            self.process_tokens(tokens)\r\n+            self.process_tokens(tokens, node)\r\n             if self._ignore_file:\r\n                 return False\r\n             # walk ast to collect line numbers\r\ndiff --git a/tests/functional/b/bad_option_value_disable.py b/tests/functional/b/bad_option_value_disable.py\r\nnew file mode 100644\r\nindex 000000000..cde604411\r\n--- /dev/null\r\n+++ b/tests/functional/b/bad_option_value_disable.py\r\n@@ -0,0 +1,6 @@\r\n+\"\"\"Tests for the disabling of bad-option-value.\"\"\"\r\n+# pylint: disable=invalid-name\r\n+\r\n+# pylint: disable=bad-option-value\r\n+\r\n+var = 1  # pylint: disable=a-removed-option\r\n```\nThe PyLinter is pylint's internal god class, I think if we don't dare to modify it it's a problem. On the other hand, it might be possible to make the node ``Optional`` with a default value of ``None`` and raise a deprecation warning if the node is ``None`` without too much hassle ?\r\n\r\n```diff\r\n- self.file_state.collect_block_lines(self.msgs_store, node)\r\n+ if node is not None:\r\n+     self.file_state.collect_block_lines(self.msgs_store, node)\r\n+ else:\r\n+     warnings.warn(\" process_tokens... deprecation... 3.0.. bad option value won't be disablable...\")\nYeah, just making it optional and immediately deprecating it sounds good. Let's add a test for a disabling a message by ID also.\nI found some issue while working on this so it will take a little longer.\r\n\r\nHowever, would you guys be okay with one refactor before this to create a `_MessageStateHandler`. I would move all methods like `disable`, `enable`, `set_message_state` etc into this class. Similar to how we moved some of the `PyLinter` stuff to `_ArgumentsManager`. I know we had something similar with `MessageHandlerMixIn` previously, but the issue was that that class was always mixed with `PyLinter` but `mypy` didn't know this.\r\nThere are two main benefits:\r\n1) Clean up of `PyLinter` and its file\r\n2) We no longer need to inherit from `BaseTokenChecker`. This is better as `pylint` will rightfully complain about `process_tokens` signature not having `node` as argument. If we keep inheriting we will need to keep giving a default value, which is something we want to avoid in the future.\r\n\r\nFor now I would only:\r\n1) Create `_MessageStateHandler` and let `PyLinter` inherit from it.\r\n2) Make `PyLinter` a `BaseChecker` and move `process_tokens` to `_MessageStateHandler`.\r\n3) Fix the issue in this issue.\r\n\r\nEdit: A preparing PR has been opened with https://github.com/PyCQA/pylint/pull/6537.\nBefore I look closer to come up with an opinion, I just remember we have #5156, so we should keep it in mind or close it.\nI think #5156 is compatible with the proposition Daniel made, it can be a first step as it's better to inherit from ``BaseChecker`` than from ``BaseTokenChecker``.\n@DanielNoord sounds good to me!\nWell, the refactor turned out to be rather pointless as I ran into multiple subtle regressions with my first approach.\r\n\r\nI'm now looking into a different solution: modifying `FileState` to always have access to the relevant `Module` and then expanding pragma's whenever we encounter them. However, this is also proving tricky... I can see why this issue has remained open for so long.\nThank you for looking into it!\nMaybe a setting is enough?",
+  "created_at": "2022-05-09T07:24:39Z",
+  "version": "2.14",
+  "FAIL_TO_PASS": "[\"tests/lint/unittest_lint.py::test_enable_message_block\", \"tests/test_deprecation.py::test_collectblocklines\"]",
+  "PASS_TO_PASS": "[\"tests/lint/unittest_lint.py::test_addmessage\", \"tests/lint/unittest_lint.py::test_addmessage_invalid\", \"tests/lint/unittest_lint.py::test_analyze_explicit_script\", \"tests/lint/unittest_lint.py::test_by_module_statement_value\", \"tests/lint/unittest_lint.py::test_custom_should_analyze_file\", \"tests/lint/unittest_lint.py::test_disable_alot\", \"tests/lint/unittest_lint.py::test_disable_similar\", \"tests/lint/unittest_lint.py::test_enable_by_symbol\", \"tests/lint/unittest_lint.py::test_enable_checkers\", \"tests/lint/unittest_lint.py::test_enable_message\", \"tests/lint/unittest_lint.py::test_enable_message_category\", \"tests/lint/unittest_lint.py::test_enable_report\", \"tests/lint/unittest_lint.py::test_errors_only\", \"tests/lint/unittest_lint.py::test_filename_with__init__\", \"tests/lint/unittest_lint.py::test_full_documentation\", \"tests/lint/unittest_lint.py::test_init_hooks_called_before_load_plugins\", \"tests/lint/unittest_lint.py::test_list_msgs_enabled\", \"tests/lint/unittest_lint.py::test_load_plugin_command_line\", \"tests/lint/unittest_lint.py::test_load_plugin_config_file\", \"tests/lint/unittest_lint.py::test_load_plugin_configuration\", \"tests/lint/unittest_lint.py::test_message_state_scope\", \"tests/lint/unittest_lint.py::test_more_args[case0]\", \"tests/lint/unittest_lint.py::test_more_args[case1]\", \"tests/lint/unittest_lint.py::test_more_args[case2]\", \"tests/lint/unittest_lint.py::test_multiprocessing[1]\", \"tests/lint/unittest_lint.py::test_multiprocessing[2]\", \"tests/lint/unittest_lint.py::test_no_args\", \"tests/lint/unittest_lint.py::test_one_arg[case0]\", \"tests/lint/unittest_lint.py::test_one_arg[case1]\", \"tests/lint/unittest_lint.py::test_one_arg[case2]\", \"tests/lint/unittest_lint.py::test_one_arg[case3]\", \"tests/lint/unittest_lint.py::test_one_arg[case4]\", \"tests/lint/unittest_lint.py::test_pylint_home\", \"tests/lint/unittest_lint.py::test_pylint_home_from_environ\", \"tests/lint/unittest_lint.py::test_pylint_visit_method_taken_in_account\", \"tests/lint/unittest_lint.py::test_pylintrc\", \"tests/lint/unittest_lint.py::test_pylintrc_parentdir\", \"tests/lint/unittest_lint.py::test_pylintrc_parentdir_no_package\", \"tests/lint/unittest_lint.py::test_report_output_format_aliased\", \"tests/lint/unittest_lint.py::test_set_option_1\", \"tests/lint/unittest_lint.py::test_set_option_2\", \"tests/lint/unittest_lint.py::test_set_unsupported_reporter\", \"tests/lint/unittest_lint.py::test_two_similar_args[case0]\", \"tests/lint/unittest_lint.py::test_two_similar_args[case1]\", \"tests/lint/unittest_lint.py::test_two_similar_args[case2]\", \"tests/lint/unittest_lint.py::test_two_similar_args[case3]\", \"tests/lint/unittest_lint.py::test_warn_about_old_home\", \"tests/test_deprecation.py::test_checker_implements\", \"tests/test_deprecation.py::test_filestate\", \"tests/test_deprecation.py::test_interfaces\", \"tests/test_deprecation.py::test_load_and_save_results\", \"tests/test_deprecation.py::test_mapreducemixin\", \"tests/test_deprecation.py::test_reporter_implements\"]",
+  "environment_setup_commit": "680edebc686cad664bbed934a490aeafa775f163",
+  "patch_files": [
+    "pylint/lint/pylinter.py",
+    "pylint/utils/file_state.py"
+  ],
+  "test_patch_files": [
+    "tests/functional/b/bad_option_value_disable.py",
+    "tests/functional/b/bad_option_value_disable.txt",
+    "tests/lint/unittest_lint.py",
+    "tests/regrtest_data/long_test_file.py",
+    "tests/test_deprecation.py"
+  ],
+  "patch_diff_details": {
+    "pylint/lint/pylinter.py": {
+      "diffs": [
+        {
+          "start_line_old": 940,
+          "end_line_old": 941,
+          "file_pos": 3,
+          "file_context_length": 9528,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.__init___PyLinter.load_default_plugins.2",
+          "closest_snippet_line_distance": 600
+        }
+      ]
+    },
+    "pylint/utils/file_state.py": {
+      "diffs": [
+        {
+          "start_line_old": 77,
+          "end_line_old": 89,
+          "file_pos": 95,
+          "file_context_length": 111394,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/utils/file_state.py_4_MessageStateDict.1",
+          "closest_snippet_line_distance": 58
+        },
+        {
+          "start_line_old": 118,
+          "end_line_old": 120,
+          "file_pos": 95,
+          "file_context_length": 111394,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/utils/file_state.py_4_MessageStateDict.1",
+          "closest_snippet_line_distance": 89
+        },
+        {
+          "start_line_old": 142,
+          "end_line_old": 143,
+          "file_pos": 95,
+          "file_context_length": 111394,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/utils/file_state.py_4_MessageStateDict.1",
+          "closest_snippet_line_distance": 112
+        },
+        {
+          "start_line_old": 163,
+          "end_line_old": 165,
+          "file_pos": 95,
+          "file_context_length": 111394,
+          "closest_snippet_id": "/tmp/repos/pylint/pylint/utils/file_state.py_4_MessageStateDict.1",
+          "closest_snippet_line_distance": 134
+        }
+      ]
+    }
+  },
+  "vectors": 1303,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-option-value/bad.py__",
+      "distance": 0.850959062576294,
+      "file_path": "doc/data/messages/b/bad-option-value/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 0
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-option-value/good.py__",
+      "distance": 0.8802640438079834,
+      "file_path": "doc/data/messages/b/bad-option-value/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 0
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_MSGS_MSGS.1",
+      "distance": 0.9048352241516113,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 97,
+      "end_line": 215,
+      "tokens": 982,
+      "context_length": 982,
+      "file_pos": 3
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/pylint/pylint/config/option_parser.py_optparse_",
+      "distance": 0.9472025036811829,
+      "file_path": "pylint/config/option_parser.py",
+      "start_line": 5,
+      "end_line": 54,
+      "tokens": 371,
+      "context_length": 1353
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_Option.process_",
+      "distance": 0.9874088168144226,
+      "file_path": "pylint/config/option.py",
+      "start_line": 204,
+      "end_line": 219,
+      "tokens": 177,
+      "context_length": 1530
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/pylint/pylint/constants.py_DELETED_MESSAGES_46",
+      "distance": 0.9888044595718384,
+      "file_path": "pylint/constants.py",
+      "start_line": 92,
+      "end_line": 199,
+      "tokens": 1388,
+      "context_length": 2918
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker_BadBuiltinChecker.options.1",
+      "distance": 0.9909209609031677,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 25,
+      "end_line": 50,
+      "tokens": 166,
+      "context_length": 3084
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_29_Option.__init__.2",
+      "distance": 0.9932546615600586,
+      "file_path": "pylint/config/option.py",
+      "start_line": 149,
+      "end_line": 182,
+      "tokens": 313,
+      "context_length": 3397
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_provider.py_5_UnsupportedAction.__init__.2",
+      "distance": 0.9957065582275391,
+      "file_path": "pylint/config/arguments_provider.py",
+      "start_line": 7,
+      "end_line": 28,
+      "tokens": 145,
+      "context_length": 3542
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_provider.py__ArgumentsProvider.option_value__ArgumentsProvider.set_option.2",
+      "distance": 1.0353169441223145,
+      "file_path": "pylint/config/arguments_provider.py",
+      "start_line": 115,
+      "end_line": 133,
+      "tokens": 212,
+      "context_length": 3754
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_Option._check_choice_Option.16",
+      "distance": 1.0358672142028809,
+      "file_path": "pylint/config/option.py",
+      "start_line": 184,
+      "end_line": 202,
+      "tokens": 179,
+      "context_length": 3933
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/dict-iter-missing-items/bad.py__",
+      "distance": 1.0362954139709473,
+      "file_path": "doc/data/messages/d/dict-iter-missing-items/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 3933
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker_StdlibChecker.msgs.1",
+      "distance": 1.0425164699554443,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 332,
+      "end_line": 433,
+      "tokens": 1075,
+      "context_length": 5008
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py__ArgumentsManager.global_set_option__ArgumentsManager.global_set_option.2",
+      "distance": 1.0501797199249268,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 647,
+      "end_line": 655,
+      "tokens": 110,
+      "context_length": 5118
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/undefined-variable/bad.py__",
+      "distance": 1.0503301620483398,
+      "file_path": "doc/data/messages/u/undefined-variable/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 5118
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/pylint/pylint/config/option.py_4__choice_validator.2.1",
+      "distance": 1.0505640506744385,
+      "file_path": "pylint/config/option.py",
+      "start_line": 5,
+      "end_line": 55,
+      "tokens": 305,
+      "context_length": 5423
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/pylint/pylint/config/options_provider_mixin.py_optparse_OptionsProviderMixIn.option_value.2.1",
+      "distance": 1.057600736618042,
+      "file_path": "pylint/config/options_provider_mixin.py",
+      "start_line": 5,
+      "end_line": 53,
+      "tokens": 346,
+      "context_length": 5769
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-value/bad.py__",
+      "distance": 1.0582195520401,
+      "file_path": "doc/data/messages/d/duplicate-value/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 5769
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/consider-using-with/bad.py__",
+      "distance": 1.0612773895263672,
+      "file_path": "doc/data/messages/c/consider-using-with/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 5769
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/pylint/pylint/config/option.py__yn_validator__yn_validator.6",
+      "distance": 1.0615870952606201,
+      "file_path": "pylint/config/option.py",
+      "start_line": 58,
+      "end_line": 68,
+      "tokens": 114,
+      "context_length": 5883
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/pylint/pylint/config/callback_actions.py__DisableAction__DisableAction.__call__.3.1.2.2",
+      "distance": 1.0624308586120605,
+      "file_path": "pylint/config/callback_actions.py",
+      "start_line": 368,
+      "end_line": 385,
+      "tokens": 149,
+      "context_length": 6032
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_5_14",
+      "distance": 1.0651321411132812,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 7,
+      "end_line": 22,
+      "tokens": 107,
+      "context_length": 6139
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/undefined-all-variable/bad.py__",
+      "distance": 1.0659250020980835,
+      "file_path": "doc/data/messages/u/undefined-all-variable/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 6139
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/pylint/pylint/config/__init__.py_4_16",
+      "distance": 1.0729540586471558,
+      "file_path": "pylint/config/__init__.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 273,
+      "context_length": 6412
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/pylint/pylint/constants.py_INCOMPATIBLE_WITH_USELESS_SUPPRESSION_TYPING_TYPE_CHECKS_GUARDS.1",
+      "distance": 1.0821878910064697,
+      "file_path": "pylint/constants.py",
+      "start_line": 200,
+      "end_line": 213,
+      "tokens": 122,
+      "context_length": 6534
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unreachable/bad.py__",
+      "distance": 1.0837332010269165,
+      "file_path": "doc/data/messages/u/unreachable/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 6534
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/pylint/pylint/constants.py__warn_about_old_home_",
+      "distance": 1.086220622062683,
+      "file_path": "pylint/constants.py",
+      "start_line": 216,
+      "end_line": 269,
+      "tokens": 469,
+      "context_length": 7003
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_provider.py__ArgumentsProvider.options_and_values_",
+      "distance": 1.0893298387527466,
+      "file_path": "pylint/config/arguments_provider.py",
+      "start_line": 180,
+      "end_line": 195,
+      "tokens": 137,
+      "context_length": 7140
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-builtin/bad.py__",
+      "distance": 1.09226393699646,
+      "file_path": "doc/data/messages/b/bad-builtin/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 7140
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/undefined-variable/good.py__",
+      "distance": 1.0927927494049072,
+      "file_path": "doc/data/messages/u/undefined-variable/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 7140
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_ARGUMENTS_DEPRECATED_DECORATORS.1",
+      "distance": 1.0934863090515137,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 43,
+      "end_line": 89,
+      "tokens": 556,
+      "context_length": 7696
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/pylint/doc/data/messages/o/overridden-final-method/bad.py__",
+      "distance": 1.0938501358032227,
+      "file_path": "doc/data/messages/o/overridden-final-method/bad.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 7696
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-lambda-assignment/bad.py__",
+      "distance": 1.0951284170150757,
+      "file_path": "doc/data/messages/u/unnecessary-lambda-assignment/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 7696
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_FormatChecker.remove_pylint_option_from_lines_FormatChecker.is_line_length_check_activated.3.1",
+      "distance": 1.1017374992370605,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 597,
+      "end_line": 617,
+      "tokens": 197,
+      "context_length": 7893
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/pylint/pylint/constants.py_4_DELETED_MSGID_PREFIXES.1",
+      "distance": 1.1026298999786377,
+      "file_path": "pylint/constants.py",
+      "start_line": 5,
+      "end_line": 90,
+      "tokens": 608,
+      "context_length": 8501
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/pylint/pylint/lint/message_state_handler.py__MessageStateHandler.disable__MessageStateHandler.disable_next.4",
+      "distance": 1.104381799697876,
+      "file_path": "pylint/lint/message_state_handler.py",
+      "start_line": 170,
+      "end_line": 200,
+      "tokens": 220,
+      "context_length": 8721
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-value/good.py__",
+      "distance": 1.106015682220459,
+      "file_path": "doc/data/messages/d/duplicate-value/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 8721
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/undefined-all-variable/good.py__",
+      "distance": 1.1062226295471191,
+      "file_path": "doc/data/messages/u/undefined-all-variable/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 8721
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-dunder-call/bad.py__",
+      "distance": 1.1081767082214355,
+      "file_path": "doc/data/messages/u/unnecessary-dunder-call/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 8721
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/pylint/pylint/extensions/bad_builtin.py_BadBuiltinChecker.visit_call_",
+      "distance": 1.1096234321594238,
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "start_line": 52,
+      "end_line": 67,
+      "tokens": 173,
+      "context_length": 8894
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/pylint/doc/data/messages/g/global-at-module-level/bad.py__",
+      "distance": 1.1096317768096924,
+      "file_path": "doc/data/messages/g/global-at-module-level/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 8894
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-builtin/good.py__",
+      "distance": 1.1109315156936646,
+      "file_path": "doc/data/messages/b/bad-builtin/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 8894
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/pylint/pylint/utils/utils.py_get_global_option_49_get_global_option_49.3.1",
+      "distance": 1.1122632026672363,
+      "file_path": "pylint/utils/utils.py",
+      "start_line": 265,
+      "end_line": 282,
+      "tokens": 171,
+      "context_length": 9065
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/consider-using-sys-exit/bad.py__",
+      "distance": 1.1124346256256104,
+      "file_path": "doc/data/messages/c/consider-using-sys-exit/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 9065
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-direct-lambda-call/bad.py__",
+      "distance": 1.11362624168396,
+      "file_path": "doc/data/messages/u/unnecessary-direct-lambda-call/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 9065
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/pylint/pylint/checkers/unsupported_version.py_UnsupportedVersionChecker._check_typing_final_",
+      "distance": 1.1186470985412598,
+      "file_path": "pylint/checkers/unsupported_version.py",
+      "start_line": 64,
+      "end_line": 85,
+      "tokens": 171,
+      "context_length": 9236
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_error_checker.py_BasicErrorChecker_BasicErrorChecker.msgs.1",
+      "distance": 1.1189805269241333,
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "start_line": 99,
+      "end_line": 207,
+      "tokens": 952,
+      "context_length": 10188
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/pylint/pylint/config/option.py__multiple_choice_validator__validate.3.1",
+      "distance": 1.1192727088928223,
+      "file_path": "pylint/config/option.py",
+      "start_line": 71,
+      "end_line": 146,
+      "tokens": 601,
+      "context_length": 10789
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_invalid_envvar_value_",
+      "distance": 1.122813105583191,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 719,
+      "end_line": 750,
+      "tokens": 243,
+      "context_length": 11032
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/pylint/pylint/checkers/variables.py_MSGS_MSGS.1",
+      "distance": 1.1241403818130493,
+      "file_path": "pylint/checkers/variables.py",
+      "start_line": 360,
+      "end_line": 499,
+      "tokens": 1243,
+      "context_length": 12275
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/arguments-out-of-order/bad.py__",
+      "distance": 1.1251393556594849,
+      "file_path": "doc/data/messages/a/arguments-out-of-order/bad.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 12275
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/useless-return/bad.py__",
+      "distance": 1.1280145645141602,
+      "file_path": "doc/data/messages/u/useless-return/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 12275
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/pylint/pylint/lint/run.py_4_19.4.2",
+      "distance": 1.128828525543213,
+      "file_path": "pylint/lint/run.py",
+      "start_line": 5,
+      "end_line": 27,
+      "tokens": 148,
+      "context_length": 12423
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/pylint/pylint/checkers/unsupported_version.py_5_UnsupportedVersionChecker.visit_decorators.2",
+      "distance": 1.1292948722839355,
+      "file_path": "pylint/checkers/unsupported_version.py",
+      "start_line": 9,
+      "end_line": 62,
+      "tokens": 420,
+      "context_length": 12843
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/pylint/doc/data/messages/g/global-statement/bad.py__",
+      "distance": 1.1304707527160645,
+      "file_path": "doc/data/messages/g/global-statement/bad.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 12843
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/pylint/pylint/config/option_manager_mixin.py_5__expand_default.6.1",
+      "distance": 1.1310912370681763,
+      "file_path": "pylint/config/option_manager_mixin.py",
+      "start_line": 7,
+      "end_line": 51,
+      "tokens": 287,
+      "context_length": 13130
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-format-argument-key/bad.py__",
+      "distance": 1.1315901279449463,
+      "file_path": "doc/data/messages/m/missing-format-argument-key/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 13130
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py__ArgumentsManager.add_optik_option__ArgumentsManager.add_optik_option.2",
+      "distance": 1.1326110363006592,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 357,
+      "end_line": 375,
+      "tokens": 181,
+      "context_length": 13311
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/arguments-renamed/bad.py__",
+      "distance": 1.134230136871338,
+      "file_path": "doc/data/messages/a/arguments-renamed/bad.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 13311
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/pylint/doc/data/messages/i/import-outside-toplevel/bad.py__",
+      "distance": 1.134724736213684,
+      "file_path": "doc/data/messages/i/import-outside-toplevel/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 13311
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unidiomatic-typecheck/bad.py__",
+      "distance": 1.1352360248565674,
+      "file_path": "doc/data/messages/u/unidiomatic-typecheck/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 13311
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_MSGS_MSGS.1",
+      "distance": 1.1356091499328613,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 58,
+      "end_line": 163,
+      "tokens": 1015,
+      "context_length": 14326
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/pylint/pylint/lint/base_options.py_5__make_linter_options.2",
+      "distance": 1.1365742683410645,
+      "file_path": "pylint/lint/base_options.py",
+      "start_line": 7,
+      "end_line": 392,
+      "tokens": 188,
+      "context_length": 14514
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/consider-using-with/good.py__",
+      "distance": 1.1370329856872559,
+      "file_path": "doc/data/messages/c/consider-using-with/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 14514
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py_5_ConfigProvider.1",
+      "distance": 1.1375237703323364,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 7,
+      "end_line": 56,
+      "tokens": 280,
+      "context_length": 14794
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/binary-op-exception/bad.py__",
+      "distance": 1.1405277252197266,
+      "file_path": "doc/data/messages/b/binary-op-exception/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unreachable/good.py__",
+      "distance": 1.1411529779434204,
+      "file_path": "doc/data/messages/u/unreachable/good.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/use-dict-literal/bad.py__",
+      "distance": 1.1431618928909302,
+      "file_path": "doc/data/messages/u/use-dict-literal/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-argument-name/bad.py__",
+      "distance": 1.1448055505752563,
+      "file_path": "doc/data/messages/d/duplicate-argument-name/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-continue/bad.py__",
+      "distance": 1.1461246013641357,
+      "file_path": "doc/data/messages/n/no-else-continue/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-raise/bad.py__",
+      "distance": 1.1461374759674072,
+      "file_path": "doc/data/messages/n/no-else-raise/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-lambda-assignment/good.py__",
+      "distance": 1.1466138362884521,
+      "file_path": "doc/data/messages/u/unnecessary-lambda-assignment/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unused-wildcard-import/bad.py__",
+      "distance": 1.1472852230072021,
+      "file_path": "doc/data/messages/u/unused-wildcard-import/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/comparison-of-constants/bad.py__",
+      "distance": 1.1480382680892944,
+      "file_path": "doc/data/messages/c/comparison-of-constants/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 14794
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/main.py_5_DIRECTLY_SUPPORTED_FORMATS.1",
+      "distance": 1.148252248764038,
+      "file_path": "pylint/pyreverse/main.py",
+      "start_line": 7,
+      "end_line": 33,
+      "tokens": 160,
+      "context_length": 14954
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/use-list-literal/bad.py__",
+      "distance": 1.1487334966659546,
+      "file_path": "doc/data/messages/u/use-list-literal/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 14954
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py__ArgumentsManager.add_option_group__ArgumentsManager.add_option_group.2",
+      "distance": 1.1509020328521729,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 320,
+      "end_line": 355,
+      "tokens": 312,
+      "context_length": 15266
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-direct-lambda-call/good.py__",
+      "distance": 1.1511015892028809,
+      "file_path": "doc/data/messages/u/unnecessary-direct-lambda-call/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/pylint/doc/data/messages/s/self-assigning-variable/bad.py__",
+      "distance": 1.1518945693969727,
+      "file_path": "doc/data/messages/s/self-assigning-variable/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/confusing-consecutive-elif/bad.py__",
+      "distance": 1.153169870376587,
+      "file_path": "doc/data/messages/c/confusing-consecutive-elif/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-dunder-call/good.py__",
+      "distance": 1.1550557613372803,
+      "file_path": "doc/data/messages/u/unnecessary-dunder-call/good.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-break/bad.py__",
+      "distance": 1.1556620597839355,
+      "file_path": "doc/data/messages/n/no-else-break/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/pylint/doc/data/messages/o/overridden-final-method/good.py__",
+      "distance": 1.156355381011963,
+      "file_path": "doc/data/messages/o/overridden-final-method/good.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 15266
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/pylint/pylint/checkers/format.py_5_MSGS.1",
+      "distance": 1.1568009853363037,
+      "file_path": "pylint/checkers/format.py",
+      "start_line": 14,
+      "end_line": 114,
+      "tokens": 718,
+      "context_length": 15984
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-list-index-lookup/bad.py__",
+      "distance": 1.1584408283233643,
+      "file_path": "doc/data/messages/u/unnecessary-list-index-lookup/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 15984
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/pylint/doc/data/messages/s/super-with-arguments/bad.py__",
+      "distance": 1.1590319871902466,
+      "file_path": "doc/data/messages/s/super-with-arguments/bad.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 15984
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/pylint/pylint/extensions/typing.py_TYPING_NORETURN_TypingChecker.8",
+      "distance": 1.159444808959961,
+      "file_path": "pylint/extensions/typing.py",
+      "start_line": 78,
+      "end_line": 161,
+      "tokens": 762,
+      "context_length": 16746
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/broad-except/bad.py__",
+      "distance": 1.1599318981170654,
+      "file_path": "doc/data/messages/b/broad-except/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-staticmethod-argument/good.py__",
+      "distance": 1.160266399383545,
+      "file_path": "doc/data/messages/b/bad-staticmethod-argument/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/typevar-name-mismatch/bad.py__",
+      "distance": 1.1603915691375732,
+      "file_path": "doc/data/messages/t/typevar-name-mismatch/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/useless-import-alias/bad.py__",
+      "distance": 1.161147117614746,
+      "file_path": "doc/data/messages/u/useless-import-alias/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/pylint/doc/data/messages/r/return-in-init/bad.py__",
+      "distance": 1.1615411043167114,
+      "file_path": "doc/data/messages/r/return-in-init/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-yield-doc/bad.py__",
+      "distance": 1.1626408100128174,
+      "file_path": "doc/data/messages/m/missing-yield-doc/bad.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-many-arguments/bad.py__",
+      "distance": 1.1629462242126465,
+      "file_path": "doc/data/messages/t/too-many-arguments/bad.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 0,
+      "context_length": 16746
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_CLASSES_DEPRECATED_CLASSES.1",
+      "distance": 1.1637508869171143,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 246,
+      "end_line": 299,
+      "tokens": 260,
+      "context_length": 17006
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-many-format-args/bad.py__",
+      "distance": 1.163961410522461,
+      "file_path": "doc/data/messages/t/too-many-format-args/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 17006
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-super-call/bad.py__",
+      "distance": 1.164391279220581,
+      "file_path": "doc/data/messages/b/bad-super-call/bad.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 17006
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/typevar-double-variance/bad.py__",
+      "distance": 1.1647047996520996,
+      "file_path": "doc/data/messages/t/typevar-double-variance/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 17006
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/pylint/examples/deprecation_checker.py_1_5.1",
+      "distance": 1.165496587753296,
+      "file_path": "examples/deprecation_checker.py",
+      "start_line": 1,
+      "end_line": 48,
+      "tokens": 462,
+      "context_length": 17468
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_DEPRECATED_METHODS_DEPRECATED_METHODS.1",
+      "distance": 1.166349172592163,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 92,
+      "end_line": 243,
+      "tokens": 1148,
+      "context_length": 18616
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/assignment-from-none/bad.py__",
+      "distance": 1.1671726703643799,
+      "file_path": "doc/data/messages/a/assignment-from-none/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 18616
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-yield-type-doc/bad.py__",
+      "distance": 1.168593406677246,
+      "file_path": "doc/data/messages/m/missing-yield-type-doc/bad.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 18616
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_5_24",
+      "distance": 1.1686689853668213,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 7,
+      "end_line": 97,
+      "tokens": 739,
+      "context_length": 19355
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bare-except/bad.py__",
+      "distance": 1.168869972229004,
+      "file_path": "doc/data/messages/b/bare-except/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 19355
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/method-cache-max-size-none/bad.py__",
+      "distance": 1.1694886684417725,
+      "file_path": "doc/data/messages/m/method-cache-max-size-none/bad.py",
+      "start_line": 1,
+      "end_line": 10,
+      "tokens": 0,
+      "context_length": 19355
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-open-mode/bad.py__",
+      "distance": 1.169623851776123,
+      "file_path": "doc/data/messages/b/bad-open-mode/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 19355
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/pylint/pylint/checkers/refactoring/implicit_booleaness_checker.py_4_ImplicitBooleanessChecker.options.1",
+      "distance": 1.1697176694869995,
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "start_line": 5,
+      "end_line": 75,
+      "tokens": 495,
+      "context_length": 19850
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/pylint/doc/data/messages/i/invalid-enum-extension/bad.py__",
+      "distance": 1.1702865362167358,
+      "file_path": "doc/data/messages/i/invalid-enum-extension/bad.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 19850
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/abstract-method/bad.py__",
+      "distance": 1.1704413890838623,
+      "file_path": "doc/data/messages/a/abstract-method/bad.py",
+      "start_line": 1,
+      "end_line": 21,
+      "tokens": 0,
+      "context_length": 19850
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-raises-doc/bad.py__",
+      "distance": 1.1710186004638672,
+      "file_path": "doc/data/messages/m/missing-raises-doc/bad.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 19850
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/pylint/pylint/checkers/base/basic_checker.py_BasicChecker_BasicChecker.msgs.1",
+      "distance": 1.1712000370025635,
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "start_line": 104,
+      "end_line": 251,
+      "tokens": 1362,
+      "context_length": 21212
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-format-argument-key/good.py__",
+      "distance": 1.1712361574172974,
+      "file_path": "doc/data/messages/m/missing-format-argument-key/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 21212
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker.__init___StdlibChecker._check_shallow_copy_environ.3.1.2",
+      "distance": 1.1715590953826904,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 435,
+      "end_line": 481,
+      "tokens": 510,
+      "context_length": 21722
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/pylint/pylint/checkers/design_analysis.py_STDLIB_CLASSES_IGNORE_ANCESTOR_STDLIB_CLASSES_IGNORE_ANCESTOR.1",
+      "distance": 1.1718720197677612,
+      "file_path": "pylint/checkers/design_analysis.py",
+      "start_line": 98,
+      "end_line": 176,
+      "tokens": 510,
+      "context_length": 22232
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/pylint/pylint/config/utils.py__convert_option_to_argument.13__convert_option_to_argument.14.1",
+      "distance": 1.1722365617752075,
+      "file_path": "pylint/config/utils.py",
+      "start_line": 124,
+      "end_line": 146,
+      "tokens": 263,
+      "context_length": 22495
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-super-call/good.py__",
+      "distance": 1.1725850105285645,
+      "file_path": "doc/data/messages/b/bad-super-call/good.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 22495
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-few-format-args/bad.py__",
+      "distance": 1.1726813316345215,
+      "file_path": "doc/data/messages/t/too-few-format-args/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 22495
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/pylint/pylint/utils/file_state.py_4_MessageStateDict.1",
+      "distance": 1.1734733581542969,
+      "file_path": "pylint/utils/file_state.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 125,
+      "context_length": 22620,
+      "file_pos": 95
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-argument-name/good.py__",
+      "distance": 1.1746565103530884,
+      "file_path": "doc/data/messages/d/duplicate-argument-name/good.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 22620
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-staticmethod-argument/bad.py__",
+      "distance": 1.175121545791626,
+      "file_path": "doc/data/messages/b/bad-staticmethod-argument/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 22620
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/comparison-with-callable/bad.py__",
+      "distance": 1.1755260229110718,
+      "file_path": "doc/data/messages/c/comparison-with-callable/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 22620
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/pylint/pylint/config/exceptions.py_4_",
+      "distance": 1.1756435632705688,
+      "file_path": "pylint/config/exceptions.py",
+      "start_line": 5,
+      "end_line": 24,
+      "tokens": 117,
+      "context_length": 22737
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/ungrouped-imports/bad.py__",
+      "distance": 1.1764941215515137,
+      "file_path": "doc/data/messages/u/ungrouped-imports/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 22737
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/pylint/pylint/checkers/logging.py_5_CHECKED_CONVENIENCE_FUNCTIONS.1",
+      "distance": 1.177341103553772,
+      "file_path": "pylint/checkers/logging.py",
+      "start_line": 7,
+      "end_line": 99,
+      "tokens": 727,
+      "context_length": 23464
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.any_fail_on_issues_PyLinter.get_checker_names.2.1",
+      "distance": 1.1774044036865234,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 481,
+      "end_line": 518,
+      "tokens": 308,
+      "context_length": 23772,
+      "file_pos": 101
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/binary-op-exception/good.py__",
+      "distance": 1.1774698495864868,
+      "file_path": "doc/data/messages/b/binary-op-exception/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 23772
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/catching-non-exception/bad.py__",
+      "distance": 1.177782654762268,
+      "file_path": "doc/data/messages/c/catching-non-exception/bad.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 23772
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-type-doc/bad.py__",
+      "distance": 1.1780126094818115,
+      "file_path": "doc/data/messages/m/missing-type-doc/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 23772
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/pylint/pylint/checkers/typecheck.py_TypeChecker_TypeChecker.options.1",
+      "distance": 1.178763508796692,
+      "file_path": "pylint/checkers/typecheck.py",
+      "start_line": 800,
+      "end_line": 952,
+      "tokens": 1076,
+      "context_length": 24848
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/chained-comparison/bad.py__",
+      "distance": 1.1795437335968018,
+      "file_path": "doc/data/messages/c/chained-comparison/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 24848
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unused-wildcard-import/good.py__",
+      "distance": 1.1795637607574463,
+      "file_path": "doc/data/messages/u/unused-wildcard-import/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 24848
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/pylint/pylint/checkers/imports.py_MSGS_MSGS.1",
+      "distance": 1.1798992156982422,
+      "file_path": "pylint/checkers/imports.py",
+      "start_line": 199,
+      "end_line": 285,
+      "tokens": 745,
+      "context_length": 25593
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/useless-return/good.py__",
+      "distance": 1.1802647113800049,
+      "file_path": "doc/data/messages/u/useless-return/good.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 25593
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-except-order/good.py__",
+      "distance": 1.1807142496109009,
+      "file_path": "doc/data/messages/b/bad-except-order/good.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 25593
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.enable_fail_on_messages_PyLinter.enable_fail_on_messages.8.1.1.1.3.2",
+      "distance": 1.180814266204834,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 450,
+      "end_line": 479,
+      "tokens": 298,
+      "context_length": 25891,
+      "file_pos": 110
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-except-order/bad.py__",
+      "distance": 1.1808171272277832,
+      "file_path": "doc/data/messages/b/bad-except-order/bad.py",
+      "start_line": 1,
+      "end_line": 9,
+      "tokens": 0,
+      "context_length": 25891
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/arguments-out-of-order/good.py__",
+      "distance": 1.1817898750305176,
+      "file_path": "doc/data/messages/a/arguments-out-of-order/good.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 25891
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/useless-import-alias/good.py__",
+      "distance": 1.1818389892578125,
+      "file_path": "doc/data/messages/u/useless-import-alias/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 25891
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/pylint/pylint/config/argument.py__TYPE_TRANSFORMERS__TYPE_TRANSFORMERS.1",
+      "distance": 1.1824274063110352,
+      "file_path": "pylint/config/argument.py",
+      "start_line": 124,
+      "end_line": 138,
+      "tokens": 139,
+      "context_length": 26030
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-ellipsis/bad.py__",
+      "distance": 1.1830322742462158,
+      "file_path": "doc/data/messages/u/unnecessary-ellipsis/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 26030
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/misplaced-future/bad.py__",
+      "distance": 1.183145523071289,
+      "file_path": "doc/data/messages/m/misplaced-future/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 26030
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/pylint/pylint/config/callback_actions.py_6__DoNothingAction.__call__.1.1",
+      "distance": 1.1832947731018066,
+      "file_path": "pylint/config/callback_actions.py",
+      "start_line": 9,
+      "end_line": 55,
+      "tokens": 255,
+      "context_length": 26285
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-return/bad.py__",
+      "distance": 1.1836503744125366,
+      "file_path": "doc/data/messages/n/no-else-return/bad.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 26285
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/pylint/pylint/epylint.py_py_run_py_run_19.1",
+      "distance": 1.183739185333252,
+      "file_path": "pylint/epylint.py",
+      "start_line": 126,
+      "end_line": 143,
+      "tokens": 114,
+      "context_length": 26399
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py__ArgumentsManager.set_option_",
+      "distance": 1.1839489936828613,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 728,
+      "end_line": 754,
+      "tokens": 221,
+      "context_length": 26620
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-param-doc/bad.py__",
+      "distance": 1.184126377105713,
+      "file_path": "doc/data/messages/m/missing-param-doc/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 26620
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-bases/bad.py__",
+      "distance": 1.1852526664733887,
+      "file_path": "doc/data/messages/d/duplicate-bases/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 26620
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_5_27",
+      "distance": 1.1853055953979492,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 7,
+      "end_line": 41,
+      "tokens": 300,
+      "context_length": 26920
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/pylint/doc/data/messages/f/function-redefined/bad.py__",
+      "distance": 1.185371994972229,
+      "file_path": "doc/data/messages/f/function-redefined/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 26920
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/confusing-consecutive-elif/good.py_1_",
+      "distance": 1.1861059665679932,
+      "file_path": "doc/data/messages/c/confusing-consecutive-elif/good.py",
+      "start_line": 1,
+      "end_line": 23,
+      "tokens": 131,
+      "context_length": 27051
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/comparison-with-itself/bad.py__",
+      "distance": 1.1861333847045898,
+      "file_path": "doc/data/messages/c/comparison-with-itself/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 27051
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/arguments-renamed/good.py__",
+      "distance": 1.186387300491333,
+      "file_path": "doc/data/messages/a/arguments-renamed/good.py",
+      "start_line": 1,
+      "end_line": 14,
+      "tokens": 0,
+      "context_length": 27051
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/pylint/doc/data/messages/g/global-at-module-level/good.py__",
+      "distance": 1.1866507530212402,
+      "file_path": "doc/data/messages/g/global-at-module-level/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 27051
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/pylint/doc/data/messages/l/literal-comparison/bad.py__",
+      "distance": 1.1871020793914795,
+      "file_path": "doc/data/messages/l/literal-comparison/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 27051
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/pylint/pylint/checkers/exceptions.py_5__builtin_exceptions",
+      "distance": 1.187178373336792,
+      "file_path": "pylint/checkers/exceptions.py",
+      "start_line": 7,
+      "end_line": 29,
+      "tokens": 123,
+      "context_length": 27174
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/pylint/doc/data/messages/d/duplicate-key/bad.py__",
+      "distance": 1.1876308917999268,
+      "file_path": "doc/data/messages/d/duplicate-key/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 27174
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/pylint/pylint/config/deprecation_actions.py__NewNamesAction.__call___",
+      "distance": 1.1885017156600952,
+      "file_path": "pylint/config/deprecation_actions.py",
+      "start_line": 94,
+      "end_line": 108,
+      "tokens": 120,
+      "context_length": 27294
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-many-format-args/good.py__",
+      "distance": 1.188554048538208,
+      "file_path": "doc/data/messages/t/too-many-format-args/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 27294
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-exception-context/good.py__",
+      "distance": 1.188843846321106,
+      "file_path": "doc/data/messages/b/bad-exception-context/good.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 27294
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/pylint/pylint/checkers/misc.py_5_ByIdManagedMessagesChecker._get_by_id_managed_msgs.1.1",
+      "distance": 1.1888865232467651,
+      "file_path": "pylint/checkers/misc.py",
+      "start_line": 7,
+      "end_line": 41,
+      "tokens": 213,
+      "context_length": 27507
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/pylint/pylint/config/deprecation_actions.py_6__OldNamesAction.__call__.3.1",
+      "distance": 1.1891093254089355,
+      "file_path": "pylint/config/deprecation_actions.py",
+      "start_line": 9,
+      "end_line": 59,
+      "tokens": 273,
+      "context_length": 27780
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/pylint/pylint/pyreverse/main.py_OPTIONS_OPTIONS.1",
+      "distance": 1.1894358396530151,
+      "file_path": "pylint/pyreverse/main.py",
+      "start_line": 35,
+      "end_line": 203,
+      "tokens": 892,
+      "context_length": 28672
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/pylint/pylint/checkers/strings.py_MSGS_MSGS.1",
+      "distance": 1.1897404193878174,
+      "file_path": "pylint/checkers/strings.py",
+      "start_line": 61,
+      "end_line": 190,
+      "tokens": 1222,
+      "context_length": 29894
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/pylint/doc/data/messages/c/consider-using-sys-exit/good.py__",
+      "distance": 1.1900557279586792,
+      "file_path": "doc/data/messages/c/consider-using-sys-exit/good.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-classmethod-argument/good.py__",
+      "distance": 1.1903228759765625,
+      "file_path": "doc/data/messages/b/bad-classmethod-argument/good.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-format-character/bad.py__",
+      "distance": 1.1905488967895508,
+      "file_path": "doc/data/messages/b/bad-format-character/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unidiomatic-typecheck/good.py__",
+      "distance": 1.190831184387207,
+      "file_path": "doc/data/messages/u/unidiomatic-typecheck/good.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/pylint/doc/data/messages/s/super-without-brackets/bad.py__",
+      "distance": 1.1911873817443848,
+      "file_path": "doc/data/messages/s/super-without-brackets/bad.py",
+      "start_line": 1,
+      "end_line": 12,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-open-mode/good.py__",
+      "distance": 1.1914533376693726,
+      "file_path": "doc/data/messages/b/bad-open-mode/good.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/attribute-defined-outside-init/bad.py__",
+      "distance": 1.1918104887008667,
+      "file_path": "doc/data/messages/a/attribute-defined-outside-init/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-str-strip-call/good.py__",
+      "distance": 1.191896677017212,
+      "file_path": "doc/data/messages/b/bad-str-strip-call/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/pylint/doc/data/messages/i/invalid-enum-extension/good.py__",
+      "distance": 1.1919584274291992,
+      "file_path": "doc/data/messages/i/invalid-enum-extension/good.py",
+      "start_line": 1,
+      "end_line": 13,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/typevar-name-mismatch/good.py__",
+      "distance": 1.1925476789474487,
+      "file_path": "doc/data/messages/t/typevar-name-mismatch/good.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 29894
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/pylint/pylint/__pkginfo__.py_5_",
+      "distance": 1.1926231384277344,
+      "file_path": "pylint/__pkginfo__.py",
+      "start_line": 10,
+      "end_line": 44,
+      "tokens": 224,
+      "context_length": 30118
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/pylint/pylint/utils/utils.py__format_option_value__format_option_value.3.1",
+      "distance": 1.1947238445281982,
+      "file_path": "pylint/utils/utils.py",
+      "start_line": 336,
+      "end_line": 354,
+      "tokens": 214,
+      "context_length": 30332
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/pylint/pylint/checkers/stdlib.py_StdlibChecker._check_env_function_StdlibChecker._check_env_function.7.1",
+      "distance": 1.1947576999664307,
+      "file_path": "pylint/checkers/stdlib.py",
+      "start_line": 680,
+      "end_line": 717,
+      "tokens": 273,
+      "context_length": 30605
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/assignment-from-no-return/bad.py__",
+      "distance": 1.1963379383087158,
+      "file_path": "doc/data/messages/a/assignment-from-no-return/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 30605
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/pylint/pylint/__init__.py_4_run_symilar.3",
+      "distance": 1.1968872547149658,
+      "file_path": "pylint/__init__.py",
+      "start_line": 5,
+      "end_line": 57,
+      "tokens": 335,
+      "context_length": 30940
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/pylint/pylint/checkers/__init__.py_5_13.1",
+      "distance": 1.1976933479309082,
+      "file_path": "pylint/checkers/__init__.py",
+      "start_line": 44,
+      "end_line": 64,
+      "tokens": 117,
+      "context_length": 31057
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-raise/good.py__",
+      "distance": 1.1979689598083496,
+      "file_path": "doc/data/messages/n/no-else-raise/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 31057
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-classmethod-argument/bad.py__",
+      "distance": 1.198655605316162,
+      "file_path": "doc/data/messages/b/bad-classmethod-argument/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 31057
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/pylint/pylint/testutils/functional_test_file.py___all___",
+      "distance": 1.1996128559112549,
+      "file_path": "pylint/testutils/functional_test_file.py",
+      "start_line": 5,
+      "end_line": 24,
+      "tokens": 93,
+      "context_length": 31150
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/broad-except/good.py__",
+      "distance": 1.2004973888397217,
+      "file_path": "doc/data/messages/b/broad-except/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/pylint/doc/data/messages/w/wildcard-import/bad.py__",
+      "distance": 1.2010847330093384,
+      "file_path": "doc/data/messages/w/wildcard-import/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-str-strip-call/bad.py__",
+      "distance": 1.2011384963989258,
+      "file_path": "doc/data/messages/b/bad-str-strip-call/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unspecified-encoding/bad.py__",
+      "distance": 1.2013568878173828,
+      "file_path": "doc/data/messages/u/unspecified-encoding/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/try-except-raise/bad.py__",
+      "distance": 1.201640248298645,
+      "file_path": "doc/data/messages/t/try-except-raise/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/pylint/doc/data/messages/s/singleton-comparison/bad.py__",
+      "distance": 1.2020139694213867,
+      "file_path": "doc/data/messages/s/singleton-comparison/bad.py",
+      "start_line": 1,
+      "end_line": 4,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-return-type-doc/bad.py__",
+      "distance": 1.2021445035934448,
+      "file_path": "doc/data/messages/m/missing-return-type-doc/bad.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/unnecessary-list-index-lookup/good.py__",
+      "distance": 1.2024625539779663,
+      "file_path": "doc/data/messages/u/unnecessary-list-index-lookup/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 31150
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/pylint/pylint/config/arguments_manager.py__ArgumentsManager.load_config_file__ArgumentsManager.load_config_file.2",
+      "distance": 1.203418493270874,
+      "file_path": "pylint/config/arguments_manager.py",
+      "start_line": 559,
+      "end_line": 573,
+      "tokens": 127,
+      "context_length": 31277
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bad-exception-context/bad.py__",
+      "distance": 1.2041149139404297,
+      "file_path": "doc/data/messages/b/bad-exception-context/bad.py",
+      "start_line": 1,
+      "end_line": 8,
+      "tokens": 0,
+      "context_length": 31277
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/pylint/pylint/config/utils.py_5_15.1",
+      "distance": 1.2045023441314697,
+      "file_path": "pylint/config/utils.py",
+      "start_line": 7,
+      "end_line": 28,
+      "tokens": 118,
+      "context_length": 31395
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/pylint/doc/data/messages/m/missing-return-doc/bad.py__",
+      "distance": 1.2047512531280518,
+      "file_path": "doc/data/messages/m/missing-return-doc/bad.py",
+      "start_line": 1,
+      "end_line": 7,
+      "tokens": 0,
+      "context_length": 31395
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/use-dict-literal/good.py__",
+      "distance": 1.2047585248947144,
+      "file_path": "doc/data/messages/u/use-dict-literal/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 31395
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/pylint/pylint/lint/message_state_handler.py_4_14.1",
+      "distance": 1.2054009437561035,
+      "file_path": "pylint/lint/message_state_handler.py",
+      "start_line": 5,
+      "end_line": 35,
+      "tokens": 151,
+      "context_length": 31546
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-few-format-args/good.py__",
+      "distance": 1.2066161632537842,
+      "file_path": "doc/data/messages/t/too-few-format-args/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 31546
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/pylint/doc/data/messages/p/potential-index-error/bad.py__",
+      "distance": 1.20701265335083,
+      "file_path": "doc/data/messages/p/potential-index-error/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 31546
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/pylint/doc/data/messages/t/too-many-arguments/good.py__",
+      "distance": 1.2074823379516602,
+      "file_path": "doc/data/messages/t/too-many-arguments/good.py",
+      "start_line": 1,
+      "end_line": 19,
+      "tokens": 0,
+      "context_length": 31546
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/pylint/pylint/lint/pylinter.py_PyLinter.__init___PyLinter.load_default_plugins.2",
+      "distance": 1.2085659503936768,
+      "file_path": "pylint/lint/pylinter.py",
+      "start_line": 251,
+      "end_line": 341,
+      "tokens": 815,
+      "context_length": 32361,
+      "file_pos": 163
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/pylint/doc/data/messages/u/use-maxsplit-arg/bad.py__",
+      "distance": 1.2086679935455322,
+      "file_path": "doc/data/messages/u/use-maxsplit-arg/bad.py",
+      "start_line": 1,
+      "end_line": 3,
+      "tokens": 0,
+      "context_length": 32361
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/pylint/doc/data/messages/b/bare-except/good.py__",
+      "distance": 1.2090163230895996,
+      "file_path": "doc/data/messages/b/bare-except/good.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 32361
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/pylint/pylint/epylint.py_py_run_20_py_run_20.12.4.1",
+      "distance": 1.209051251411438,
+      "file_path": "pylint/epylint.py",
+      "start_line": 146,
+      "end_line": 198,
+      "tokens": 491,
+      "context_length": 32852
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/pylint/doc/data/messages/g/global-statement/good.py__",
+      "distance": 1.2094337940216064,
+      "file_path": "doc/data/messages/g/global-statement/good.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 32852
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/pylint/pylint/lint/base_options.py__make_run_options_",
+      "distance": 1.2098238468170166,
+      "file_path": "pylint/lint/base_options.py",
+      "start_line": 395,
+      "end_line": 572,
+      "tokens": 1142,
+      "context_length": 33994
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/assigning-non-slot/bad.py__",
+      "distance": 1.2099248170852661,
+      "file_path": "doc/data/messages/a/assigning-non-slot/bad.py",
+      "start_line": 1,
+      "end_line": 11,
+      "tokens": 0,
+      "context_length": 33994
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/pylint/doc/data/messages/i/import-outside-toplevel/good.py__",
+      "distance": 1.2106449604034424,
+      "file_path": "doc/data/messages/i/import-outside-toplevel/good.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 33994
+    },
+    {
+      "position": 208,
+      "id": "/tmp/repos/pylint/doc/data/messages/w/wrong-import-order/bad.py__",
+      "distance": 1.2114336490631104,
+      "file_path": "doc/data/messages/w/wrong-import-order/bad.py",
+      "start_line": 1,
+      "end_line": 5,
+      "tokens": 0,
+      "context_length": 33994
+    },
+    {
+      "position": 209,
+      "id": "/tmp/repos/pylint/doc/data/messages/n/no-else-continue/good.py__",
+      "distance": 1.2114896774291992,
+      "file_path": "doc/data/messages/n/no-else-continue/good.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 33994
+    },
+    {
+      "position": 210,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/assert-on-tuple/bad.py__",
+      "distance": 1.2120263576507568,
+      "file_path": "doc/data/messages/a/assert-on-tuple/bad.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 33994
+    },
+    {
+      "position": 211,
+      "id": "/tmp/repos/pylint/pylint/checkers/base_checker.py_4_20.1",
+      "distance": 1.2121074199676514,
+      "file_path": "pylint/checkers/base_checker.py",
+      "start_line": 5,
+      "end_line": 32,
+      "tokens": 166,
+      "context_length": 34160
+    },
+    {
+      "position": 212,
+      "id": "/tmp/repos/pylint/doc/data/messages/s/self-assigning-variable/good.py__",
+      "distance": 1.212233304977417,
+      "file_path": "doc/data/messages/s/self-assigning-variable/good.py",
+      "start_line": 1,
+      "end_line": 2,
+      "tokens": 0,
+      "context_length": 34160
+    },
+    {
+      "position": 213,
+      "id": "/tmp/repos/pylint/doc/data/messages/a/access-member-before-definition/bad.py__",
+      "distance": 1.2129987478256226,
+      "file_path": "doc/data/messages/a/access-member-before-definition/bad.py",
+      "start_line": 1,
+      "end_line": 6,
+      "tokens": 0,
+      "context_length": 34160
+    }
+  ],
+  "files": [
+    {
+      "file_path": "doc/data/messages/b/bad-option-value/bad.py",
+      "position": 1,
+      "tokens": 21,
+      "context_length": 21
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-option-value/good.py",
+      "position": 2,
+      "tokens": 15,
+      "context_length": 36
+    },
+    {
+      "file_path": "pylint/lint/pylinter.py",
+      "position": 3,
+      "tokens": 9492,
+      "context_length": 9528
+    },
+    {
+      "file_path": "pylint/config/option_parser.py",
+      "position": 4,
+      "tokens": 437,
+      "context_length": 9965
+    },
+    {
+      "file_path": "pylint/config/option.py",
+      "position": 5,
+      "tokens": 1744,
+      "context_length": 11709
+    },
+    {
+      "file_path": "pylint/constants.py",
+      "position": 6,
+      "tokens": 2654,
+      "context_length": 14363
+    },
+    {
+      "file_path": "pylint/extensions/bad_builtin.py",
+      "position": 7,
+      "tokens": 511,
+      "context_length": 14874
+    },
+    {
+      "file_path": "pylint/config/arguments_provider.py",
+      "position": 8,
+      "tokens": 1643,
+      "context_length": 16517
+    },
+    {
+      "file_path": "doc/data/messages/d/dict-iter-missing-items/bad.py",
+      "position": 9,
+      "tokens": 64,
+      "context_length": 16581
+    },
+    {
+      "file_path": "pylint/checkers/stdlib.py",
+      "position": 10,
+      "tokens": 6149,
+      "context_length": 22730
+    },
+    {
+      "file_path": "pylint/config/arguments_manager.py",
+      "position": 11,
+      "tokens": 5986,
+      "context_length": 28716
+    },
+    {
+      "file_path": "doc/data/messages/u/undefined-variable/bad.py",
+      "position": 12,
+      "tokens": 12,
+      "context_length": 28728
+    },
+    {
+      "file_path": "pylint/config/options_provider_mixin.py",
+      "position": 13,
+      "tokens": 968,
+      "context_length": 29696
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-value/bad.py",
+      "position": 14,
+      "tokens": 22,
+      "context_length": 29718
+    },
+    {
+      "file_path": "doc/data/messages/c/consider-using-with/bad.py",
+      "position": 15,
+      "tokens": 30,
+      "context_length": 29748
+    },
+    {
+      "file_path": "pylint/config/callback_actions.py",
+      "position": 16,
+      "tokens": 2619,
+      "context_length": 32367
+    },
+    {
+      "file_path": "doc/data/messages/u/undefined-all-variable/bad.py",
+      "position": 17,
+      "tokens": 26,
+      "context_length": 32393
+    },
+    {
+      "file_path": "pylint/config/__init__.py",
+      "position": 18,
+      "tokens": 573,
+      "context_length": 32966
+    },
+    {
+      "file_path": "doc/data/messages/u/unreachable/bad.py",
+      "position": 19,
+      "tokens": 23,
+      "context_length": 32989
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-builtin/bad.py",
+      "position": 20,
+      "tokens": 31,
+      "context_length": 33020
+    },
+    {
+      "file_path": "doc/data/messages/u/undefined-variable/good.py",
+      "position": 21,
+      "tokens": 11,
+      "context_length": 33031
+    },
+    {
+      "file_path": "doc/data/messages/o/overridden-final-method/bad.py",
+      "position": 22,
+      "tokens": 48,
+      "context_length": 33079
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-lambda-assignment/bad.py",
+      "position": 23,
+      "tokens": 25,
+      "context_length": 33104
+    },
+    {
+      "file_path": "pylint/checkers/format.py",
+      "position": 24,
+      "tokens": 5969,
+      "context_length": 39073
+    },
+    {
+      "file_path": "pylint/lint/message_state_handler.py",
+      "position": 25,
+      "tokens": 3297,
+      "context_length": 42370
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-value/good.py",
+      "position": 26,
+      "tokens": 13,
+      "context_length": 42383
+    },
+    {
+      "file_path": "doc/data/messages/u/undefined-all-variable/good.py",
+      "position": 27,
+      "tokens": 19,
+      "context_length": 42402
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-dunder-call/bad.py",
+      "position": 28,
+      "tokens": 63,
+      "context_length": 42465
+    },
+    {
+      "file_path": "doc/data/messages/g/global-at-module-level/bad.py",
+      "position": 29,
+      "tokens": 15,
+      "context_length": 42480
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-builtin/good.py",
+      "position": 30,
+      "tokens": 21,
+      "context_length": 42501
+    },
+    {
+      "file_path": "pylint/utils/utils.py",
+      "position": 31,
+      "tokens": 3095,
+      "context_length": 45596
+    },
+    {
+      "file_path": "doc/data/messages/c/consider-using-sys-exit/bad.py",
+      "position": 32,
+      "tokens": 42,
+      "context_length": 45638
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-direct-lambda-call/bad.py",
+      "position": 33,
+      "tokens": 29,
+      "context_length": 45667
+    },
+    {
+      "file_path": "pylint/checkers/unsupported_version.py",
+      "position": 34,
+      "tokens": 672,
+      "context_length": 46339
+    },
+    {
+      "file_path": "pylint/checkers/base/basic_error_checker.py",
+      "position": 35,
+      "tokens": 4516,
+      "context_length": 50855
+    },
+    {
+      "file_path": "pylint/checkers/variables.py",
+      "position": 36,
+      "tokens": 22307,
+      "context_length": 73162
+    },
+    {
+      "file_path": "doc/data/messages/a/arguments-out-of-order/bad.py",
+      "position": 37,
+      "tokens": 84,
+      "context_length": 73246
+    },
+    {
+      "file_path": "doc/data/messages/u/useless-return/bad.py",
+      "position": 38,
+      "tokens": 24,
+      "context_length": 73270
+    },
+    {
+      "file_path": "pylint/lint/run.py",
+      "position": 39,
+      "tokens": 1514,
+      "context_length": 74784
+    },
+    {
+      "file_path": "doc/data/messages/g/global-statement/bad.py",
+      "position": 40,
+      "tokens": 33,
+      "context_length": 74817
+    },
+    {
+      "file_path": "pylint/config/option_manager_mixin.py",
+      "position": 41,
+      "tokens": 2776,
+      "context_length": 77593
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-format-argument-key/bad.py",
+      "position": 42,
+      "tokens": 25,
+      "context_length": 77618
+    },
+    {
+      "file_path": "doc/data/messages/a/arguments-renamed/bad.py",
+      "position": 43,
+      "tokens": 102,
+      "context_length": 77720
+    },
+    {
+      "file_path": "doc/data/messages/i/import-outside-toplevel/bad.py",
+      "position": 44,
+      "tokens": 23,
+      "context_length": 77743
+    },
+    {
+      "file_path": "doc/data/messages/u/unidiomatic-typecheck/bad.py",
+      "position": 45,
+      "tokens": 36,
+      "context_length": 77779
+    },
+    {
+      "file_path": "pylint/checkers/exceptions.py",
+      "position": 46,
+      "tokens": 4505,
+      "context_length": 82284
+    },
+    {
+      "file_path": "pylint/lint/base_options.py",
+      "position": 47,
+      "tokens": 3934,
+      "context_length": 86218
+    },
+    {
+      "file_path": "doc/data/messages/c/consider-using-with/good.py",
+      "position": 48,
+      "tokens": 23,
+      "context_length": 86241
+    },
+    {
+      "file_path": "doc/data/messages/b/binary-op-exception/bad.py",
+      "position": 49,
+      "tokens": 27,
+      "context_length": 86268
+    },
+    {
+      "file_path": "doc/data/messages/u/unreachable/good.py",
+      "position": 50,
+      "tokens": 17,
+      "context_length": 86285
+    },
+    {
+      "file_path": "doc/data/messages/u/use-dict-literal/bad.py",
+      "position": 51,
+      "tokens": 14,
+      "context_length": 86299
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-argument-name/bad.py",
+      "position": 52,
+      "tokens": 22,
+      "context_length": 86321
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-continue/bad.py",
+      "position": 53,
+      "tokens": 43,
+      "context_length": 86364
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-raise/bad.py",
+      "position": 54,
+      "tokens": 58,
+      "context_length": 86422
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-lambda-assignment/good.py",
+      "position": 55,
+      "tokens": 17,
+      "context_length": 86439
+    },
+    {
+      "file_path": "doc/data/messages/u/unused-wildcard-import/bad.py",
+      "position": 56,
+      "tokens": 19,
+      "context_length": 86458
+    },
+    {
+      "file_path": "doc/data/messages/c/comparison-of-constants/bad.py",
+      "position": 57,
+      "tokens": 23,
+      "context_length": 86481
+    },
+    {
+      "file_path": "pylint/pyreverse/main.py",
+      "position": 58,
+      "tokens": 1469,
+      "context_length": 87950
+    },
+    {
+      "file_path": "doc/data/messages/u/use-list-literal/bad.py",
+      "position": 59,
+      "tokens": 13,
+      "context_length": 87963
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-direct-lambda-call/good.py",
+      "position": 60,
+      "tokens": 13,
+      "context_length": 87976
+    },
+    {
+      "file_path": "doc/data/messages/s/self-assigning-variable/bad.py",
+      "position": 61,
+      "tokens": 18,
+      "context_length": 87994
+    },
+    {
+      "file_path": "doc/data/messages/c/confusing-consecutive-elif/bad.py",
+      "position": 62,
+      "tokens": 58,
+      "context_length": 88052
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-dunder-call/good.py",
+      "position": 63,
+      "tokens": 33,
+      "context_length": 88085
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-break/bad.py",
+      "position": 64,
+      "tokens": 41,
+      "context_length": 88126
+    },
+    {
+      "file_path": "doc/data/messages/o/overridden-final-method/good.py",
+      "position": 65,
+      "tokens": 40,
+      "context_length": 88166
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-list-index-lookup/bad.py",
+      "position": 66,
+      "tokens": 36,
+      "context_length": 88202
+    },
+    {
+      "file_path": "doc/data/messages/s/super-with-arguments/bad.py",
+      "position": 67,
+      "tokens": 35,
+      "context_length": 88237
+    },
+    {
+      "file_path": "pylint/extensions/typing.py",
+      "position": 68,
+      "tokens": 3889,
+      "context_length": 92126
+    },
+    {
+      "file_path": "doc/data/messages/b/broad-except/bad.py",
+      "position": 69,
+      "tokens": 23,
+      "context_length": 92149
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-staticmethod-argument/good.py",
+      "position": 70,
+      "tokens": 17,
+      "context_length": 92166
+    },
+    {
+      "file_path": "doc/data/messages/t/typevar-name-mismatch/bad.py",
+      "position": 71,
+      "tokens": 22,
+      "context_length": 92188
+    },
+    {
+      "file_path": "doc/data/messages/u/useless-import-alias/bad.py",
+      "position": 72,
+      "tokens": 13,
+      "context_length": 92201
+    },
+    {
+      "file_path": "doc/data/messages/r/return-in-init/bad.py",
+      "position": 73,
+      "tokens": 27,
+      "context_length": 92228
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-yield-doc/bad.py",
+      "position": 74,
+      "tokens": 64,
+      "context_length": 92292
+    },
+    {
+      "file_path": "doc/data/messages/t/too-many-arguments/bad.py",
+      "position": 75,
+      "tokens": 71,
+      "context_length": 92363
+    },
+    {
+      "file_path": "doc/data/messages/t/too-many-format-args/bad.py",
+      "position": 76,
+      "tokens": 33,
+      "context_length": 92396
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-super-call/bad.py",
+      "position": 77,
+      "tokens": 35,
+      "context_length": 92431
+    },
+    {
+      "file_path": "doc/data/messages/t/typevar-double-variance/bad.py",
+      "position": 78,
+      "tokens": 31,
+      "context_length": 92462
+    },
+    {
+      "file_path": "examples/deprecation_checker.py",
+      "position": 79,
+      "tokens": 900,
+      "context_length": 93362
+    },
+    {
+      "file_path": "doc/data/messages/a/assignment-from-none/bad.py",
+      "position": 80,
+      "tokens": 18,
+      "context_length": 93380
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-yield-type-doc/bad.py",
+      "position": 81,
+      "tokens": 73,
+      "context_length": 93453
+    },
+    {
+      "file_path": "pylint/checkers/design_analysis.py",
+      "position": 82,
+      "tokens": 4871,
+      "context_length": 98324
+    },
+    {
+      "file_path": "doc/data/messages/b/bare-except/bad.py",
+      "position": 83,
+      "tokens": 21,
+      "context_length": 98345
+    },
+    {
+      "file_path": "doc/data/messages/m/method-cache-max-size-none/bad.py",
+      "position": 84,
+      "tokens": 72,
+      "context_length": 98417
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-open-mode/bad.py",
+      "position": 85,
+      "tokens": 31,
+      "context_length": 98448
+    },
+    {
+      "file_path": "pylint/checkers/refactoring/implicit_booleaness_checker.py",
+      "position": 86,
+      "tokens": 1786,
+      "context_length": 100234
+    },
+    {
+      "file_path": "doc/data/messages/i/invalid-enum-extension/bad.py",
+      "position": 87,
+      "tokens": 41,
+      "context_length": 100275
+    },
+    {
+      "file_path": "doc/data/messages/a/abstract-method/bad.py",
+      "position": 88,
+      "tokens": 64,
+      "context_length": 100339
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-raises-doc/bad.py",
+      "position": 89,
+      "tokens": 77,
+      "context_length": 100416
+    },
+    {
+      "file_path": "pylint/checkers/base/basic_checker.py",
+      "position": 90,
+      "tokens": 7198,
+      "context_length": 107614
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-format-argument-key/good.py",
+      "position": 91,
+      "tokens": 21,
+      "context_length": 107635
+    },
+    {
+      "file_path": "pylint/config/utils.py",
+      "position": 92,
+      "tokens": 1952,
+      "context_length": 109587
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-super-call/good.py",
+      "position": 93,
+      "tokens": 23,
+      "context_length": 109610
+    },
+    {
+      "file_path": "doc/data/messages/t/too-few-format-args/bad.py",
+      "position": 94,
+      "tokens": 28,
+      "context_length": 109638
+    },
+    {
+      "file_path": "pylint/utils/file_state.py",
+      "position": 95,
+      "tokens": 1756,
+      "context_length": 111394
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-argument-name/good.py",
+      "position": 96,
+      "tokens": 14,
+      "context_length": 111408
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-staticmethod-argument/bad.py",
+      "position": 97,
+      "tokens": 24,
+      "context_length": 111432
+    },
+    {
+      "file_path": "doc/data/messages/c/comparison-with-callable/bad.py",
+      "position": 98,
+      "tokens": 73,
+      "context_length": 111505
+    },
+    {
+      "file_path": "pylint/config/exceptions.py",
+      "position": 99,
+      "tokens": 182,
+      "context_length": 111687
+    },
+    {
+      "file_path": "doc/data/messages/u/ungrouped-imports/bad.py",
+      "position": 100,
+      "tokens": 30,
+      "context_length": 111717
+    },
+    {
+      "file_path": "pylint/checkers/logging.py",
+      "position": 101,
+      "tokens": 3000,
+      "context_length": 114717
+    },
+    {
+      "file_path": "doc/data/messages/b/binary-op-exception/good.py",
+      "position": 102,
+      "tokens": 20,
+      "context_length": 114737
+    },
+    {
+      "file_path": "doc/data/messages/c/catching-non-exception/bad.py",
+      "position": 103,
+      "tokens": 32,
+      "context_length": 114769
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-type-doc/bad.py",
+      "position": 104,
+      "tokens": 48,
+      "context_length": 114817
+    },
+    {
+      "file_path": "pylint/checkers/typecheck.py",
+      "position": 105,
+      "tokens": 17185,
+      "context_length": 132002
+    },
+    {
+      "file_path": "doc/data/messages/c/chained-comparison/bad.py",
+      "position": 106,
+      "tokens": 35,
+      "context_length": 132037
+    },
+    {
+      "file_path": "doc/data/messages/u/unused-wildcard-import/good.py",
+      "position": 107,
+      "tokens": 11,
+      "context_length": 132048
+    },
+    {
+      "file_path": "pylint/checkers/imports.py",
+      "position": 108,
+      "tokens": 7843,
+      "context_length": 139891
+    },
+    {
+      "file_path": "doc/data/messages/u/useless-return/good.py",
+      "position": 109,
+      "tokens": 13,
+      "context_length": 139904
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-except-order/good.py",
+      "position": 110,
+      "tokens": 19,
+      "context_length": 139923
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-except-order/bad.py",
+      "position": 111,
+      "tokens": 47,
+      "context_length": 139970
+    },
+    {
+      "file_path": "doc/data/messages/a/arguments-out-of-order/good.py",
+      "position": 112,
+      "tokens": 72,
+      "context_length": 140042
+    },
+    {
+      "file_path": "doc/data/messages/u/useless-import-alias/good.py",
+      "position": 113,
+      "tokens": 5,
+      "context_length": 140047
+    },
+    {
+      "file_path": "pylint/config/argument.py",
+      "position": 114,
+      "tokens": 3083,
+      "context_length": 143130
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-ellipsis/bad.py",
+      "position": 115,
+      "tokens": 20,
+      "context_length": 143150
+    },
+    {
+      "file_path": "doc/data/messages/m/misplaced-future/bad.py",
+      "position": 116,
+      "tokens": 18,
+      "context_length": 143168
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-return/bad.py",
+      "position": 117,
+      "tokens": 52,
+      "context_length": 143220
+    },
+    {
+      "file_path": "pylint/epylint.py",
+      "position": 118,
+      "tokens": 1701,
+      "context_length": 144921
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-param-doc/bad.py",
+      "position": 119,
+      "tokens": 40,
+      "context_length": 144961
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-bases/bad.py",
+      "position": 120,
+      "tokens": 23,
+      "context_length": 144984
+    },
+    {
+      "file_path": "doc/data/messages/f/function-redefined/bad.py",
+      "position": 121,
+      "tokens": 21,
+      "context_length": 145005
+    },
+    {
+      "file_path": "doc/data/messages/c/confusing-consecutive-elif/good.py",
+      "position": 122,
+      "tokens": 131,
+      "context_length": 145136
+    },
+    {
+      "file_path": "doc/data/messages/c/comparison-with-itself/bad.py",
+      "position": 123,
+      "tokens": 29,
+      "context_length": 145165
+    },
+    {
+      "file_path": "doc/data/messages/a/arguments-renamed/good.py",
+      "position": 124,
+      "tokens": 96,
+      "context_length": 145261
+    },
+    {
+      "file_path": "doc/data/messages/g/global-at-module-level/good.py",
+      "position": 125,
+      "tokens": 5,
+      "context_length": 145266
+    },
+    {
+      "file_path": "doc/data/messages/l/literal-comparison/bad.py",
+      "position": 126,
+      "tokens": 21,
+      "context_length": 145287
+    },
+    {
+      "file_path": "doc/data/messages/d/duplicate-key/bad.py",
+      "position": 127,
+      "tokens": 30,
+      "context_length": 145317
+    },
+    {
+      "file_path": "pylint/config/deprecation_actions.py",
+      "position": 128,
+      "tokens": 637,
+      "context_length": 145954
+    },
+    {
+      "file_path": "doc/data/messages/t/too-many-format-args/good.py",
+      "position": 129,
+      "tokens": 21,
+      "context_length": 145975
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-exception-context/good.py",
+      "position": 130,
+      "tokens": 56,
+      "context_length": 146031
+    },
+    {
+      "file_path": "pylint/checkers/misc.py",
+      "position": 131,
+      "tokens": 1304,
+      "context_length": 147335
+    },
+    {
+      "file_path": "pylint/checkers/strings.py",
+      "position": 132,
+      "tokens": 8236,
+      "context_length": 155571
+    },
+    {
+      "file_path": "doc/data/messages/c/consider-using-sys-exit/good.py",
+      "position": 133,
+      "tokens": 36,
+      "context_length": 155607
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-classmethod-argument/good.py",
+      "position": 134,
+      "tokens": 18,
+      "context_length": 155625
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-format-character/bad.py",
+      "position": 135,
+      "tokens": 20,
+      "context_length": 155645
+    },
+    {
+      "file_path": "doc/data/messages/u/unidiomatic-typecheck/good.py",
+      "position": 136,
+      "tokens": 26,
+      "context_length": 155671
+    },
+    {
+      "file_path": "doc/data/messages/s/super-without-brackets/bad.py",
+      "position": 137,
+      "tokens": 56,
+      "context_length": 155727
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-open-mode/good.py",
+      "position": 138,
+      "tokens": 23,
+      "context_length": 155750
+    },
+    {
+      "file_path": "doc/data/messages/a/attribute-defined-outside-init/bad.py",
+      "position": 139,
+      "tokens": 23,
+      "context_length": 155773
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-str-strip-call/good.py",
+      "position": 140,
+      "tokens": 30,
+      "context_length": 155803
+    },
+    {
+      "file_path": "doc/data/messages/i/invalid-enum-extension/good.py",
+      "position": 141,
+      "tokens": 47,
+      "context_length": 155850
+    },
+    {
+      "file_path": "doc/data/messages/t/typevar-name-mismatch/good.py",
+      "position": 142,
+      "tokens": 13,
+      "context_length": 155863
+    },
+    {
+      "file_path": "pylint/__pkginfo__.py",
+      "position": 143,
+      "tokens": 309,
+      "context_length": 156172
+    },
+    {
+      "file_path": "doc/data/messages/a/assignment-from-no-return/bad.py",
+      "position": 144,
+      "tokens": 29,
+      "context_length": 156201
+    },
+    {
+      "file_path": "pylint/__init__.py",
+      "position": 145,
+      "tokens": 729,
+      "context_length": 156930
+    },
+    {
+      "file_path": "pylint/checkers/__init__.py",
+      "position": 146,
+      "tokens": 998,
+      "context_length": 157928
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-raise/good.py",
+      "position": 147,
+      "tokens": 46,
+      "context_length": 157974
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-classmethod-argument/bad.py",
+      "position": 148,
+      "tokens": 27,
+      "context_length": 158001
+    },
+    {
+      "file_path": "pylint/testutils/functional_test_file.py",
+      "position": 149,
+      "tokens": 158,
+      "context_length": 158159
+    },
+    {
+      "file_path": "doc/data/messages/b/broad-except/good.py",
+      "position": 150,
+      "tokens": 17,
+      "context_length": 158176
+    },
+    {
+      "file_path": "doc/data/messages/w/wildcard-import/bad.py",
+      "position": 151,
+      "tokens": 11,
+      "context_length": 158187
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-str-strip-call/bad.py",
+      "position": 152,
+      "tokens": 46,
+      "context_length": 158233
+    },
+    {
+      "file_path": "doc/data/messages/u/unspecified-encoding/bad.py",
+      "position": 153,
+      "tokens": 28,
+      "context_length": 158261
+    },
+    {
+      "file_path": "doc/data/messages/t/try-except-raise/bad.py",
+      "position": 154,
+      "tokens": 28,
+      "context_length": 158289
+    },
+    {
+      "file_path": "doc/data/messages/s/singleton-comparison/bad.py",
+      "position": 155,
+      "tokens": 27,
+      "context_length": 158316
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-return-type-doc/bad.py",
+      "position": 156,
+      "tokens": 62,
+      "context_length": 158378
+    },
+    {
+      "file_path": "doc/data/messages/u/unnecessary-list-index-lookup/good.py",
+      "position": 157,
+      "tokens": 24,
+      "context_length": 158402
+    },
+    {
+      "file_path": "doc/data/messages/b/bad-exception-context/bad.py",
+      "position": 158,
+      "tokens": 61,
+      "context_length": 158463
+    },
+    {
+      "file_path": "doc/data/messages/m/missing-return-doc/bad.py",
+      "position": 159,
+      "tokens": 50,
+      "context_length": 158513
+    },
+    {
+      "file_path": "doc/data/messages/u/use-dict-literal/good.py",
+      "position": 160,
+      "tokens": 4,
+      "context_length": 158517
+    },
+    {
+      "file_path": "doc/data/messages/t/too-few-format-args/good.py",
+      "position": 161,
+      "tokens": 21,
+      "context_length": 158538
+    },
+    {
+      "file_path": "doc/data/messages/p/potential-index-error/bad.py",
+      "position": 162,
+      "tokens": 19,
+      "context_length": 158557
+    },
+    {
+      "file_path": "doc/data/messages/t/too-many-arguments/good.py",
+      "position": 163,
+      "tokens": 76,
+      "context_length": 158633
+    },
+    {
+      "file_path": "doc/data/messages/u/use-maxsplit-arg/bad.py",
+      "position": 164,
+      "tokens": 24,
+      "context_length": 158657
+    },
+    {
+      "file_path": "doc/data/messages/b/bare-except/good.py",
+      "position": 165,
+      "tokens": 17,
+      "context_length": 158674
+    },
+    {
+      "file_path": "doc/data/messages/g/global-statement/good.py",
+      "position": 166,
+      "tokens": 24,
+      "context_length": 158698
+    },
+    {
+      "file_path": "doc/data/messages/a/assigning-non-slot/bad.py",
+      "position": 167,
+      "tokens": 54,
+      "context_length": 158752
+    },
+    {
+      "file_path": "doc/data/messages/i/import-outside-toplevel/good.py",
+      "position": 168,
+      "tokens": 14,
+      "context_length": 158766
+    },
+    {
+      "file_path": "doc/data/messages/w/wrong-import-order/bad.py",
+      "position": 169,
+      "tokens": 26,
+      "context_length": 158792
+    },
+    {
+      "file_path": "doc/data/messages/n/no-else-continue/good.py",
+      "position": 170,
+      "tokens": 31,
+      "context_length": 158823
+    },
+    {
+      "file_path": "doc/data/messages/a/assert-on-tuple/bad.py",
+      "position": 171,
+      "tokens": 14,
+      "context_length": 158837
+    },
+    {
+      "file_path": "pylint/checkers/base_checker.py",
+      "position": 172,
+      "tokens": 2272,
+      "context_length": 161109
+    },
+    {
+      "file_path": "doc/data/messages/s/self-assigning-variable/good.py",
+      "position": 173,
+      "tokens": 6,
+      "context_length": 161115
+    },
+    {
+      "file_path": "doc/data/messages/a/access-member-before-definition/bad.py",
+      "position": 174,
+      "tokens": 34,
+      "context_length": 161149
+    }
+  ]
+}

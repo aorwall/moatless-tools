@@ -1,0 +1,1231 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-9939",
+  "model_patch": "diff --git a/sklearn/linear_model/logistic.py b/sklearn/linear_model/logistic.py\nindex 3de13a86b..703ffe72b 100644\n--- a/sklearn/linear_model/logistic.py\n+++ b/sklearn/linear_model/logistic.py\n@@ -759,8 +759,8 @@ def logistic_regression_path(X, y, pos_class=None, Cs=10, fit_intercept=True,\n \n         if multi_class == 'multinomial':\n             multi_w0 = np.reshape(w0, (classes.size, -1))\n-            if classes.size == 2:\n-                multi_w0 = multi_w0[1][np.newaxis, :]\n+            # if classes.size == 2:\n+            #     multi_w0 = multi_w0[1][np.newaxis, :]\n             coefs.append(multi_w0)\n         else:\n             coefs.append(w0.copy())\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sklearn/linear_model/logistic.py"
+  ],
+  "repo": "scikit-learn/scikit-learn",
+  "base_commit": "f247ad5adfe86b2ee64a4a3db1b496c8bf1c9dff",
+  "patch": "diff --git a/sklearn/linear_model/logistic.py b/sklearn/linear_model/logistic.py\n--- a/sklearn/linear_model/logistic.py\n+++ b/sklearn/linear_model/logistic.py\n@@ -1101,14 +1101,18 @@ class LogisticRegression(BaseEstimator, LinearClassifierMixin,\n     coef_ : array, shape (1, n_features) or (n_classes, n_features)\n         Coefficient of the features in the decision function.\n \n-        `coef_` is of shape (1, n_features) when the given problem\n-        is binary.\n+        `coef_` is of shape (1, n_features) when the given problem is binary.\n+        In particular, when `multi_class='multinomial'`, `coef_` corresponds\n+        to outcome 1 (True) and `-coef_` corresponds to outcome 0 (False).\n \n     intercept_ : array, shape (1,) or (n_classes,)\n         Intercept (a.k.a. bias) added to the decision function.\n \n         If `fit_intercept` is set to False, the intercept is set to zero.\n-        `intercept_` is of shape(1,) when the problem is binary.\n+        `intercept_` is of shape (1,) when the given problem is binary.\n+        In particular, when `multi_class='multinomial'`, `intercept_`\n+        corresponds to outcome 1 (True) and `-intercept_` corresponds to\n+        outcome 0 (False).\n \n     n_iter_ : array, shape (n_classes,) or (1, )\n         Actual number of iterations for all classes. If binary or multinomial,\n@@ -1332,11 +1336,17 @@ def predict_proba(self, X):\n         \"\"\"\n         if not hasattr(self, \"coef_\"):\n             raise NotFittedError(\"Call fit before prediction\")\n-        calculate_ovr = self.coef_.shape[0] == 1 or self.multi_class == \"ovr\"\n-        if calculate_ovr:\n+        if self.multi_class == \"ovr\":\n             return super(LogisticRegression, self)._predict_proba_lr(X)\n         else:\n-            return softmax(self.decision_function(X), copy=False)\n+            decision = self.decision_function(X)\n+            if decision.ndim == 1:\n+                # Workaround for multi_class=\"multinomial\" and binary outcomes\n+                # which requires softmax prediction with only a 1D decision.\n+                decision_2d = np.c_[-decision, decision]\n+            else:\n+                decision_2d = decision\n+            return softmax(decision_2d, copy=False)\n \n     def predict_log_proba(self, X):\n         \"\"\"Log of probability estimates.\n",
+  "test_patch": "diff --git a/sklearn/linear_model/tests/test_logistic.py b/sklearn/linear_model/tests/test_logistic.py\n--- a/sklearn/linear_model/tests/test_logistic.py\n+++ b/sklearn/linear_model/tests/test_logistic.py\n@@ -198,6 +198,23 @@ def test_multinomial_binary():\n         assert_greater(np.mean(pred == target), .9)\n \n \n+def test_multinomial_binary_probabilities():\n+    # Test multinomial LR gives expected probabilities based on the\n+    # decision function, for a binary problem.\n+    X, y = make_classification()\n+    clf = LogisticRegression(multi_class='multinomial', solver='saga')\n+    clf.fit(X, y)\n+\n+    decision = clf.decision_function(X)\n+    proba = clf.predict_proba(X)\n+\n+    expected_proba_class_1 = (np.exp(decision) /\n+                              (np.exp(decision) + np.exp(-decision)))\n+    expected_proba = np.c_[1-expected_proba_class_1, expected_proba_class_1]\n+\n+    assert_almost_equal(proba, expected_proba)\n+\n+\n def test_sparsify():\n     # Test sparsify and densify members.\n     n_samples, n_features = iris.data.shape\n",
+  "problem_statement": "Incorrect predictions when fitting a LogisticRegression model on binary outcomes with `multi_class='multinomial'`.\n#### Description\r\nIncorrect predictions when fitting a LogisticRegression model on binary outcomes with `multi_class='multinomial'`.\r\n<!-- Example: Joblib Error thrown when calling fit on LatentDirichletAllocation with evaluate_every > 0-->\r\n\r\n#### Steps/Code to Reproduce\r\n```python\r\n    from sklearn.linear_model import LogisticRegression\r\n    import sklearn.metrics\r\n    import numpy as np\r\n\r\n    # Set up a logistic regression object\r\n    lr = LogisticRegression(C=1000000, multi_class='multinomial',\r\n                            solver='sag', tol=0.0001, warm_start=False,\r\n                            verbose=0)\r\n\r\n    # Set independent variable values\r\n    Z = np.array([\r\n       [ 0.        ,  0.        ],\r\n       [ 1.33448632,  0.        ],\r\n       [ 1.48790105, -0.33289528],\r\n       [-0.47953866, -0.61499779],\r\n       [ 1.55548163,  1.14414766],\r\n       [-0.31476657, -1.29024053],\r\n       [-1.40220786, -0.26316645],\r\n       [ 2.227822  , -0.75403668],\r\n       [-0.78170885, -1.66963585],\r\n       [ 2.24057471, -0.74555021],\r\n       [-1.74809665,  2.25340192],\r\n       [-1.74958841,  2.2566389 ],\r\n       [ 2.25984734, -1.75106702],\r\n       [ 0.50598996, -0.77338402],\r\n       [ 1.21968303,  0.57530831],\r\n       [ 1.65370219, -0.36647173],\r\n       [ 0.66569897,  1.77740068],\r\n       [-0.37088553, -0.92379819],\r\n       [-1.17757946, -0.25393047],\r\n       [-1.624227  ,  0.71525192]])\r\n    \r\n    # Set dependant variable values\r\n    Y = np.array([1, 0, 0, 1, 0, 0, 0, 0, \r\n                  0, 0, 1, 1, 1, 0, 0, 1, \r\n                  0, 0, 1, 1], dtype=np.int32)\r\n\r\n    lr.fit(Z, Y)\r\n    p = lr.predict_proba(Z)\r\n    print(sklearn.metrics.log_loss(Y, p)) # ...\r\n\r\n    print(lr.intercept_)\r\n    print(lr.coef_)\r\n```\r\n<!--\r\nExample:\r\n```python\r\nfrom sklearn.feature_extraction.text import CountVectorizer\r\nfrom sklearn.decomposition import LatentDirichletAllocation\r\n\r\ndocs = [\"Help I have a bug\" for i in range(1000)]\r\n\r\nvectorizer = CountVectorizer(input=docs, analyzer='word')\r\nlda_features = vectorizer.fit_transform(docs)\r\n\r\nlda_model = LatentDirichletAllocation(\r\n    n_topics=10,\r\n    learning_method='online',\r\n    evaluate_every=10,\r\n    n_jobs=4,\r\n)\r\nmodel = lda_model.fit(lda_features)\r\n```\r\nIf the code is too long, feel free to put it in a public gist and link\r\nit in the issue: https://gist.github.com\r\n-->\r\n\r\n#### Expected Results\r\nIf we compare against R or using `multi_class='ovr'`, the log loss (which is approximately proportional to the objective function as the regularisation is set to be negligible through the choice of `C`) is incorrect. We expect the log loss to be roughly `0.5922995`\r\n\r\n#### Actual Results\r\nThe actual log loss when using `multi_class='multinomial'` is `0.61505641264`.\r\n\r\n#### Further Information\r\nSee the stack exchange question https://stats.stackexchange.com/questions/306886/confusing-behaviour-of-scikit-learn-logistic-regression-multinomial-optimisation?noredirect=1#comment583412_306886 for more information.\r\n\r\nThe issue it seems is caused in https://github.com/scikit-learn/scikit-learn/blob/ef5cb84a/sklearn/linear_model/logistic.py#L762. In the `multinomial` case even if `classes.size==2` we cannot reduce to a 1D case by throwing away one of the vectors of coefficients (as we can in normal binary logistic regression). This is essentially a difference between softmax (redundancy allowed) and logistic regression.\r\n\r\nThis can be fixed by commenting out the lines 762 and 763. I am apprehensive however that this may cause some other unknown issues which is why I am positing as a bug.\r\n\r\n#### Versions\r\n<!--\r\nPlease run the following snippet and paste the output below.\r\nimport platform; print(platform.platform())\r\nimport sys; print(\"Python\", sys.version)\r\nimport numpy; print(\"NumPy\", numpy.__version__)\r\nimport scipy; print(\"SciPy\", scipy.__version__)\r\nimport sklearn; print(\"Scikit-Learn\", sklearn.__version__)\r\n-->\r\nLinux-4.10.0-33-generic-x86_64-with-Ubuntu-16.04-xenial\r\nPython 3.5.2 (default, Nov 17 2016, 17:05:23) \r\nNumPy 1.13.1\r\nSciPy 0.19.1\r\nScikit-Learn 0.19.0\r\n<!-- Thanks for contributing! -->\r\n\n",
+  "hints_text": "Yes, just taking the coef for one class indeed seems incorrect. Is there\nany way to adjust the coef of one class (and the intercept) given the other\nto get the right probabilities?\n\n> This is essentially a difference between softmax (redundancy allowed) and logistic regression.\r\n\r\nIndeed, there is a difference in the way we want to compute `predict_proba`:\r\n1. In OVR-LR, you want a sigmoid: `exp(D(x)) / (exp(D(x)) + 1)`, where `D(x)` is the decision function.\r\n2. In multinomial-LR with `n_classes=2`, you want a softmax `exp(D(x)) / (exp(D(x)) + exp(-D(x))`.\r\n\r\nSo we **do** expect different results between (1) and (2). \r\nHowever, there is indeed a bug and your fix is correct:\r\n\r\nIn the current code, we incorrectly use the sigmoid on case (2). Removing lines 762 and 763 does solve this problem, but change the API of `self.coef_`, which specifically states `coef_ is of shape (1, n_features) when the given problem is binary`.\r\n\r\nAnother way to fix it is to change directly `predict_proba`, adding the case binary+multinomial:\r\n```py\r\n        if self.multi_class == \"ovr\":\r\n            return super(LogisticRegression, self)._predict_proba_lr(X)\r\n        elif self.coef_.shape[0] == 1:\r\n            decision = self.decision_function(X)\r\n            return softmax(np.c_[-decision, decision], copy=False)\r\n        else:\r\n            return softmax(self.decision_function(X), copy=False)\r\n```\r\nIt will also break current behavior of `predict_proba`, but we don't need deprecation if we consider it is a bug.\r\n\r\n\nIf it didn't cause too many further issues, I think the first solution would be better i.e. changing the API of `self.coef_` for the `multinomial` case. This is because, say we fit a logistic regression `lr`, then upon inspecting the `lr.coef_ ` and `lr.intercept_` objects, it is clear what model is being used. \r\n\r\nI also believe anyone using `multinomial` for a binary case (as I was) is doing it as part of some more general functionality and will also be fitting non-binary models depending on their data. If they want to access the parameters of the models (as I was) `.intercept_` and `.coef_` their generalisation will be broken in the binary case if only `predict_proba` is changed.\nWe already break the generalisation elsewhere, as in `decision_function` and in the `coef_` shape for other multiclass methods. I think maintaining internal consistency here might be more important than some abstract concern that \"generalisation will be broken\". I think we should choose modifying `predict_proba`. This also makes it clear that the multinomial case does not suddenly introduce more free parameters.\nI agree it would make more sense to have `coef_.shape = (n_classes, n_features)` even when `n_classes = 2`, to have more consistency and avoid special cases.\r\n\r\nHowever, it is a valid argument also for the OVR case (actually, it is nice to have the same `coef_` API for both multinomial and OVR cases). Does that mean we should change the `coef_`  API in all cases? It is an important API change which will break a lot of user code, and which might not be consistent with the rest of scikit-learn...\nAnother option could be to always use the `ovr` method in the binary case even when `multiclass` is set to `multinomial`. This would avoid the case of models having exactly the same coefficients but predicting different values due to have different `multiclass` parameters. As previously mentioned, if `predict_proba` gets changed, the `multinomial` prediction would be particularly confusing if someone just looks at the 1D coefficients `coef_` (I think the `ovr` case is the intuitive one).\r\n\r\nI believe by doing this, the only code that would get broken would be anyone who already knew about the bug and had coded their own workaround.\r\n\r\nNote: If we do this, it is not returning the actual correct parameters with regards to the regularisation, despite the fact the solutions will be identical in terms of prediction. This may make it a no go.\nChanging the binary coef_ in the general case is just not going to happen.\nIf you want to fix a bug, fix a bug...\n\nOn 10 October 2017 at 00:05, Tom Dupr\u00e9 la Tour <notifications@github.com>\nwrote:\n\n> I agree it would make more sense to have coef_.shape = (n_classes,\n> n_features) even when n_classes = 2, to have more consistency and avoid\n> special cases.\n>\n> However, it is a valid argument also for the OVR case (actually, it is\n> nice to have the same coef_ API for both multinomial and OVR cases). Does\n> that mean we should change the coef_ API in all cases? It is an important\n> API changes which will break a lot of user code, and which might not be\n> consistent with the rest of scikit-learn.\n>\n> \u2014\n> You are receiving this because you commented.\n> Reply to this email directly, view it on GitHub\n> <https://github.com/scikit-learn/scikit-learn/issues/9889#issuecomment-335150971>,\n> or mute the thread\n> <https://github.com/notifications/unsubscribe-auth/AAEz6-kpIPulfN1z6KQYbqEQP2bRd3pPks5sqhkPgaJpZM4PyMNd>\n> .\n>\n\nAre the learnt probabilities then equivalent if it changes to ovr for 2\nclasses? Seems a reasonable idea to me.\n\nThinking about it, it works with no regularisation but when regularisation is involved we should expect slightly different results for `ovr` and `multinomial`.\r\n\r\nMaybe then just change `predict_proba` as suggested and a warning message when fitting a binary model with `multinomial`.\nwhy the warning? what would it say?\n\nThe issue is that the values of `coef_` do not intuitively describe the model in the binary case using `multinomial`. If someone fits a binary logistic regression and receives back a 1D vector of coefficients (`W` say for convenience), I would assume that they will think the predicted probability of a new observation `X`, is given by\r\n\r\n    exp(dot(W,X)) / (1 + exp(dot(W,X)))\r\n\r\nThis is true in the `ovr` case only. In the `multinomial` case, it is actually given by\r\n\r\n    exp(dot(W,X)) / (exp(dot(-W,X)) + exp(dot(W,X)))\r\n\r\nI believe this would surprise and cause errors for many people upon receiving a 1D vector of coefficients `W` so I think they should be warned about it. In fact I wouldn't be surprised if people currently using the logistic regression coefficients in the `multinomial`, binary outcome case, have bugs in their code.\r\n\r\nI would suggest a warning message when `.fit` is called with `multinomial`, when binary outcomes are detected. Something along the lines of (this can probably be made more concise):\r\n\r\n    Fitting a binary model with multi_class=multinomial. The returned `coef_` and `intercept_` values form the coefficients for outcome 1 (True), use `-coef_` and `-intercept` to form the coefficients for outcome 0 (False).\nI think it would be excessive noise to warn such upon fit. why not just\namend the coef_ description? most users will not be manually making\nprobabilistic interpretations of coef_ in any case, and we can't in general\nstop users misinterpreting things on the basis of assumption rather than\nreading the docs...\n\nFair enough. My only argument to the contrary would be that using `multinomial` for binary classification is a fairly uncommon thing to do, so the warning would be infrequent.\r\n\r\nHowever I agree in this case that if a user is only receiving a 1D vector of coefficients (i.e. it is not in the general form as for dimensions > 2), then they should be checking the documentation for exactly what this means, so amending the `coef_` description should suffice.\nSo to sum-up, we need to:\r\n - update `predict_proba` as described in https://github.com/scikit-learn/scikit-learn/issues/9889#issuecomment-335129554\r\n- update `coef_`'s docstring\r\n- add a test and a bugfix entry in `whats_new`\r\n\r\nDo you want to do it @rwolst ?\nSure, I'll do it.\nThanks",
+  "created_at": "2017-10-17T10:52:38Z",
+  "version": "0.20",
+  "FAIL_TO_PASS": "[\"sklearn/linear_model/tests/test_logistic.py::test_multinomial_binary_probabilities\"]",
+  "PASS_TO_PASS": "[\"sklearn/linear_model/tests/test_logistic.py::test_check_solver_option\", \"sklearn/linear_model/tests/test_logistic.py::test_consistency_path\", \"sklearn/linear_model/tests/test_logistic.py::test_dtype_match\", \"sklearn/linear_model/tests/test_logistic.py::test_error\", \"sklearn/linear_model/tests/test_logistic.py::test_inconsistent_input\", \"sklearn/linear_model/tests/test_logistic.py::test_intercept_logistic_helper\", \"sklearn/linear_model/tests/test_logistic.py::test_liblinear_decision_function_zero\", \"sklearn/linear_model/tests/test_logistic.py::test_liblinear_dual_random_state\", \"sklearn/linear_model/tests/test_logistic.py::test_liblinear_logregcv_sparse\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_cv\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_cv_sparse\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_grad_hess\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_loss_and_grad\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_class_weights\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_convergence_warnings\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_multinomial\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_sample_weights\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_solvers\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regression_solvers_multiclass\", \"sklearn/linear_model/tests/test_logistic.py::test_logistic_regressioncv_class_weights\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_cv_penalty\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_intercept_scaling\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_intercept_scaling_zero\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_l1\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_l1_sparse_data\", \"sklearn/linear_model/tests/test_logistic.py::test_logreg_predict_proba_multinomial\", \"sklearn/linear_model/tests/test_logistic.py::test_lr_liblinear_warning\", \"sklearn/linear_model/tests/test_logistic.py::test_multinomial_binary\", \"sklearn/linear_model/tests/test_logistic.py::test_multinomial_grad_hess\", \"sklearn/linear_model/tests/test_logistic.py::test_multinomial_logistic_regression_string_inputs\", \"sklearn/linear_model/tests/test_logistic.py::test_multinomial_validation\", \"sklearn/linear_model/tests/test_logistic.py::test_n_iter\", \"sklearn/linear_model/tests/test_logistic.py::test_nan\", \"sklearn/linear_model/tests/test_logistic.py::test_ovr_multinomial_iris\", \"sklearn/linear_model/tests/test_logistic.py::test_predict_2_classes\", \"sklearn/linear_model/tests/test_logistic.py::test_predict_3_classes\", \"sklearn/linear_model/tests/test_logistic.py::test_predict_iris\", \"sklearn/linear_model/tests/test_logistic.py::test_saga_sparse\", \"sklearn/linear_model/tests/test_logistic.py::test_saga_vs_liblinear\", \"sklearn/linear_model/tests/test_logistic.py::test_sparsify\", \"sklearn/linear_model/tests/test_logistic.py::test_warm_start\", \"sklearn/linear_model/tests/test_logistic.py::test_write_parameters\"]",
+  "environment_setup_commit": "55bf5d93e5674f13a1134d93a11fd0cd11aabcd1",
+  "patch_files": [
+    "sklearn/linear_model/logistic.py"
+  ],
+  "test_patch_files": [
+    "sklearn/linear_model/tests/test_logistic.py"
+  ],
+  "patch_diff_details": {
+    "sklearn/linear_model/logistic.py": {
+      "diffs": [
+        {
+          "start_line_old": 1104,
+          "end_line_old": 1111,
+          "file_pos": 2,
+          "file_context_length": 17480,
+          "pos": 16,
+          "context_length": 11761
+        },
+        {
+          "start_line_old": 1335,
+          "end_line_old": 1339,
+          "file_pos": 2,
+          "file_context_length": 17480,
+          "closest_snippet_id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.1_LogisticRegressionCV.1",
+          "closest_snippet_line_distance": 27,
+          "pos": 61,
+          "context_length": 36756
+        }
+      ]
+    }
+  },
+  "vectors": 2881,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_1_models.1",
+      "distance": 0.6960325241088867,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 1,
+      "end_line": 59,
+      "tokens": 462,
+      "context_length": 462
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.1_LogisticRegression.1",
+      "distance": 0.7374001741409302,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 964,
+      "end_line": 1155,
+      "tokens": 2038,
+      "context_length": 2500,
+      "file_pos": 2
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.fold_coefs__LogisticRegressionCV.fit.41.coefs_paths.1",
+      "distance": 0.7430205345153809,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1675,
+      "end_line": 1730,
+      "tokens": 642,
+      "context_length": 3142,
+      "file_pos": 2
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.fit.22_LogisticRegression.fit.33.1",
+      "distance": 0.7433027625083923,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1267,
+      "end_line": 1308,
+      "tokens": 426,
+      "context_length": 3568,
+      "file_pos": 2
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_mnist.py_1_",
+      "distance": 0.7679163217544556,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_mnist.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 655,
+      "context_length": 4223
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit.42_",
+      "distance": 0.7712035179138184,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1732,
+      "end_line": 1787,
+      "tokens": 542,
+      "context_length": 4765,
+      "file_pos": 3
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic_multinomial.py_1_",
+      "distance": 0.7890117764472961,
+      "file_path": "examples/linear_model/plot_logistic_multinomial.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 669,
+      "context_length": 5434
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path.2_logistic_regression_path.21.8.w0.1",
+      "distance": 0.7988802790641785,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 590,
+      "end_line": 654,
+      "tokens": 740,
+      "context_length": 6174,
+      "file_pos": 4
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py_26_",
+      "distance": 0.8028270602226257,
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "start_line": 61,
+      "end_line": 119,
+      "tokens": 519,
+      "context_length": 6693
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path.26_logistic_regression_path.27.1",
+      "distance": 0.8191763162612915,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 704,
+      "end_line": 770,
+      "tokens": 772,
+      "context_length": 7465,
+      "file_pos": 4
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path.22_logistic_regression_path.n_iter.1",
+      "distance": 0.8215793371200562,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 656,
+      "end_line": 703,
+      "tokens": 639,
+      "context_length": 8104,
+      "file_pos": 4
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__multinomial_loss__multinomial_loss.14.1",
+      "distance": 0.8371076583862305,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 243,
+      "end_line": 297,
+      "tokens": 430,
+      "context_length": 8534,
+      "file_pos": 4
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_30__randomized_logistic.8.1",
+      "distance": 0.8438162803649902,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 358,
+      "end_line": 387,
+      "tokens": 296,
+      "context_length": 8830
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_1_get_scorer",
+      "distance": 0.8446772694587708,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1,
+      "end_line": 37,
+      "tokens": 215,
+      "context_length": 9045,
+      "file_pos": 5
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.1_LogisticRegressionCV.1",
+      "distance": 0.8530086278915405,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1362,
+      "end_line": 1556,
+      "tokens": 2114,
+      "context_length": 11159,
+      "file_pos": 5
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__log_reg_scoring_path.2_LogisticRegression",
+      "distance": 0.8535422086715698,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 903,
+      "end_line": 1357,
+      "tokens": 602,
+      "context_length": 11761,
+      "file_pos": 5
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.__init___LogisticRegression.__init__.self.n_jobs.1",
+      "distance": 0.8539817333221436,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1157,
+      "end_line": 1175,
+      "tokens": 202,
+      "context_length": 11963,
+      "file_pos": 5
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__check_solver_option__check_solver_option.5.1.1",
+      "distance": 0.8580572605133057,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 426,
+      "end_line": 447,
+      "tokens": 247,
+      "context_length": 12210,
+      "file_pos": 5
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.__init___LogisticRegressionCV.__init__.self.random_state.1",
+      "distance": 0.8594197034835815,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1558,
+      "end_line": 1578,
+      "tokens": 221,
+      "context_length": 12431,
+      "file_pos": 5
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic.py_1_",
+      "distance": 0.8648867607116699,
+      "file_path": "examples/linear_model/plot_logistic.py",
+      "start_line": 1,
+      "end_line": 67,
+      "tokens": 440,
+      "context_length": 12871
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_1___all__.1",
+      "distance": 0.8690340518951416,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 1,
+      "end_line": 63,
+      "tokens": 489,
+      "context_length": 13360
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OneVsRestClassifier.multilabel__OneVsRestClassifier._first_estimator.1.1",
+      "distance": 0.870614767074585,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 375,
+      "end_line": 410,
+      "tokens": 300,
+      "context_length": 13660
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_iris_logistic.py_1_",
+      "distance": 0.8713765144348145,
+      "file_path": "examples/linear_model/plot_iris_logistic.py",
+      "start_line": 1,
+      "end_line": 60,
+      "tokens": 453,
+      "context_length": 14113
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic_path.py_1_",
+      "distance": 0.8744177222251892,
+      "file_path": "examples/linear_model/plot_logistic_path.py",
+      "start_line": 1,
+      "end_line": 56,
+      "tokens": 286,
+      "context_length": 14399
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_logistic_l1_l2_sparsity.py_1_",
+      "distance": 0.875853419303894,
+      "file_path": "examples/linear_model/plot_logistic_l1_l2_sparsity.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 698,
+      "context_length": 15097
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__multinomial_loss_grad__multinomial_loss_grad.12.1",
+      "distance": 0.8824588060379028,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 300,
+      "end_line": 350,
+      "tokens": 432,
+      "context_length": 15529,
+      "file_pos": 10
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_16_",
+      "distance": 0.8844904899597168,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 78,
+      "end_line": 142,
+      "tokens": 488,
+      "context_length": 16017
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_train_check_classifiers_train.7.22.y_prob.8.y_log_prob.3",
+      "distance": 0.8861619234085083,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1200,
+      "end_line": 1307,
+      "tokens": 1123,
+      "context_length": 17140
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.predict_log_proba_LogisticRegressionCV",
+      "distance": 0.891089677810669,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1341,
+      "end_line": 1786,
+      "tokens": 151,
+      "context_length": 17291,
+      "file_pos": 12
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_RandomizedLogisticRegression_RandomizedLogisticRegression.1",
+      "distance": 0.8926069140434265,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 390,
+      "end_line": 506,
+      "tokens": 1055,
+      "context_length": 18346
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_RandomizedLogisticRegression.__init___RandomizedLogisticRegression._preprocess_data.3.1",
+      "distance": 0.9028269052505493,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 507,
+      "end_line": 538,
+      "tokens": 332,
+      "context_length": 18678
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_SGDClassifier._predict_proba_SGDClassifier._predict_proba.1.3.1",
+      "distance": 0.905302882194519,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 849,
+      "end_line": 888,
+      "tokens": 296,
+      "context_length": 18974
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/scikit-learn/sklearn/naive_bayes.py_MultinomialNB_MultinomialNB.__init__.self.class_prior.1",
+      "distance": 0.9077838063240051,
+      "file_path": "sklearn/naive_bayes.py",
+      "start_line": 631,
+      "end_line": 710,
+      "tokens": 716,
+      "context_length": 19690
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_1_41",
+      "distance": 0.909268856048584,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 764,
+      "context_length": 20454
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_glmnet.py_10_",
+      "distance": 0.9154272079467773,
+      "file_path": "benchmarks/bench_glmnet.py",
+      "start_line": 47,
+      "end_line": 129,
+      "tokens": 796,
+      "context_length": 21250
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_MultinomialDeviance_MultinomialDeviance.init_estimator.1.1",
+      "distance": 0.9178175330162048,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 528,
+      "end_line": 544,
+      "tokens": 124,
+      "context_length": 21374
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/scikit-learn/examples/multioutput/plot_classifier_chain_yeast.py_1_33",
+      "distance": 0.9276124238967896,
+      "file_path": "examples/multioutput/plot_classifier_chain_yeast.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 760,
+      "context_length": 22134
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/scikit-learn/examples/text/plot_document_classification_20newsgroups.py_results_",
+      "distance": 0.9276611804962158,
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "start_line": 250,
+      "end_line": 328,
+      "tokens": 673,
+      "context_length": 22807
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py_OutputCodeClassifier_OutputCodeClassifier.__init__.self.n_jobs.1",
+      "distance": 0.9299918413162231,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 633,
+      "end_line": 705,
+      "tokens": 713,
+      "context_length": 23520
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_57_",
+      "distance": 0.9354400634765625,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 122,
+      "end_line": 169,
+      "tokens": 589,
+      "context_length": 24109
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_random_forest_regression_multioutput.py_1_",
+      "distance": 0.9361778497695923,
+      "file_path": "examples/ensemble/plot_random_forest_regression_multioutput.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 633,
+      "context_length": 24742
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/scikit-learn/examples/classification/plot_lda.py_18_",
+      "distance": 0.9372112154960632,
+      "file_path": "examples/classification/plot_lda.py",
+      "start_line": 41,
+      "end_line": 72,
+      "tokens": 325,
+      "context_length": 25067
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_class_weight_classifiers_check_class_weight_classifiers.3.2",
+      "distance": 0.9388986229896545,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1523,
+      "end_line": 1565,
+      "tokens": 449,
+      "context_length": 25516
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/scikit-learn/sklearn/metrics/classification.py_log_loss.8_log_loss.21.1",
+      "distance": 0.9406763315200806,
+      "file_path": "sklearn/metrics/classification.py",
+      "start_line": 1737,
+      "end_line": 1771,
+      "tokens": 361,
+      "context_length": 25877
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.fit_LogisticRegression.fit.21",
+      "distance": 0.9415996074676514,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1177,
+      "end_line": 1266,
+      "tokens": 807,
+      "context_length": 26684,
+      "file_pos": 22
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier._partial_fit_MLPClassifier.predict_log_proba.3.1",
+      "distance": 0.942152202129364,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1019,
+      "end_line": 1047,
+      "tokens": 234,
+      "context_length": 26918
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/scikit-learn/examples/ensemble/plot_adaboost_multiclass.py_1_34",
+      "distance": 0.9488958120346069,
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "start_line": 1,
+      "end_line": 91,
+      "tokens": 757,
+      "context_length": 27675
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/scikit-learn/examples/neural_networks/plot_rbm_logistic_classification.py_1_12",
+      "distance": 0.9491110444068909,
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "start_line": 1,
+      "end_line": 42,
+      "tokens": 304,
+      "context_length": 27979
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/scikit-learn/sklearn/naive_bayes.py_BernoulliNB_BernoulliNB.1",
+      "distance": 0.9505940675735474,
+      "file_path": "sklearn/naive_bayes.py",
+      "start_line": 840,
+      "end_line": 909,
+      "tokens": 705,
+      "context_length": 28684
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_model_complexity_influence.py__count_nonzero_coefficients_",
+      "distance": 0.9512035250663757,
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "start_line": 121,
+      "end_line": 170,
+      "tokens": 540,
+      "context_length": 29224
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPClassifier.1_MLPClassifier.1",
+      "distance": 0.9526196718215942,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 692,
+      "end_line": 897,
+      "tokens": 1853,
+      "context_length": 31077
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_29_",
+      "distance": 0.95318204164505,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 92,
+      "end_line": 156,
+      "tokens": 503,
+      "context_length": 31580
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_np_DEFAULT_EPSILON.1",
+      "distance": 0.9535254240036011,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 7,
+      "end_line": 42,
+      "tokens": 312,
+      "context_length": 31892
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/scikit-learn/sklearn/discriminant_analysis.py_LinearDiscriminantAnalysis_LinearDiscriminantAnalysis.1",
+      "distance": 0.9582961797714233,
+      "file_path": "sklearn/discriminant_analysis.py",
+      "start_line": 130,
+      "end_line": 248,
+      "tokens": 1044,
+      "context_length": 32936
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py__multinomial_grad_hess.hessp__multinomial_grad_hess.12.1",
+      "distance": 0.9605409502983093,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 402,
+      "end_line": 423,
+      "tokens": 246,
+      "context_length": 33182,
+      "file_pos": 27
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_46_",
+      "distance": 0.9606286287307739,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 197,
+      "end_line": 239,
+      "tokens": 373,
+      "context_length": 33555
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/scikit-learn/examples/tree/plot_tree_regression_multioutput.py_1_",
+      "distance": 0.960730791091919,
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "start_line": 1,
+      "end_line": 61,
+      "tokens": 567,
+      "context_length": 34122
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_multi_task_lasso_support.py_1_",
+      "distance": 0.9636472463607788,
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "start_line": 1,
+      "end_line": 70,
+      "tokens": 587,
+      "context_length": 34709
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/scikit-learn/sklearn/multiclass.py__ConstantPredictor__ConstantPredictor.predict_proba.2.1",
+      "distance": 0.9638463258743286,
+      "file_path": "sklearn/multiclass.py",
+      "start_line": 110,
+      "end_line": 130,
+      "tokens": 137,
+      "context_length": 34846
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/scikit-learn/sklearn/svm/classes.py_LinearSVC.1_LinearSVC.1",
+      "distance": 0.9651641845703125,
+      "file_path": "sklearn/svm/classes.py",
+      "start_line": 15,
+      "end_line": 172,
+      "tokens": 1635,
+      "context_length": 36481
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegression.predict_proba_LogisticRegression.predict_proba.4.2.1.1",
+      "distance": 0.965376615524292,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1310,
+      "end_line": 1339,
+      "tokens": 275,
+      "context_length": 36756,
+      "file_pos": 31
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_logistic_regression_path_logistic_regression_path.1",
+      "distance": 0.9691534042358398,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 450,
+      "end_line": 589,
+      "tokens": 1370,
+      "context_length": 38126,
+      "file_pos": 31
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/__init__.py_1_",
+      "distance": 0.9710934162139893,
+      "file_path": "sklearn/linear_model/__init__.py",
+      "start_line": 1,
+      "end_line": 87,
+      "tokens": 709,
+      "context_length": 38835
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/scikit-learn/sklearn/svm/base.py__fit_liblinear.2_",
+      "distance": 0.9713044166564941,
+      "file_path": "sklearn/svm/base.py",
+      "start_line": 845,
+      "end_line": 907,
+      "tokens": 648,
+      "context_length": 39483
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_rcv1_logreg_convergence.py_plt_get_loss.6.1",
+      "distance": 0.9743243455886841,
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "start_line": 6,
+      "end_line": 31,
+      "tokens": 202,
+      "context_length": 39685
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_lasso_model_selection.py_1_alpha_aic_.1",
+      "distance": 0.9756596088409424,
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 691,
+      "context_length": 40376
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_classes_check_classifiers_classes.9.11.1",
+      "distance": 0.9780440330505371,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1393,
+      "end_line": 1427,
+      "tokens": 336,
+      "context_length": 40712
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_compare_calibration.py_1_lr.1",
+      "distance": 0.9781059622764587,
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "start_line": 1,
+      "end_line": 78,
+      "tokens": 759,
+      "context_length": 41471
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/multilayer_perceptron.py_MLPRegressor.1_MLPRegressor.1",
+      "distance": 0.9799256324768066,
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "start_line": 1076,
+      "end_line": 1278,
+      "tokens": 1831,
+      "context_length": 43302
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/scikit-learn/examples/plot_multilabel.py_15_",
+      "distance": 0.9807180762290955,
+      "file_path": "examples/plot_multilabel.py",
+      "start_line": 97,
+      "end_line": 115,
+      "tokens": 185,
+      "context_length": 43487
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/scikit-learn/examples/classification/plot_classification_probability.py_1_",
+      "distance": 0.9813507795333862,
+      "file_path": "examples/classification/plot_classification_probability.py",
+      "start_line": 1,
+      "end_line": 86,
+      "tokens": 703,
+      "context_length": 44190
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/scikit-learn/examples/calibration/plot_calibration_multiclass.py_42_56",
+      "distance": 0.9825358390808105,
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "start_line": 81,
+      "end_line": 121,
+      "tokens": 753,
+      "context_length": 44943
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/scikit-learn/benchmarks/bench_mnist.py_ESTIMATORS_ESTIMATORS.1",
+      "distance": 0.9833353757858276,
+      "file_path": "benchmarks/bench_mnist.py",
+      "start_line": 85,
+      "end_line": 106,
+      "tokens": 314,
+      "context_length": 45257
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/base.py_LinearClassifierMixin._predict_proba_lr_LinearClassifierMixin._predict_proba_lr.7.2.2",
+      "distance": 0.9852068424224854,
+      "file_path": "sklearn/linear_model/base.py",
+      "start_line": 331,
+      "end_line": 348,
+      "tokens": 167,
+      "context_length": 45424
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/scikit-learn/examples/applications/plot_out_of_core_classification.py_31_partial_fit_classifiers.1",
+      "distance": 0.9872531890869141,
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "start_line": 188,
+      "end_line": 215,
+      "tokens": 234,
+      "context_length": 45658
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_LogisticRegressionCV.fit_LogisticRegressionCV.fit.31.2.backend.1",
+      "distance": 0.9873950481414795,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 1580,
+      "end_line": 1674,
+      "tokens": 786,
+      "context_length": 46444,
+      "file_pos": 39
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_regressors_train_check_regressors_train.23.1",
+      "distance": 0.9889144897460938,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1458,
+      "end_line": 1496,
+      "tokens": 442,
+      "context_length": 46886
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/scikit-learn/examples/gaussian_process/plot_gpc.py_1_33",
+      "distance": 0.9896540641784668,
+      "file_path": "examples/gaussian_process/plot_gpc.py",
+      "start_line": 1,
+      "end_line": 77,
+      "tokens": 751,
+      "context_length": 47637
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_1_MULTI_OUTPUT.1",
+      "distance": 0.9902833104133606,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1,
+      "end_line": 72,
+      "tokens": 625,
+      "context_length": 48262
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/scikit-learn/examples/cross_decomposition/plot_compare_cross_decomposition.py_49_",
+      "distance": 0.9904324412345886,
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "start_line": 83,
+      "end_line": 156,
+      "tokens": 759,
+      "context_length": 49021
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/scikit-learn/sklearn/ensemble/gradient_boosting.py_ExponentialLoss._update_terminal_region_ExponentialLoss._score_to_decision.1.1",
+      "distance": 0.9910809397697449,
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "start_line": 624,
+      "end_line": 649,
+      "tokens": 293,
+      "context_length": 49314
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_RandomizedLasso.__init___RandomizedLasso.__init__.self.memory.1",
+      "distance": 0.9916136264801025,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 313,
+      "end_line": 335,
+      "tokens": 239,
+      "context_length": 49553
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/randomized_l1.py_RandomizedLasso._make_estimator_and_params_RandomizedLasso._make_estimator_and_params.8.1",
+      "distance": 0.9917852282524109,
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "start_line": 337,
+      "end_line": 355,
+      "tokens": 223,
+      "context_length": 49776
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/scikit-learn/sklearn/utils/estimator_checks.py_check_classifiers_one_label_check_classifiers_one_label.8.5.2.2",
+      "distance": 0.9923210144042969,
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "start_line": 1166,
+      "end_line": 1197,
+      "tokens": 258,
+      "context_length": 50034
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/scikit-learn/sklearn/neural_network/_base.py_binary_log_loss_",
+      "distance": 0.9930974841117859,
+      "file_path": "sklearn/neural_network/_base.py",
+      "start_line": 225,
+      "end_line": 253,
+      "tokens": 215,
+      "context_length": 50249
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/stochastic_gradient.py_SGDClassifier.__init___SGDClassifier._check_proba.2.1",
+      "distance": 0.9933522343635559,
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "start_line": 789,
+      "end_line": 808,
+      "tokens": 281,
+      "context_length": 50530
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/logistic.py_41__log_reg_scoring_path.1",
+      "distance": 0.995611310005188,
+      "file_path": "sklearn/linear_model/logistic.py",
+      "start_line": 773,
+      "end_line": 902,
+      "tokens": 1258,
+      "context_length": 51788,
+      "file_pos": 42
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/scikit-learn/examples/linear_model/plot_bayesian_ridge.py_1_y_58.1",
+      "distance": 0.9995220303535461,
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "start_line": 1,
+      "end_line": 99,
+      "tokens": 771,
+      "context_length": 52559
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/scikit-learn/sklearn/linear_model/coordinate_descent.py_MultiTaskLasso_MultiTaskLasso.1",
+      "distance": 1.0028842687606812,
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "start_line": 1789,
+      "end_line": 1891,
+      "tokens": 941,
+      "context_length": 53500
+    }
+  ],
+  "files": [
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_20newsgroups.py",
+      "position": 1,
+      "tokens": 988,
+      "context_length": 988
+    },
+    {
+      "file_path": "sklearn/linear_model/logistic.py",
+      "position": 2,
+      "tokens": 16492,
+      "context_length": 17480
+    },
+    {
+      "file_path": "examples/linear_model/plot_sparse_logistic_regression_mnist.py",
+      "position": 3,
+      "tokens": 686,
+      "context_length": 18166
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic_multinomial.py",
+      "position": 4,
+      "tokens": 697,
+      "context_length": 18863
+    },
+    {
+      "file_path": "sklearn/linear_model/randomized_l1.py",
+      "position": 5,
+      "tokens": 5771,
+      "context_length": 24634
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic.py",
+      "position": 6,
+      "tokens": 448,
+      "context_length": 25082
+    },
+    {
+      "file_path": "sklearn/multiclass.py",
+      "position": 7,
+      "tokens": 6488,
+      "context_length": 31570
+    },
+    {
+      "file_path": "examples/linear_model/plot_iris_logistic.py",
+      "position": 8,
+      "tokens": 461,
+      "context_length": 32031
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic_path.py",
+      "position": 9,
+      "tokens": 311,
+      "context_length": 32342
+    },
+    {
+      "file_path": "examples/linear_model/plot_logistic_l1_l2_sparsity.py",
+      "position": 10,
+      "tokens": 752,
+      "context_length": 33094
+    },
+    {
+      "file_path": "examples/neural_networks/plot_rbm_logistic_classification.py",
+      "position": 11,
+      "tokens": 1091,
+      "context_length": 34185
+    },
+    {
+      "file_path": "sklearn/utils/estimator_checks.py",
+      "position": 12,
+      "tokens": 17447,
+      "context_length": 51632
+    },
+    {
+      "file_path": "sklearn/linear_model/stochastic_gradient.py",
+      "position": 13,
+      "tokens": 12141,
+      "context_length": 63773
+    },
+    {
+      "file_path": "sklearn/naive_bayes.py",
+      "position": 14,
+      "tokens": 8353,
+      "context_length": 72126
+    },
+    {
+      "file_path": "examples/calibration/plot_calibration_multiclass.py",
+      "position": 15,
+      "tokens": 2133,
+      "context_length": 74259
+    },
+    {
+      "file_path": "benchmarks/bench_glmnet.py",
+      "position": 16,
+      "tokens": 1087,
+      "context_length": 75346
+    },
+    {
+      "file_path": "sklearn/ensemble/gradient_boosting.py",
+      "position": 17,
+      "tokens": 18253,
+      "context_length": 93599
+    },
+    {
+      "file_path": "examples/multioutput/plot_classifier_chain_yeast.py",
+      "position": 18,
+      "tokens": 1023,
+      "context_length": 94622
+    },
+    {
+      "file_path": "examples/text/plot_document_classification_20newsgroups.py",
+      "position": 19,
+      "tokens": 2557,
+      "context_length": 97179
+    },
+    {
+      "file_path": "examples/ensemble/plot_random_forest_regression_multioutput.py",
+      "position": 20,
+      "tokens": 654,
+      "context_length": 97833
+    },
+    {
+      "file_path": "examples/classification/plot_lda.py",
+      "position": 21,
+      "tokens": 591,
+      "context_length": 98424
+    },
+    {
+      "file_path": "sklearn/metrics/classification.py",
+      "position": 22,
+      "tokens": 18370,
+      "context_length": 116794
+    },
+    {
+      "file_path": "sklearn/neural_network/multilayer_perceptron.py",
+      "position": 23,
+      "tokens": 11643,
+      "context_length": 128437
+    },
+    {
+      "file_path": "examples/ensemble/plot_adaboost_multiclass.py",
+      "position": 24,
+      "tokens": 1023,
+      "context_length": 129460
+    },
+    {
+      "file_path": "examples/applications/plot_model_complexity_influence.py",
+      "position": 25,
+      "tokens": 1524,
+      "context_length": 130984
+    },
+    {
+      "file_path": "examples/linear_model/plot_lasso_model_selection.py",
+      "position": 26,
+      "tokens": 1329,
+      "context_length": 132313
+    },
+    {
+      "file_path": "sklearn/discriminant_analysis.py",
+      "position": 27,
+      "tokens": 6631,
+      "context_length": 138944
+    },
+    {
+      "file_path": "benchmarks/bench_rcv1_logreg_convergence.py",
+      "position": 28,
+      "tokens": 1948,
+      "context_length": 140892
+    },
+    {
+      "file_path": "examples/tree/plot_tree_regression_multioutput.py",
+      "position": 29,
+      "tokens": 567,
+      "context_length": 141459
+    },
+    {
+      "file_path": "examples/linear_model/plot_multi_task_lasso_support.py",
+      "position": 30,
+      "tokens": 612,
+      "context_length": 142071
+    },
+    {
+      "file_path": "sklearn/svm/classes.py",
+      "position": 31,
+      "tokens": 10412,
+      "context_length": 152483
+    },
+    {
+      "file_path": "sklearn/linear_model/__init__.py",
+      "position": 32,
+      "tokens": 709,
+      "context_length": 153192
+    },
+    {
+      "file_path": "sklearn/svm/base.py",
+      "position": 33,
+      "tokens": 7840,
+      "context_length": 161032
+    },
+    {
+      "file_path": "examples/calibration/plot_compare_calibration.py",
+      "position": 34,
+      "tokens": 1181,
+      "context_length": 162213
+    },
+    {
+      "file_path": "examples/plot_multilabel.py",
+      "position": 35,
+      "tokens": 1104,
+      "context_length": 163317
+    },
+    {
+      "file_path": "examples/classification/plot_classification_probability.py",
+      "position": 36,
+      "tokens": 728,
+      "context_length": 164045
+    },
+    {
+      "file_path": "benchmarks/bench_mnist.py",
+      "position": 37,
+      "tokens": 1731,
+      "context_length": 165776
+    },
+    {
+      "file_path": "sklearn/linear_model/base.py",
+      "position": 38,
+      "tokens": 4968,
+      "context_length": 170744
+    },
+    {
+      "file_path": "examples/applications/plot_out_of_core_classification.py",
+      "position": 39,
+      "tokens": 3309,
+      "context_length": 174053
+    },
+    {
+      "file_path": "examples/gaussian_process/plot_gpc.py",
+      "position": 40,
+      "tokens": 1036,
+      "context_length": 175089
+    },
+    {
+      "file_path": "examples/cross_decomposition/plot_compare_cross_decomposition.py",
+      "position": 41,
+      "tokens": 1483,
+      "context_length": 176572
+    },
+    {
+      "file_path": "sklearn/neural_network/_base.py",
+      "position": 42,
+      "tokens": 1607,
+      "context_length": 178179
+    },
+    {
+      "file_path": "examples/linear_model/plot_bayesian_ridge.py",
+      "position": 43,
+      "tokens": 920,
+      "context_length": 179099
+    },
+    {
+      "file_path": "sklearn/linear_model/coordinate_descent.py",
+      "position": 44,
+      "tokens": 20396,
+      "context_length": 199495
+    }
+  ]
+}

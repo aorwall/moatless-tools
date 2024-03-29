@@ -1,4 +1,6 @@
 import re
+import time
+from chunk import Chunk
 from enum import Enum
 from typing import Sequence, List, Optional, Any, Callable
 
@@ -17,8 +19,8 @@ from moatless.splitters.code_splitter_v2 import CodeSplitterV2
 CodeBlockChunk = List[CodeBlock]
 
 
-def count_chunk_tokens(chunks: CodeBlockChunk) -> int:
-    return sum([chunk.tokens for chunk in chunks])
+def count_chunk_tokens(chunk: CodeBlockChunk) -> int:
+    return sum([block.tokens for block in chunk])
 
 
 def count_parent_tokens(codeblock: CodeBlock) -> int:
@@ -73,6 +75,10 @@ class EpicSplitter(NodeParser):
         default=1500, description="Chunk size to use for splitting code documents."
     )
 
+    max_chunks: int = Field(
+        default=100, description="Max number of chunks to split a document into."
+    )
+
     min_chunk_size: int = Field(
         default=256, description="Min tokens to split code."
     )
@@ -95,6 +101,7 @@ class EpicSplitter(NodeParser):
         min_chunk_size: int = 256,
         max_chunk_size: int = 1500,
         hard_token_limit: int = 6000,
+        max_chunks: int = 100,
         include_metadata: bool = True,
         include_prev_next_rel: bool = True,
         text_splitter: Optional[TextSplitter] = None,
@@ -125,6 +132,7 @@ class EpicSplitter(NodeParser):
             min_chunk_size=min_chunk_size,
             max_chunk_size=max_chunk_size,
             hard_token_limit=hard_token_limit,
+            max_chunks=max_chunks,
             comment_strategy=comment_strategy,
             include_non_code_files=include_non_code_files,
             non_code_file_extensions=non_code_file_extensions,
@@ -153,24 +161,46 @@ class EpicSplitter(NodeParser):
 
             try:
                 # TODO: Derive language from file extension
+
+                starttime = time.time_ns()
                 codeblock = self._parser.parse(content)
+
+                parse_time = time.time_ns() - starttime
+                if parse_time > 1e9:
+                    logger.warning(
+                        f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds.")
+
             except Exception as e:
                 logger.warning(
                     f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split(). Error: {e}")
                 # TODO: Fall back to treesitter or text split
                 continue
 
+            starttime = time.time_ns()
             chunks = self._chunk_contents(codeblock=codeblock, file_path=file_path)
+            parse_time = time.time_ns() - starttime
+            if parse_time > 1e8:
+                logger.warning(
+                    f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds.")
+            if len(chunks) > 100:
+                logger.info(
+                    f"Splitting file {file_path} in {len(chunks)} chunks"
+                )
 
+            starttime = time.time_ns()
             for chunk in chunks:
-                content = self._to_context_string(codeblock, chunk)
+                path_tree = self._create_path_tree(chunk)
+                content = self._to_context_string(codeblock, path_tree)
                 chunk_node = self._create_node(content, node, chunk=chunk)
                 if chunk_node:
                     all_nodes.append(chunk_node)
-
+            parse_time = time.time_ns() - starttime
+            if parse_time > 1e9:
+                logger.warning(
+                    f"Create noeds for file {file_path} took {parse_time / 1e9:.2f} seconds.")
         return all_nodes
 
-    def _chunk_contents(self, codeblock: CodeBlock = None, file_path: str = "") -> List[CodeBlockChunk]:
+    def _chunk_contents(self, codeblock: CodeBlock = None, file_path: str = None) -> List[CodeBlockChunk]:
         tokens = codeblock.sum_tokens()
         if tokens == 0:
             logger.debug(f"Skipping file {file_path} because it has no tokens.")
@@ -182,17 +212,24 @@ class EpicSplitter(NodeParser):
             # TODO: Fall back to treesitter or text split
             return []
 
-        if all(codeblock.type in NON_CODE_BLOCKS for block in codeblock.children):
-            logger.info(f"Skipping file {file_path} because it has no code blocks.")
-            return []
+        if tokens > self.hard_token_limit:
+            for child in codeblock.children:
+                if child.type == CodeBlockType.COMMENT and "generated" in child.content.lower(): # TODO: Make a generic solution to detect files that shouldn't be indexed. Maybe ask an LLM?
+                    logger.info(
+                        f"File {file_path} has {tokens} tokens and the word 'generated' in the first comments,"
+                        f" will assume it's a generated file.")
+                    return []
+                else:
+                    break
 
         if tokens < self.min_chunk_size:
-            return [[codeblock]]
+            child_blocks = codeblock.get_all_child_blocks()
+            return [[codeblock] + child_blocks]
 
         return self._chunk_block(codeblock, file_path)
 
     def _chunk_block(self, codeblock: CodeBlock, file_path: str = None) -> list[CodeBlockChunk]:
-        chunks: list[CodeBlockChunk] = []
+        chunks: List[CodeBlockChunk] = []
         current_chunk = []
         comment_chunk = []
 
@@ -229,7 +266,7 @@ class EpicSplitter(NodeParser):
                 comment_chunk = []
                 current_chunk.append(child)
 
-                child_chunks = self._chunk_block(child)
+                child_chunks = self._chunk_block(child, file_path=file_path)
 
                 if child_chunks:
                     first_child_chunk = child_chunks[0]
@@ -267,35 +304,62 @@ class EpicSplitter(NodeParser):
         else:
             chunks.append(current_chunk)
 
-        merged_chunks = []
-        for i, chunk in enumerate(chunks):
-            if count_chunk_tokens(chunk) < self.min_chunk_size:
-                if i == 0:
-                    if len(chunks) > 1 and count_chunk_tokens(chunks[1]) < self.chunk_size:
-                        chunks[1].extend(chunk)
-                    else:
-                        merged_chunks.append(chunk)
-                elif i == len(chunks) - 1:
-                    if count_chunk_tokens(chunks[-1]) < self.chunk_size:
-                        chunks[-2].extend(chunk)
-                    else:
-                        merged_chunks.append(chunk)
-                else:
-                    if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(chunks[i + 1]) < self.chunk_size:
-                        chunks[i - 1].extend(chunk)
-                    elif count_chunk_tokens(chunks[i + 1]) < count_chunk_tokens(chunks[i - 1]) < self.chunk_size:
-                        chunks[i + 1].extend(chunk)
-                    else:
-                        merged_chunks.append(chunk)
-            else:
-                merged_chunks.append(chunk)
+        return self._merge_chunks(chunks)
 
-        return merged_chunks
+    def _merge_chunks(self, chunks: List[CodeBlockChunk]) -> List[CodeBlockChunk]:
+        while True:
+            merged_chunks = []
+            should_continue = False
+
+            for i, chunk in enumerate(chunks):
+                if count_chunk_tokens(chunk) < self.min_chunk_size or len(chunks) > self.max_chunks:
+
+                    if i == 0 and len(chunks) > 1:
+                        if count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                            chunks[1] = chunk + chunks[1]
+                            should_continue = True
+                        else:
+                            merged_chunks.append(chunk)
+
+                    elif i == len(chunks) - 1:
+                        if merged_chunks and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                            merged_chunks[-1] = merged_chunks[-1] + chunk
+                            should_continue = True
+                        else:
+                            merged_chunks.append(chunk)
+
+                    else:
+                        if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(chunks[i + 1]):
+                            if merged_chunks and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                                merged_chunks[-1] = merged_chunks[-1] + chunk
+                                should_continue = True
+                            else:
+                                merged_chunks.append(chunk)
+                        else:
+                            if count_chunk_tokens(chunks[i + 1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                                chunks[i + 1] = chunk + chunks[i + 1]
+                                should_continue = True
+                            else:
+                                merged_chunks.append(chunk)
+                else:
+                    merged_chunks.append(chunk)
+
+            chunks = merged_chunks + chunks[i + 1:]
+
+            if len(chunks) < self.max_chunks or not should_continue:
+                break
+
+        return chunks
+    def _create_path_tree(cls, blocks: List[CodeBlock]) -> PathTree:
+        path_tree = PathTree()
+        for block in blocks:
+            path_tree.add_to_tree(block.full_path())
+        return path_tree
 
     def _ignore_comment(self, codeblock: CodeBlock) -> bool:
         return re.search(r"(?i)copyright|license|author", codeblock.content) or not codeblock.content
 
-    def _to_context_string(self, codeblock: CodeBlock, show_blocks: List["CodeBlock"]) -> str:
+    def _to_context_string(self, codeblock: CodeBlock, path_tree: PathTree) -> str:
         contents = ""
 
         if codeblock.pre_lines:
@@ -310,19 +374,19 @@ class EpicSplitter(NodeParser):
 
         has_outcommented_code = False
         for i, child in enumerate(codeblock.children):
-            show_code = child in show_blocks
-            if show_code:
+            child_tree = path_tree.child_tree(child.identifier)
+            if child_tree and child_tree.show:
                 if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
                     if codeblock.type not in [CodeBlockType.CLASS, CodeBlockType.MODULE, CodeBlockType.TEST_SUITE]:
                         contents += child.create_commented_out_block("... other code").to_string()
                 contents += self._to_context_string(
                     codeblock=child,
-                    show_blocks=show_blocks)
+                    path_tree=child_tree)
                 has_outcommented_code = False
-            elif child.has_any_block(show_blocks):
+            elif child_tree:
                 contents += self._to_context_string(
                     codeblock=child,
-                    show_blocks=show_blocks)
+                    path_tree=child_tree)
                 has_outcommented_code = False
             elif child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
                 has_outcommented_code = True
@@ -331,6 +395,10 @@ class EpicSplitter(NodeParser):
             contents += child.create_commented_out_block("... other code").to_string()
 
         return contents
+
+    def _contains_block_paths(self, codeblock: CodeBlock, block_paths: List[List[str]]):
+        return [block_path for block_path in block_paths
+                if block_path[:len(codeblock.full_path())] == codeblock.full_path()]
 
     def _create_node(self, content: str, node: BaseNode, chunk: CodeBlockChunk = None) -> Optional[TextNode]:
         metadata = {
@@ -346,19 +414,6 @@ class EpicSplitter(NodeParser):
         content = content.strip()
 
         tokens = get_tokenizer()(content)
-        if len(tokens) > self.hard_token_limit:
-            logger.warning(f"Chunk in {node.metadata.get('file_path')} has {len(tokens)} tokens, will cut of at {self.hard_token_limit} tokens.")
-            tokens = tokens[:self.hard_token_limit]
-
-            try:
-                # TODO: Should be generic like get_tokenizer()
-                import tiktoken
-                enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
-                content = enc.decode(tokens)
-            except Exception as e:
-                logger.warning(f"Failed to decode tokens to text. Error: {e}")
-                return None
-
         metadata["tokens"] = len(tokens)
 
         excluded_embed_metadata_keys = node.excluded_embed_metadata_keys.copy()
@@ -384,37 +439,3 @@ class EpicSplitter(NodeParser):
     def _count_tokens(self, text: str):
         tokenizer = get_tokenizer()
         return len(tokenizer(text))
-
-
-if "__main__" == __name__:
-    with open("/tmp/repos/sqlfluff/src/sqlfluff/dialects/dialect_postgres_keywords.py", "r") as file:
-        content = file.read()
-
-    parser = create_parser("python", tokenizer=get_tokenizer())
-
-    splitter = EpicSplitter(
-        chunk_size=750,
-        min_chunk_size=100,
-        comment_strategy=CommentStrategy.ASSOCIATE,
-    )
-
-    codeblock = parser.parse(content)
-
-    print(codeblock.to_tree())
-
-    tokenizer = get_tokenizer()
-
-    chunks = splitter._chunk_block(codeblock)
-
-    for i, chunk in enumerate(chunks):
-        content = splitter._to_context_string(codeblock, chunk)
-        print(f"\n========== Chunk {i} ==========\n\n")
-
-        tokens = len(get_tokenizer()(content))
-        print(f"Tokens: {tokens}")
-
-        for block in chunk:
-            print(f"- {block.path_string()}")
-
-        print(content)
-

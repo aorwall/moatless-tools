@@ -1,0 +1,2855 @@
+{
+  "instance_id": "django__django-13363",
+  "model_patch": "diff --git a/django/db/models/functions/datetime.py b/django/db/models/functions/datetime.py\nindex b6594b043b..6828980733 100644\n--- a/django/db/models/functions/datetime.py\n+++ b/django/db/models/functions/datetime.py\n@@ -292,7 +292,7 @@ class TruncDate(TruncBase):\n     def as_sql(self, compiler, connection):\n         # Cast to date rather than truncate to date.\n         lhs, lhs_params = compiler.compile(self.lhs)\n-        tzname = timezone.get_current_timezone_name() if settings.USE_TZ else None\n+        tzname = self.get_tzname()\n         sql = connection.ops.datetime_cast_date_sql(lhs, tzname)\n         return sql, lhs_params\n \n@@ -305,7 +305,7 @@ class TruncTime(TruncBase):\n     def as_sql(self, compiler, connection):\n         # Cast to time rather than truncate to time.\n         lhs, lhs_params = compiler.compile(self.lhs)\n-        tzname = timezone.get_current_timezone_name() if settings.USE_TZ else None\n+        tzname = self.get_tzname()\n         sql = connection.ops.datetime_cast_time_sql(lhs, tzname)\n         return sql, lhs_params\n \n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "pass",
+  "model_patch_files": [
+    "django/db/models/functions/datetime.py"
+  ],
+  "repo": "django/django",
+  "base_commit": "76e0151ea0e0f56dca66cee846a78b89346d2c4c",
+  "patch": "diff --git a/django/db/models/functions/datetime.py b/django/db/models/functions/datetime.py\n--- a/django/db/models/functions/datetime.py\n+++ b/django/db/models/functions/datetime.py\n@@ -292,7 +292,7 @@ class TruncDate(TruncBase):\n     def as_sql(self, compiler, connection):\n         # Cast to date rather than truncate to date.\n         lhs, lhs_params = compiler.compile(self.lhs)\n-        tzname = timezone.get_current_timezone_name() if settings.USE_TZ else None\n+        tzname = self.get_tzname()\n         sql = connection.ops.datetime_cast_date_sql(lhs, tzname)\n         return sql, lhs_params\n \n@@ -305,7 +305,7 @@ class TruncTime(TruncBase):\n     def as_sql(self, compiler, connection):\n         # Cast to time rather than truncate to time.\n         lhs, lhs_params = compiler.compile(self.lhs)\n-        tzname = timezone.get_current_timezone_name() if settings.USE_TZ else None\n+        tzname = self.get_tzname()\n         sql = connection.ops.datetime_cast_time_sql(lhs, tzname)\n         return sql, lhs_params\n \n",
+  "test_patch": "diff --git a/tests/db_functions/datetime/test_extract_trunc.py b/tests/db_functions/datetime/test_extract_trunc.py\n--- a/tests/db_functions/datetime/test_extract_trunc.py\n+++ b/tests/db_functions/datetime/test_extract_trunc.py\n@@ -1124,14 +1124,24 @@ def test_trunc_timezone_applied_before_truncation(self):\n         model = DTModel.objects.annotate(\n             melb_year=TruncYear('start_datetime', tzinfo=melb),\n             pacific_year=TruncYear('start_datetime', tzinfo=pacific),\n+            melb_date=TruncDate('start_datetime', tzinfo=melb),\n+            pacific_date=TruncDate('start_datetime', tzinfo=pacific),\n+            melb_time=TruncTime('start_datetime', tzinfo=melb),\n+            pacific_time=TruncTime('start_datetime', tzinfo=pacific),\n         ).order_by('start_datetime').get()\n \n+        melb_start_datetime = start_datetime.astimezone(melb)\n+        pacific_start_datetime = start_datetime.astimezone(pacific)\n         self.assertEqual(model.start_datetime, start_datetime)\n         self.assertEqual(model.melb_year, truncate_to(start_datetime, 'year', melb))\n         self.assertEqual(model.pacific_year, truncate_to(start_datetime, 'year', pacific))\n         self.assertEqual(model.start_datetime.year, 2016)\n         self.assertEqual(model.melb_year.year, 2016)\n         self.assertEqual(model.pacific_year.year, 2015)\n+        self.assertEqual(model.melb_date, melb_start_datetime.date())\n+        self.assertEqual(model.pacific_date, pacific_start_datetime.date())\n+        self.assertEqual(model.melb_time, melb_start_datetime.time())\n+        self.assertEqual(model.pacific_time, pacific_start_datetime.time())\n \n     def test_trunc_ambiguous_and_invalid_times(self):\n         sao = pytz.timezone('America/Sao_Paulo')\n",
+  "problem_statement": "Add support for tzinfo parameter to TruncDate() and TruncTime().\nDescription\n\t \n\t\t(last modified by Joe Jackson)\n\t \nDescription\nTruncDate inherits from TruncBase, which includes the TimeZone mixin. This should allow a developer to pass in a tzinfo object to be used when converting TruncDate, but it actually uses the return value from get_current_timezone_name() unconditionally and completely discards the passed in timezone info object. The result is that attempting to aggregate by date doesn't work for timezones other than the global django.utils.timezone. For example I can't have the django app be in UTC and pass the \"America/New_York\" timezone in.\nHere's the offending line: \u200bhttps://github.com/django/django/blob/master/django/db/models/functions/datetime.py#L295\nNote, that a similar issue is happening in TruncTime.\nHere's the method I would expect it to use: \u200bhttps://github.com/django/django/blob/master/django/db/models/functions/datetime.py#L17\nExample\nclass TimeSlots(models.Model):\n start_at = models.DateTimeField()\ntz = pytz.timezone(\"America/New_York\")\nreport = (\n TimeSlots.objects.annotate(start_date=TruncDate(\"start_at\", tzinfo=tz))\n .values(\"start_date\")\n .annotate(timeslot_count=Count(\"id\"))\n .values(\"start_date\", \"timeslot_count\")\n)\nI would expect this to work, but currently the results are wrong for any timezone other than the one returned by django.utils.timezone.\nWorkaround\nThere was a workaround for me. I was able to use TruncDay and then convert the DateTimes returned outside of the database, but I found no way to convert from DateTime to Date in the database. Maybe a Cast would work, but I would expect TruncDate to work.\nPatch\n\u200bPR\n",
+  "hints_text": "Please check https://code.djangoproject.com/ticket/31640 Is it related to your issue?\nReplying to Serhii Romanov: Please check https://code.djangoproject.com/ticket/31640 Is it related to your issue? It is related, but not exactly my issue. That patch updates the TruncBase as_sql method, and world work. But the TruncDate and TruncTime classes override as_sql and don't call super. So the timezone passed in is ignored. I can attempt to submit a patch for this issue. I'll just need to take a minute and read up on how to properly do that.\ntzinfo is not a documented (or tested) parameter of \u200bTruncDate() or \u200bTruncTime() so it's not a bug but request for a new feature. It sounds reasonable to support tzinfo in TruncDate() and TruncTime(), and I cannot find any argument against it in the original \u200bPR (maybe Josh will remember sth).\nThere was no explicit reason to ignore any passed in tz parameter - it was just a reimplementation of the existing method: \u200bhttps://github.com/django/django/commit/2a4af0ea43512370764303d35bc5309f8abce666#diff-b6b218ec29b7fb6a7d89868a94bfc73eL492 Trunc documents the use of tzinfo: \u200bhttps://github.com/django/django/commit/2a4af0ea43512370764303d35bc5309f8abce666#diff-34b63f01d4190c08facabac9c11075ccR512 and it should reasonably apply to all subclasses of Trunc as well. I think accept as a bug is the correct decision here.",
+  "created_at": "2020-08-29T18:59:41Z",
+  "version": "3.2",
+  "FAIL_TO_PASS": "[\"test_trunc_timezone_applied_before_truncation (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\"]",
+  "PASS_TO_PASS": "[\"test_extract_day_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_day_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_duration_unsupported_lookups (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_duration_unsupported_lookups (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_duration_without_native_duration_field (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_duration_without_native_duration_field (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_func_explicit_timezone_priority (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_func_with_timezone (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_hour_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_hour_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_iso_weekday_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_iso_weekday_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_iso_year_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_iso_year_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_iso_year_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_iso_year_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_minute_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_minute_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_month_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_month_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_none (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_none (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_quarter_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_quarter_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_quarter_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_quarter_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_second_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_second_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_week_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_week_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_week_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_week_func_boundaries (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_weekday_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_weekday_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_year_exact_lookup (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_year_exact_lookup (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_year_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_year_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_year_greaterthan_lookup (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_year_greaterthan_lookup (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_extract_year_lessthan_lookup (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_extract_year_lessthan_lookup (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_ambiguous_and_invalid_times (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_date_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_date_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_date_none (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_date_none (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_day_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_day_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_func_with_timezone (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_hour_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_hour_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_minute_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_minute_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_month_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_month_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_none (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_none (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_quarter_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_quarter_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_second_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_second_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_subquery_with_parameters (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_subquery_with_parameters (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_time_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_time_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_time_none (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_time_none (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_week_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_week_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\", \"test_trunc_year_func (db_functions.datetime.test_extract_trunc.DateFunctionTests)\", \"test_trunc_year_func (db_functions.datetime.test_extract_trunc.DateFunctionWithTimeZoneTests)\"]",
+  "environment_setup_commit": "65dfb06a1ab56c238cc80f5e1c31f61210c4577d",
+  "patch_files": [
+    "django/db/models/functions/datetime.py"
+  ],
+  "test_patch_files": [
+    "tests/db_functions/datetime/test_extract_trunc.py"
+  ],
+  "patch_diff_details": {
+    "django/db/models/functions/datetime.py": {
+      "diffs": [
+        {
+          "start_line_old": 295,
+          "end_line_old": 295,
+          "file_pos": 1,
+          "file_context_length": 2552,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/functions/datetime.py_TruncBase.convert_value_TruncBase.convert_value.2.1",
+          "closest_snippet_line_distance": 42,
+          "pos": 4,
+          "context_length": 1235
+        },
+        {
+          "start_line_old": 308,
+          "end_line_old": 308,
+          "file_pos": 1,
+          "file_context_length": 2552,
+          "closest_snippet_id": "/tmp/repos/django/django/db/models/functions/datetime.py_TruncBase.convert_value_TruncBase.convert_value.2.1",
+          "closest_snippet_line_distance": 55,
+          "pos": 4,
+          "context_length": 1235
+        }
+      ]
+    }
+  },
+  "vectors": 3482,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_TruncBase.resolve_expression_TruncBase.resolve_expression.14.1",
+      "distance": 0.6880877017974854,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 205,
+      "end_line": 232,
+      "tokens": 424,
+      "context_length": 424,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_TruncBase_TruncBase.as_sql.3.1",
+      "distance": 0.7044369578361511,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 183,
+      "end_line": 203,
+      "tokens": 216,
+      "context_length": 640,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_TruncBase.convert_value_TruncBase.convert_value.2.1",
+      "distance": 0.7426474094390869,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 234,
+      "end_line": 253,
+      "tokens": 170,
+      "context_length": 810,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_Trunc_",
+      "distance": 0.744407594203949,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 256,
+      "end_line": 327,
+      "tokens": 425,
+      "context_length": 1235,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_time_trunc__sqlite_datetime_cast_time.3.1",
+      "distance": 0.8971329927444458,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 462,
+      "end_line": 488,
+      "tokens": 229,
+      "context_length": 1464
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_1_TimezoneMixin.get_tzname.tzname.3.1",
+      "distance": 0.9260916709899902,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 236,
+      "context_length": 1700,
+      "file_pos": 2
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_Extract_Extract.as_sql.4.1",
+      "distance": 0.9266238212585449,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 31,
+      "end_line": 61,
+      "tokens": 300,
+      "context_length": 2000,
+      "file_pos": 2
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/django/django/utils/timezone.py_1_deactivate.2.1",
+      "distance": 0.9294565320014954,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 1,
+      "end_line": 101,
+      "tokens": 608,
+      "context_length": 2608
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.datetime_trunc_sql_DatabaseOperations.datetime_trunc_sql.9.1",
+      "distance": 0.9568662047386169,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 104,
+      "end_line": 128,
+      "tokens": 350,
+      "context_length": 2958
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_Extract.resolve_expression_Extract.resolve_expression.7.1",
+      "distance": 0.9657458662986755,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 63,
+      "end_line": 84,
+      "tokens": 255,
+      "context_length": 3213,
+      "file_pos": 4
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_datetime_trunc__sqlite_datetime_trunc.3.8.1.1",
+      "distance": 0.9715705513954163,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 509,
+      "end_line": 530,
+      "tokens": 377,
+      "context_length": 3590
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_TimeFormat.Z_TimeFormat.Z.8.1",
+      "distance": 0.9842096567153931,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 183,
+      "end_line": 206,
+      "tokens": 226,
+      "context_length": 3816
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/django/django/templatetags/tz.py_do_timezone_do_timezone.12.1",
+      "distance": 0.9922076463699341,
+      "file_path": "django/templatetags/tz.py",
+      "start_line": 37,
+      "end_line": 78,
+      "tokens": 288,
+      "context_length": 4104
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField.pre_save_DateTimeField.get_prep_value.4.1",
+      "distance": 1.0074490308761597,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1345,
+      "end_line": 1373,
+      "tokens": 281,
+      "context_length": 4385
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_TimeFormat_TimeFormat.i.2.1",
+      "distance": 1.0115396976470947,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 47,
+      "end_line": 123,
+      "tokens": 520,
+      "context_length": 4905
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.datetime_trunc_sql_DatabaseOperations.integer_field_ranges.datetime_trunc_sql.4.1",
+      "distance": 1.0234792232513428,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 145,
+      "end_line": 162,
+      "tokens": 309,
+      "context_length": 5214
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_date_trunc__sqlite_date_trunc.3.5.1.1",
+      "distance": 1.0321681499481201,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 444,
+      "end_line": 459,
+      "tokens": 199,
+      "context_length": 5413
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_datetime_parse__sqlite_datetime_parse.5.1",
+      "distance": 1.0329071283340454,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 422,
+      "end_line": 441,
+      "tokens": 196,
+      "context_length": 5609
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.date_extract_sql_DatabaseOperations.pk_default_value.1.1",
+      "distance": 1.033128023147583,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 68,
+      "end_line": 115,
+      "tokens": 504,
+      "context_length": 6113
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/django/django/utils/timezone.py_make_aware_",
+      "distance": 1.0335570573806763,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 228,
+      "end_line": 252,
+      "tokens": 233,
+      "context_length": 6346
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/django/django/utils/datetime_safe.py_1__findall.sites.4.1",
+      "distance": 1.0370068550109863,
+      "file_path": "django/utils/datetime_safe.py",
+      "start_line": 1,
+      "end_line": 71,
+      "tokens": 461,
+      "context_length": 6807
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_DateFormat.I_DateFormat.I.2",
+      "distance": 1.038335919380188,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 237,
+      "end_line": 248,
+      "tokens": 110,
+      "context_length": 6917
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations._prepare_tzname_delta_DatabaseOperations.datetime_extract_sql.2.1",
+      "distance": 1.0403649806976318,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 76,
+      "end_line": 102,
+      "tokens": 272,
+      "context_length": 7189
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.time_trunc_sql_DatabaseOperations.time_trunc_sql.3.3.1.1",
+      "distance": 1.04129958152771,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 130,
+      "end_line": 140,
+      "tokens": 130,
+      "context_length": 7319
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.timezone_BaseDatabaseWrapper.timezone.2.3.1.1",
+      "distance": 1.047863483428955,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 117,
+      "end_line": 138,
+      "tokens": 186,
+      "context_length": 7505
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/django/django/utils/timezone.py_localdate_is_naive.2.1",
+      "distance": 1.0484497547149658,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 175,
+      "end_line": 225,
+      "tokens": 349,
+      "context_length": 7854
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_TimeFormat.s_TimeFormat.u.2.1",
+      "distance": 1.049297571182251,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 154,
+      "end_line": 181,
+      "tokens": 203,
+      "context_length": 8057
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/django/django/utils/timesince.py_calendar_TIMESINCE_CHUNKS.1",
+      "distance": 1.0499837398529053,
+      "file_path": "django/utils/timesince.py",
+      "start_line": 1,
+      "end_line": 24,
+      "tokens": 220,
+      "context_length": 8277
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.datetime_cast_date_sql_DatabaseOperations.integer_field_ranges.datetime_extract_sql.2.1",
+      "distance": 1.0513734817504883,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 132,
+      "end_line": 143,
+      "tokens": 213,
+      "context_length": 8490
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField._check_fix_default_value_TimeField._check_fix_default_value.8.1",
+      "distance": 1.0581440925598145,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2098,
+      "end_line": 2139,
+      "tokens": 325,
+      "context_length": 8815
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_BaseDatabaseOperations.date_trunc_sql_BaseDatabaseOperations.field_cast_sql.2.1",
+      "distance": 1.0617707967758179,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 102,
+      "end_line": 188,
+      "tokens": 764,
+      "context_length": 9579
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField_DateTimeField.4",
+      "distance": 1.0633186101913452,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1236,
+      "end_line": 1249,
+      "tokens": 157,
+      "context_length": 9736
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/django/django/templatetags/tz.py_localtime_tag_localtime_tag.6.1",
+      "distance": 1.0655866861343384,
+      "file_path": "django/templatetags/tz.py",
+      "start_line": 125,
+      "end_line": 145,
+      "tokens": 176,
+      "context_length": 9912
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/django/django/db/backends/utils.py_typecast_timestamp_typecast_timestamp.4.10.1",
+      "distance": 1.0662201642990112,
+      "file_path": "django/db/backends/utils.py",
+      "start_line": 151,
+      "end_line": 175,
+      "tokens": 234,
+      "context_length": 10146
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/django/django/conf/locale/tk/formats.py_DATE_FORMAT_",
+      "distance": 1.0673942565917969,
+      "file_path": "django/conf/locale/tk/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 402,
+      "context_length": 10548
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField_TimeField.__init__.3",
+      "distance": 1.0700671672821045,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2080,
+      "end_line": 2096,
+      "tokens": 185,
+      "context_length": 10733
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_DateFormat.S_",
+      "distance": 1.0703375339508057,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 295,
+      "end_line": 350,
+      "tokens": 452,
+      "context_length": 11185
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/django/django/conf/locale/tg/formats.py_DATE_FORMAT_",
+      "distance": 1.071265459060669,
+      "file_path": "django/conf/locale/tg/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 402,
+      "context_length": 11587
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.date_trunc_sql_DatabaseOperations.date_trunc_sql.3.5.1.1",
+      "distance": 1.074135422706604,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 57,
+      "end_line": 74,
+      "tokens": 204,
+      "context_length": 11791
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_DateFormat.r_DateFormat.r.4.1",
+      "distance": 1.076075792312622,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 282,
+      "end_line": 293,
+      "tokens": 121,
+      "context_length": 11912
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/django/django/conf/locale/ta/formats.py_DATE_FORMAT_",
+      "distance": 1.0761191844940186,
+      "file_path": "django/conf/locale/ta/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 125,
+      "context_length": 12037
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField.deconstruct_TimeField.to_python.5",
+      "distance": 1.0796918869018555,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2141,
+      "end_line": 2181,
+      "tokens": 289,
+      "context_length": 12326
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.11_DatabaseOperations.integer_field_ranges._prepare_tzname_delta.2.1",
+      "distance": 1.079756259918213,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 103,
+      "end_line": 114,
+      "tokens": 212,
+      "context_length": 12538
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/django/django/db/backends/utils.py_12_typecast_time.2.4.1",
+      "distance": 1.08056640625,
+      "file_path": "django/db/backends/utils.py",
+      "start_line": 132,
+      "end_line": 148,
+      "tokens": 141,
+      "context_length": 12679
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_TimeField.pre_save_TimeField.formfield.1.1",
+      "distance": 1.0815017223358154,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 2183,
+      "end_line": 2209,
+      "tokens": 213,
+      "context_length": 12892
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/django/django/templatetags/tz.py_1_utc.2.1",
+      "distance": 1.0834892988204956,
+      "file_path": "django/templatetags/tz.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 148,
+      "context_length": 13040
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/django/django/conf/locale/lt/formats.py_DATE_FORMAT_",
+      "distance": 1.0835683345794678,
+      "file_path": "django/conf/locale/lt/formats.py",
+      "start_line": 5,
+      "end_line": 44,
+      "tokens": 676,
+      "context_length": 13716
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/django/django/conf/locale/az/formats.py_DATE_FORMAT_",
+      "distance": 1.0859150886535645,
+      "file_path": "django/conf/locale/az/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 364,
+      "context_length": 14080
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_DateFormat.j_DateFormat.o.2.1",
+      "distance": 1.0869083404541016,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 250,
+      "end_line": 280,
+      "tokens": 262,
+      "context_length": 14342
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hans/formats.py_DATE_FORMAT_",
+      "distance": 1.0908725261688232,
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 14977
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/django/django/utils/dateparse.py_1_postgres_interval_re.1",
+      "distance": 1.0909130573272705,
+      "file_path": "django/utils/dateparse.py",
+      "start_line": 1,
+      "end_line": 66,
+      "tokens": 761,
+      "context_length": 15738
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/django/django/conf/locale/hu/formats.py_DATE_FORMAT_",
+      "distance": 1.0938423871994019,
+      "file_path": "django/conf/locale/hu/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 305,
+      "context_length": 16043
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_TimeFormat.O_TimeFormat.O.2",
+      "distance": 1.0943448543548584,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 125,
+      "end_line": 139,
+      "tokens": 130,
+      "context_length": 16173
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/django/django/conf/locale/et/formats.py_DATE_FORMAT_",
+      "distance": 1.0953651666641235,
+      "file_path": "django/conf/locale/et/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 133,
+      "context_length": 16306
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/django/django/utils/timezone.py_override_override.__exit__.1.2._active.value.1",
+      "distance": 1.0968873500823975,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 104,
+      "end_line": 130,
+      "tokens": 188,
+      "context_length": 16494
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/django/django/conf/locale/zh_Hant/formats.py_DATE_FORMAT_",
+      "distance": 1.100006103515625,
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 635,
+      "context_length": 17129
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/django/django/conf/locale/bn/formats.py_DATE_FORMAT_",
+      "distance": 1.1000397205352783,
+      "file_path": "django/conf/locale/bn/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 294,
+      "context_length": 17423
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/django/django/conf/locale/id/formats.py_DATE_FORMAT_",
+      "distance": 1.1007575988769531,
+      "file_path": "django/conf/locale/id/formats.py",
+      "start_line": 5,
+      "end_line": 47,
+      "tokens": 670,
+      "context_length": 18093
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField.get_internal_type_DateTimeField.to_python.6",
+      "distance": 1.1025707721710205,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1294,
+      "end_line": 1343,
+      "tokens": 342,
+      "context_length": 18435
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/django/django/conf/locale/cs/formats.py_DATE_FORMAT_",
+      "distance": 1.104048490524292,
+      "file_path": "django/conf/locale/cs/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 600,
+      "context_length": 19035
+    },
+    {
+      "position": 61,
+      "id": "/tmp/repos/django/django/conf/locale/cy/formats.py_DATE_FORMAT_",
+      "distance": 1.1044070720672607,
+      "file_path": "django/conf/locale/cy/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 529,
+      "context_length": 19564
+    },
+    {
+      "position": 62,
+      "id": "/tmp/repos/django/django/conf/locale/fr/formats.py_DATE_FORMAT_",
+      "distance": 1.1044845581054688,
+      "file_path": "django/conf/locale/fr/formats.py",
+      "start_line": 5,
+      "end_line": 32,
+      "tokens": 448,
+      "context_length": 20012
+    },
+    {
+      "position": 63,
+      "id": "/tmp/repos/django/django/conf/locale/ka/formats.py_DATE_FORMAT_",
+      "distance": 1.1055233478546143,
+      "file_path": "django/conf/locale/ka/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 773,
+      "context_length": 20785
+    },
+    {
+      "position": 64,
+      "id": "/tmp/repos/django/django/conf/locale/mk/formats.py_DATE_FORMAT_",
+      "distance": 1.1063079833984375,
+      "file_path": "django/conf/locale/mk/formats.py",
+      "start_line": 5,
+      "end_line": 39,
+      "tokens": 594,
+      "context_length": 21379
+    },
+    {
+      "position": 65,
+      "id": "/tmp/repos/django/django/utils/timezone.py_27_template_localtime.3.1",
+      "distance": 1.1063923835754395,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 133,
+      "end_line": 150,
+      "tokens": 148,
+      "context_length": 21527
+    },
+    {
+      "position": 66,
+      "id": "/tmp/repos/django/django/conf/locale/pl/formats.py_DATE_FORMAT_",
+      "distance": 1.1069413423538208,
+      "file_path": "django/conf/locale/pl/formats.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 321,
+      "context_length": 21848
+    },
+    {
+      "position": 67,
+      "id": "/tmp/repos/django/django/conf/locale/de/formats.py_DATE_FORMAT_",
+      "distance": 1.106948971748352,
+      "file_path": "django/conf/locale/de/formats.py",
+      "start_line": 5,
+      "end_line": 28,
+      "tokens": 305,
+      "context_length": 22153
+    },
+    {
+      "position": 68,
+      "id": "/tmp/repos/django/django/utils/datetime_safe.py_strftime_",
+      "distance": 1.1071933507919312,
+      "file_path": "django/utils/datetime_safe.py",
+      "start_line": 74,
+      "end_line": 107,
+      "tokens": 311,
+      "context_length": 22464
+    },
+    {
+      "position": 69,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges._convert_field_to_tz_DatabaseOperations.integer_field_ranges._convert_field_to_tz.7.1",
+      "distance": 1.1087969541549683,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 116,
+      "end_line": 130,
+      "tokens": 225,
+      "context_length": 22689
+    },
+    {
+      "position": 70,
+      "id": "/tmp/repos/django/django/conf/locale/fi/formats.py_DATE_FORMAT_",
+      "distance": 1.1096127033233643,
+      "file_path": "django/conf/locale/fi/formats.py",
+      "start_line": 5,
+      "end_line": 38,
+      "tokens": 435,
+      "context_length": 23124
+    },
+    {
+      "position": 71,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_SHORT_DATE_FORMAT_213",
+      "distance": 1.1098618507385254,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 350,
+      "end_line": 400,
+      "tokens": 785,
+      "context_length": 23909
+    },
+    {
+      "position": 72,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/operations.py_DatabaseOperations.adapt_datetimefield_value_DatabaseOperations.adapt_timefield_value.6.1",
+      "distance": 1.1101340055465698,
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "start_line": 228,
+      "end_line": 257,
+      "tokens": 198,
+      "context_length": 24107
+    },
+    {
+      "position": 73,
+      "id": "/tmp/repos/django/django/conf/locale/pt/formats.py_DATE_FORMAT_",
+      "distance": 1.1106901168823242,
+      "file_path": "django/conf/locale/pt/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 577,
+      "context_length": 24684
+    },
+    {
+      "position": 74,
+      "id": "/tmp/repos/django/django/utils/timezone.py_29_localtime.6.1",
+      "distance": 1.1106932163238525,
+      "file_path": "django/utils/timezone.py",
+      "start_line": 153,
+      "end_line": 172,
+      "tokens": 140,
+      "context_length": 24824
+    },
+    {
+      "position": 75,
+      "id": "/tmp/repos/django/django/conf/locale/pt_BR/formats.py_DATE_FORMAT_",
+      "distance": 1.110919713973999,
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "start_line": 5,
+      "end_line": 32,
+      "tokens": 459,
+      "context_length": 25283
+    },
+    {
+      "position": 76,
+      "id": "/tmp/repos/django/django/conf/locale/tr/formats.py_DATE_FORMAT_",
+      "distance": 1.1109617948532104,
+      "file_path": "django/conf/locale/tr/formats.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 319,
+      "context_length": 25602
+    },
+    {
+      "position": 77,
+      "id": "/tmp/repos/django/django/conf/locale/te/formats.py_DATE_FORMAT_",
+      "distance": 1.1112269163131714,
+      "file_path": "django/conf/locale/te/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 123,
+      "context_length": 25725
+    },
+    {
+      "position": 78,
+      "id": "/tmp/repos/django/django/conf/locale/sl/formats.py_DATE_FORMAT_",
+      "distance": 1.1119022369384766,
+      "file_path": "django/conf/locale/sl/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 708,
+      "context_length": 26433
+    },
+    {
+      "position": 79,
+      "id": "/tmp/repos/django/django/conf/locale/sk/formats.py_DATE_FORMAT_",
+      "distance": 1.1120563745498657,
+      "file_path": "django/conf/locale/sk/formats.py",
+      "start_line": 5,
+      "end_line": 29,
+      "tokens": 330,
+      "context_length": 26763
+    },
+    {
+      "position": 80,
+      "id": "/tmp/repos/django/django/conf/locale/uk/formats.py_DATE_FORMAT_",
+      "distance": 1.1121312379837036,
+      "file_path": "django/conf/locale/uk/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 425,
+      "context_length": 27188
+    },
+    {
+      "position": 81,
+      "id": "/tmp/repos/django/django/forms/fields.py_SplitDateTimeField_SplitDateTimeField.compress.2.1",
+      "distance": 1.11280357837677,
+      "file_path": "django/forms/fields.py",
+      "start_line": 1128,
+      "end_line": 1161,
+      "tokens": 293,
+      "context_length": 27481
+    },
+    {
+      "position": 82,
+      "id": "/tmp/repos/django/django/conf/locale/ca/formats.py_DATE_FORMAT_",
+      "distance": 1.1129662990570068,
+      "file_path": "django/conf/locale/ca/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 287,
+      "context_length": 27768
+    },
+    {
+      "position": 83,
+      "id": "/tmp/repos/django/django/conf/locale/da/formats.py_DATE_FORMAT_",
+      "distance": 1.1130181550979614,
+      "file_path": "django/conf/locale/da/formats.py",
+      "start_line": 5,
+      "end_line": 27,
+      "tokens": 250,
+      "context_length": 28018
+    },
+    {
+      "position": 84,
+      "id": "/tmp/repos/django/django/conf/locale/uz/formats.py_DATE_FORMAT_",
+      "distance": 1.1134529113769531,
+      "file_path": "django/conf/locale/uz/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 418,
+      "context_length": 28436
+    },
+    {
+      "position": 85,
+      "id": "/tmp/repos/django/django/conf/locale/de_CH/formats.py_DATE_FORMAT_",
+      "distance": 1.1136553287506104,
+      "file_path": "django/conf/locale/de_CH/formats.py",
+      "start_line": 5,
+      "end_line": 34,
+      "tokens": 398,
+      "context_length": 28834
+    },
+    {
+      "position": 86,
+      "id": "/tmp/repos/django/django/conf/locale/el/formats.py_DATE_FORMAT_",
+      "distance": 1.114243984222412,
+      "file_path": "django/conf/locale/el/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 455,
+      "context_length": 29289
+    },
+    {
+      "position": 87,
+      "id": "/tmp/repos/django/django/conf/locale/sv/formats.py_DATE_FORMAT_",
+      "distance": 1.11460542678833,
+      "file_path": "django/conf/locale/sv/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 481,
+      "context_length": 29770
+    },
+    {
+      "position": 88,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField._check_fix_default_value_DateField._check_fix_default_value.11.1",
+      "distance": 1.1157277822494507,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1111,
+      "end_line": 1149,
+      "tokens": 293,
+      "context_length": 30063
+    },
+    {
+      "position": 89,
+      "id": "/tmp/repos/django/django/core/files/storage.py_FileSystemStorage.delete_",
+      "distance": 1.116482138633728,
+      "file_path": "django/core/files/storage.py",
+      "start_line": 296,
+      "end_line": 368,
+      "tokens": 483,
+      "context_length": 30546
+    },
+    {
+      "position": 90,
+      "id": "/tmp/repos/django/django/conf/locale/ru/formats.py_DATE_FORMAT_",
+      "distance": 1.116652250289917,
+      "file_path": "django/conf/locale/ru/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 367,
+      "context_length": 30913
+    },
+    {
+      "position": 91,
+      "id": "/tmp/repos/django/django/db/backends/base/base.py_BaseDatabaseWrapper.timezone_name_BaseDatabaseWrapper.31",
+      "distance": 1.1167452335357666,
+      "file_path": "django/db/backends/base/base.py",
+      "start_line": 140,
+      "end_line": 182,
+      "tokens": 335,
+      "context_length": 31248
+    },
+    {
+      "position": 92,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_BaseDatabaseOperations.adapt_datefield_value_BaseDatabaseOperations.adapt_ipaddressfield_value.2.1",
+      "distance": 1.117127776145935,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 484,
+      "end_line": 525,
+      "tokens": 284,
+      "context_length": 31532
+    },
+    {
+      "position": 93,
+      "id": "/tmp/repos/django/django/conf/locale/es_MX/formats.py_DATE_FORMAT_",
+      "distance": 1.1173226833343506,
+      "file_path": "django/conf/locale/es_MX/formats.py",
+      "start_line": 3,
+      "end_line": 26,
+      "tokens": 289,
+      "context_length": 31821
+    },
+    {
+      "position": 94,
+      "id": "/tmp/repos/django/django/conf/locale/lv/formats.py_DATE_FORMAT_",
+      "distance": 1.1178524494171143,
+      "file_path": "django/conf/locale/lv/formats.py",
+      "start_line": 5,
+      "end_line": 45,
+      "tokens": 700,
+      "context_length": 32521
+    },
+    {
+      "position": 95,
+      "id": "/tmp/repos/django/django/conf/locale/is/formats.py_DATE_FORMAT_",
+      "distance": 1.1180524826049805,
+      "file_path": "django/conf/locale/is/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 130,
+      "context_length": 32651
+    },
+    {
+      "position": 96,
+      "id": "/tmp/repos/django/django/conf/locale/ml/formats.py_DATE_FORMAT_",
+      "distance": 1.1180877685546875,
+      "file_path": "django/conf/locale/ml/formats.py",
+      "start_line": 5,
+      "end_line": 38,
+      "tokens": 610,
+      "context_length": 33261
+    },
+    {
+      "position": 97,
+      "id": "/tmp/repos/django/django/conf/locale/en_GB/formats.py_DATE_FORMAT_",
+      "distance": 1.1189311742782593,
+      "file_path": "django/conf/locale/en_GB/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 655,
+      "context_length": 33916
+    },
+    {
+      "position": 98,
+      "id": "/tmp/repos/django/django/conf/locale/ar_DZ/formats.py_DATE_FORMAT_",
+      "distance": 1.1190519332885742,
+      "file_path": "django/conf/locale/ar_DZ/formats.py",
+      "start_line": 5,
+      "end_line": 30,
+      "tokens": 252,
+      "context_length": 34168
+    },
+    {
+      "position": 99,
+      "id": "/tmp/repos/django/django/templatetags/tz.py_timezone_tag_timezone_tag.7.1",
+      "distance": 1.1193912029266357,
+      "file_path": "django/templatetags/tz.py",
+      "start_line": 148,
+      "end_line": 170,
+      "tokens": 176,
+      "context_length": 34344
+    },
+    {
+      "position": 100,
+      "id": "/tmp/repos/django/django/conf/locale/en_AU/formats.py_DATE_FORMAT_",
+      "distance": 1.1199824810028076,
+      "file_path": "django/conf/locale/en_AU/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 655,
+      "context_length": 34999
+    },
+    {
+      "position": 101,
+      "id": "/tmp/repos/django/django/conf/locale/sr_Latn/formats.py_DATE_FORMAT_",
+      "distance": 1.1202659606933594,
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 726,
+      "context_length": 35725
+    },
+    {
+      "position": 102,
+      "id": "/tmp/repos/django/django/db/models/functions/datetime.py_ExtractYear_Now.as_postgresql.4.1",
+      "distance": 1.1205804347991943,
+      "file_path": "django/db/models/functions/datetime.py",
+      "start_line": 87,
+      "end_line": 180,
+      "tokens": 548,
+      "context_length": 36273,
+      "file_pos": 59
+    },
+    {
+      "position": 103,
+      "id": "/tmp/repos/django/django/conf/locale/ig/formats.py_DATE_FORMAT_",
+      "distance": 1.1213929653167725,
+      "file_path": "django/conf/locale/ig/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 388,
+      "context_length": 36661
+    },
+    {
+      "position": 104,
+      "id": "/tmp/repos/django/django/conf/locale/sr/formats.py_DATE_FORMAT_",
+      "distance": 1.1222039461135864,
+      "file_path": "django/conf/locale/sr/formats.py",
+      "start_line": 5,
+      "end_line": 40,
+      "tokens": 726,
+      "context_length": 37387
+    },
+    {
+      "position": 105,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_datetime_extract__sqlite_datetime_extract.3.6.1.1",
+      "distance": 1.123119831085205,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 491,
+      "end_line": 506,
+      "tokens": 156,
+      "context_length": 37543
+    },
+    {
+      "position": 106,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.time_trunc_sql_DatabaseOperations.integer_field_ranges.time_trunc_sql.4.4.1",
+      "distance": 1.123210072517395,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 164,
+      "end_line": 174,
+      "tokens": 206,
+      "context_length": 37749
+    },
+    {
+      "position": 107,
+      "id": "/tmp/repos/django/django/conf/locale/mn/formats.py_DATE_FORMAT_",
+      "distance": 1.1235417127609253,
+      "file_path": "django/conf/locale/mn/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 120,
+      "context_length": 37869
+    },
+    {
+      "position": 108,
+      "id": "/tmp/repos/django/django/conf/locale/ro/formats.py_DATE_FORMAT_",
+      "distance": 1.1240246295928955,
+      "file_path": "django/conf/locale/ro/formats.py",
+      "start_line": 5,
+      "end_line": 36,
+      "tokens": 262,
+      "context_length": 38131
+    },
+    {
+      "position": 109,
+      "id": "/tmp/repos/django/django/conf/locale/bs/formats.py_DATE_FORMAT_",
+      "distance": 1.1247262954711914,
+      "file_path": "django/conf/locale/bs/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 139,
+      "context_length": 38270
+    },
+    {
+      "position": 110,
+      "id": "/tmp/repos/django/django/conf/locale/es_PR/formats.py_DATE_FORMAT_",
+      "distance": 1.1249113082885742,
+      "file_path": "django/conf/locale/es_PR/formats.py",
+      "start_line": 3,
+      "end_line": 28,
+      "tokens": 252,
+      "context_length": 38522
+    },
+    {
+      "position": 111,
+      "id": "/tmp/repos/django/django/utils/text.py_Truncator_Truncator.add_truncation_text.6.1",
+      "distance": 1.125227928161621,
+      "file_path": "django/utils/text.py",
+      "start_line": 59,
+      "end_line": 79,
+      "tokens": 188,
+      "context_length": 38710
+    },
+    {
+      "position": 112,
+      "id": "/tmp/repos/django/django/conf/locale/nn/formats.py_DATE_FORMAT_",
+      "distance": 1.1255203485488892,
+      "file_path": "django/conf/locale/nn/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 593,
+      "context_length": 39303
+    },
+    {
+      "position": 113,
+      "id": "/tmp/repos/django/django/conf/locale/sq/formats.py_DATE_FORMAT_",
+      "distance": 1.1256992816925049,
+      "file_path": "django/conf/locale/sq/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 128,
+      "context_length": 39431
+    },
+    {
+      "position": 114,
+      "id": "/tmp/repos/django/django/conf/locale/eo/formats.py_DATE_FORMAT_",
+      "distance": 1.125898838043213,
+      "file_path": "django/conf/locale/eo/formats.py",
+      "start_line": 5,
+      "end_line": 48,
+      "tokens": 707,
+      "context_length": 40138
+    },
+    {
+      "position": 115,
+      "id": "/tmp/repos/django/django/conf/locale/kn/formats.py_DATE_FORMAT_",
+      "distance": 1.126133680343628,
+      "file_path": "django/conf/locale/kn/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 123,
+      "context_length": 40261
+    },
+    {
+      "position": 116,
+      "id": "/tmp/repos/django/django/conf/locale/hr/formats.py_DATE_FORMAT_",
+      "distance": 1.1262032985687256,
+      "file_path": "django/conf/locale/hr/formats.py",
+      "start_line": 5,
+      "end_line": 43,
+      "tokens": 742,
+      "context_length": 41003
+    },
+    {
+      "position": 117,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeCheckMixin_DateTimeCheckMixin._check_fix_default_value.1.1",
+      "distance": 1.12709641456604,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1061,
+      "end_line": 1090,
+      "tokens": 218,
+      "context_length": 41221
+    },
+    {
+      "position": 118,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/operations.py_DatabaseOperations.date_trunc_sql_DatabaseOperations.fetch_returned_insert_rows.2.1",
+      "distance": 1.128442645072937,
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "start_line": 41,
+      "end_line": 85,
+      "tokens": 483,
+      "context_length": 41704
+    },
+    {
+      "position": 119,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField._check_fix_default_value_DateTimeField._check_fix_default_value.8.1",
+      "distance": 1.1292660236358643,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1251,
+      "end_line": 1292,
+      "tokens": 332,
+      "context_length": 42036
+    },
+    {
+      "position": 120,
+      "id": "/tmp/repos/django/django/conf/locale/en/formats.py_DATE_FORMAT_",
+      "distance": 1.1300493478775024,
+      "file_path": "django/conf/locale/en/formats.py",
+      "start_line": 5,
+      "end_line": 38,
+      "tokens": 610,
+      "context_length": 42646
+    },
+    {
+      "position": 121,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_1_BaseDatabaseFeatures.82",
+      "distance": 1.1304771900177002,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 1,
+      "end_line": 113,
+      "tokens": 899,
+      "context_length": 43545
+    },
+    {
+      "position": 122,
+      "id": "/tmp/repos/django/django/conf/locale/bg/formats.py_DATE_FORMAT_",
+      "distance": 1.1324834823608398,
+      "file_path": "django/conf/locale/bg/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 131,
+      "context_length": 43676
+    },
+    {
+      "position": 123,
+      "id": "/tmp/repos/django/django/template/defaultfilters.py_83_divisibleby.2.1",
+      "distance": 1.1328535079956055,
+      "file_path": "django/template/defaultfilters.py",
+      "start_line": 692,
+      "end_line": 769,
+      "tokens": 443,
+      "context_length": 44119
+    },
+    {
+      "position": 124,
+      "id": "/tmp/repos/django/django/conf/locale/nb/formats.py_DATE_FORMAT_",
+      "distance": 1.1338832378387451,
+      "file_path": "django/conf/locale/nb/formats.py",
+      "start_line": 5,
+      "end_line": 37,
+      "tokens": 593,
+      "context_length": 44712
+    },
+    {
+      "position": 125,
+      "id": "/tmp/repos/django/django/contrib/humanize/templatetags/humanize.py_NaturalTimeFormatter.string_for_",
+      "distance": 1.1339747905731201,
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "start_line": 222,
+      "end_line": 260,
+      "tokens": 370,
+      "context_length": 45082
+    },
+    {
+      "position": 126,
+      "id": "/tmp/repos/django/django/utils/formats.py_get_format_lazy_time_format.2.1",
+      "distance": 1.1353609561920166,
+      "file_path": "django/utils/formats.py",
+      "start_line": 141,
+      "end_line": 162,
+      "tokens": 205,
+      "context_length": 45287
+    },
+    {
+      "position": 127,
+      "id": "/tmp/repos/django/django/conf/locale/ga/formats.py_DATE_FORMAT_",
+      "distance": 1.1359055042266846,
+      "file_path": "django/conf/locale/ga/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 124,
+      "context_length": 45411
+    },
+    {
+      "position": 128,
+      "id": "/tmp/repos/django/django/conf/locale/es/formats.py_DATE_FORMAT_",
+      "distance": 1.1373943090438843,
+      "file_path": "django/conf/locale/es/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 285,
+      "context_length": 45696
+    },
+    {
+      "position": 129,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/field.py_OFTDateTime_OFTDateTime.value.6.3.1.1",
+      "distance": 1.1388107538223267,
+      "file_path": "django/contrib/gis/gdal/field.py",
+      "start_line": 163,
+      "end_line": 175,
+      "tokens": 171,
+      "context_length": 45867
+    },
+    {
+      "position": 130,
+      "id": "/tmp/repos/django/django/contrib/humanize/templatetags/humanize.py_NaturalTimeFormatter_NaturalTimeFormatter.future_substrings.1",
+      "distance": 1.1398608684539795,
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "start_line": 177,
+      "end_line": 220,
+      "tokens": 731,
+      "context_length": 46598
+    },
+    {
+      "position": 131,
+      "id": "/tmp/repos/django/django/conf/locale/ja/formats.py_DATE_FORMAT_",
+      "distance": 1.1414103507995605,
+      "file_path": "django/conf/locale/ja/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 149,
+      "context_length": 46747
+    },
+    {
+      "position": 132,
+      "id": "/tmp/repos/django/django/conf/locale/es_AR/formats.py_DATE_FORMAT_",
+      "distance": 1.1415479183197021,
+      "file_path": "django/conf/locale/es_AR/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 275,
+      "context_length": 47022
+    },
+    {
+      "position": 133,
+      "id": "/tmp/repos/django/django/conf/locale/he/formats.py_DATE_FORMAT_",
+      "distance": 1.141945481300354,
+      "file_path": "django/conf/locale/he/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 142,
+      "context_length": 47164
+    },
+    {
+      "position": 134,
+      "id": "/tmp/repos/django/django/forms/fields.py_TimeField_DateTimeFormatsIterator.__iter__.2",
+      "distance": 1.1421561241149902,
+      "file_path": "django/forms/fields.py",
+      "start_line": 411,
+      "end_line": 436,
+      "tokens": 168,
+      "context_length": 47332
+    },
+    {
+      "position": 135,
+      "id": "/tmp/repos/django/django/utils/text.py_Truncator._text_chars_Truncator._text_chars.6.1",
+      "distance": 1.142348051071167,
+      "file_path": "django/utils/text.py",
+      "start_line": 104,
+      "end_line": 122,
+      "tokens": 165,
+      "context_length": 47497
+    },
+    {
+      "position": 136,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField.pre_save_DateField.contribute_to_class.2.2",
+      "distance": 1.142745018005371,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1195,
+      "end_line": 1213,
+      "tokens": 180,
+      "context_length": 47677
+    },
+    {
+      "position": 137,
+      "id": "/tmp/repos/django/django/db/backends/postgresql/base.py_DatabaseWrapper.ensure_timezone_DatabaseWrapper.tzinfo_factory.1.1",
+      "distance": 1.142817497253418,
+      "file_path": "django/db/backends/postgresql/base.py",
+      "start_line": 209,
+      "end_line": 241,
+      "tokens": 260,
+      "context_length": 47937
+    },
+    {
+      "position": 138,
+      "id": "/tmp/repos/django/django/conf/locale/ky/formats.py_DATE_FORMAT_",
+      "distance": 1.142904281616211,
+      "file_path": "django/conf/locale/ky/formats.py",
+      "start_line": 5,
+      "end_line": 33,
+      "tokens": 414,
+      "context_length": 48351
+    },
+    {
+      "position": 139,
+      "id": "/tmp/repos/django/django/conf/locale/es_CO/formats.py_DATE_FORMAT_",
+      "distance": 1.1430115699768066,
+      "file_path": "django/conf/locale/es_CO/formats.py",
+      "start_line": 3,
+      "end_line": 27,
+      "tokens": 262,
+      "context_length": 48613
+    },
+    {
+      "position": 140,
+      "id": "/tmp/repos/django/django/conf/locale/gd/formats.py_DATE_FORMAT_",
+      "distance": 1.145603895187378,
+      "file_path": "django/conf/locale/gd/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 144,
+      "context_length": 48757
+    },
+    {
+      "position": 141,
+      "id": "/tmp/repos/django/django/conf/locale/ko/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.14741051197052,
+      "file_path": "django/conf/locale/ko/formats.py",
+      "start_line": 32,
+      "end_line": 50,
+      "tokens": 385,
+      "context_length": 49142
+    },
+    {
+      "position": 142,
+      "id": "/tmp/repos/django/django/db/models/functions/mixins.py_FixDurationInputMixin_",
+      "distance": 1.1482173204421997,
+      "file_path": "django/db/models/functions/mixins.py",
+      "start_line": 23,
+      "end_line": 53,
+      "tokens": 257,
+      "context_length": 49399
+    },
+    {
+      "position": 143,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.adapt_datetimefield_value_DatabaseOperations.integer_field_ranges.adapt_datetimefield_value.7.1",
+      "distance": 1.1500844955444336,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 517,
+      "end_line": 541,
+      "tokens": 242,
+      "context_length": 49641
+    },
+    {
+      "position": 144,
+      "id": "/tmp/repos/django/django/conf/locale/km/formats.py_DATE_FORMAT_",
+      "distance": 1.1501399278640747,
+      "file_path": "django/conf/locale/km/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 164,
+      "context_length": 49805
+    },
+    {
+      "position": 145,
+      "id": "/tmp/repos/django/django/views/generic/dates.py_DateMixin_DateMixin._make_date_lookup_arg.3.1",
+      "distance": 1.151153564453125,
+      "file_path": "django/views/generic/dates.py",
+      "start_line": 229,
+      "end_line": 271,
+      "tokens": 334,
+      "context_length": 50139
+    },
+    {
+      "position": 146,
+      "id": "/tmp/repos/django/django/conf/locale/it/formats.py_DATE_FORMAT_",
+      "distance": 1.1515591144561768,
+      "file_path": "django/conf/locale/it/formats.py",
+      "start_line": 5,
+      "end_line": 41,
+      "tokens": 764,
+      "context_length": 50903
+    },
+    {
+      "position": 147,
+      "id": "/tmp/repos/django/django/conf/locale/es_NI/formats.py_DATE_FORMAT_",
+      "distance": 1.152588129043579,
+      "file_path": "django/conf/locale/es_NI/formats.py",
+      "start_line": 3,
+      "end_line": 27,
+      "tokens": 270,
+      "context_length": 51173
+    },
+    {
+      "position": 148,
+      "id": "/tmp/repos/django/django/conf/locale/ar/formats.py_DATE_FORMAT_",
+      "distance": 1.1531471014022827,
+      "file_path": "django/conf/locale/ar/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 135,
+      "context_length": 51308
+    },
+    {
+      "position": 149,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField.deconstruct_DateField.to_python.5",
+      "distance": 1.154252052307129,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1151,
+      "end_line": 1193,
+      "tokens": 287,
+      "context_length": 51595
+    },
+    {
+      "position": 150,
+      "id": "/tmp/repos/django/django/conf/locale/hi/formats.py_DATE_FORMAT_",
+      "distance": 1.1547513008117676,
+      "file_path": "django/conf/locale/hi/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 125,
+      "context_length": 51720
+    },
+    {
+      "position": 151,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_uuid_DatabaseOperations.explain_prefix.1",
+      "distance": 1.1557435989379883,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 1,
+      "end_line": 34,
+      "tokens": 273,
+      "context_length": 51993
+    },
+    {
+      "position": 152,
+      "id": "/tmp/repos/django/django/db/models/functions/mixins.py_sys_FixDecimalInputMixin.as_postgresql.output_field.4.1",
+      "distance": 1.15610933303833,
+      "file_path": "django/db/models/functions/mixins.py",
+      "start_line": 1,
+      "end_line": 20,
+      "tokens": 161,
+      "context_length": 52154
+    },
+    {
+      "position": 153,
+      "id": "/tmp/repos/django/django/conf/locale/nl/formats.py_DATETIME_INPUT_FORMATS_",
+      "distance": 1.1565877199172974,
+      "file_path": "django/conf/locale/nl/formats.py",
+      "start_line": 32,
+      "end_line": 67,
+      "tokens": 1371,
+      "context_length": 53525
+    },
+    {
+      "position": 154,
+      "id": "/tmp/repos/django/django/db/backends/mysql/operations.py_DatabaseOperations.subtract_temporals_DatabaseOperations.subtract_temporals.5.1",
+      "distance": 1.1572387218475342,
+      "file_path": "django/db/backends/mysql/operations.py",
+      "start_line": 321,
+      "end_line": 336,
+      "tokens": 264,
+      "context_length": 53789
+    },
+    {
+      "position": 155,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.date_trunc_sql_DatabaseOperations.integer_field_ranges.date_trunc_sql.2.4.1.1",
+      "distance": 1.159633994102478,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 92,
+      "end_line": 101,
+      "tokens": 201,
+      "context_length": 53990
+    },
+    {
+      "position": 156,
+      "id": "/tmp/repos/django/django/forms/fields.py_DateTimeField_DateTimeField.strptime.1.1",
+      "distance": 1.161485195159912,
+      "file_path": "django/forms/fields.py",
+      "start_line": 439,
+      "end_line": 472,
+      "tokens": 225,
+      "context_length": 54215
+    },
+    {
+      "position": 157,
+      "id": "/tmp/repos/django/django/conf/locale/nl/formats.py_DATE_FORMAT_TIME_INPUT_FORMATS.1",
+      "distance": 1.161494255065918,
+      "file_path": "django/conf/locale/nl/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 467,
+      "context_length": 54682
+    },
+    {
+      "position": 158,
+      "id": "/tmp/repos/django/django/conf/locale/ko/formats.py_DATE_FORMAT_TIME_INPUT_FORMATS.1",
+      "distance": 1.161547064781189,
+      "file_path": "django/conf/locale/ko/formats.py",
+      "start_line": 5,
+      "end_line": 31,
+      "tokens": 460,
+      "context_length": 55142
+    },
+    {
+      "position": 159,
+      "id": "/tmp/repos/django/django/conf/locale/gl/formats.py_DATE_FORMAT_",
+      "distance": 1.1646840572357178,
+      "file_path": "django/conf/locale/gl/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 170,
+      "context_length": 55312
+    },
+    {
+      "position": 160,
+      "id": "/tmp/repos/django/django/views/generic/dates.py__get_next_prev_",
+      "distance": 1.1653615236282349,
+      "file_path": "django/views/generic/dates.py",
+      "start_line": 634,
+      "end_line": 730,
+      "tokens": 806,
+      "context_length": 56118
+    },
+    {
+      "position": 161,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField_DateField.__init__.3",
+      "distance": 1.1665898561477661,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1093,
+      "end_line": 1109,
+      "tokens": 175,
+      "context_length": 56293
+    },
+    {
+      "position": 162,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateTimeField.get_db_prep_value_DateTimeField.formfield.1.1",
+      "distance": 1.1668095588684082,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1375,
+      "end_line": 1389,
+      "tokens": 121,
+      "context_length": 56414
+    },
+    {
+      "position": 163,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_DateFormat_DateFormat.F.2.1",
+      "distance": 1.169111967086792,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 209,
+      "end_line": 235,
+      "tokens": 215,
+      "context_length": 56629
+    },
+    {
+      "position": 164,
+      "id": "/tmp/repos/django/django/forms/fields.py_BaseTemporalField_BaseTemporalField.strptime.1",
+      "distance": 1.1702251434326172,
+      "file_path": "django/forms/fields.py",
+      "start_line": 366,
+      "end_line": 384,
+      "tokens": 134,
+      "context_length": 56763
+    },
+    {
+      "position": 165,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model._perform_date_checks_Model._perform_date_checks.3.1",
+      "distance": 1.1712199449539185,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1125,
+      "end_line": 1152,
+      "tokens": 286,
+      "context_length": 57049
+    },
+    {
+      "position": 166,
+      "id": "/tmp/repos/django/django/contrib/humanize/templatetags/humanize.py_17_naturaltime.2.1",
+      "distance": 1.1715946197509766,
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "start_line": 140,
+      "end_line": 174,
+      "tokens": 280,
+      "context_length": 57329
+    },
+    {
+      "position": 167,
+      "id": "/tmp/repos/django/django/conf/locale/fa/formats.py_DATE_FORMAT_",
+      "distance": 1.178419589996338,
+      "file_path": "django/conf/locale/fa/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 149,
+      "context_length": 57478
+    },
+    {
+      "position": 168,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_TimeFormat.P_TimeFormat.P.4.1",
+      "distance": 1.179685354232788,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 141,
+      "end_line": 152,
+      "tokens": 151,
+      "context_length": 57629
+    },
+    {
+      "position": 169,
+      "id": "/tmp/repos/django/django/db/models/fields/__init__.py_DateField.get_prep_value_DateField.formfield.1.1",
+      "distance": 1.185279130935669,
+      "file_path": "django/db/models/fields/__init__.py",
+      "start_line": 1215,
+      "end_line": 1233,
+      "tokens": 149,
+      "context_length": 57778
+    },
+    {
+      "position": 170,
+      "id": "/tmp/repos/django/django/conf/locale/th/formats.py_DATE_FORMAT_",
+      "distance": 1.186326503753662,
+      "file_path": "django/conf/locale/th/formats.py",
+      "start_line": 5,
+      "end_line": 34,
+      "tokens": 355,
+      "context_length": 58133
+    },
+    {
+      "position": 171,
+      "id": "/tmp/repos/django/django/utils/duration.py_datetime_",
+      "distance": 1.1866440773010254,
+      "file_path": "django/utils/duration.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 304,
+      "context_length": 58437
+    },
+    {
+      "position": 172,
+      "id": "/tmp/repos/django/django/contrib/postgres/apps.py_1_RANGE_TYPES.1",
+      "distance": 1.1889894008636475,
+      "file_path": "django/contrib/postgres/apps.py",
+      "start_line": 1,
+      "end_line": 17,
+      "tokens": 129,
+      "context_length": 58566
+    },
+    {
+      "position": 173,
+      "id": "/tmp/repos/django/django/views/generic/dates.py_DayMixin_DayMixin._get_current_day.2.1",
+      "distance": 1.1894776821136475,
+      "file_path": "django/views/generic/dates.py",
+      "start_line": 120,
+      "end_line": 163,
+      "tokens": 285,
+      "context_length": 58851
+    },
+    {
+      "position": 174,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/base.py__sqlite_time_extract__sqlite_format_dtdelta.5.1",
+      "distance": 1.1912733316421509,
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "start_line": 533,
+      "end_line": 561,
+      "tokens": 250,
+      "context_length": 59101
+    },
+    {
+      "position": 175,
+      "id": "/tmp/repos/django/django/contrib/admin/widgets.py_AdminDateWidget_AdminTimeWidget.__init__.2",
+      "distance": 1.1913278102874756,
+      "file_path": "django/contrib/admin/widgets.py",
+      "start_line": 49,
+      "end_line": 70,
+      "tokens": 168,
+      "context_length": 59269
+    },
+    {
+      "position": 176,
+      "id": "/tmp/repos/django/django/conf/locale/vi/formats.py_DATE_FORMAT_",
+      "distance": 1.1917262077331543,
+      "file_path": "django/conf/locale/vi/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 179,
+      "context_length": 59448
+    },
+    {
+      "position": 177,
+      "id": "/tmp/repos/django/django/utils/dateparse.py_parse_datetime_parse_datetime.3.7.1",
+      "distance": 1.1928362846374512,
+      "file_path": "django/utils/dateparse.py",
+      "start_line": 98,
+      "end_line": 122,
+      "tokens": 258,
+      "context_length": 59706
+    },
+    {
+      "position": 178,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol._base_set_DatabaseCache.pickle_protocol._base_set.6.12.7.1.1",
+      "distance": 1.193442940711975,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 112,
+      "end_line": 197,
+      "tokens": 794,
+      "context_length": 60500
+    },
+    {
+      "position": 179,
+      "id": "/tmp/repos/django/django/utils/dateformat.py_Formatter_Formatter.format.3.1",
+      "distance": 1.1952706575393677,
+      "file_path": "django/utils/dateformat.py",
+      "start_line": 31,
+      "end_line": 44,
+      "tokens": 121,
+      "context_length": 60621
+    },
+    {
+      "position": 180,
+      "id": "/tmp/repos/django/django/contrib/gis/gdal/field.py_Field.as_datetime_Field.as_datetime.5.2.1",
+      "distance": 1.1965012550354004,
+      "file_path": "django/contrib/gis/gdal/field.py",
+      "start_line": 60,
+      "end_line": 71,
+      "tokens": 158,
+      "context_length": 60779
+    },
+    {
+      "position": 181,
+      "id": "/tmp/repos/django/django/db/models/functions/math.py_math_ATan.lookup_name.1",
+      "distance": 1.1968809366226196,
+      "file_path": "django/db/models/functions/math.py",
+      "start_line": 1,
+      "end_line": 29,
+      "tokens": 154,
+      "context_length": 60933
+    },
+    {
+      "position": 182,
+      "id": "/tmp/repos/django/django/db/migrations/serializer.py_builtins_DecimalSerializer.serialize.1.1",
+      "distance": 1.2009608745574951,
+      "file_path": "django/db/migrations/serializer.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 434,
+      "context_length": 61367
+    },
+    {
+      "position": 183,
+      "id": "/tmp/repos/django/django/utils/dates.py_1_",
+      "distance": 1.2011568546295166,
+      "file_path": "django/utils/dates.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 679,
+      "context_length": 62046
+    },
+    {
+      "position": 184,
+      "id": "/tmp/repos/django/django/templatetags/tz.py_get_current_timezone_tag_",
+      "distance": 1.2014539241790771,
+      "file_path": "django/templatetags/tz.py",
+      "start_line": 173,
+      "end_line": 191,
+      "tokens": 149,
+      "context_length": 62195
+    },
+    {
+      "position": 185,
+      "id": "/tmp/repos/django/django/db/backends/sqlite3/features.py_operator_",
+      "distance": 1.2045727968215942,
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "start_line": 1,
+      "end_line": 80,
+      "tokens": 725,
+      "context_length": 62920
+    },
+    {
+      "position": 186,
+      "id": "/tmp/repos/django/django/conf/global_settings.py_LANGUAGES_35",
+      "distance": 1.2048290967941284,
+      "file_path": "django/conf/global_settings.py",
+      "start_line": 51,
+      "end_line": 150,
+      "tokens": 1160,
+      "context_length": 64080
+    },
+    {
+      "position": 187,
+      "id": "/tmp/repos/django/django/utils/dateparse.py_parse_date_parse_time.3.4.1",
+      "distance": 1.2052173614501953,
+      "file_path": "django/utils/dateparse.py",
+      "start_line": 69,
+      "end_line": 95,
+      "tokens": 222,
+      "context_length": 64302
+    },
+    {
+      "position": 188,
+      "id": "/tmp/repos/django/django/contrib/admin/filters.py_DateFieldListFilter_DateFieldListFilter.choices.1.1",
+      "distance": 1.2058968544006348,
+      "file_path": "django/contrib/admin/filters.py",
+      "start_line": 305,
+      "end_line": 368,
+      "tokens": 627,
+      "context_length": 64929
+    },
+    {
+      "position": 189,
+      "id": "/tmp/repos/django/django/db/models/lookups.py_IExact_IntegerLessThan.1",
+      "distance": 1.2068253755569458,
+      "file_path": "django/db/models/lookups.py",
+      "start_line": 305,
+      "end_line": 355,
+      "tokens": 306,
+      "context_length": 65235
+    },
+    {
+      "position": 190,
+      "id": "/tmp/repos/django/django/utils/text.py_Truncator.chars_Truncator.chars.9.1",
+      "distance": 1.207705020904541,
+      "file_path": "django/utils/text.py",
+      "start_line": 81,
+      "end_line": 102,
+      "tokens": 202,
+      "context_length": 65437
+    },
+    {
+      "position": 191,
+      "id": "/tmp/repos/django/django/db/models/base.py_Model.from_db_Model.__getstate__.5.1",
+      "distance": 1.2095203399658203,
+      "file_path": "django/db/models/base.py",
+      "start_line": 507,
+      "end_line": 552,
+      "tokens": 382,
+      "context_length": 65819
+    },
+    {
+      "position": 192,
+      "id": "/tmp/repos/django/django/utils/text.py_Truncator.words_Truncator._text_words.4.1",
+      "distance": 1.2097246646881104,
+      "file_path": "django/utils/text.py",
+      "start_line": 124,
+      "end_line": 146,
+      "tokens": 187,
+      "context_length": 66006
+    },
+    {
+      "position": 193,
+      "id": "/tmp/repos/django/django/contrib/admin/templatetags/admin_list.py_date_hierarchy_date_hierarchy.2.13.5.2.1",
+      "distance": 1.2104887962341309,
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "start_line": 322,
+      "end_line": 406,
+      "tokens": 754,
+      "context_length": 66760
+    },
+    {
+      "position": 194,
+      "id": "/tmp/repos/django/django/db/models/base.py_copy_DEFERRED.1",
+      "distance": 1.21132493019104,
+      "file_path": "django/db/models/base.py",
+      "start_line": 1,
+      "end_line": 50,
+      "tokens": 328,
+      "context_length": 67088
+    },
+    {
+      "position": 195,
+      "id": "/tmp/repos/django/django/views/generic/dates.py_datetime_YearMixin._get_current_year.2.1",
+      "distance": 1.2115418910980225,
+      "file_path": "django/views/generic/dates.py",
+      "start_line": 1,
+      "end_line": 65,
+      "tokens": 420,
+      "context_length": 67508
+    },
+    {
+      "position": 196,
+      "id": "/tmp/repos/django/django/contrib/gis/db/models/functions.py_GeoFunc_OracleToleranceMixin.as_oracle.4.1",
+      "distance": 1.2117071151733398,
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "start_line": 88,
+      "end_line": 124,
+      "tokens": 264,
+      "context_length": 67772
+    },
+    {
+      "position": 197,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol.set_DatabaseCache.pickle_protocol.touch.3.1",
+      "distance": 1.212246298789978,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 97,
+      "end_line": 110,
+      "tokens": 234,
+      "context_length": 68006
+    },
+    {
+      "position": 198,
+      "id": "/tmp/repos/django/django/contrib/postgres/forms/ranges.py_1_HiddenRangeWidget.__init__.1",
+      "distance": 1.2149691581726074,
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "start_line": 1,
+      "end_line": 28,
+      "tokens": 201,
+      "context_length": 68207
+    },
+    {
+      "position": 199,
+      "id": "/tmp/repos/django/django/db/backends/base/operations.py_datetime_BaseDatabaseOperations.date_extract_sql.2",
+      "distance": 1.2155357599258423,
+      "file_path": "django/db/backends/base/operations.py",
+      "start_line": 1,
+      "end_line": 100,
+      "tokens": 829,
+      "context_length": 69036
+    },
+    {
+      "position": 200,
+      "id": "/tmp/repos/django/django/db/backends/oracle/operations.py_DatabaseOperations.integer_field_ranges.adapt_timefield_value_DatabaseOperations.integer_field_ranges.adapt_decimalfield_value.1.1",
+      "distance": 1.21599280834198,
+      "file_path": "django/db/backends/oracle/operations.py",
+      "start_line": 543,
+      "end_line": 562,
+      "tokens": 209,
+      "context_length": 69245
+    },
+    {
+      "position": 201,
+      "id": "/tmp/repos/django/django/core/cache/backends/db.py_DatabaseCache.pickle_protocol.has_key_DatabaseCache.pickle_protocol.has_key.8.2.1",
+      "distance": 1.2167457342147827,
+      "file_path": "django/core/cache/backends/db.py",
+      "start_line": 230,
+      "end_line": 253,
+      "tokens": 259,
+      "context_length": 69504
+    },
+    {
+      "position": 202,
+      "id": "/tmp/repos/django/django/db/backends/base/features.py_BaseDatabaseFeatures.supports_transactions_",
+      "distance": 1.2175050973892212,
+      "file_path": "django/db/backends/base/features.py",
+      "start_line": 320,
+      "end_line": 338,
+      "tokens": 161,
+      "context_length": 69665
+    },
+    {
+      "position": 203,
+      "id": "/tmp/repos/django/django/db/models/functions/__init__.py_NullIf_",
+      "distance": 1.2176964282989502,
+      "file_path": "django/db/models/functions/__init__.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 666,
+      "context_length": 70331
+    },
+    {
+      "position": 204,
+      "id": "/tmp/repos/django/django/db/models/expressions.py_TemporalSubtraction_F.__hash__.1.1",
+      "distance": 1.2188923358917236,
+      "file_path": "django/db/models/expressions.py",
+      "start_line": 547,
+      "end_line": 588,
+      "tokens": 298,
+      "context_length": 70629
+    },
+    {
+      "position": 205,
+      "id": "/tmp/repos/django/django/db/backends/utils.py_datetime_CursorWrapper.8",
+      "distance": 1.2189176082611084,
+      "file_path": "django/db/backends/utils.py",
+      "start_line": 1,
+      "end_line": 45,
+      "tokens": 273,
+      "context_length": 70902
+    },
+    {
+      "position": 206,
+      "id": "/tmp/repos/django/django/conf/locale/eu/formats.py_DATE_FORMAT_",
+      "distance": 1.2209692001342773,
+      "file_path": "django/conf/locale/eu/formats.py",
+      "start_line": 5,
+      "end_line": 22,
+      "tokens": 171,
+      "context_length": 71073
+    },
+    {
+      "position": 207,
+      "id": "/tmp/repos/django/django/db/models/options.py_Options.contribute_to_class_Options.contribute_to_class.16.self.db_table_2.1",
+      "distance": 1.2214860916137695,
+      "file_path": "django/db/models/options.py",
+      "start_line": 147,
+      "end_line": 206,
+      "tokens": 587,
+      "context_length": 71660
+    }
+  ],
+  "files": [
+    {
+      "file_path": "django/db/models/functions/datetime.py",
+      "position": 1,
+      "tokens": 2552,
+      "context_length": 2552
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/base.py",
+      "position": 2,
+      "tokens": 5936,
+      "context_length": 8488
+    },
+    {
+      "file_path": "django/utils/timezone.py",
+      "position": 3,
+      "tokens": 1670,
+      "context_length": 10158
+    },
+    {
+      "file_path": "django/db/backends/mysql/operations.py",
+      "position": 4,
+      "tokens": 3663,
+      "context_length": 13821
+    },
+    {
+      "file_path": "django/utils/dateformat.py",
+      "position": 5,
+      "tokens": 2693,
+      "context_length": 16514
+    },
+    {
+      "file_path": "django/templatetags/tz.py",
+      "position": 6,
+      "tokens": 1185,
+      "context_length": 17699
+    },
+    {
+      "file_path": "django/db/models/fields/__init__.py",
+      "position": 7,
+      "tokens": 17689,
+      "context_length": 35388
+    },
+    {
+      "file_path": "django/db/backends/oracle/operations.py",
+      "position": 8,
+      "tokens": 5941,
+      "context_length": 41329
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/operations.py",
+      "position": 9,
+      "tokens": 3031,
+      "context_length": 44360
+    },
+    {
+      "file_path": "django/utils/datetime_safe.py",
+      "position": 10,
+      "tokens": 774,
+      "context_length": 45134
+    },
+    {
+      "file_path": "django/db/backends/base/base.py",
+      "position": 11,
+      "tokens": 4883,
+      "context_length": 50017
+    },
+    {
+      "file_path": "django/utils/timesince.py",
+      "position": 12,
+      "tokens": 926,
+      "context_length": 50943
+    },
+    {
+      "file_path": "django/db/backends/base/operations.py",
+      "position": 13,
+      "tokens": 5567,
+      "context_length": 56510
+    },
+    {
+      "file_path": "django/db/backends/utils.py",
+      "position": 14,
+      "tokens": 1866,
+      "context_length": 58376
+    },
+    {
+      "file_path": "django/conf/locale/tk/formats.py",
+      "position": 15,
+      "tokens": 447,
+      "context_length": 58823
+    },
+    {
+      "file_path": "django/conf/locale/tg/formats.py",
+      "position": 16,
+      "tokens": 447,
+      "context_length": 59270
+    },
+    {
+      "file_path": "django/conf/locale/ta/formats.py",
+      "position": 17,
+      "tokens": 169,
+      "context_length": 59439
+    },
+    {
+      "file_path": "django/conf/locale/lt/formats.py",
+      "position": 18,
+      "tokens": 721,
+      "context_length": 60160
+    },
+    {
+      "file_path": "django/conf/locale/az/formats.py",
+      "position": 19,
+      "tokens": 409,
+      "context_length": 60569
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hans/formats.py",
+      "position": 20,
+      "tokens": 680,
+      "context_length": 61249
+    },
+    {
+      "file_path": "django/utils/dateparse.py",
+      "position": 21,
+      "tokens": 1480,
+      "context_length": 62729
+    },
+    {
+      "file_path": "django/conf/locale/hu/formats.py",
+      "position": 22,
+      "tokens": 350,
+      "context_length": 63079
+    },
+    {
+      "file_path": "django/conf/locale/et/formats.py",
+      "position": 23,
+      "tokens": 177,
+      "context_length": 63256
+    },
+    {
+      "file_path": "django/conf/locale/zh_Hant/formats.py",
+      "position": 24,
+      "tokens": 680,
+      "context_length": 63936
+    },
+    {
+      "file_path": "django/conf/locale/bn/formats.py",
+      "position": 25,
+      "tokens": 338,
+      "context_length": 64274
+    },
+    {
+      "file_path": "django/conf/locale/id/formats.py",
+      "position": 26,
+      "tokens": 715,
+      "context_length": 64989
+    },
+    {
+      "file_path": "django/conf/locale/cs/formats.py",
+      "position": 27,
+      "tokens": 645,
+      "context_length": 65634
+    },
+    {
+      "file_path": "django/conf/locale/cy/formats.py",
+      "position": 28,
+      "tokens": 574,
+      "context_length": 66208
+    },
+    {
+      "file_path": "django/conf/locale/fr/formats.py",
+      "position": 29,
+      "tokens": 493,
+      "context_length": 66701
+    },
+    {
+      "file_path": "django/conf/locale/ka/formats.py",
+      "position": 30,
+      "tokens": 818,
+      "context_length": 67519
+    },
+    {
+      "file_path": "django/conf/locale/mk/formats.py",
+      "position": 31,
+      "tokens": 639,
+      "context_length": 68158
+    },
+    {
+      "file_path": "django/conf/locale/pl/formats.py",
+      "position": 32,
+      "tokens": 366,
+      "context_length": 68524
+    },
+    {
+      "file_path": "django/conf/locale/de/formats.py",
+      "position": 33,
+      "tokens": 350,
+      "context_length": 68874
+    },
+    {
+      "file_path": "django/conf/locale/fi/formats.py",
+      "position": 34,
+      "tokens": 480,
+      "context_length": 69354
+    },
+    {
+      "file_path": "django/conf/global_settings.py",
+      "position": 35,
+      "tokens": 5760,
+      "context_length": 75114
+    },
+    {
+      "file_path": "django/conf/locale/pt/formats.py",
+      "position": 36,
+      "tokens": 622,
+      "context_length": 75736
+    },
+    {
+      "file_path": "django/conf/locale/pt_BR/formats.py",
+      "position": 37,
+      "tokens": 504,
+      "context_length": 76240
+    },
+    {
+      "file_path": "django/conf/locale/tr/formats.py",
+      "position": 38,
+      "tokens": 364,
+      "context_length": 76604
+    },
+    {
+      "file_path": "django/conf/locale/te/formats.py",
+      "position": 39,
+      "tokens": 167,
+      "context_length": 76771
+    },
+    {
+      "file_path": "django/conf/locale/sl/formats.py",
+      "position": 40,
+      "tokens": 753,
+      "context_length": 77524
+    },
+    {
+      "file_path": "django/conf/locale/sk/formats.py",
+      "position": 41,
+      "tokens": 375,
+      "context_length": 77899
+    },
+    {
+      "file_path": "django/conf/locale/uk/formats.py",
+      "position": 42,
+      "tokens": 470,
+      "context_length": 78369
+    },
+    {
+      "file_path": "django/forms/fields.py",
+      "position": 43,
+      "tokens": 9347,
+      "context_length": 87716
+    },
+    {
+      "file_path": "django/conf/locale/ca/formats.py",
+      "position": 44,
+      "tokens": 332,
+      "context_length": 88048
+    },
+    {
+      "file_path": "django/conf/locale/da/formats.py",
+      "position": 45,
+      "tokens": 295,
+      "context_length": 88343
+    },
+    {
+      "file_path": "django/conf/locale/uz/formats.py",
+      "position": 46,
+      "tokens": 463,
+      "context_length": 88806
+    },
+    {
+      "file_path": "django/conf/locale/de_CH/formats.py",
+      "position": 47,
+      "tokens": 443,
+      "context_length": 89249
+    },
+    {
+      "file_path": "django/conf/locale/el/formats.py",
+      "position": 48,
+      "tokens": 500,
+      "context_length": 89749
+    },
+    {
+      "file_path": "django/conf/locale/sv/formats.py",
+      "position": 49,
+      "tokens": 526,
+      "context_length": 90275
+    },
+    {
+      "file_path": "django/core/files/storage.py",
+      "position": 50,
+      "tokens": 2879,
+      "context_length": 93154
+    },
+    {
+      "file_path": "django/conf/locale/ru/formats.py",
+      "position": 51,
+      "tokens": 412,
+      "context_length": 93566
+    },
+    {
+      "file_path": "django/conf/locale/es_MX/formats.py",
+      "position": 52,
+      "tokens": 305,
+      "context_length": 93871
+    },
+    {
+      "file_path": "django/conf/locale/lv/formats.py",
+      "position": 53,
+      "tokens": 745,
+      "context_length": 94616
+    },
+    {
+      "file_path": "django/conf/locale/is/formats.py",
+      "position": 54,
+      "tokens": 175,
+      "context_length": 94791
+    },
+    {
+      "file_path": "django/conf/locale/ml/formats.py",
+      "position": 55,
+      "tokens": 655,
+      "context_length": 95446
+    },
+    {
+      "file_path": "django/conf/locale/en_GB/formats.py",
+      "position": 56,
+      "tokens": 700,
+      "context_length": 96146
+    },
+    {
+      "file_path": "django/conf/locale/ar_DZ/formats.py",
+      "position": 57,
+      "tokens": 297,
+      "context_length": 96443
+    },
+    {
+      "file_path": "django/conf/locale/en_AU/formats.py",
+      "position": 58,
+      "tokens": 700,
+      "context_length": 97143
+    },
+    {
+      "file_path": "django/conf/locale/sr_Latn/formats.py",
+      "position": 59,
+      "tokens": 771,
+      "context_length": 97914
+    },
+    {
+      "file_path": "django/conf/locale/ig/formats.py",
+      "position": 60,
+      "tokens": 433,
+      "context_length": 98347
+    },
+    {
+      "file_path": "django/conf/locale/sr/formats.py",
+      "position": 61,
+      "tokens": 771,
+      "context_length": 99118
+    },
+    {
+      "file_path": "django/conf/locale/mn/formats.py",
+      "position": 62,
+      "tokens": 164,
+      "context_length": 99282
+    },
+    {
+      "file_path": "django/conf/locale/ro/formats.py",
+      "position": 63,
+      "tokens": 307,
+      "context_length": 99589
+    },
+    {
+      "file_path": "django/conf/locale/bs/formats.py",
+      "position": 64,
+      "tokens": 183,
+      "context_length": 99772
+    },
+    {
+      "file_path": "django/conf/locale/es_PR/formats.py",
+      "position": 65,
+      "tokens": 268,
+      "context_length": 100040
+    },
+    {
+      "file_path": "django/utils/text.py",
+      "position": 66,
+      "tokens": 3451,
+      "context_length": 103491
+    },
+    {
+      "file_path": "django/conf/locale/nn/formats.py",
+      "position": 67,
+      "tokens": 638,
+      "context_length": 104129
+    },
+    {
+      "file_path": "django/conf/locale/sq/formats.py",
+      "position": 68,
+      "tokens": 172,
+      "context_length": 104301
+    },
+    {
+      "file_path": "django/conf/locale/eo/formats.py",
+      "position": 69,
+      "tokens": 752,
+      "context_length": 105053
+    },
+    {
+      "file_path": "django/conf/locale/kn/formats.py",
+      "position": 70,
+      "tokens": 167,
+      "context_length": 105220
+    },
+    {
+      "file_path": "django/conf/locale/hr/formats.py",
+      "position": 71,
+      "tokens": 787,
+      "context_length": 106007
+    },
+    {
+      "file_path": "django/db/backends/postgresql/operations.py",
+      "position": 72,
+      "tokens": 2516,
+      "context_length": 108523
+    },
+    {
+      "file_path": "django/conf/locale/en/formats.py",
+      "position": 73,
+      "tokens": 655,
+      "context_length": 109178
+    },
+    {
+      "file_path": "django/db/backends/base/features.py",
+      "position": 74,
+      "tokens": 2724,
+      "context_length": 111902
+    },
+    {
+      "file_path": "django/conf/locale/bg/formats.py",
+      "position": 75,
+      "tokens": 175,
+      "context_length": 112077
+    },
+    {
+      "file_path": "django/template/defaultfilters.py",
+      "position": 76,
+      "tokens": 6086,
+      "context_length": 118163
+    },
+    {
+      "file_path": "django/conf/locale/nb/formats.py",
+      "position": 77,
+      "tokens": 638,
+      "context_length": 118801
+    },
+    {
+      "file_path": "django/contrib/humanize/templatetags/humanize.py",
+      "position": 78,
+      "tokens": 2800,
+      "context_length": 121601
+    },
+    {
+      "file_path": "django/utils/formats.py",
+      "position": 79,
+      "tokens": 2106,
+      "context_length": 123707
+    },
+    {
+      "file_path": "django/conf/locale/ga/formats.py",
+      "position": 80,
+      "tokens": 168,
+      "context_length": 123875
+    },
+    {
+      "file_path": "django/conf/locale/es/formats.py",
+      "position": 81,
+      "tokens": 330,
+      "context_length": 124205
+    },
+    {
+      "file_path": "django/contrib/gis/gdal/field.py",
+      "position": 82,
+      "tokens": 1677,
+      "context_length": 125882
+    },
+    {
+      "file_path": "django/conf/locale/ja/formats.py",
+      "position": 83,
+      "tokens": 193,
+      "context_length": 126075
+    },
+    {
+      "file_path": "django/conf/locale/es_AR/formats.py",
+      "position": 84,
+      "tokens": 320,
+      "context_length": 126395
+    },
+    {
+      "file_path": "django/conf/locale/he/formats.py",
+      "position": 85,
+      "tokens": 186,
+      "context_length": 126581
+    },
+    {
+      "file_path": "django/db/backends/postgresql/base.py",
+      "position": 86,
+      "tokens": 2873,
+      "context_length": 129454
+    },
+    {
+      "file_path": "django/conf/locale/ky/formats.py",
+      "position": 87,
+      "tokens": 459,
+      "context_length": 129913
+    },
+    {
+      "file_path": "django/conf/locale/es_CO/formats.py",
+      "position": 88,
+      "tokens": 278,
+      "context_length": 130191
+    },
+    {
+      "file_path": "django/conf/locale/gd/formats.py",
+      "position": 89,
+      "tokens": 188,
+      "context_length": 130379
+    },
+    {
+      "file_path": "django/conf/locale/ko/formats.py",
+      "position": 90,
+      "tokens": 890,
+      "context_length": 131269
+    },
+    {
+      "file_path": "django/db/models/functions/mixins.py",
+      "position": 91,
+      "tokens": 418,
+      "context_length": 131687
+    },
+    {
+      "file_path": "django/conf/locale/km/formats.py",
+      "position": 92,
+      "tokens": 208,
+      "context_length": 131895
+    },
+    {
+      "file_path": "django/views/generic/dates.py",
+      "position": 93,
+      "tokens": 5441,
+      "context_length": 137336
+    },
+    {
+      "file_path": "django/conf/locale/it/formats.py",
+      "position": 94,
+      "tokens": 809,
+      "context_length": 138145
+    },
+    {
+      "file_path": "django/conf/locale/es_NI/formats.py",
+      "position": 95,
+      "tokens": 286,
+      "context_length": 138431
+    },
+    {
+      "file_path": "django/conf/locale/ar/formats.py",
+      "position": 96,
+      "tokens": 179,
+      "context_length": 138610
+    },
+    {
+      "file_path": "django/conf/locale/hi/formats.py",
+      "position": 97,
+      "tokens": 169,
+      "context_length": 138779
+    },
+    {
+      "file_path": "django/conf/locale/nl/formats.py",
+      "position": 98,
+      "tokens": 1883,
+      "context_length": 140662
+    },
+    {
+      "file_path": "django/conf/locale/gl/formats.py",
+      "position": 99,
+      "tokens": 214,
+      "context_length": 140876
+    },
+    {
+      "file_path": "django/db/models/base.py",
+      "position": 100,
+      "tokens": 16644,
+      "context_length": 157520
+    },
+    {
+      "file_path": "django/conf/locale/fa/formats.py",
+      "position": 101,
+      "tokens": 193,
+      "context_length": 157713
+    },
+    {
+      "file_path": "django/conf/locale/th/formats.py",
+      "position": 102,
+      "tokens": 400,
+      "context_length": 158113
+    },
+    {
+      "file_path": "django/utils/duration.py",
+      "position": 103,
+      "tokens": 305,
+      "context_length": 158418
+    },
+    {
+      "file_path": "django/contrib/postgres/apps.py",
+      "position": 104,
+      "tokens": 552,
+      "context_length": 158970
+    },
+    {
+      "file_path": "django/contrib/admin/widgets.py",
+      "position": 105,
+      "tokens": 3794,
+      "context_length": 162764
+    },
+    {
+      "file_path": "django/conf/locale/vi/formats.py",
+      "position": 106,
+      "tokens": 223,
+      "context_length": 162987
+    },
+    {
+      "file_path": "django/core/cache/backends/db.py",
+      "position": 107,
+      "tokens": 2122,
+      "context_length": 165109
+    },
+    {
+      "file_path": "django/db/models/functions/math.py",
+      "position": 108,
+      "tokens": 1124,
+      "context_length": 166233
+    },
+    {
+      "file_path": "django/db/migrations/serializer.py",
+      "position": 109,
+      "tokens": 2671,
+      "context_length": 168904
+    },
+    {
+      "file_path": "django/utils/dates.py",
+      "position": 110,
+      "tokens": 679,
+      "context_length": 169583
+    },
+    {
+      "file_path": "django/db/backends/sqlite3/features.py",
+      "position": 111,
+      "tokens": 725,
+      "context_length": 170308
+    },
+    {
+      "file_path": "django/contrib/admin/filters.py",
+      "position": 112,
+      "tokens": 4093,
+      "context_length": 174401
+    },
+    {
+      "file_path": "django/db/models/lookups.py",
+      "position": 113,
+      "tokens": 4953,
+      "context_length": 179354
+    },
+    {
+      "file_path": "django/contrib/admin/templatetags/admin_list.py",
+      "position": 114,
+      "tokens": 3660,
+      "context_length": 183014
+    },
+    {
+      "file_path": "django/contrib/gis/db/models/functions.py",
+      "position": 115,
+      "tokens": 3945,
+      "context_length": 186959
+    },
+    {
+      "file_path": "django/contrib/postgres/forms/ranges.py",
+      "position": 116,
+      "tokens": 677,
+      "context_length": 187636
+    },
+    {
+      "file_path": "django/db/models/functions/__init__.py",
+      "position": 117,
+      "tokens": 666,
+      "context_length": 188302
+    },
+    {
+      "file_path": "django/db/models/expressions.py",
+      "position": 118,
+      "tokens": 10761,
+      "context_length": 199063
+    },
+    {
+      "file_path": "django/conf/locale/eu/formats.py",
+      "position": 119,
+      "tokens": 216,
+      "context_length": 199279
+    },
+    {
+      "file_path": "django/db/models/options.py",
+      "position": 120,
+      "tokens": 7106,
+      "context_length": 206385
+    }
+  ]
+}

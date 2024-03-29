@@ -1,0 +1,779 @@
+{
+  "instance_id": "sympy__sympy-23824",
+  "model_patch": "diff --git a/sympy/physics/hep/gamma_matrices.py b/sympy/physics/hep/gamma_matrices.py\nindex 23284e4a92..8869cc7a8f 100644\n--- a/sympy/physics/hep/gamma_matrices.py\n+++ b/sympy/physics/hep/gamma_matrices.py\n@@ -695,7 +695,8 @@ def kahane_simplify(expression):\n     # If `first_dum_pos` is not zero, it means that there are trailing free gamma\n     # matrices in front of `expression`, so multiply by them:\n     for i in range(0, first_dum_pos):\n-        [ri.insert(0, free_pos[i]) for ri in resulting_indices]\n+        for ri in resulting_indices:\n+            ri.append(free_pos[i])\n \n     resulting_expr = S.Zero\n     for i in resulting_indices:\n",
+  "model_name_or_path": "Devin",
+  "pass_or_fail": "fail",
+  "model_patch_files": [
+    "sympy/physics/hep/gamma_matrices.py"
+  ],
+  "repo": "sympy/sympy",
+  "base_commit": "39de9a2698ad4bb90681c0fdb70b30a78233145f",
+  "patch": "diff --git a/sympy/physics/hep/gamma_matrices.py b/sympy/physics/hep/gamma_matrices.py\n--- a/sympy/physics/hep/gamma_matrices.py\n+++ b/sympy/physics/hep/gamma_matrices.py\n@@ -694,8 +694,7 @@ def kahane_simplify(expression):\n \n     # If `first_dum_pos` is not zero, it means that there are trailing free gamma\n     # matrices in front of `expression`, so multiply by them:\n-    for i in range(0, first_dum_pos):\n-        [ri.insert(0, free_pos[i]) for ri in resulting_indices]\n+    resulting_indices = list( free_pos[0:first_dum_pos] + ri for ri in resulting_indices )\n \n     resulting_expr = S.Zero\n     for i in resulting_indices:\n",
+  "test_patch": "diff --git a/sympy/physics/hep/tests/test_gamma_matrices.py b/sympy/physics/hep/tests/test_gamma_matrices.py\n--- a/sympy/physics/hep/tests/test_gamma_matrices.py\n+++ b/sympy/physics/hep/tests/test_gamma_matrices.py\n@@ -257,10 +257,12 @@ def test_kahane_simplify1():\n     t = (G(mu)*G(nu)*G(rho)*G(sigma)*G(-mu))\n     r = kahane_simplify(t)\n     assert r.equals(-2*G(sigma)*G(rho)*G(nu))\n-    t = (G(mu)*G(nu)*G(rho)*G(sigma)*G(-mu))\n+    t = (G(mu)*G(-mu)*G(rho)*G(sigma))\n     r = kahane_simplify(t)\n-    assert r.equals(-2*G(sigma)*G(rho)*G(nu))\n-\n+    assert r.equals(4*G(rho)*G(sigma))\n+    t = (G(rho)*G(sigma)*G(mu)*G(-mu))\n+    r = kahane_simplify(t)\n+    assert r.equals(4*G(rho)*G(sigma))\n \n def test_gamma_matrix_class():\n     i, j, k = tensor_indices('i,j,k', LorentzIndex)\n",
+  "problem_statement": "physics.hep.kahane_simplify() incorrectly reverses order of leading uncontracted gamma matrices\nThe kahane_simplify() function applies [identities](https://en.wikipedia.org/w/index.php?title=Gamma_matrices&oldid=1098219980#Miscellaneous_identities) such as $\\gamma^\\mu \\gamma_\\mu = 4 I_4$ to simplify products of gamma matrices in which contracted matrices occur. Leading gamma matrices without contractions should be unaffected, but a bug causes such leading terms to be prepended in reverse order.\r\n\r\nThe bug is illustrated by the following example:\r\n```python\r\nimport sympy\r\nfrom sympy.physics.hep.gamma_matrices import GammaMatrix as G, gamma_trace, LorentzIndex\r\nfrom sympy.physics.hep.gamma_matrices import kahane_simplify\r\nfrom sympy.tensor.tensor import tensor_indices\r\n\r\ndef test_kahane_leading_gamma_matrix_bug():\r\n    mu, nu, rho, sigma = tensor_indices(\"mu, nu, rho, sigma\", LorentzIndex)\r\n    \r\n    t = G(mu)*G(-mu)*G(rho)*G(sigma)\r\n    r = kahane_simplify(t)\r\n    print(r)\r\n    assert r.equals(4*G(rho)*G(sigma))\r\n    \r\n    t = G(rho)*G(sigma)*G(mu)*G(-mu)\r\n    r = kahane_simplify(t)\r\n    print(r)\r\n    assert r.equals(4*G(rho)*G(sigma))\r\n```\r\n\r\nThe result is\r\n```\r\n4*GammaMatrix(rho)*GammaMatrix(sigma)\r\n4*GammaMatrix(sigma)*GammaMatrix(rho)\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/gahs/Documents/sympy/sympy-dev/test_kahane_leading_gamma_matrix_bug.py\", line 17, in test_kahane_leading_gamma_matrix_bug\r\n    assert r.equals(4*G(rho)*G(sigma))\r\nAssertionError\r\n```\r\n\r\nBoth $\\gamma^\\mu \\gamma_\\mu \\gamma^\\rho \\gamma^\\sigma$ and $\\gamma^\\rho \\gamma^\\sigma \\gamma^\\mu \\gamma_\\mu$ should simplify to $4\\gamma^\\rho \\gamma^\\sigma$, but the order of $\\gamma^\\rho$ and $\\gamma^\\sigma$ is flipped in the second case due to the bug.\r\n\r\nI found the source of the bug and it is simple to fix. In `kahane_simplify()` the leading matrices are removed at the beginning of the function and then inserted at the start of the product at the end of the function, and the insertion loop is just backward.\r\n\r\nI'll generate a pull request for this shortly.\r\n\n",
+  "hints_text": "",
+  "created_at": "2022-07-23T22:13:36Z",
+  "version": "1.12",
+  "FAIL_TO_PASS": "[\"test_kahane_simplify1\"]",
+  "PASS_TO_PASS": "[\"test_gamma_matrix_class\", \"test_kahane_algorithm\"]",
+  "environment_setup_commit": "c6cb7c5602fa48034ab1bd43c2347a7e8488f12e",
+  "patch_files": [
+    "sympy/physics/hep/gamma_matrices.py"
+  ],
+  "test_patch_files": [
+    "sympy/physics/hep/tests/test_gamma_matrices.py"
+  ],
+  "patch_diff_details": {
+    "sympy/physics/hep/gamma_matrices.py": {
+      "diffs": [
+        {
+          "start_line_old": 697,
+          "end_line_old": 698,
+          "file_pos": 1,
+          "file_context_length": 6399,
+          "closest_snippet_id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.2_kahane_simplify.58",
+          "closest_snippet_line_distance": 193,
+          "pos": 4,
+          "context_length": 3088
+        }
+      ]
+    }
+  },
+  "vectors": 9684,
+  "snippets": [
+    {
+      "position": 1,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify_kahane_simplify.1",
+      "distance": 0.6732921600341797,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 337,
+      "end_line": 416,
+      "tokens": 808,
+      "context_length": 808,
+      "file_pos": 1
+    },
+    {
+      "position": 2,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.72_kahane_simplify.92",
+      "distance": 0.6905121207237244,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 559,
+      "end_line": 651,
+      "tokens": 864,
+      "context_length": 1672,
+      "file_pos": 1
+    },
+    {
+      "position": 3,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.2_kahane_simplify.58",
+      "distance": 0.7001534700393677,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 418,
+      "end_line": 505,
+      "tokens": 847,
+      "context_length": 2519,
+      "file_pos": 1
+    },
+    {
+      "position": 4,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.93_",
+      "distance": 0.7153018712997437,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 653,
+      "end_line": 718,
+      "tokens": 569,
+      "context_length": 3088,
+      "file_pos": 1
+    },
+    {
+      "position": 5,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_kahane_simplify.59_kahane_simplify.71",
+      "distance": 0.7298983335494995,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 506,
+      "end_line": 558,
+      "tokens": 605,
+      "context_length": 3693,
+      "file_pos": 1
+    },
+    {
+      "position": 6,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_simplify_gpgp._simplify_gpgp_simplify_gpgp.5.2.2.1.1",
+      "distance": 0.8003354668617249,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 98,
+      "end_line": 167,
+      "tokens": 548,
+      "context_length": 4241,
+      "file_pos": 1
+    },
+    {
+      "position": 7,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py__simplify_single_line__simplify_single_line.5.1",
+      "distance": 0.807246744632721,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 200,
+      "end_line": 220,
+      "tokens": 196,
+      "context_length": 4437,
+      "file_pos": 1
+    },
+    {
+      "position": 8,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_simplify_gpgp_simplify_gpgp.1",
+      "distance": 0.8286113739013672,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 81,
+      "end_line": 97,
+      "tokens": 205,
+      "context_length": 4642,
+      "file_pos": 1
+    },
+    {
+      "position": 9,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py__trace_single_line._trace_single_line1__trace_single_line.4.4.1.1",
+      "distance": 0.8633756637573242,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 248,
+      "end_line": 311,
+      "tokens": 571,
+      "context_length": 5213,
+      "file_pos": 1
+    },
+    {
+      "position": 10,
+      "id": "/tmp/repos/sympy/sympy/simplify/gammasimp.py__gammasimp.rule_gamma.22__gammasimp.rule_gamma.22.3.29.1",
+      "distance": 0.8698508143424988,
+      "file_path": "sympy/simplify/gammasimp.py",
+      "start_line": 214,
+      "end_line": 374,
+      "tokens": 1455,
+      "context_length": 6668
+    },
+    {
+      "position": 11,
+      "id": "/tmp/repos/sympy/sympy/core/backend.py_os__simplify_matrix.7.1",
+      "distance": 0.8995856046676636,
+      "file_path": "sympy/core/backend.py",
+      "start_line": 1,
+      "end_line": 73,
+      "tokens": 850,
+      "context_length": 7518
+    },
+    {
+      "position": 12,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py__meijergexpand.do_slater__meijergexpand.do_slater.func.9.1",
+      "distance": 0.9231410026550293,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 2264,
+      "end_line": 2365,
+      "tokens": 1027,
+      "context_length": 8545
+    },
+    {
+      "position": 13,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py__gamma_trace1__gamma_trace1.8.5.1",
+      "distance": 0.9275345802307129,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 314,
+      "end_line": 334,
+      "tokens": 230,
+      "context_length": 8775,
+      "file_pos": 4
+    },
+    {
+      "position": 14,
+      "id": "/tmp/repos/sympy/sympy/simplify/gammasimp.py_1_gammasimp.14.1",
+      "distance": 0.9309906363487244,
+      "file_path": "sympy/simplify/gammasimp.py",
+      "start_line": 1,
+      "end_line": 81,
+      "tokens": 741,
+      "context_length": 9516
+    },
+    {
+      "position": 15,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__rewrite_gamma.43__rewrite_gamma.56.1",
+      "distance": 0.9312362670898438,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 725,
+      "end_line": 766,
+      "tokens": 364,
+      "context_length": 9880
+    },
+    {
+      "position": 16,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__rewrite_gamma.42__rewrite_gamma.42.5.11.1",
+      "distance": 0.9327203035354614,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 621,
+      "end_line": 723,
+      "tokens": 980,
+      "context_length": 10860
+    },
+    {
+      "position": 17,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.33_add_formulae.50",
+      "distance": 0.9394969940185547,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 192,
+      "end_line": 231,
+      "tokens": 769,
+      "context_length": 11629
+    },
+    {
+      "position": 18,
+      "id": "/tmp/repos/sympy/sympy/simplify/gammasimp.py__gammasimp.rule_gamma__gammasimp.rule_gamma.21",
+      "distance": 0.9412535429000854,
+      "file_path": "sympy/simplify/gammasimp.py",
+      "start_line": 106,
+      "end_line": 212,
+      "tokens": 834,
+      "context_length": 12463
+    },
+    {
+      "position": 19,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__rewrite_gamma.13__rewrite_gamma.exception.1.1",
+      "distance": 0.9578785300254822,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 560,
+      "end_line": 620,
+      "tokens": 570,
+      "context_length": 13033
+    },
+    {
+      "position": 20,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_gamma_trace_gamma_trace.5.1",
+      "distance": 0.9809448719024658,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 170,
+      "end_line": 197,
+      "tokens": 280,
+      "context_length": 13313,
+      "file_pos": 5
+    },
+    {
+      "position": 21,
+      "id": "/tmp/repos/sympy/sympy/simplify/gammasimp.py__gammasimp.rule_gamma.23__gammasimp.10.1",
+      "distance": 0.9858114719390869,
+      "file_path": "sympy/simplify/gammasimp.py",
+      "start_line": 376,
+      "end_line": 464,
+      "tokens": 791,
+      "context_length": 14104
+    },
+    {
+      "position": 22,
+      "id": "/tmp/repos/sympy/sympy/functions/special/hyper.py_meijerg._diff_wrt_parameter_meijerg._diff_wrt_parameter.an.13.1",
+      "distance": 0.9876230955123901,
+      "file_path": "sympy/functions/special/hyper.py",
+      "start_line": 528,
+      "end_line": 612,
+      "tokens": 744,
+      "context_length": 14848
+    },
+    {
+      "position": 23,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/pauli.py__qsimplify_pauli_product__qsimplify_pauli_product.3.8.1.1",
+      "distance": 0.9901214838027954,
+      "file_path": "sympy/physics/quantum/pauli.py",
+      "start_line": 518,
+      "end_line": 620,
+      "tokens": 641,
+      "context_length": 15489
+    },
+    {
+      "position": 24,
+      "id": "/tmp/repos/sympy/sympy/physics/hep/gamma_matrices.py_1_GammaMatrix.1",
+      "distance": 0.9934746026992798,
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "start_line": 1,
+      "end_line": 43,
+      "tokens": 325,
+      "context_length": 15814,
+      "file_pos": 7
+    },
+    {
+      "position": 25,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.21_add_formulae.mz.1",
+      "distance": 1.0024843215942383,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 152,
+      "end_line": 191,
+      "tokens": 739,
+      "context_length": 16553
+    },
+    {
+      "position": 26,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.81_add_formulae.93",
+      "distance": 1.0026682615280151,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 344,
+      "end_line": 375,
+      "tokens": 626,
+      "context_length": 17179
+    },
+    {
+      "position": 27,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_1_52",
+      "distance": 1.0155407190322876,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 1,
+      "end_line": 68,
+      "tokens": 758,
+      "context_length": 17937
+    },
+    {
+      "position": 28,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_polygamma._eval_expand_func_polygamma._eval_expand_func.4.1",
+      "distance": 1.0202603340148926,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 790,
+      "end_line": 834,
+      "tokens": 456,
+      "context_length": 18393
+    },
+    {
+      "position": 29,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_polygamma._eval_rewrite_as_zeta_polygamma._eval_as_leading_term.4.2.1.1",
+      "distance": 1.0207879543304443,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 836,
+      "end_line": 855,
+      "tokens": 235,
+      "context_length": 18628
+    },
+    {
+      "position": 30,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_gamma._eval_conjugate_gamma._eval_rewrite_as_factorial.1.1",
+      "distance": 1.0228824615478516,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 173,
+      "end_line": 196,
+      "tokens": 179,
+      "context_length": 18807
+    },
+    {
+      "position": 31,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.62_add_formulae.65",
+      "distance": 1.0288879871368408,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 264,
+      "end_line": 297,
+      "tokens": 675,
+      "context_length": 19482
+    },
+    {
+      "position": 32,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_hypersimp_hypersimp.8.2.1.1",
+      "distance": 1.0292669534683228,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 280,
+      "end_line": 324,
+      "tokens": 346,
+      "context_length": 19828
+    },
+    {
+      "position": 33,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py__trigpats.matchers_identity__trigpats.15.1",
+      "distance": 1.030822992324829,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 808,
+      "end_line": 848,
+      "tokens": 729,
+      "context_length": 20557
+    },
+    {
+      "position": 34,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_simplify.36_simplify.63.1",
+      "distance": 1.0345065593719482,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 662,
+      "end_line": 760,
+      "tokens": 828,
+      "context_length": 21385
+    },
+    {
+      "position": 35,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__rewrite_gamma__rewrite_gamma.11",
+      "distance": 1.0362896919250488,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 470,
+      "end_line": 533,
+      "tokens": 764,
+      "context_length": 22149
+    },
+    {
+      "position": 36,
+      "id": "/tmp/repos/sympy/sympy/integrals/transforms.py__rewrite_sin_MellinTransformStripError.2",
+      "distance": 1.0381524562835693,
+      "file_path": "sympy/integrals/transforms.py",
+      "start_line": 418,
+      "end_line": 467,
+      "tokens": 616,
+      "context_length": 22765
+    },
+    {
+      "position": 37,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_lowergamma.eval_lowergamma.eval.16.6.1.1",
+      "distance": 1.0385555028915405,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 291,
+      "end_line": 339,
+      "tokens": 671,
+      "context_length": 23436
+    },
+    {
+      "position": 38,
+      "id": "/tmp/repos/sympy/examples/advanced/relativity.py_curvature_eq4.5",
+      "distance": 1.0394361019134521,
+      "file_path": "examples/advanced/relativity.py",
+      "start_line": 97,
+      "end_line": 157,
+      "tokens": 487,
+      "context_length": 23923
+    },
+    {
+      "position": 39,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_loggamma._eval_rewrite_as_intractable_loggamma.fdiff.1.2.1",
+      "distance": 1.0407253503799438,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 1031,
+      "end_line": 1050,
+      "tokens": 149,
+      "context_length": 24072
+    },
+    {
+      "position": 40,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_gamma._eval_expand_func_gamma._eval_expand_func.4.1",
+      "distance": 1.0409696102142334,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 153,
+      "end_line": 171,
+      "tokens": 178,
+      "context_length": 24250
+    },
+    {
+      "position": 41,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_formulae.66_add_formulae.80",
+      "distance": 1.0413334369659424,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 298,
+      "end_line": 343,
+      "tokens": 706,
+      "context_length": 24956
+    },
+    {
+      "position": 42,
+      "id": "/tmp/repos/sympy/sympy/simplify/trigsimp.py_trigsimp_groebner.2_trigsimp_groebner.58",
+      "distance": 1.0426702499389648,
+      "file_path": "sympy/simplify/trigsimp.py",
+      "start_line": 120,
+      "end_line": 177,
+      "tokens": 827,
+      "context_length": 25783
+    },
+    {
+      "position": 43,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_try_lerchphi.31_try_lerchphi.51.1",
+      "distance": 1.042694091796875,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 1817,
+      "end_line": 1853,
+      "tokens": 468,
+      "context_length": 26251
+    },
+    {
+      "position": 44,
+      "id": "/tmp/repos/sympy/sympy/simplify/hyperexpand.py_add_meijerg_formulae_add_meijerg_formulae.5",
+      "distance": 1.0443304777145386,
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "start_line": 388,
+      "end_line": 415,
+      "tokens": 307,
+      "context_length": 26558
+    },
+    {
+      "position": 45,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_loggamma._eval_expand_func_loggamma._eval_expand_func.4.1",
+      "distance": 1.0451300144195557,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 988,
+      "end_line": 1007,
+      "tokens": 218,
+      "context_length": 26776
+    },
+    {
+      "position": 46,
+      "id": "/tmp/repos/sympy/sympy/physics/quantum/cg.py__check_varsh_872_9__check_varsh_872_9.2",
+      "distance": 1.048823595046997,
+      "file_path": "sympy/physics/quantum/cg.py",
+      "start_line": 553,
+      "end_line": 595,
+      "tokens": 776,
+      "context_length": 27552
+    },
+    {
+      "position": 47,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_uppergamma.eval_uppergamma.eval.9.1.1",
+      "distance": 1.0492475032806396,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 484,
+      "end_line": 539,
+      "tokens": 550,
+      "context_length": 28102
+    },
+    {
+      "position": 48,
+      "id": "/tmp/repos/sympy/sympy/integrals/meijerint.py__check_antecedents.151__check_antecedents.175",
+      "distance": 1.049347162246704,
+      "file_path": "sympy/integrals/meijerint.py",
+      "start_line": 1220,
+      "end_line": 1257,
+      "tokens": 800,
+      "context_length": 28902
+    },
+    {
+      "position": 49,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_polygamma._eval_aseries_polygamma._eval_aseries.5.4.fac.8.1",
+      "distance": 1.049560308456421,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 694,
+      "end_line": 733,
+      "tokens": 496,
+      "context_length": 29398
+    },
+    {
+      "position": 50,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_lowergamma._eval_aseries_lowergamma._eval_is_zero.2.1.1",
+      "distance": 1.0497398376464844,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 373,
+      "end_line": 395,
+      "tokens": 243,
+      "context_length": 29641
+    },
+    {
+      "position": 51,
+      "id": "/tmp/repos/sympy/sympy/functions/special/gamma_functions.py_lowergamma.fdiff_lowergamma.fdiff.2.4.1",
+      "distance": 1.050546407699585,
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "start_line": 278,
+      "end_line": 289,
+      "tokens": 135,
+      "context_length": 29776
+    },
+    {
+      "position": 52,
+      "id": "/tmp/repos/sympy/sympy/functions/special/hyper.py_hyper.__new___hyper._eval_expand_func.4.1",
+      "distance": 1.050699234008789,
+      "file_path": "sympy/functions/special/hyper.py",
+      "start_line": 192,
+      "end_line": 218,
+      "tokens": 326,
+      "context_length": 30102
+    },
+    {
+      "position": 53,
+      "id": "/tmp/repos/sympy/sympy/matrices/expressions/kronecker.py_validate_extract_commutative.6.1",
+      "distance": 1.0522112846374512,
+      "file_path": "sympy/matrices/expressions/kronecker.py",
+      "start_line": 236,
+      "end_line": 254,
+      "tokens": 115,
+      "context_length": 30217
+    },
+    {
+      "position": 54,
+      "id": "/tmp/repos/sympy/sympy/plotting/experimental_lambdify.py_1_54",
+      "distance": 1.0523266792297363,
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "start_line": 1,
+      "end_line": 75,
+      "tokens": 856,
+      "context_length": 31073
+    },
+    {
+      "position": 55,
+      "id": "/tmp/repos/sympy/sympy/abc.py_14_",
+      "distance": 1.0554044246673584,
+      "file_path": "sympy/abc.py",
+      "start_line": 72,
+      "end_line": 112,
+      "tokens": 451,
+      "context_length": 31524
+    },
+    {
+      "position": 56,
+      "id": "/tmp/repos/sympy/sympy/physics/matrices.py_mgamma_mgamma.6.1",
+      "distance": 1.0558791160583496,
+      "file_path": "sympy/physics/matrices.py",
+      "start_line": 75,
+      "end_line": 147,
+      "tokens": 631,
+      "context_length": 32155
+    },
+    {
+      "position": 57,
+      "id": "/tmp/repos/sympy/sympy/core/sympify.py_kernS_",
+      "distance": 1.0573499202728271,
+      "file_path": "sympy/core/sympify.py",
+      "start_line": 532,
+      "end_line": 636,
+      "tokens": 838,
+      "context_length": 32993
+    },
+    {
+      "position": 58,
+      "id": "/tmp/repos/sympy/sympy/simplify/simplify.py_kroneckersimp_kroneckersimp.9.1",
+      "distance": 1.0588313341140747,
+      "file_path": "sympy/simplify/simplify.py",
+      "start_line": 1149,
+      "end_line": 1197,
+      "tokens": 386,
+      "context_length": 33379
+    },
+    {
+      "position": 59,
+      "id": "/tmp/repos/sympy/sympy/matrices/matrices.py_MatrixBase.inverse_QR_MatrixBase.strongly_connected_components_decomposition.__doc__.1",
+      "distance": 1.0592718124389648,
+      "file_path": "sympy/matrices/matrices.py",
+      "start_line": 2215,
+      "end_line": 2275,
+      "tokens": 740,
+      "context_length": 34119
+    },
+    {
+      "position": 60,
+      "id": "/tmp/repos/sympy/sympy/tensor/tensor.py_TensMul_TensMul.__call__.10.1",
+      "distance": 1.0611481666564941,
+      "file_path": "sympy/tensor/tensor.py",
+      "start_line": 3209,
+      "end_line": 3954,
+      "tokens": 6583,
+      "context_length": 40702
+    }
+  ],
+  "files": [
+    {
+      "file_path": "sympy/physics/hep/gamma_matrices.py",
+      "position": 1,
+      "tokens": 6399,
+      "context_length": 6399
+    },
+    {
+      "file_path": "sympy/simplify/gammasimp.py",
+      "position": 2,
+      "tokens": 4166,
+      "context_length": 10565
+    },
+    {
+      "file_path": "sympy/core/backend.py",
+      "position": 3,
+      "tokens": 1051,
+      "context_length": 11616
+    },
+    {
+      "file_path": "sympy/simplify/hyperexpand.py",
+      "position": 4,
+      "tokens": 24840,
+      "context_length": 36456
+    },
+    {
+      "file_path": "sympy/integrals/transforms.py",
+      "position": 5,
+      "tokens": 26037,
+      "context_length": 62493
+    },
+    {
+      "file_path": "sympy/functions/special/hyper.py",
+      "position": 6,
+      "tokens": 10843,
+      "context_length": 73336
+    },
+    {
+      "file_path": "sympy/physics/quantum/pauli.py",
+      "position": 7,
+      "tokens": 4392,
+      "context_length": 77728
+    },
+    {
+      "file_path": "sympy/functions/special/gamma_functions.py",
+      "position": 8,
+      "tokens": 11716,
+      "context_length": 89444
+    },
+    {
+      "file_path": "sympy/simplify/simplify.py",
+      "position": 9,
+      "tokens": 18670,
+      "context_length": 108114
+    },
+    {
+      "file_path": "sympy/simplify/trigsimp.py",
+      "position": 10,
+      "tokens": 12332,
+      "context_length": 120446
+    },
+    {
+      "file_path": "examples/advanced/relativity.py",
+      "position": 11,
+      "tokens": 1572,
+      "context_length": 122018
+    },
+    {
+      "file_path": "sympy/physics/quantum/cg.py",
+      "position": 12,
+      "tokens": 6793,
+      "context_length": 128811
+    },
+    {
+      "file_path": "sympy/integrals/meijerint.py",
+      "position": 13,
+      "tokens": 25114,
+      "context_length": 153925
+    },
+    {
+      "file_path": "sympy/matrices/expressions/kronecker.py",
+      "position": 14,
+      "tokens": 3644,
+      "context_length": 157569
+    },
+    {
+      "file_path": "sympy/plotting/experimental_lambdify.py",
+      "position": 15,
+      "tokens": 5359,
+      "context_length": 162928
+    },
+    {
+      "file_path": "sympy/abc.py",
+      "position": 16,
+      "tokens": 1173,
+      "context_length": 164101
+    },
+    {
+      "file_path": "sympy/physics/matrices.py",
+      "position": 17,
+      "tokens": 1340,
+      "context_length": 165441
+    },
+    {
+      "file_path": "sympy/core/sympify.py",
+      "position": 18,
+      "tokens": 5175,
+      "context_length": 170616
+    },
+    {
+      "file_path": "sympy/matrices/matrices.py",
+      "position": 19,
+      "tokens": 19526,
+      "context_length": 190142
+    },
+    {
+      "file_path": "sympy/tensor/tensor.py",
+      "position": 20,
+      "tokens": 35709,
+      "context_length": 225851
+    }
+  ]
+}
