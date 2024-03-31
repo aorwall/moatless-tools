@@ -7,7 +7,9 @@ class CodeSnippet:
     id: str
     file_path: str
     content: str
-    distance: float
+    distance: float = 0.0
+    tokens: int = 0
+    language: str = "python"
     start_line: Optional[int] = None
     end_line: Optional[int] = None
 

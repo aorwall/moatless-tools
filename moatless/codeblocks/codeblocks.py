@@ -141,6 +141,17 @@ class RelationshipType(str, Enum):
     TYPE = "type"
 
 
+class DiffAction(Enum):
+    ADD = "add"
+    REMOVE = "remove"
+    UPDATE = "update"
+
+
+class BlockDiff(BaseModel):
+    block_path: List[str] = Field()
+    action: DiffAction = Field()
+
+
 class MergeAction(BaseModel):
     action: str
     original_block: Optional["CodeBlock"] = None
@@ -297,7 +308,7 @@ class CodeBlock(BaseModel):
         return self.to_string()
 
     def to_string(self):
-        return self._to_context_string()
+        return self._to_string()
 
     def _insert_into_tree(self, node, path):
         if not path:
@@ -358,20 +369,11 @@ class CodeBlock(BaseModel):
             blocks.extend(child.get_all_child_blocks())
         return blocks
 
-    def _to_context_string(self,
-                           path_tree: PathTree = None,
-                           show_blocks: List["CodeBlock"] = None,
-                           exclude_types: List[CodeBlockType] = None,
-                           show_commented_out_code_comment: bool = True) -> str:
+    def get_children(self, exclude_blocks: List[CodeBlockType] = []) -> List["CodeBlock"]:
+        return [child for child in self.children if child.type not in exclude_blocks]
+
+    def _to_string(self) -> str:
         contents = ""
-
-        if exclude_types is None:
-            if self.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]:
-                exclude_types = [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.TEST_SUITE, CodeBlockType.TEST_CASE]
-            else:
-                exclude_types = []
-
-        show_code = self._show_code(path_tree, show_blocks, exclude_types)
 
         if self.pre_lines:
             contents += "\n" * (self.pre_lines - 1)
@@ -383,78 +385,10 @@ class CodeBlock(BaseModel):
         else:
             contents += self.pre_code + self.content
 
-        # ignore comments at start
-        # TODO: Should be CodeBlock trait?
-        start = 0
-        is_licence_comment = False
-        while len(self.children) > start and self.children[start].type == CodeBlockType.COMMENT and (
-                re.search(r"(?i)copyright|license|author", self.children[start].content)
-                or not self.children[start].content
-                or is_licence_comment):
-            if re.search(r"(?i)copyright|license|author", self.children[start].content):
-                is_licence_comment = True
-
-            start += 1
-
-        outcommented_types = set()
-        for i, child in enumerate(self.children[start:]):
-            if self._ignore_block(child, i):
-                continue
-
-            if show_code:
-                if outcommented_types:
-                    # TODO: print by type
-                    if show_commented_out_code_comment:
-                        contents += child.create_commented_out_block()._to_context_string()
-                    else:
-                        contents += "\n"
-
-                    outcommented_types.clear()
-                contents += child._to_context_string(
-                    path_tree=path_tree.tree.get(child.identifier, None) if path_tree else None,
-                    show_blocks=show_blocks,
-                    exclude_types=exclude_types,
-                    show_commented_out_code_comment=show_commented_out_code_comment)
-            elif child in show_blocks or child.has_any_block(show_blocks):
-                contents += child._to_context_string(
-                    path_tree=path_tree.tree.get(child.identifier, None) if path_tree else None,
-                    show_blocks=show_blocks,
-                    exclude_types=exclude_types,
-                    show_commented_out_code_comment=show_commented_out_code_comment)
-            else:
-                outcommented_types.add(child.type)
-
-        if show_commented_out_code_comment and outcommented_types and self.children:
-            # TODO: print by type
-            contents += self.children[-1].create_commented_out_block()._to_context_string()
+        for i, child in enumerate(self.children):
+            contents += child._to_string()
 
         return contents
-
-    def _show_code(
-            self,
-            path_tree: PathTree = None,
-            show_blocks: List["CodeBlock"] = None,
-            exclude_types: List[CodeBlockType] = None):
-
-        if path_tree and not path_tree.tree.get(self.identifier):
-            return False
-
-        if show_blocks and self not in show_blocks:
-            return False
-
-        if exclude_types is not None and self.type in exclude_types:
-            return False
-
-        return True
-
-
-    def _ignore_block(self, block: "CodeBlock", index: int) -> bool:
-        if block.type == CodeBlockType.COMMENT:
-            # TODO: Do a more generic solution...
-            if index == 0 and re.search(r"(?i)copyright|license|author", block.content):
-                return True
-
-        return False
 
     def _build_path_tree(self, block_paths: List[str], include_references: bool = False):
         path_tree = PathTree()
@@ -482,38 +416,11 @@ class CodeBlock(BaseModel):
 
         return path_tree
 
-    # TODO: Move to Module sub class
-    def to_string_with_blocks(self, block_paths: List[str], include_references: bool = False,
-                              show_commented_out_code_comment: bool = True) -> str:
-        if self.parent:
-            raise ValueError("Cannot call to_string_with_blocks on non root block.")
-
-        path_tree = self._build_path_tree(block_paths, include_references)
-        return self._to_context_string(path_tree, show_commented_out_code_comment=show_commented_out_code_comment)
-
-    def to_context_string(self,
-                          include_references: bool = False,
-                          show_commented_out_code_comment: bool = True,
-                          exclude_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE, CodeBlockType.TEST_CASE]) -> str:
-        path_tree = PathTree()
-        if include_references:
-            path_tree = self.build_reference_tree()
-
-        path_tree.add_to_tree(self.full_path())
-
-        content = self.root()._to_context_string(path_tree, show_commented_out_code_comment=show_commented_out_code_comment, exclude_types=exclude_types)
-
-        if include_references:
-            path_tree = PathTree()
-            path_tree.add_to_tree(self.full_path())
-            content = self.root()._to_context_string(path_tree, show_commented_out_code_comment=show_commented_out_code_comment, exclude_types=exclude_types)
-
-        return content
 
     def to_tree(self,
                 indent: int = 0,
-                only_identifiers: bool = True,
-                show_full_path: bool = False,
+                only_identifiers: bool = False,
+                show_full_path: bool = True,
                 show_tokens: bool = False,
                 debug: bool = False,
                 include_types: List[CodeBlockType] = None,
@@ -555,6 +462,8 @@ class CodeBlock(BaseModel):
             content += Colors.GREEN
             if include_parameters and self.parameters:
                 content += f"{self.identifier}({', '.join([param.identifier for param in self.parameters])})"
+            elif show_full_path:
+                content += f" ({self.path_string()})"
             else:
                 content += f" ({self.identifier})"
 
@@ -571,12 +480,19 @@ class CodeBlock(BaseModel):
     def __eq__(self, other):
         if not isinstance(other, CodeBlock):
             return False
+
         return self.full_path() == other.full_path()
+
+    def equal_contents(self, other: "CodeBlock"):
+        if len(self.children) != len(other.children):
+            return False
+
+        child_equal = all([self.children[i].equal_contents(other.children[i]) for i in range(len(self.children))])
+        return self.content == other.content and child_equal
 
     def dict(self, **kwargs):
         # TODO: Add **kwargs to dict call
         return super().dict(exclude={"parent", "merge_history"})
-
 
     def path_string(self):
         return ".".join(self.full_path())
@@ -917,13 +833,11 @@ class CodeBlock(BaseModel):
         return []
 
     def merge(self, updated_block: "CodeBlock"):
-        logging.debug(f"Merging block `{self.type.value}: {self.identifier}` ({len(self.children)} children) with "
-                      f"`{updated_block.type.value}: {updated_block.identifier}` ({len(updated_block.children)} children)")
+        logging.debug(f"Merging block `{self.type.value}: {self.path_string()}` ({len(self.children)} children) with "
+                      f"`{updated_block.type.value}: {updated_block.path_string()}` ({len(updated_block.children)} children)")
 
         # If there are no matching child blocks on root level expect separate blocks to update on other levels
-        has_identifier = any(child.identifier for child in self.children)
-        no_matching_identifiers = has_identifier and not self.has_any_matching_child(updated_block.children)
-        if no_matching_identifiers:
+        if not self.has_any_matching_child(updated_block.children):
             update_pairs = self.find_nested_matching_pairs(updated_block)
             if update_pairs:
                 for original_child, updated_child in update_pairs:
@@ -938,39 +852,41 @@ class CodeBlock(BaseModel):
                 return
 
             raise ValueError(f"Didn't find matching blocks in `{self.identifier}``")
-        else:
-            self._merge(updated_block)
+
+        self._merge(updated_block)
 
     def _merge(self, updated_block: "CodeBlock"):
-        logging.debug(f"Merging block `{self.type.value}: {self.identifier}` ({len(self.children)} children) with "
-                      f"`{updated_block.type.value}: {updated_block.identifier}` ({len(updated_block.children)} children)")
+        logging.debug(f"Merging block `{self.type.value}: {self.path_string()}` ({len(self.children)} children) with "
+                      f"`{updated_block.type.value}: {updated_block.path_string()}` ({len(updated_block.children)} children)")
 
         # Just replace if there are no code blocks in original block
         if len(self.children) == 0 or all(child.type in NON_CODE_BLOCKS for child in self.children):
             self.children = updated_block.children
             self.merge_history.append(MergeAction(action="replace_non_code_blocks"))
 
-        # Find and replace if all children are matching
-        update_pairs = self.find_matching_pairs(updated_block)
-        if update_pairs:
-            self.merge_history.append(
-                MergeAction(action="all_children_match", original_block=self, updated_block=updated_block))
+        # Find and replace if all children in a class are matching
+        if self.type == CodeBlockType.CLASS == updated_block.type:
+            update_pairs = self.find_matching_pairs(updated_block)
+            if update_pairs:
+                self.merge_history.append(
+                    MergeAction(action="all_children_match", original_block=self, updated_block=updated_block))
 
-            for original_child, updated_child in update_pairs:
-                original_child._merge(updated_child)
+                for original_child, updated_child in update_pairs:
+                    original_child._merge(updated_child)
 
-            return
+                return
 
         # Replace if block is complete
-        if updated_block.is_complete():
-            self.children = updated_block.children
-            self.merge_history.append(MergeAction(action="replace_complete", original_block=self, updated_block=updated_block))
+        # if updated_block.is_complete():
+        #     self.children = updated_block.children
+        #     self.merge_history.append(MergeAction(action="replace_complete", original_block=self, updated_block=updated_block))
 
         self._merge_block_by_block(updated_block)
 
     def _merge_block_by_block(self, updated_block: "CodeBlock"):
         i = 0
         j = 0
+
         while j < len(updated_block.children):
             if i >= len(self.children):
                 self.children.extend(updated_block.children[j:])
@@ -979,7 +895,7 @@ class CodeBlock(BaseModel):
             original_block_child = self.children[i]
             updated_block_child = updated_block.children[j]
 
-            if original_block_child == updated_block_child:
+            if original_block_child.equal_contents(updated_block_child):
                 original_block_child.merge_history.append(MergeAction(action="is_same"))
                 i += 1
                 j += 1

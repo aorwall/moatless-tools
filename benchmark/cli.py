@@ -19,6 +19,7 @@ from benchmark.utils import diff_details
 from moatless.retrievers.golden_retriever import GoldenRetriever, IngestionPipelineSetup
 from moatless.splitters.epic_split import CommentStrategy
 from moatless.splitters.epic_split import EpicSplitter
+from moatless.utils import setup_github_repo
 
 app = typer.Typer()
 get_app = typer.Typer()
@@ -49,24 +50,6 @@ ingestion_pipelines = [
         embed_model=OpenAIEmbedding(model="text-embedding-3-small")
     )
 ]
-
-
-def maybe_clone(repo_url, repo_dir):
-    if not os.path.exists(f"{repo_dir}/.git"):
-        # Clone the repo if the directory doesn't exist
-        result = subprocess.run(['git', 'clone', repo_url, repo_dir], check=True, text=True, capture_output=True)
-
-        if result.returncode == 0:
-            print(f"Repo '{repo_url}' was cloned to '{repo_dir}'", file=sys.stderr)
-        else:
-            print(f"Failed to clone repo '{repo_url}' to '{repo_dir}'", file=sys.stderr)
-            raise typer.Exit(code=1)
-    else:
-        print(f"Repo '{repo_url}' already exists in '{repo_dir}'", file=sys.stderr)
-
-
-def checkout_commit(repo_dir, commit_hash):
-    subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=repo_dir, check=True)
 
 
 def write_file(path, text):
@@ -183,16 +166,10 @@ def instance(
     run_benchmark(row_data, benchmark_run)
 
 
+
+
 def run_benchmark(row_data: dict, benchmark_run: str, report_dir='benchmark/reports'):
-    repo_name = row_data['repo'].split('/')[-1]
-    repo = f'git@github.com:{row_data["repo"]}.git'
-    base_commit = row_data['base_commit']
-    path = f'/tmp/repos/{repo_name}'
-    if not os.path.exists(path):
-        os.makedirs(path)
-        print(f"Directory '{path}' was created.")
-    maybe_clone(repo, path)
-    checkout_commit(path, base_commit)
+    setup_github_repo(row_data["repo"], row_data['base_commit'])
 
     instance_id = row_data['instance_id']
     print(f"Processing {instance_id}")
