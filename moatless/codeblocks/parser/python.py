@@ -24,31 +24,16 @@ class PythonParser(CodeParser):
         self.queries.extend(self._build_queries("python.scm"))
 
         if self.apply_gpt_tweaks:
-            self.queries.extend(self._build_queries("python_gpt.scm"))
-
-    def process_match(self, node_match: NodeMatch, node: Node, content_bytes: bytes):
-        if self.apply_gpt_tweaks:
-            # Fix function with commented out content
-            if (node.type == "function_definition"
-                    and node_match.block_type != CodeBlockType.FUNCTION
-                    and node.next_sibling and node.next_sibling.type == "comment"
-                    and self.is_outcommented_code(node.next_sibling.text.decode("utf8"))):
-                self.debug_log(f"Ignore function with commented out content: {node.text}")
-
-                node_match.block_type = CodeBlockType.COMMENTED_OUT_CODE
-                node_match.first_child = node.next_sibling
-                node_match.last_child = node.next_sibling
-
-        if node_match.block_type == CodeBlockType.COMMENT and self.is_outcommented_code(node.text.decode("utf8")):
-            node_match.block_type = CodeBlockType.COMMENTED_OUT_CODE
-
-        return node_match
+            self.gpt_queries.extend(self._build_queries("python_gpt.scm"))
 
     def pre_process(self, codeblock: CodeBlock):
         if codeblock.type == CodeBlockType.FUNCTION and codeblock.identifier == "__init__":
             codeblock.type = CodeBlockType.CONSTRUCTOR
 
     def post_process(self, codeblock: CodeBlock):
+        if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(codeblock.content):
+            codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
+
         if codeblock.type == CodeBlockType.ASSIGNMENT:
             for reference in codeblock.references:
                 reference.type = RelationshipType.TYPE
@@ -89,6 +74,10 @@ class PythonParser(CodeParser):
                 for reference in init_block.get_all_references():
                     if reference.scope == ReferenceScope.CLASS:
                         codeblock.references.append(reference)
+
+        if (codeblock.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
+                and len(codeblock.children) == 1 and codeblock.children[0].type == CodeBlockType.COMMENTED_OUT_CODE):
+            codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 
     def is_outcommented_code(self, comment):
         return comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords)

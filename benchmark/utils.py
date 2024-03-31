@@ -1,4 +1,136 @@
+import logging
+import os
 import re
+import sys
+from typing import List
+
+from llama_index.core import get_tokenizer
+
+from moatless.retriever import CodeSnippet
+
+
+logger = logging.getLogger(__name__)
+
+
+def write_file(path, text):
+    with open(path, 'w') as f:
+        f.write(text)
+        print(f"File '{path}' was saved", file=sys.stderr)
+
+
+def write_json(path, name, data):
+    json_str = json.dumps(data, indent=2)
+    json_path = f"{path}/{name}.json"
+    write_file(json_path, json_str)
+
+
+def diff_file_names(text: str) -> list[str]:
+    return [
+        line[len("+++ b/"):]
+        for line in text.split('\n')
+        if line.startswith('+++')
+    ]
+
+
+def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: str):
+    report = {}
+    report["instance_id"] = row_data["instance_id"]
+
+    patch_files = row_data["patch_files"]
+    no_of_patches = len(patch_files)
+
+    found_patch_files = set()
+    found_snippets = 0
+
+    top_file_pos = None
+    file_pos = 0
+    min_pos = None
+    sum_pos = 0
+
+    sum_tokens = 0
+    sum_file_tokens = 0
+
+    snippet_reports = []
+    file_reports = {}
+
+    for i, snippet in enumerate(code_snippets):
+        snippet_pos = i+1
+
+        tokenizer = get_tokenizer()
+        tokens = len(tokenizer(snippet.content))
+
+        sum_tokens += tokens
+
+        file_report = file_reports.get(snippet.file_path)
+        if not file_report:
+            file_pos += 1
+
+            file_report = {
+                "file_path": snippet.file_path,
+                "position": file_pos
+            }
+
+            try:
+                with open(f"{repo_path}/{snippet.file_path}", "r") as f:
+                    file_tokens = len(tokenizer(f.read()))
+                    sum_file_tokens += file_tokens
+                    file_report["tokens"] = file_tokens
+                    file_report["context_length"] = sum_file_tokens
+            except Exception as e:
+                logger.info(f"Failed to read file: {e}")
+                file_report["error"] = str(e)
+                file_report["snippet_id"] = snippet.id
+
+            file_reports[snippet.file_path] = file_report
+
+        file_hit = snippet.file_path in row_data["patch_diff_details"]
+
+        snippet_report = {
+            "position": snippet_pos,
+            "id": snippet.id,
+            "distance": snippet.distance,
+            "file_path": snippet.file_path,
+            "start_line": snippet.start_line,
+            "end_line": snippet.end_line,
+            "tokens": tokens,
+            "context_length": sum_tokens,
+        }
+        snippet_reports.append(snippet_report)
+
+        if file_hit:
+            if not top_file_pos:
+                top_file_pos = file_pos
+
+            snippet_report["file_pos"] = file_pos
+
+            found_patch_files.add(snippet.file_path)
+            diffs = row_data["patch_diff_details"][snippet.file_path]
+            for diff in diffs["diffs"]:
+                if "file_pos" not in diff:
+                    diff["file_pos"] = file_pos
+                    diff["file_context_length"] = file_report["context_length"]
+
+                if snippet.start_line and (snippet.start_line <= diff['start_line_old'] <= diff.get('end_line_old', diff['start_line_old']) <= snippet.end_line):
+                    found_snippets += 1
+                    diff["pos"] = snippet_pos
+                    diff["context_length"] = sum_tokens
+
+                    if "closest_snippet" in diff:
+                        del diff["closest_snippet"]
+                        del diff["closest_snippet_line_distance"]
+
+                elif "pos" not in diff and snippet.start_line and snippet.end_line:
+                    line_distance = min(abs(snippet.start_line - diff['start_line_old']), abs(snippet.end_line - diff.get('end_line_old', diff['start_line_old'])))
+
+                    if "closest_snippet" not in diff or line_distance < diff["line_distance"]:
+                        diff["closest_snippet_id"] = snippet.id
+                        diff["closest_snippet_line_distance"] = line_distance
+
+    report["patch_diff_details"] = row_data["patch_diff_details"]
+    report["snippets"] = snippet_reports
+    report["files"] = list(file_reports.values())
+
+    return report
 
 
 def diff_details(text: str):

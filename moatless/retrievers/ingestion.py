@@ -44,12 +44,14 @@ class Ingestion:
                  docstore: DocumentStore,
                  pipeline_setup: IngestionPipelineSetup,
                  path: str,
+                 num_workers: int = None,
                  perist_dir: str = None):
         self.vector_store = vector_store
         self.docstore = docstore
         self.pipeline_setup = pipeline_setup
         self.path = path
         self.perist_dir = perist_dir
+        self.num_workers = num_workers
 
     def run(self):
         reader = SimpleDirectoryReader(
@@ -79,7 +81,7 @@ class Ingestion:
         docs = reader.load_data()
         logger.info(f"Read {len(docs)} documents")
 
-        prepared_nodes = prepare_pipeline.run(documents=docs, show_progress=True)  # TODO: Set num_workers to run in parallell
+        prepared_nodes = prepare_pipeline.run(documents=docs, show_progress=True, num_workers=self.num_workers)
 
         tokenizer = get_tokenizer()
         sum_tokens = 0
@@ -95,7 +97,7 @@ class Ingestion:
 
         logger.info(f"Prepared {len(prepared_nodes)} nodes with {sum_tokens} tokens")
 
-        embedded_nodes = embed_pipeline.run(nodes=list(prepared_nodes), show_progress=True, num_workers=4)
+        embedded_nodes = embed_pipeline.run(nodes=list(prepared_nodes), show_progress=True, num_workers=self.num_workers)
 
         tokens = sum([len(tokenizer(node.get_content())) for node in embedded_nodes])
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {tokens} tokens")

@@ -1,9 +1,7 @@
-import csv
 import json
 import logging
 import os
 import shutil
-import sys
 
 import faiss
 from azure.core.exceptions import ResourceNotFoundError
@@ -11,10 +9,12 @@ from azure.storage.blob import BlobServiceClient
 from llama_index.core import get_tokenizer
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
+from llama_index.embeddings.openai import OpenAIEmbedding
 
 from moatless.retrievers.golden_retriever import IngestionPipelineSetup, GoldenRetriever
 from moatless.retrievers.ingestion import Ingestion
 from moatless.splitters import report
+from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.store.simple_faiss import SimpleFaissVectorStore
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,58 @@ def write_file(path, text):
     with open(path, 'w') as f:
         f.write(text)
         logger.info(f"File '{path}' was saved")
+
+
+def initiate_index(path: str, index_name: str, persist_dir: str = "/tmp/.storage"):
+    pipeline_setup = IngestionPipelineSetup(
+        name="epic-splitter-v4--100-750--comment-associate--text-embedding-3-small--1536",
+        splitter=EpicSplitter(min_chunk_size=100, chunk_size=750, language="python", comment_strategy=CommentStrategy.ASSOCIATE),
+        embed_model=OpenAIEmbedding(model="text-embedding-3-small")
+    )
+
+    if not os.path.exists(persist_dir):
+        os.makedirs(persist_dir)
+
+    downloaded_existing_store = download_store(persist_dir, pipeline_setup.name, index_name)
+
+    try:
+        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
+    except:
+        faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(1536))
+        vector_store = SimpleFaissVectorStore(faiss_index)
+
+    try:
+        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
+    except:
+        docstore = SimpleDocumentStore()
+
+    if not downloaded_existing_store:
+        ingestion = Ingestion(
+            vector_store=vector_store,
+            docstore=docstore,
+            pipeline_setup=pipeline_setup,
+            path=path,
+            perist_dir=persist_dir
+        )
+        vectors, indexed_tokens = ingestion.run()
+        print(f"Indexed {vectors} vectors and {indexed_tokens} tokens.")
+
+        docstore.persist(persist_path=os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
+        logger.info(f"Persisted docstore to {persist_dir}")
+        vector_store.persist(persist_dir=persist_dir)
+        logger.info(f"Persisted vector store to {persist_dir}")
+
+        try:
+            upload_store(persist_dir, pipeline_setup.name, index_name)
+        except Exception as e:
+            logger.info(f"Failed to upload store: {e}")
+
+    retriever = GoldenRetriever(
+        vector_store=vector_store,
+        docstore=docstore,
+        embed_model=pipeline_setup.embed_model)
+
+    return retriever
 
 
 def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: str, path: str, repo_name: str, row_data: dict, commit: str, report_dir='benchmark/reports'):
@@ -389,7 +441,7 @@ def upload_store(store_path: str, ingestion_name: str, file_name: str):
 
 
 def download_store(store_path: str, ingestion_name: str, file_name: str):
-    zip_file = f"{file_name}.zip"
+    zip_file = f"zips/{file_name}.zip"
     if os.path.exists(zip_file):
         logger.info(f"Found {zip_file} locally, skipping download.")
         shutil.unpack_archive(zip_file, store_path)

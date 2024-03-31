@@ -261,7 +261,7 @@ class CodeParser:
 
     def find_in_tree(self, node: Node) -> Optional[NodeMatch]:
         if self.apply_gpt_tweaks:
-            match = self.find_match(node, True)
+            match = self.find_match_with_gpt_tweaks(node)
             if match:
                 self.debug_log(f"GPT match: {match.block_type} on {node}")
                 return match
@@ -274,9 +274,20 @@ class CodeParser:
             self.debug_log(f"Found no match on node type {node.type} set block type {CodeBlockType.CODE}")
             return NodeMatch(block_type=CodeBlockType.CODE)
 
-    def find_match(self, node: Node, gpt_tweaks: bool = False) -> Optional[NodeMatch]:
-        queries = gpt_tweaks and self.gpt_queries or self.queries
-        for label, node_type, query in queries:
+    def find_match_with_gpt_tweaks(self, node: Node) -> Optional[NodeMatch]:
+        for label, node_type, query in self.gpt_queries:
+            if node_type and node.type != node_type and node_type != "_":
+                continue
+            match = self._find_match(node, query, label, capture_from_parent=True)
+            if match:
+                if not match.query:
+                    match.query = label
+                return match
+
+        return None
+
+    def find_match(self, node: Node) -> Optional[NodeMatch]:
+        for label, node_type, query in self.queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
             match = self._find_match(node, query, label)
@@ -287,8 +298,11 @@ class CodeParser:
 
         return None
 
-    def _find_match(self, node: Node, query, label: str) -> Optional[NodeMatch]:
-        captures = query.captures(node)
+    def _find_match(self, node: Node, query, label: str, capture_from_parent: bool = False) -> Optional[NodeMatch]:
+        if capture_from_parent:
+            captures = query.captures(node.parent)
+        else:
+            captures = query.captures(node)
 
         node_match = NodeMatch()
 
@@ -300,13 +314,15 @@ class CodeParser:
         for found_node, tag in captures:
             self.debug_log(f"[{label}] Found tag {tag} on node {found_node}")
 
-            if tag == "root" and node != found_node:
-                self.debug_log(f"[{label}] Expect first hit to be root match for {node}, got {tag} on {found_node}")
-                break
-
-            if tag == "root" and not root_node:
+            if tag == "root" and not root_node and node == found_node:
                 self.debug_log(f"[{label}] Root node {found_node}")
                 root_node = found_node
+
+            if not root_node:
+                continue
+
+            if tag == "no_children" and found_node.children:
+                return None
 
             if tag == "check_child":
                 return self.find_match(found_node)
@@ -323,13 +339,13 @@ class CodeParser:
                     if child_match.first_child:
                         node_match.first_child = child_match.first_child
 
-            if tag == "identifier":
+            if tag == "identifier" and not node_match.identifier_node:
                 node_match.identifier_node = found_node
 
-            if tag == "child.first":
+            if tag == "child.first" and not node_match.first_child:
                 node_match.first_child = found_node
 
-            if tag == "child.last":
+            if tag == "child.last"  and not node_match.last_child:
                 node_match.last_child = found_node
 
             if tag == "parameter.identifier":
@@ -496,7 +512,6 @@ class CodeParser:
 
     def _count_tokens(self, content: str):
         if not self.tokenizer:
-            logger.warning("No tokenizer set, cannot count tokens")
             return 0
         return len(self.tokenizer(content))
 

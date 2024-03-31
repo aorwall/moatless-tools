@@ -3,14 +3,16 @@ import json
 import os
 
 
-def instance_report(dir: str, subdir: str) -> dict:
-    report_path = os.path.join(dir, subdir, "data.json")
+def instance_report(dir: str, file: str = "data.json") -> dict:
+    report_path = os.path.join(dir, file)
+    if not os.path.exists(report_path):
+        return None
     with open(report_path, "r") as f:
         return json.load(f)
 
 
-def instance_reports(dir: str) -> list[dict]:
-    return [instance_report(dir, subdir) for subdir in os.listdir(dir) if os.path.isdir(os.path.join(dir, subdir))]
+def instance_reports(dir: str, file: str = "data.json") -> list[str]:
+    return [os.path.join(dir, subdir) for subdir in os.listdir(dir) if os.path.exists(os.path.join(dir, subdir, file))]
 
 
 def sort_key(data_row):
@@ -19,15 +21,23 @@ def sort_key(data_row):
 
 
 def generate_summary(dir: str):
-    reports = instance_reports(dir)
+    report_dirs = instance_reports(dir)
 
     summary = []
 
-    for report in reports:
+    for report_dir in report_dirs:
+        report = instance_report(report_dir)
+
+        select_report = instance_report(report_dir, "select_file.json")
+
         any_file_context = None
         any_snippet_context = None
         all_file_context = 0
         all_snippet_context = 0
+
+        any_files_selected_context = None
+        all_files_selected_context = 0
+
         avg_distance_to_snippet = []
 
         patch_diffs = 0
@@ -39,7 +49,7 @@ def generate_summary(dir: str):
             for diff in file_diff['diffs']:
                 patch_diffs += 1
 
-                # Skip new files
+                # Ignore new files
                 if diff.get('start_line_old', 0) == 0 and diff.get('end_line_old', 0) == 0:
                     continue
 
@@ -61,6 +71,17 @@ def generate_summary(dir: str):
                         avg_distance_to_snippet.append(diff['closest_snippet_line_distance'])
                     all_snippet_context = None
 
+        if select_report:
+            for file_path, file_diff in select_report['patch_diff_details'].items():
+                for diff in file_diff['diffs']:
+                    if 'file_context_length' in diff:
+                        any_files_selected_context = min(any_files_selected_context or float('inf'), diff['file_context_length'])
+
+                        if all_files_selected_context is not None:
+                            all_files_selected_context = max(all_files_selected_context, diff['file_context_length'])
+                    else:
+                        all_files_selected_context = None
+
         avg_distance_to_snippet = sum(avg_distance_to_snippet) / len(avg_distance_to_snippet) if avg_distance_to_snippet else None
 
         summary.append({
@@ -73,6 +94,9 @@ def generate_summary(dir: str):
             'all_file_context': all_file_context,
             'all_snippet_context': all_snippet_context,
             'avg_distance_to_snippet': avg_distance_to_snippet,
+            'has_select': select_report is not None,
+            'all_files_selected_context': all_files_selected_context,
+            'any_files_selected_context': any_files_selected_context,
             'files_missed_by_devin': missed_by_devin,
             'devin_pass_or_fail': report['pass_or_fail']
         })
