@@ -2,6 +2,8 @@
 
 | **matplotlib/matplotlib** | `aca6e9d5e98811ca37c442217914b15e78127c89` |
 | ---- | ---- |
+| **Indexed vectors** | 3941 |
+| **Indexed tokens** | 1584041 |
 | **No of patches** | 1 |
 | **All found context length** | - |
 | **Any found context length** | - |
@@ -180,39 +182,37 @@ git checkout
 | 19 | 16 doc/conf.py | 111 | 158| 481 | 15913 | 176192 | 
 | 20 | 17 examples/subplots_axes_and_figures/axes_box_aspect.py | 111 | 156| 344 | 16257 | 177317 | 
 | 21 | 17 tutorials/intermediate/arranging_axes.py | 345 | 413| 671 | 16928 | 177317 | 
-| 22 | 18 examples/scales/semilogx_demo.py | 1 | 24| 104 | 17032 | 177421 | 
-| 23 | 18 tutorials/intermediate/constrainedlayout_guide.py | 636 | 721| 777 | 17809 | 177421 | 
-| 24 | 18 tutorials/intermediate/arranging_axes.py | 100 | 178| 775 | 18584 | 177421 | 
-| 25 | 18 lib/matplotlib/pyplot.py | 2835 | 2854| 226 | 18810 | 177421 | 
-| 26 | 18 doc/conf.py | 178 | 273| 760 | 19570 | 177421 | 
-| 27 | 18 lib/matplotlib/_cm.py | 767 | 791| 613 | 20183 | 177421 | 
-| 28 | 18 lib/matplotlib/pyplot.py | 341 | 359| 175 | 20358 | 177421 | 
-| 29 | 18 lib/matplotlib/rcsetup.py | 126 | 171| 320 | 20678 | 177421 | 
-| 30 | 18 lib/matplotlib/figure.py | 2035 | 2056| 240 | 20918 | 177421 | 
-| 31 | 19 examples/shapes_and_collections/artist_reference.py | 90 | 130| 319 | 21237 | 178581 | 
-| 32 | 19 lib/matplotlib/_cm.py | 819 | 841| 545 | 21782 | 178581 | 
-| 33 | 19 lib/matplotlib/_cm.py | 1080 | 1211| 458 | 22240 | 178581 | 
-| 34 | 20 examples/subplots_axes_and_figures/broken_axis.py | 1 | 55| 525 | 22765 | 179106 | 
-| 35 | 20 doc/conf.py | 274 | 331| 412 | 23177 | 179106 | 
-| 36 | 21 examples/userdemo/demo_gridspec03.py | 1 | 52| 421 | 23598 | 179527 | 
-| 37 | 21 lib/matplotlib/_cm.py | 942 | 959| 398 | 23996 | 179527 | 
-| 38 | 22 lib/matplotlib/__init__.py | 107 | 156| 328 | 24324 | 191545 | 
-| 39 | 22 lib/matplotlib/pyplot.py | 2520 | 2551| 369 | 24693 | 191545 | 
-| 40 | 23 examples/subplots_axes_and_figures/ganged_plots.py | 1 | 41| 344 | 25037 | 191889 | 
-| 41 | 24 examples/subplots_axes_and_figures/gridspec_multicolumn.py | 1 | 34| 259 | 25296 | 192148 | 
-| 42 | 24 lib/matplotlib/axes/_base.py | 1 | 32| 212 | 25508 | 192148 | 
-| 43 | 24 lib/matplotlib/_cm.py | 611 | 635| 657 | 26165 | 192148 | 
-| 44 | 24 lib/matplotlib/axes/_base.py | 469 | 4640| 813 | 26978 | 192148 | 
-| 45 | 24 lib/matplotlib/pyplot.py | 753 | 812| 624 | 27602 | 192148 | 
-| 46 | 25 examples/axes_grid1/demo_fixed_size_axes.py | 1 | 48| 326 | 27928 | 192474 | 
-| 47 | 25 examples/subplots_axes_and_figures/axes_box_aspect.py | 1 | 110| 781 | 28709 | 192474 | 
-| 48 | 26 lib/matplotlib/backends/backend_gtk3.py | 135 | 184| 461 | 29170 | 197316 | 
-| 49 | 26 lib/matplotlib/_cm.py | 637 | 661| 660 | 29830 | 197316 | 
-| 50 | 26 lib/matplotlib/figure.py | 1998 | 2033| 381 | 30211 | 197316 | 
-| 51 | 26 lib/matplotlib/_cm.py | 663 | 687| 670 | 30881 | 197316 | 
-| 52 | 26 tutorials/intermediate/constrainedlayout_guide.py | 532 | 634| 1011 | 31892 | 197316 | 
-| 53 | 26 tutorials/intermediate/tight_layout_guide.py | 222 | 293| 495 | 32387 | 197316 | 
-| 54 | 26 lib/matplotlib/_cm.py | 713 | 739| 719 | 33106 | 197316 | 
+| 22 | 17 tutorials/intermediate/constrainedlayout_guide.py | 636 | 721| 777 | 17705 | 177317 | 
+| 23 | 17 tutorials/intermediate/arranging_axes.py | 100 | 178| 775 | 18480 | 177317 | 
+| 24 | 17 lib/matplotlib/pyplot.py | 2835 | 2854| 226 | 18706 | 177317 | 
+| 25 | 17 doc/conf.py | 178 | 273| 760 | 19466 | 177317 | 
+| 26 | 17 lib/matplotlib/_cm.py | 767 | 791| 613 | 20079 | 177317 | 
+| 27 | 17 lib/matplotlib/pyplot.py | 341 | 359| 175 | 20254 | 177317 | 
+| 28 | 17 lib/matplotlib/figure.py | 2035 | 2056| 240 | 20494 | 177317 | 
+| 29 | 17 lib/matplotlib/rcsetup.py | 126 | 171| 320 | 20814 | 177317 | 
+| 30 | 18 examples/shapes_and_collections/artist_reference.py | 90 | 130| 319 | 21133 | 178477 | 
+| 31 | 18 lib/matplotlib/_cm.py | 819 | 841| 545 | 21678 | 178477 | 
+| 32 | 19 examples/subplots_axes_and_figures/broken_axis.py | 1 | 55| 525 | 22203 | 179002 | 
+| 33 | 19 lib/matplotlib/_cm.py | 1080 | 1211| 458 | 22661 | 179002 | 
+| 34 | 19 doc/conf.py | 274 | 331| 412 | 23073 | 179002 | 
+| 35 | 20 examples/userdemo/demo_gridspec03.py | 1 | 52| 421 | 23494 | 179423 | 
+| 36 | 20 lib/matplotlib/_cm.py | 942 | 959| 398 | 23892 | 179423 | 
+| 37 | 21 lib/matplotlib/__init__.py | 107 | 156| 328 | 24220 | 191441 | 
+| 38 | 21 lib/matplotlib/pyplot.py | 2520 | 2551| 369 | 24589 | 191441 | 
+| 39 | 22 examples/subplots_axes_and_figures/ganged_plots.py | 1 | 41| 344 | 24933 | 191785 | 
+| 40 | 23 examples/subplots_axes_and_figures/gridspec_multicolumn.py | 1 | 34| 259 | 25192 | 192044 | 
+| 41 | 23 lib/matplotlib/axes/_base.py | 1 | 32| 212 | 25404 | 192044 | 
+| 42 | 23 lib/matplotlib/_cm.py | 611 | 635| 657 | 26061 | 192044 | 
+| 43 | 23 lib/matplotlib/axes/_base.py | 469 | 4640| 813 | 26874 | 192044 | 
+| 44 | 23 lib/matplotlib/pyplot.py | 753 | 812| 624 | 27498 | 192044 | 
+| 45 | 24 examples/axes_grid1/demo_fixed_size_axes.py | 1 | 48| 326 | 27824 | 192370 | 
+| 46 | 24 examples/subplots_axes_and_figures/axes_box_aspect.py | 1 | 110| 781 | 28605 | 192370 | 
+| 47 | 25 lib/matplotlib/backends/backend_gtk3.py | 135 | 184| 461 | 29066 | 197212 | 
+| 48 | 25 lib/matplotlib/_cm.py | 637 | 661| 660 | 29726 | 197212 | 
+| 49 | 25 lib/matplotlib/_cm.py | 663 | 687| 670 | 30396 | 197212 | 
+| 50 | 25 lib/matplotlib/figure.py | 1998 | 2033| 381 | 30777 | 197212 | 
+| 51 | 25 tutorials/intermediate/constrainedlayout_guide.py | 532 | 634| 1011 | 31788 | 197212 | 
+| 52 | 25 tutorials/intermediate/tight_layout_guide.py | 222 | 293| 495 | 32283 | 197212 | 
 
 
 ## Missing Patch Files

@@ -27,12 +27,12 @@ def maybe_clone(repo_url, repo_dir):
         result = subprocess.run(['git', 'clone', repo_url, repo_dir], check=True, text=True, capture_output=True)
 
         if result.returncode == 0:
-            print(f"Repo '{repo_url}' was cloned to '{repo_dir}'", file=sys.stderr)
+            print(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
         else:
-            print(f"Failed to clone repo '{repo_url}' to '{repo_dir}'", file=sys.stderr)
+            print(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
             raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
     else:
-        print(f"Repo '{repo_url}' already exists in '{repo_dir}'", file=sys.stderr)
+        print(f"Repo '{repo_url}' already exists in '{repo_dir}'")
 
 
 def checkout_commit(repo_dir, commit_hash):

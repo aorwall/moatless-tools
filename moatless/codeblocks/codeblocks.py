@@ -289,6 +289,10 @@ class CodeBlock(BaseModel):
             self.append_child(child)
 
     def replace_child(self, index: int, child: "CodeBlock"):
+        # TODO: Do a proper update of everything when replacing child blocks
+        child.pre_code = self.children[index].pre_code
+        child.pre_lines = self.children[index].pre_lines
+        child.indentation = self.children[index].indentation
         self.children[index] = child
         child.parent = self
 
@@ -299,6 +303,17 @@ class CodeBlock(BaseModel):
 
     def remove_child(self, index: int):
         del self.children[index]
+
+    def replace_by_path(self, path: List[str], new_block: "CodeBlock"):
+        if not path:
+            return
+
+        for i, child in enumerate(self.children):
+            if child.identifier == path[0]:
+                if len(path) == 1:
+                    self.replace_child(i, new_block)
+                else:
+                    child.replace_by_path(path[1:], new_block)
 
     def has_equal_definition(self, other: "CodeBlock") -> bool:
         # TODO: should be replaced an expression that checks the actual identifier and parameters
