@@ -6,7 +6,7 @@ from typing import Sequence, List, Optional, Any, Callable
 
 from llama_index.core.bridge.pydantic import Field, PrivateAttr
 from llama_index.core.callbacks import CallbackManager
-from llama_index.core.node_parser import NodeParser, TextSplitter
+from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSplitter
 from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode, NodeRelationship
 from llama_index.core.utils import get_tqdm_iterable, get_tokenizer
@@ -96,9 +96,9 @@ class EpicSplitter(NodeParser):
 
     def __init__(
         self,
-        chunk_size: int = 1024,
-        language: str = "python", # TODO: Shouldn't have to set this
-        min_chunk_size: int = 256,
+        chunk_size: int = 750,
+        language: str = "python" , # TODO: Shouldn't have to set this
+        min_chunk_size: int = 100,
         max_chunk_size: int = 1500,
         hard_token_limit: int = 6000,
         max_chunks: int = 100,
@@ -128,7 +128,7 @@ class EpicSplitter(NodeParser):
         super().__init__(
             chunk_size=chunk_size,
             chunk_overlap=0,
-            text_splitter=text_splitter or CodeSplitterV2(chunk_size=chunk_size, language="python"),
+            text_splitter=text_splitter or TokenTextSplitter(),
             min_chunk_size=min_chunk_size,
             max_chunk_size=max_chunk_size,
             hard_token_limit=hard_token_limit,
@@ -407,9 +407,16 @@ class EpicSplitter(NodeParser):
             "file_type": node.metadata.get("file_type"),
         }
 
+        node_id = node.id_
+
         if chunk:
             metadata["start_line"] = chunk[0].start_line
             metadata["end_line"] = chunk[-1].end_line
+
+            metadata["start_block"] = chunk[0].path_string()
+            metadata["end_block"] = chunk[-1].path_string()
+
+            node_id += f"_{chunk[0].path_string()}_{chunk[-1].path_string()}"
 
         content = content.strip()
 
@@ -418,11 +425,6 @@ class EpicSplitter(NodeParser):
 
         excluded_embed_metadata_keys = node.excluded_embed_metadata_keys.copy()
         excluded_embed_metadata_keys.extend(["start_line", "end_line", "tokens"])
-
-        node_id = node.id_
-
-        if chunk:
-            node_id += f"_{chunk[0].path_string()}_{chunk[-1].path_string()}"
 
         return TextNode(
             id_=node_id,

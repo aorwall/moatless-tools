@@ -1,6 +1,8 @@
 import logging
+import pathlib
 
-from tree_sitter import Node
+from tree_sitter import Node, Language
+import tree_sitter_python as tspython
 
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, \
     RelationshipType
@@ -18,13 +20,19 @@ logger = logging.getLogger(__name__)
 class PythonParser(CodeParser):
 
     def __init__(self, **kwargs):
-        super().__init__("python", **kwargs)
+        language = Language(tspython.language(), "python")
+
+        super().__init__(language, **kwargs)
 
         self.queries = []
         self.queries.extend(self._build_queries("python.scm"))
 
         if self.apply_gpt_tweaks:
             self.gpt_queries.extend(self._build_queries("python_gpt.scm"))
+
+    @property
+    def language(self):
+        return "python"
 
     def pre_process(self, codeblock: CodeBlock):
         if codeblock.type == CodeBlockType.FUNCTION and codeblock.identifier == "__init__":

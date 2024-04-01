@@ -1,12 +1,10 @@
 import logging
 import re
-import time
 from dataclasses import dataclass, field
 from importlib import resources
 from typing import List, Tuple, Optional, Callable
 
-import tree_sitter_languages
-from tree_sitter import Node
+from tree_sitter import Node, Language, Parser
 
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, Relationship, ReferenceScope, Parameter, \
     RelationshipType
@@ -58,25 +56,29 @@ def find_nested_type(node: Node, type: str, levels: int = -1):
 class CodeParser:
 
     def __init__(self,
-                 language: str,
+                 language: Language,
                  encoding: str = "utf8",
                  tokenizer: Callable[[str], List] = None,
                  apply_gpt_tweaks: bool = False,
                  debug: bool = False):
         try:
-            self.tree_parser = tree_sitter_languages.get_parser(language)
-            self.tree_language = tree_sitter_languages.get_language(language)
+            self.tree_parser = Parser()
+            self.tree_parser.set_language(language)
+            self.tree_language = language
         except Exception as e:
             print(f"Could not get parser for language {language}.")
             raise e
         self.apply_gpt_tweaks = apply_gpt_tweaks
         self.debug = debug
         self.encoding = encoding
-        self.language = language
         self.gpt_queries = []
         self.queries = []
         self.reference_index = {}
         self.tokenizer = tokenizer
+
+    @property
+    def language(self):
+        pass
 
     def _extract_node_type(self, query: str):
         pattern = r'\(\s*(\w+)'

@@ -1,7 +1,6 @@
 from moatless.codeblocks.parser.python import PythonParser
 
 
-
 def _verify_merge(original_content, updated_content, assertions):
     parser = PythonParser(apply_gpt_tweaks=True)
 
@@ -32,6 +31,7 @@ def test_merge_function_with_updated_line():
         assert foo_func.to_string() == "def foo():\n    bar = 2"
 
     _verify_merge(original_content, updated_content, assertion)
+
 
 def test_merge_function_with_new_lines():
     original_content = """def foo():
@@ -128,3 +128,27 @@ def test_pytest_dev__pytest_5808_ignore_comments():
         assert original_block.to_string() == expected_content
 
     _verify_merge(original_content, updated_content, assertion)
+
+
+def test_pytest_dev__pytest_5808_only_function():
+    with open("data/python/pytest-dev__pytest-5808/original_pastebin.py", "r") as f:
+        original_content = f.read()
+
+    with open("data/python/pytest-dev__pytest-5808/update_pastebin_create_new_paste.py", "r") as f:
+        updated_content = f.read()
+
+    with open("data/python/pytest-dev__pytest-5808/expected_pastebin.py", "r") as f:
+        expected_content = f.read()
+
+    parser = PythonParser(apply_gpt_tweaks=True)
+
+    original_block = parser.parse(original_content)
+    updated_block = parser.parse(updated_content)
+
+    print(f"Original block:\n{original_block.to_tree()}")
+    print(f"Updated block:\n{updated_block.to_tree()}")
+
+    original_block.replace_by_path(["create_new_paste"], updated_block.children[0])
+    print(f"Merged block:\n{original_block.to_tree()}")
+
+    assert original_block.to_string() == expected_content

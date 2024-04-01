@@ -53,7 +53,7 @@ class CodeSplitterV2(TextSplitter):
 
     def __init__(
         self,
-        language: str,
+        language: str = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         parser: Any = None,
         tokenizer: Optional[Callable] = None,
@@ -83,7 +83,7 @@ class CodeSplitterV2(TextSplitter):
                 )
                 raise
         if not isinstance(parser, Parser):
-            raise ValueError("Parser must be a tree-sitter Parser object.")
+            raise ValueError(f"Parser must be a tree-sitter Parser object. Was {type(parser)}.")
 
         self._parser = parser
         self._tokenizer = tokenizer or get_tokenizer()

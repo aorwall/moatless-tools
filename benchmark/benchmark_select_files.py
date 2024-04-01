@@ -35,7 +35,7 @@ def benchmark_reports(report_dir: str = 'reports/princeton-nlp-SWE-bench-devin')
         select_files(report)
 
 
-def select_files(report: dict, base_dir: str = '/tmp/repos'):
+def select_files(report: dict, base_dir: str = '/tmp/repos', force: bool = False):
     print(f"Selecting files for report '{report['instance_id']}'")
 
     # FIXME: Just temporary workaround to clean up diffs
@@ -55,7 +55,7 @@ def select_files(report: dict, base_dir: str = '/tmp/repos'):
 
     repo_path = setup_github_repo(repo=report['repo'], base_commit=report['base_commit'], base_dir=base_dir)
 
-    code_selector = CodeSelector(model_name="claude-3-haiku-20240307", file_context_token_limit=50000)
+    code_selector = CodeSelector(model_name="claude-3-haiku-20240307", file_context_token_limit=100000, repo_path=repo_path)
 
     code_snippets = []
 
@@ -70,9 +70,9 @@ def select_files(report: dict, base_dir: str = '/tmp/repos'):
             content=content
         ))
 
-    response = code_selector.select_code_snippets(report['problem_statement'], code_snippets)
+    response = code_selector.select_files(report['problem_statement'], code_snippets)
 
-    code_snippets = [selected_code_snippet.code_snippet for selected_code_snippet in response.selected_code_snippets]
+    code_snippets = [selected_code_snippet.code_snippet for selected_code_snippet in response.files]
 
     report = recall_report(report, code_snippets, repo_path)
 
@@ -91,5 +91,5 @@ if __name__ == '__main__':
 
 #    benchmark_reports()
 
-    report = get_report('django__django-14855')
+    report = get_report('django__django-13281')
     select_files(report)

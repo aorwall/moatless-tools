@@ -92,6 +92,11 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         self._fs = fs or fsspec.filesystem("file")
         super().__init__(**kwargs)
 
+    @classmethod
+    def from_defaults(cls, d: int = 1536):
+        faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(1536))
+        return cls(faiss_index, d)
+
     @property
     def client(self) -> Any:
         """Return the faiss index."""
@@ -159,19 +164,15 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         if query.filters is not None:
             raise ValueError("Metadata filters not implemented for Faiss yet.")
 
-        top_k = query.similarity_top_k + 1000  # TODO: Temp fix because of not removed indices
-
         query_embedding = cast(List[float], query.query_embedding)
         query_embedding_np = np.array(query_embedding, dtype="float32")[np.newaxis, :]
         dists, indices = self._faiss_index.search(
-            query_embedding_np, top_k
+            query_embedding_np, query.similarity_top_k
         )
         dists = list(dists[0])
-        # if empty, then return an empty response
         if len(indices) == 0:
             return VectorStoreQueryResult(similarities=[], ids=[])
 
-        # returned dimension is 1 x k
         node_idxs = indices[0]
 
         duplicates = 0
@@ -181,7 +182,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         filtered_node_ids = []
         for dist, idx in zip(dists, node_idxs):
             if idx < 0:
-                logger.warning(f"Negative index {idx} found in query result, skipping.")
+                logger.debug(f"Negative index {idx} found in query result, skipping.")
                 continue
 
             node_id = self._data.vector_id_to_text_id.get(idx)
@@ -192,9 +193,6 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
                 duplicates += 1
             else:
                 not_found += 1
-
-            if len(filtered_node_ids) >= query.similarity_top_k:
-                break
 
         if not_found or duplicates:
             logger.warning(f"Skipped {not_found} not found nodes and {duplicates} duplicates in query result.")

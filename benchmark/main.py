@@ -12,7 +12,7 @@ from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
 from llama_index.embeddings.openai import OpenAIEmbedding
 
 from moatless.retrievers.golden_retriever import IngestionPipelineSetup, GoldenRetriever
-from moatless.retrievers.ingestion import Ingestion
+from moatless.retrievers.ingestion import CodeBaseIngestionPipeline
 from moatless.splitters import report
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.store.simple_faiss import SimpleFaissVectorStore
@@ -88,7 +88,7 @@ def initiate_index(path: str, index_name: str, persist_dir: str = "/tmp/.storage
         docstore = SimpleDocumentStore()
 
     if not downloaded_existing_store:
-        ingestion = Ingestion(
+        ingestion = CodeBaseIngestionPipeline(
             vector_store=vector_store,
             docstore=docstore,
             pipeline_setup=pipeline_setup,
@@ -138,7 +138,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         docstore = SimpleDocumentStore()
 
     if not downloaded_existing_store:
-        ingestion = Ingestion(
+        ingestion = CodeBaseIngestionPipeline(
             vector_store=vector_store,
             docstore=docstore,
             pipeline_setup=pipeline_setup,
