@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 
 
 def setup_github_repo(repo: str, base_commit: str, base_dir: str = '/tmp/repos'):

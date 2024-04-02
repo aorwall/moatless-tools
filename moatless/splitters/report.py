@@ -1,11 +1,9 @@
 import logging
 
 from llama_index.core import get_tokenizer
-from llama_index.core.node_parser import TokenTextSplitter, CodeSplitter
-from llama_index.core.node_parser.interface import TextSplitter, NodeParser
+from llama_index.core.node_parser.interface import NodeParser
 from llama_index.core.schema import TextNode
 
-from moatless.splitters.code_splitter_v2 import CodeSplitterV2
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 
 

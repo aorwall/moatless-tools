@@ -1,12 +1,11 @@
 import logging
-import pathlib
 
-from tree_sitter import Node, Language
 import tree_sitter_python as tspython
+from tree_sitter import Language
 
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, \
     RelationshipType
-from moatless.codeblocks.parser.parser import CodeParser, commented_out_keywords, NodeMatch
+from moatless.codeblocks.parser.parser import CodeParser, commented_out_keywords
 
 child_block_types = ["ERROR", "block"]
 

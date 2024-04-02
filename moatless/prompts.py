@@ -11,12 +11,15 @@ When you update a code block you must follow the rules below:
 * Leave NO todo's, placeholders or missing pieces
 * Ensure code is complete! 
 * Write out ALL existing code!
+ 
+You should ONLY use the function `write_code` to update the code. If no changes are needed you can leave the changes field empty.
 
-Use the write_code function to update the code. 
+Think step by step and start by writing your thoughts.
 """
 
 CREATE_DEV_PLAN_SYSTEM_PROMPT = """Act as an expert software developer. 
-Your task is to create a development plan for how to update the code base.
+
+Your task is to create a plan for how to update the provided code files to solve a software requirement. 
 Follow the user's requirements carefully and to the letter. 
 
 You will plan the development by creating tasks for each part of the code files that you want to update.
@@ -34,7 +37,6 @@ If you want to provide an instruction that applied to more than one code block i
 Think step by step and start by writing out your thoughts. 
 
 You should ONLY use the function `create_development_plan` to create a plan with a list of tasks. 
-
 """
 
 SELECT_FILES_SYSTEM_PROMPT = """

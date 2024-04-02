@@ -10,9 +10,9 @@ from llama_index.core import get_tokenizer
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
 from llama_index.embeddings.openai import OpenAIEmbedding
-
 from moatless.retrievers.golden_retriever import IngestionPipelineSetup, GoldenRetriever
 from moatless.retrievers.ingestion import CodeBaseIngestionPipeline
+
 from moatless.splitters import report
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.store.simple_faiss import SimpleFaissVectorStore

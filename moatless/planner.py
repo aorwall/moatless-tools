@@ -8,8 +8,8 @@ from openai import BaseModel
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.prompts import CREATE_DEV_PLAN_SYSTEM_PROMPT
 from moatless.constants import SMART_MODEL
+from moatless.prompts import CREATE_DEV_PLAN_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +17,13 @@ logger = logging.getLogger(__name__)
 class DevelopmentTask(BaseModel):
     file_path: str
     instructions: str
-    block_paths: List[str]
+    block_path: str
 
 
 class DevelopmentPlan(BaseModel):
     thoughts: Optional[str] = None
     tasks: List[DevelopmentTask]
 
-
-class PlannerResponse(BaseModel):
-    thoughts: Optional[str] = None
-    tasks: List[DevelopmentTask]
 
 
 class Planner:
@@ -37,9 +33,11 @@ class Planner:
         self._repo_path = repo_path
         self._parser = PythonParser()
 
-    def plan_development(self, instructions: str, files: List[str]) -> PlannerResponse:
-        system_message = {"content": CREATE_DEV_PLAN_SYSTEM_PROMPT, "role": "system"}
-        file_context_message = {"content": self._file_context_prompt(files), "role": "user"}
+    def plan_development(self, instructions: str, files: List[str]) -> DevelopmentPlan:
+
+        file_context = self._file_context_prompt(files)
+        system_prompt = f"# FILES:\n{file_context}\n\n========================\n\nINSTRUCTIONS:\n{CREATE_DEV_PLAN_SYSTEM_PROMPT}"
+        system_message = {"content": system_prompt, "role": "system"}
         instruction_message = {"content": instructions, "role": "user"}
 
         tools = [
@@ -61,14 +59,12 @@ class Planner:
                                     "type": "object",
                                     "properties": {
                                         "file_path": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "Path to the file that should be updated."
                                         },
-                                        "block_paths": {
-                                            "type": "array",
-                                            "description": "Path to code blocks that should be updated.",
-                                            "items": {
-                                                "type": "string"
-                                            }
+                                        "block_path": {
+                                            "type": "string",
+                                            "description": "Path to code block that should be updated."
                                         },
                                         "instructions": {
                                             "type": "string",
@@ -88,7 +84,6 @@ class Planner:
         messages = [
             system_message,
             instruction_message,
-            file_context_message
         ]
 
         retry = 0
@@ -99,9 +94,10 @@ class Planner:
                 tools=tools,
                 messages=messages)
 
-            thoughts = ""
-            tasks = []
             try:
+                if response.choices[0].message.content:
+                    logger.info(f"Got unexpected message: {response.choices[0].message.content}")
+
                 if response.choices[0].message.tool_calls:
                     tool_calls = response.choices[0].message.tool_calls
 
@@ -112,9 +108,8 @@ class Planner:
                         logger.debug(json.dumps(function_args, indent=2))
 
                         if function_name == "create_development_plan":
-                            dev_plan = DevelopmentPlan.parse_obj(function_args)
-                            tasks.extend(dev_plan.tasks)
-                            thoughts = dev_plan.thoughts
+                            # TODO: Handle more than one tool call
+                            return DevelopmentPlan.parse_obj(function_args)
                         else:
                             logger.debug(f"Unknown function: {function_name}")
                 else:
@@ -122,18 +117,18 @@ class Planner:
             except Exception as e:
                 logger.error(f"Error processing response: {e}")
 
-            if not tasks:
-                messages.append({"content": response.choices[0].message.content,
-                                 "role": "assistant"})
-                messages.append({"content": "You must use the function `create_development_plan` to create a plan with a list of tasks!",
-                                 "role": "user"})
-                retry += 1
-            else:
-                return PlannerResponse(thoughts=thoughts, tasks=tasks)
+            messages.append({"content": response.choices[0].message.content,
+                             "role": "assistant"})
+            messages.append({"content": "You must use the function `create_development_plan` to create a plan with a list of tasks!",
+                             "role": "user"})
+            retry += 1
+            logger.warning(f"No tasks found in response. Retrying {retry}/3...")
+
+        # TODO: Return error?
+        return DevelopmentPlan()
 
     def _file_context_prompt(self, files: List[str]) -> str:
-        file_context_content = "Here's some files that might be relevant:\n\n"
-
+        file_context_content = ""
         for file_path in files:
             full_file_path = os.path.join(self._repo_path, file_path)
             with open(full_file_path, 'r') as f:
@@ -141,10 +136,7 @@ class Planner:
 
             codeblock = self._parser.parse(file_content)
             content = self._to_code_block_string(codeblock)
-            file_context_content += (f"{file_path}\n"
-                                     f"```\n"
-                                     f"{content}\n"
-                                     f"```\n")
+            file_context_content += f"{file_path}\n```\n{content}\n```\n"
         return file_context_content
 
     def _to_code_block_string(self, codeblock: CodeBlock) -> str:

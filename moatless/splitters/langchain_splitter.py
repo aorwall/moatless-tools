@@ -3,9 +3,9 @@
 ."""
 from typing import List, Optional
 
+from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.node_parser import TextSplitter
-from llama_index.core.bridge.pydantic import PrivateAttr
 
 
 class RecursiveCharacterTextSplitterLangchainWrapper(TextSplitter):

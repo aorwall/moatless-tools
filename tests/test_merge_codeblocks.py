@@ -1,3 +1,5 @@
+from typing import List
+
 from moatless.codeblocks.parser.python import PythonParser
 
 
@@ -149,6 +151,92 @@ def test_pytest_dev__pytest_5808_only_function():
     print(f"Updated block:\n{updated_block.to_tree()}")
 
     original_block.replace_by_path(["create_new_paste"], updated_block.children[0])
+    print(f"Merged block:\n{original_block.to_tree()}")
+
+    assert original_block.to_string() == expected_content
+
+
+def test_replace_function():
+    with open("data/python/replace_function/original.py", "r") as f:
+        original_content = f.read()
+
+    with open("data/python/replace_function/update.py", "r") as f:
+        updated_content = f.read()
+
+    with open("data/python/replace_function/expected.py", "r") as f:
+        expected_content = f.read()
+
+    parser = PythonParser(apply_gpt_tweaks=True)
+
+    original_block = parser.parse(original_content)
+    updated_block = parser.parse(updated_content)
+
+    print(f"Original block:\n{original_block.to_tree()}")
+    print(f"Updated block:\n{updated_block.to_tree()}")
+
+    block_path = ["MatrixShaping", "_eval_col_insert"]
+    changed_block = find_by_path_recursive(updated_block, block_path)
+
+    original_block.replace_by_path(block_path, changed_block)
+    print(f"Merged block:\n{original_block.to_tree()}")
+
+    assert original_block.to_string() == expected_content
+
+
+def find_by_path_recursive(codeblock, block_path: List[str]):
+    found = codeblock.find_by_path(block_path)
+    if not found and len(block_path) > 1:
+        return find_by_path_recursive(codeblock, block_path[1:])
+    return found
+
+
+def test_replace_function_with_context():
+    with open("data/python/replace_function/original.py", "r") as f:
+        original_content = f.read()
+
+    with open("data/python/replace_function/update_with_context.py", "r") as f:
+        updated_content = f.read()
+
+    with open("data/python/replace_function/expected.py", "r") as f:
+        expected_content = f.read()
+
+    parser = PythonParser(apply_gpt_tweaks=True)
+
+    original_block = parser.parse(original_content)
+    updated_block = parser.parse(updated_content)
+
+    print(f"Original block:\n{original_block.to_tree()}")
+    print(f"Updated block:\n{updated_block.to_tree()}")
+
+    change_block = updated_block.find_by_path(["MatrixShaping", "_eval_col_insert"])
+
+    original_block.replace_by_path(["MatrixShaping", "_eval_col_insert"], change_block)
+    print(f"Merged block:\n{original_block.to_tree()}")
+
+    assert original_block.to_string() == expected_content
+
+
+def test_replace_function_with_indentation():
+    with open("data/python/replace_function/original.py", "r") as f:
+        original_content = f.read()
+
+    with open("data/python/replace_function/update_with_indentation.py", "r") as f:
+        updated_content = f.read()
+
+    with open("data/python/replace_function/expected.py", "r") as f:
+        expected_content = f.read()
+
+    parser = PythonParser(apply_gpt_tweaks=True)
+
+    original_block = parser.parse(original_content)
+    updated_block = parser.parse(updated_content)
+
+    print(f"Original block:\n{original_block.to_tree()}")
+    print(f"Updated block:\n{updated_block.to_tree()}")
+
+    change_block = updated_block.find_by_path(["_eval_col_insert"])
+
+    original_block.replace_by_path(["MatrixShaping", "_eval_col_insert"], change_block)
     print(f"Merged block:\n{original_block.to_tree()}")
 
     assert original_block.to_string() == expected_content

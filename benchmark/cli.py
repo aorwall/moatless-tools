@@ -1,11 +1,9 @@
 """
 This is a customized version of the CLI in https://github.com/raymyers/swe-bench-util
 """
-import csv
 import json
 import logging
 import os
-import subprocess
 import sys
 from typing import Optional, List
 
@@ -13,10 +11,10 @@ import typer
 from datasets import load_dataset
 from dotenv import load_dotenv
 from llama_index.embeddings.openai import OpenAIEmbedding
+from moatless.retrievers.golden_retriever import IngestionPipelineSetup
 
-from benchmark.main import write_markdown, benchmark_retrieve
+from benchmark.main import benchmark_retrieve
 from benchmark.utils import diff_details
-from moatless.retrievers.golden_retriever import GoldenRetriever, IngestionPipelineSetup
 from moatless.splitters.epic_split import CommentStrategy
 from moatless.splitters.epic_split import EpicSplitter
 from moatless.utils import setup_github_repo
