@@ -4,27 +4,21 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import faiss
 import fsspec
 import numpy as np
 from dataclasses_json import DataClassJsonMixin
 from fsspec.implementations.local import LocalFileSystem
-from llama_index.core.bridge.pydantic import Field, PrivateAttr
-
+from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.schema import BaseNode
-from llama_index.core.utils import concat_dirs
 from llama_index.core.vector_stores.types import (
     DEFAULT_PERSIST_DIR,
-    DEFAULT_PERSIST_FNAME,
-    MetadataFilters,
-    VectorStore,
     VectorStoreQuery,
     VectorStoreQueryMode,
     VectorStoreQueryResult, BasePydanticVectorStore,
 )
-from llama_index.core.vector_stores.utils import node_to_metadata_dict
 
 logger = logging.getLogger(__name__)
 

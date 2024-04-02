@@ -1,6 +1,5 @@
 import re
 import time
-from chunk import Chunk
 from enum import Enum
 from typing import Sequence, List, Optional, Any, Callable
 
@@ -12,9 +11,7 @@ from llama_index.core.schema import BaseNode, TextNode, NodeRelationship
 from llama_index.core.utils import get_tqdm_iterable, get_tokenizer
 
 from moatless.codeblocks import create_parser, CodeParser
-from moatless.codeblocks.codeblocks import NON_CODE_BLOCKS, PathTree, CodeBlock, CodeBlockType
-from moatless.splitters.code_splitter_v2 import CodeSplitterV2
-
+from moatless.codeblocks.codeblocks import PathTree, CodeBlock, CodeBlockType
 
 CodeBlockChunk = List[CodeBlock]
 

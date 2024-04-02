@@ -1,5 +1,4 @@
 """ submit failure or test session information to a pastebin service. """
-import tempfile
 
 import pytest
 

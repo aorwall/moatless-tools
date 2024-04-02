@@ -2,7 +2,6 @@ import copy
 import logging
 import re
 from enum import Enum
-from hashlib import sha256
 from typing import List, Optional, Callable, Tuple
 
 from pydantic import BaseModel, validator, Field, root_validator
@@ -292,9 +291,22 @@ class CodeBlock(BaseModel):
         # TODO: Do a proper update of everything when replacing child blocks
         child.pre_code = self.children[index].pre_code
         child.pre_lines = self.children[index].pre_lines
-        child.indentation = self.children[index].indentation
+        self.sync_indentation(self.children[index], child)
+
         self.children[index] = child
         child.parent = self
+
+    def sync_indentation(self, original_block: "CodeBlock", updated_block: "CodeBlock"):
+        original_indentation_length = len(original_block.indentation) + len(self.indentation)
+        updated_indentation_length = len(updated_block.indentation) + len(updated_block.parent.indentation)
+
+        # To handle separate code blocks provdided out of context
+        if original_indentation_length == updated_indentation_length and len(updated_block.indentation) == 0:
+            updated_block.indentation = ' ' * original_indentation_length
+
+        elif original_indentation_length > updated_indentation_length:
+            additional_indentation = ' ' * (original_indentation_length - updated_indentation_length)
+            updated_block.add_indentation(additional_indentation)
 
     def replace_children(self, index: int, children: List["CodeBlock"]):
         for child in children:
@@ -615,6 +627,16 @@ class CodeBlock(BaseModel):
     def add_indentation(self, indentation: str):
         if self.pre_lines:
             self.indentation += indentation
+
+        # TODO: Find a more graceful way to solve multi line blocks
+        if "\n" in self.content:
+            lines = self.content.split("\n")
+            content = lines[0]
+            for line in lines[1:]:
+                if line.startswith(" "):
+                    content += "\n" + indentation + line
+            self.content = content
+
         for child in self.children:
             child.add_indentation(indentation)
 

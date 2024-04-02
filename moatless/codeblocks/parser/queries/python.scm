@@ -61,7 +61,6 @@
     (
       (block
         . (_) @child.first
-        (_) ? @child.last .
       )
     )
   ]

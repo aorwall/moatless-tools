@@ -3,7 +3,7 @@ from moatless.codeblocks.parser.python import PythonParser
 
 
 def _verify_parsing(content, assertion):
-    parser = PythonParser(apply_gpt_tweaks=True)
+    parser = PythonParser(apply_gpt_tweaks=True, debug=True)
 
     codeblock = parser.parse(content)
 
@@ -84,6 +84,21 @@ def pytest_terminal_summary(terminalreporter):
                 ["pytest_configure", "pytest_unconfigure", "create_new_paste", "pytest_terminal_summary"])
         assert ([child.type for child in codeblock.children] ==
                 [CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.COMMENTED_OUT_CODE, CodeBlockType.FUNCTION, CodeBlockType.COMMENTED_OUT_CODE])
+
+    _verify_parsing(content, assertion)
+
+
+def test_function_in_function():
+    content = """def foo():
+    def bar():
+        print('hello world')
+        return 42
+
+    print("hello")
+    return bar()"""
+
+    def assertion(codeblock):
+        assert len(codeblock.children) == 1
 
     _verify_parsing(content, assertion)
 

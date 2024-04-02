@@ -11,7 +11,6 @@ from llama_index.core.bridge.pydantic import Field, PrivateAttr
 from llama_index.core.callbacks.base import CallbackManager
 from llama_index.core.callbacks.schema import CBEventType, EventPayload
 from llama_index.core.node_parser.interface import TextSplitter
-from llama_index.core.node_parser.node_utils import default_id_func
 from llama_index.core.schema import Document, BaseNode
 from tree_sitter import Node
 

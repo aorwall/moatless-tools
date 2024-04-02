@@ -1,18 +1,15 @@
 import logging
 import os
-import re
 from typing import List, Tuple, Dict
-import xml.etree.ElementTree as ET
 
 from litellm import completion, ModelResponse
 from llama_index.core import get_tokenizer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from moatless.codeblocks import CodeBlockType, CodeBlock
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.print import print_by_line_numbers
-from moatless.prompts import SELECT_FILES_SYSTEM_PROMPT
 from moatless.constants import CHEAP_MODEL
+from moatless.prompts import SELECT_FILES_SYSTEM_PROMPT
 from moatless.retriever import CodeSnippet
 from moatless.types import CodeFile
 from moatless.utils.xml import extract_between_tags

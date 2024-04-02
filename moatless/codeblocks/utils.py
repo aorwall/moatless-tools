@@ -1,8 +1,3 @@
-import os
-from functools import partial
-from typing import Callable, List
-
-
 class Colors:
     RED = '\033[91m'
     GREEN = '\033[92m'
