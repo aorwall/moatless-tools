@@ -10,9 +10,8 @@ from llama_index.core import get_tokenizer
 
 from benchmark.utils import diff_details, write_json, diff_file_names
 from moatless.coder import CoderResponse
-from moatless.planner import PlannerResponse
+from moatless.planner import DevelopmentPlan
 from moatless.selector import SelectFilesResponse
-from moatless.types import CodeFile
 from moatless.retriever import CodeSnippet
 
 logger = logging.getLogger(__name__)
@@ -85,6 +84,19 @@ def get_instance(id: str,
             return row
 
 
+def get_instances(split: str='dev',
+                  dataset_name='princeton-nlp/SWE-bench',
+                  data_dir: str = None):
+    dataset = download(split, dataset_name, data_dir)
+    dataset.sort(key=sort_key)
+    return dataset
+
+
+def sort_key(data_row):
+    text, number = data_row["instance_id"].rsplit('-', 1)
+    return text, int(number)
+
+
 def get_index_name(row_data: dict):
     return f"{row_data['repo'].replace('/', '_')}__{row_data['instance_id']}"
 
@@ -106,7 +118,6 @@ def display_patches(data: dict, path: str):
     from IPython.display import display, Markdown
 
     diff = subprocess.run(['git', 'diff'], cwd=path, check=True, text=True, capture_output=True)
-
     display(Markdown(f"""### Expected patch
 ```diff
 {data['patch']}
@@ -133,7 +144,7 @@ def display_code_snippets(data: dict, code_snippets: List[CodeSnippet]):
     context_length = 0
 
     for snippet in code_snippets:
-        context_length += snippet.tokens
+        context_length += snippet.tokens or 0
         snippets_data.append({
             "File": snippet.file_path,
             "Block": snippet.start_block,
@@ -151,12 +162,35 @@ def display_code_snippets(data: dict, code_snippets: List[CodeSnippet]):
     message = "All expected patch files is referred to in the retrieved code snippets." if all_files_found else "Some expected path files where not referred to in the code snippets. This means that the instance probably can't be completed."
     display(HTML(f"<div style='background-color: #f2f2f2; padding: 10px; border-left: 6px solid #ffcc00; margin-bottom: 10px;'>{message}</div>"))
 
+    def match_diff(row):
+        return row['File'] in data['patch_files']
+
+    df['diff_covered_or_file_match'] = df.apply(match_diff, axis=1)
+
+    df_filtered = pd.concat(
+        [df.head(5), df[df['diff_covered_or_file_match']], df.tail(5)]).drop_duplicates().sort_index()
+
+    if len(df) > len(df_filtered) > 13:
+        first_hidden_index = df_filtered.index[5]
+        last_shown_index = df_filtered.index[-5]
+
+        placeholder_row = pd.DataFrame([{
+            "File": "..." * 3,
+            "Block": "",
+            "Start line": "...",
+            "End line": "...",
+            "Context length": "...",
+            "diff_covered_or_file_match": False
+        }], index=[(first_hidden_index + last_shown_index) / 2])
+
+        df_filtered = pd.concat([df_filtered.iloc[:5], placeholder_row, df_filtered.iloc[5:]]).sort_index()
+
     def apply_highlighting(row):
         styles = ['' for _ in row]
         file_match = row['File'] in data['patch_files']
         diff_covered = False
 
-        if file_match:
+        if match_diff:
             file_diffs = data.get('patch_diff_details', {}).get(row['File'], {}).get('diffs', [])
             for diff in file_diffs:
                 if row['Start line'] <= diff['end_line_old'] and row['End line'] >= diff['start_line_old']:
@@ -177,7 +211,7 @@ def display_code_snippets(data: dict, code_snippets: List[CodeSnippet]):
         'End line': 'width: 80px; max-width: 80px;',
         'Context length': 'width: 80px; max-width: 80px;'
     }
-    styled_df = df.style.apply(apply_highlighting, axis=1).set_table_styles(
+    styled_df = df_filtered.style.apply(apply_highlighting, axis=1).set_table_styles(
         [{ 'selector': f'.col{i}', 'props': f'{style}' }
          for i, (col, style) in enumerate(column_styles.items())],
         overwrite=False)
@@ -237,7 +271,7 @@ def display_files(data: dict, response: SelectFilesResponse):
     display(styled_df)
 
 
-def display_plan(plan: PlannerResponse):
+def display_plan(plan: DevelopmentPlan):
     from IPython.display import display, Markdown
 
     if plan.thoughts:
@@ -278,3 +312,4 @@ def display_code_response(code_response: CoderResponse):
 {code_response.diff}
 ```
 """))
+

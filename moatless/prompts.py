@@ -12,9 +12,10 @@ When you update a code block you must follow the rules below:
 * Ensure code is complete! 
 * Write out ALL existing code!
  
-You should ONLY use the function `write_code` to update the code. If no changes are needed you can leave the changes field empty.
-
-Think step by step and start by writing your thoughts.
+Response with the updated code in a code block like
+```python
+# ... code here
+```
 """
 
 CREATE_DEV_PLAN_SYSTEM_PROMPT = """Act as an expert software developer. 
@@ -23,20 +24,33 @@ Your task is to create a plan for how to update the provided code files to solve
 Follow the user's requirements carefully and to the letter. 
 
 You will plan the development by creating tasks for each part of the code files that you want to update.
-The task should include the file path, the block paths to the code section and the instructions for the update.
+The task should include the file path, the block path to the code section and the instructions for the update.
 
 The block_path is a unique identifier for a block of code in a file thas is defined in a comment before the code. 
 When you specify a code block path you will ONLY be able to work with the code BELOW the block_path and ABOVE the next block_path.
 Any code that needs to be changed must be included in a task with a correct block_path set and instructions provided.  
 
-If there are changes in different code blocks in the same file you can provide multiple block paths in the same task. 
-The important part is that the code marked with a code block_path is included!
-
-If you want to provide an instruction that applied to more than one code block in a row, you can list multiple block paths.
-
 Think step by step and start by writing out your thoughts. 
+"""
 
-You should ONLY use the function `create_development_plan` to create a plan with a list of tasks. 
+SELECT_BLOCKS_SYSTEM_PROMPT = """You are an expert software engineer with superior Python programming skills. 
+
+You're provided with a list of code files and a new requirement from the user that might affect these files. 
+
+Your task is to code blocks in the provided file that are relevant th the users requirements.
+
+Follow the user's requirements carefully and to the letter. 
+
+You should try to pick out ALL parts of the code that might be relevant to be able to solve the user's requirements.
+This could both mean functions and classes that needs to be updated but also code that these are dependent on. 
+
+The block_id is a unique identifier for a block of code in a file thas is defined in a comment before the code. 
+When you specify a code block_id you will ONLY be able to work with the code BELOW the block_id and ABOVE the next block_id.
+So if the code spans over many code blocks it's important to include all block_id's that are relevant.
+
+If the the contents of the whole file is relevant you can provide just the empty file tag.
+
+Think step by step and start by writing out your thoughts. Then retunr the selected block_id's. DO NOT write anything else!
 """
 
 SELECT_FILES_SYSTEM_PROMPT = """
