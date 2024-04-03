@@ -7,7 +7,7 @@ from llama_index.core import get_tokenizer
 from pydantic import BaseModel
 
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.codeblocks.print import print_by_line_numbers
+from moatless.codeblocks.print_block import print_by_line_numbers
 from moatless.constants import CHEAP_MODEL
 from moatless.prompts import SELECT_FILES_SYSTEM_PROMPT
 from moatless.retriever import CodeSnippet

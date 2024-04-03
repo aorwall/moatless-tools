@@ -14,6 +14,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from moatless.retrievers.golden_retriever import IngestionPipelineSetup
 
 from benchmark.main import benchmark_retrieve
+from benchmark.swebench import download
 from benchmark.utils import diff_details
 from moatless.splitters.epic_split import CommentStrategy
 from moatless.splitters.epic_split import EpicSplitter
@@ -73,33 +74,6 @@ def diff_file_names(text: str) -> list[str]:
 def get_filename(split: str, dataset_name: str):
     return f'{dataset_name.replace("/", "-")}-{split}'
 
-
-@get_app.command()
-def download(split: str='dev', dataset_name='princeton-nlp/SWE-bench_Lite'):
-    """Download oracle (patched files) for all rows in split"""
-
-    file_name = get_filename(split, dataset_name)
-    file_path = f"data/{file_name}.json"
-    if os.path.exists(file_path):
-        print(f"File '{file_path}' already exists")
-        with open(file_path) as f:
-            return json.load(f)
-
-    else:
-        print(f"File '{file_path}' does not exist. Downloading...")
-
-    dataset = load_dataset(dataset_name, split=split)
-    result = []
-    for row_data in dataset:
-        row_data["patch_files"] = diff_file_names(row_data['patch'])
-        row_data["test_patch_files"] = diff_file_names(row_data['test_patch'])
-        row_data["patch_diff_details"] = diff_details(row_data['patch'])
-        result.append(row_data)
-
-    file_name = get_filename(split, dataset_name)
-    write_json('data', file_name, result)
-
-    return result
 
 
 def get_case(id: str, split: str='test', dataset_name='princeton-nlp/SWE-bench_Lite'):

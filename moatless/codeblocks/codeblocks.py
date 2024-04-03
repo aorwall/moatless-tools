@@ -8,6 +8,7 @@ from pydantic import BaseModel, validator, Field, root_validator
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
 from moatless.codeblocks.utils import Colors
+from moatless.types import BlockPath
 
 
 class CodeBlockType(str, Enum):
@@ -85,6 +86,14 @@ class PathTree(BaseModel):
     show: bool = Field(default=False, description="Show the block.")
     tree: dict[str, 'PathTree'] = Field(default_factory=dict)
 
+    @staticmethod
+    def from_block_paths(block_paths: List[BlockPath]) -> 'PathTree':
+        tree = PathTree()
+        for block_path in block_paths:
+            tree.add_to_tree(block_path)
+
+        return tree
+
     def child_tree(self, key: str) -> Optional['PathTree']:
         return self.tree.get(key, None)
 
@@ -96,6 +105,10 @@ class PathTree(BaseModel):
             if key not in self.tree:
                 self.tree[key] = PathTree()
             self.tree[key].merge(value)
+
+    def extend_tree(self, paths: list[list[str]]):
+        for path in paths:
+            self.add_to_tree(path)
 
     def add_to_tree(self, path: list[str]):
         if path is None:
@@ -450,6 +463,7 @@ class CodeBlock(BaseModel):
                 show_full_path: bool = True,
                 show_tokens: bool = False,
                 debug: bool = False,
+                include_line_numbers: bool = False,
                 include_types: List[CodeBlockType] = None,
                 include_parameters: bool = False,
                 include_block_delimiters: bool = False,
@@ -466,6 +480,7 @@ class CodeBlock(BaseModel):
                           show_full_path=show_full_path,
                           debug=debug,
                           include_types=include_types,
+                          include_line_numbers=include_line_numbers,
                           include_merge_history=include_merge_history,
                           include_parameters=include_parameters,
                           include_references=include_references,
@@ -495,6 +510,9 @@ class CodeBlock(BaseModel):
                 content += f" ({self.identifier})"
 
             content += Colors.RESET
+
+        if include_line_numbers:
+            extra += f" {self.start_line}-{self.end_line}"
 
         if debug and self.properties:
             extra += f" properties: {self.properties}"
@@ -620,6 +638,13 @@ class CodeBlock(BaseModel):
             pre_lines=1,
             content=self.create_comment(comment_out_str))
 
+    def create_comment_block(self, comment: str = "..."):
+        return CodeBlock(
+            type=CodeBlockType.COMMENT,
+            indentation=self.indentation,
+            pre_lines=1,
+            content=self.create_comment(comment))
+
     def create_comment(self, comment: str) -> str:
         symbol = get_comment_symbol(self.root().language)
         return f"{symbol} {comment}"
@@ -722,8 +747,9 @@ class CodeBlock(BaseModel):
     def find_blocks_with_identifier(self, identifier: str) -> List["CodeBlock"]:
         blocks = []
         for child_block in self.children:
-            if child_block.identifier and identifier and child_block.identifier == identifier:
+            if child_block.identifier == identifier:
                 blocks.append(child_block)
+            blocks.extend(child_block.find_blocks_with_identifier(identifier))
         return blocks
 
     def find_incomplete_blocks_with_type(self, block_type: CodeBlockType):
