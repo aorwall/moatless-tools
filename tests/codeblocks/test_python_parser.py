@@ -9,7 +9,10 @@ def _verify_parsing(content, assertion):
 
     print(codeblock.to_tree())
 
+    assert codeblock.to_string() == content
+
     assertion(codeblock)
+
 
 
 def test_function():
@@ -99,6 +102,39 @@ def test_function_in_function():
 
     def assertion(codeblock):
         assert len(codeblock.children) == 1
+
+    _verify_parsing(content, assertion)
+
+
+def test_class_with_comment():
+    content = """class BaseSchema(base.SchemaABC):
+    # ... other code
+
+    def _invoke_field_validators(self, unmarshal, data, many):
+        foo
+    bar = 1
+"""
+
+    def assertion(codeblock):
+        assert len(codeblock.children) == 1
+
+    _verify_parsing(content, assertion)
+
+def test_raise_string_line_break():
+    content = """def foo():
+    raise ValueError(
+                     \"""
+FITS WCS distortion paper lookup tables and SIP distortions only work
+in 2 dimensions.  However, WCSLIB has detected {0} dimensions in the
+core WCS keywords.  To use core WCS in conjunction with FITS WCS
+distortion paper lookup tables or SIP distortion, you must select or
+reduce these to 2 dimensions using the naxis kwarg.
+\""".format(wcsprm.naxis))
+"""
+
+    def assertion(codeblock):
+        print(codeblock.to_tree())
+        print(codeblock.to_string())
 
     _verify_parsing(content, assertion)
 

@@ -20,8 +20,23 @@ def test_print_by_line_numbers():
     print(print_by_line_numbers(codeblock, line_numbers))
 
 
+
+def test_print_with_comments():
+    file_path = "data/python/print_block/schema.py"
+
+    parser = PythonParser()
+    with open(file_path) as f:
+        content = f.read()
+    codeblock = parser.parse(content)
+
+    printed = print_block(codeblock)
+
+    print(printed)
+
+    assert printed == content
+
 def test_print_by_block_path():
-    file_path = "../data/python/replace_function/original.py"
+    file_path = "data/python/replace_function/original.py"
 
     parser = PythonParser()
     with open(file_path) as f:
@@ -32,6 +47,24 @@ def test_print_by_block_path():
     print("Printed by block path:")
     print(printed)
 
+
+def test_print_by_block_path_2():
+    file_path = "data/python/print_block/schema.py"
+    expected_file_path = "data/python/print_block/schema_expected_by_block_path.py"
+
+    parser = PythonParser()
+    with open(file_path) as f:
+        codeblock = parser.parse(f.read())
+
+    with open(expected_file_path) as f:
+        expected = f.read()
+
+    printed = print_by_block_path(codeblock, ["BaseSchema", "_invoke_field_validators"])
+
+    print("Printed by block path:")
+    print(printed)
+
+    assert printed == expected
 
 
 def test_print_by_block_paths_and_marker():
@@ -50,7 +83,6 @@ def test_print_by_block_paths_and_marker():
 
     printed = print_block(codeblock,
                           path_tree=PathTree.from_block_paths(block_paths),
-                          show_types=[CodeBlockType.CLASS, CodeBlockType.FUNCTION],
                           block_marker=BlockMarker.COMMENT)
 
     print("Printed by block path:")

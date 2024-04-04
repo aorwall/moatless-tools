@@ -11,7 +11,7 @@ from moatless.codeblocks.print_block import print_by_line_numbers
 from moatless.constants import CHEAP_MODEL
 from moatless.prompts import SELECT_FILES_SYSTEM_PROMPT
 from moatless.retriever import CodeSnippet
-from moatless.types import CodeFile
+from moatless.types import ContextFile
 from moatless.utils.xml import extract_between_tags
 
 select_files = {
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 class SelectFilesResponse(BaseModel):
     thoughts: str = None
-    files: List[CodeFile]
+    files: List[ContextFile]
     usage_stats: List[dict] = None
 
 
@@ -92,7 +92,7 @@ class FileSelector:
 
                     tokens = len(self._tokenizer(content))
                     if sum_tokens + tokens < self._file_context_token_limit:
-                        file = CodeFile(file_path=file_to_read, content=content, is_complete=True)
+                        file = ContextFile(file_path=file_to_read, content=content, is_complete=True)
                         prompt_files.append(file)
                     else:
                         logger.warning(f"File requested to read {file_to_read} is too large to include in the prompt.")
@@ -181,17 +181,17 @@ class FileSelector:
             usage_stats=usage_stats
         )
 
-    def _code_snippet_to_xml(self, file: CodeFile, idx: int = 0):
+    def _code_snippet_to_xml(self, file: ContextFile, idx: int = 0):
         return f"""<document index="{idx}">
 <source>{file.file_path}</source>
 {file.content or '# ... commented out code ...'}
 </document>
 """
 
-    def _code_snippet_to_filename(self, file: CodeFile):
+    def _code_snippet_to_filename(self, file: ContextFile):
         return f"\n<file_path>{file.file_path}</file_path>"
 
-    def _create_claude_prompt(self, requirement: str, file_by_idx: Dict[int, CodeFile]):
+    def _create_claude_prompt(self, requirement: str, file_by_idx: Dict[int, ContextFile]):
         file_context_content = ""
 
         for idx, file in file_by_idx.items():
@@ -210,7 +210,7 @@ class FileSelector:
             {"content": f"# Requirement:\n{requirement}", "role": "user"}
         ]
 
-    def _parse_claude_response(self, response: ModelResponse, file_by_idx: Dict[int, CodeFile]) -> Tuple[List[CodeFile], List[str], str]:
+    def _parse_claude_response(self, response: ModelResponse, file_by_idx: Dict[int, ContextFile]) -> Tuple[List[ContextFile], List[str], str]:
         response_message = response.choices[0].message.content
         logger.info(response_message)
 
@@ -250,7 +250,7 @@ class FileSelector:
 
         return selected_files, files_to_read, thoughts
 
-    def _group_code_snippets(self, code_snippets: List[CodeSnippet]) -> List[CodeFile]:
+    def _group_code_snippets(self, code_snippets: List[CodeSnippet]) -> List[ContextFile]:
         snippets_by_file_path = {}
 
         file_paths = []
@@ -274,14 +274,14 @@ class FileSelector:
                 file_content = f.read()
 
             if file_path not in snippets_by_file_path:
-                grouped_snippets.append(CodeFile(file_path=file_path, content=file_content, is_complete=True))
+                grouped_snippets.append(ContextFile(file_path=file_path, content=file_content, is_complete=True))
                 continue
 
             try:
                 codeblock = self._parser.parse(file_content)
             except Exception as e:
                 logger.warning(f"Error parsing file {file_path}: {e}")
-                grouped_snippets.append(CodeFile(file_path=file_path, content=file_content, is_complete=True))
+                grouped_snippets.append(ContextFile(file_path=file_path, content=file_content, is_complete=True))
                 continue
 
             snippets = snippets_by_file_path[file_path]
@@ -290,6 +290,6 @@ class FileSelector:
             line_numbers = [(snippet.start_line, snippet.end_line) for snippet in sorted_snippets]
 
             content = print_by_line_numbers(codeblock, line_numbers)
-            grouped_snippets.append(CodeFile(file_path=file_path, content=content, is_complete=codeblock.is_complete()))
+            grouped_snippets.append(ContextFile(file_path=file_path, content=content, is_complete=codeblock.is_complete()))
 
         return grouped_snippets
