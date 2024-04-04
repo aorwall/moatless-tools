@@ -13,7 +13,7 @@ from moatless.codeblocks.print_block import print_by_block_path
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.constants import SMART_MODEL
 from moatless.prompts import CODER_SYSTEM_PROMPT
-from moatless.types import Usage
+from moatless.types import Usage, BaseResponse, BlockPath
 
 logger = logging.getLogger(__name__)
 
@@ -123,44 +123,6 @@ def extract_response_parts(response: str) -> List[Union[str, CodePart]]:
     return combined_parts
 
 
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "write_code",
-            "description": "Write code in sthe pecfied block.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "thoughts": {
-                        "type": "string",
-                        "description": "Your thoughts on how to approach the task."
-                    },
-                    "change": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string"
-                            },
-                            "block_path": {
-                                "type": "string",
-                                "description": "Path to code blocks that should be updated.",
-                            },
-                            "content": {
-                                "type": "string",
-                                "descriptions": "Updated content"
-                            },
-                        },
-                        "required": ["file_path", "content"],
-                        "additionalProperties": False
-                    }
-                }
-            }
-        }
-    }
-]
-
-
 def do_diff(file_path: str, original_content: str, updated_content: str) -> Optional[str]:
     return "".join(difflib.unified_diff(
         original_content.strip().splitlines(True),
@@ -168,36 +130,17 @@ def do_diff(file_path: str, original_content: str, updated_content: str) -> Opti
         fromfile=file_path, tofile=file_path, lineterm="\n"))
 
 
-class CodeChange(BaseModel):
-    file_path: str
-    block_path: str
-    content: str
-
-
-class WriteCodeFunction(BaseModel):
-    thoughts: Optional[str] = None
-    change: CodeChange = None
-
-
-class InvalidCodeBlock(BaseModel):
-    block_path: str
-    content: str
-    message: str
-
-
-class WriteCodeResponse(BaseModel):
+class WriteCodeResult(BaseModel):
     content: Optional[str] = None
     error: Optional[str] = None
     change: Optional[str] = None
 
 
-class CoderResponse(BaseModel):
-    thoughts: Optional[str] = None
+class CoderResponse(BaseResponse):
     file_path: str
     diff: Optional[str] = None
     error: Optional[str] = None
     change: Optional[str] = None
-    usage_stats: List[Usage] = None
 
 
 class Coder:
@@ -211,16 +154,14 @@ class Coder:
         self._parser = PythonParser(apply_gpt_tweaks=True)
         self._log_file = log_file
 
-    def write_code(self, main_objective: str, instructions: str, file_path: str, block_path: str) -> CoderResponse:
+    def write_code(self, instructions: str, file_path: str, block_path: BlockPath = None, main_objective: str = None) -> CoderResponse:
         full_file_path = os.path.join(self._repo_path, file_path)
-
         with open(full_file_path, "r") as file:
             original_content = file.read()
 
-        codeblock = self._parser.parse(original_content)
-        block_path = block_path.split(".")
+        logger.debug(f"Write code to {full_file_path} and block path {block_path}")
 
-        # TODO: Verify if block paths exists in codeblock
+        codeblock = self._parser.parse(original_content)
 
         #block_content = print_by_block_paths(codeblock, block_paths)
 
@@ -230,13 +171,15 @@ class Coder:
 
         system_message = {"content": system_prompt, "role": "system"}
 
-        instruction_code = print_by_block_path(codeblock, block_path).strip()
+        instruction_code = print_by_block_path(codeblock, block_path).strip('\n')
+
+        if main_objective:
+            main_objective = f"## Main objective:\n{main_objective}\n"
+        else:
+            main_objective = ""
 
         instruction_message = {"role": "user",
-                               "content": f"""# Main objective: 
-{main_objective}
-
-# Current instructions:
+                               "content": main_objective + f"""# Instructions:
 
 {instructions}
 
@@ -260,7 +203,6 @@ class Coder:
             llm_response = completion(
                 model=self._model_name,
                 temperature=0.0,
-                # tools=tools,
                 messages=messages)
 
             if llm_response.usage:
@@ -275,46 +217,48 @@ class Coder:
             thoughts = [part for part in extracted_parts if isinstance(part, str)]
             thoughts = "\n".join([thought for thought in thoughts])
 
-            if changes:
-                if len(changes) > 1:
-                    logger.warning(f"Multiple code blocks found in response, ignoring all but the first one.")
+            if not changes:
+                return CoderResponse(
+                    thoughts=thoughts,
+                    usage_stats=usage_stats,
+                    file_path=file_path,
+                    error="No code blocks found in response."
+                )
 
-                response = self._write_code(codeblock, block_path, changes[0].content)
+            if len(changes) > 1:
+                logger.warning(f"Multiple code blocks found in response, ignoring all but the first one.")
 
-                if response.content:
-                    diff = do_diff(full_file_path, original_content, response.content)
-                    if diff:
-                        logger.debug(f"Writing updated content to {full_file_path}")
-                        # TODO: Write directly to file??
-                        with open(full_file_path, "w") as file:
-                            file.write(response.content)
-                    else:
-                        logger.info("No changes detected.")
+            response = self._write_code(codeblock, block_path, changes[0].content)
 
-                    if not response.error:
-                        messages.append(llm_response.choices[0].message.model_dump())
-                        self._save_message_log(messages)
-                        return CoderResponse(
-                            thoughts=thoughts,
-                            usage_stats=usage_stats,
-                            file_path=file_path,
-                            diff=diff,
-                            change=response.change
-                        )
+            if response.content:
+                diff = do_diff(file_path, original_content, response.content)
+                if diff:
+                    logger.debug(f"Writing updated content to {full_file_path}")
+                    # TODO: Write directly to file??
+                    with open(full_file_path, "w") as file:
+                        file.write(response.content)
+                else:
+                    logger.info("No changes detected.")
 
-                change = f"\nHere's the updated block {block_path}:\n```\n{response.content}\n```\n"
-                corrections = f"\nThe block {block_path} isn't correct.\n{response.error}\n"
+                if not response.error:
+                    return CoderResponse(
+                        thoughts=thoughts,
+                        usage_stats=usage_stats,
+                        file_path=file_path,
+                        diff=diff,
+                        change=response.change
+                    )
 
-                assistant_message = {"role": "assistant", "content": change}
-                messages.append(assistant_message)
-                correction_message = {"role": "user", "content": corrections}
+            change = f"\nHere's the updated block {block_path}:\n```\n{response.content}\n```\n"
+            corrections = f"\nThe block {block_path} isn't correct.\n{response.error}\n"
 
-                logger.info(f"Ask to the LLM to retry with the correction message: {correction_message}")
-                messages.append(correction_message)
+            assistant_message = {"role": "assistant", "content": change}
+            messages.append(assistant_message)
+            correction_message = {"role": "user", "content": corrections}
 
-                retry += 1
+            logger.info(f"Ask to the LLM to retry with the correction message: {correction_message}")
 
-        self._save_message_log(messages)
+            retry += 1
 
         return CoderResponse(
             thoughts=thoughts,
@@ -323,12 +267,10 @@ class Coder:
             error="Failed to update code blocks."
         )
 
-
-
-    def _write_code(self, original_block: CodeBlock, block_path: List[str], change: str, action: Optional[str] = None) -> WriteCodeResponse:
+    def _write_code(self, original_block: CodeBlock, block_path: List[str], change: str, action: Optional[str] = None) -> WriteCodeResult:
 
         def respond_with_invalid_block(message: str):
-            return WriteCodeResponse(
+            return WriteCodeResult(
                 change=change,
                 error=message,
             )
@@ -343,7 +285,7 @@ class Coder:
         if action == "delete":
             logger.info(f"Want to delete block {block_path}, but can't because it's not supported yet")
             # TODO: Delete block
-            return WriteCodeResponse(
+            return WriteCodeResult(
                 content=original_block.to_string(),
                 change=None
             )
@@ -351,15 +293,18 @@ class Coder:
         if action == "add":
             logger.info(f"Want to create block {block_path}, but can't because it's not supported yet")
             # TODO: Add block
-            return WriteCodeResponse(
+            return WriteCodeResult(
                 content=original_block.to_string(),
                 change=None
             )
 
-        changed_block = self.find_by_path_recursive(codeblock, block_path)
-        if not changed_block:
-            logger.warning(f"Couldn't find expected blockpath {block_path} in content:\n{change}")
-            return respond_with_invalid_block("The updated block should not contain multiple blocks.")
+        if block_path:
+            changed_block = self.find_by_path_recursive(codeblock, block_path)
+            if not changed_block:
+                logger.warning(f"Couldn't find expected blockpath {block_path} in content:\n{change}")
+                return respond_with_invalid_block("The updated block should not contain multiple blocks.")
+        else:
+            changed_block = codeblock
 
         error_blocks = changed_block.find_errors()
         if error_blocks:
@@ -372,10 +317,14 @@ class Coder:
             logger.warning(f"Updated block isn't complete:\n{change}")
             return respond_with_invalid_block("The code is not fully implemented. Write out all code in the code block.")
 
-        original_block.replace_by_path(block_path, changed_block)
-        logger.debug(f"Updated block: {block_path}")
+        if block_path:
+            original_block.replace_by_path(block_path, changed_block)
+            logger.debug(f"Updated block: {block_path}")
+        else:
+            original_block = changed_block
+            logger.debug(f"Replaces full file")
 
-        return WriteCodeResponse(
+        return WriteCodeResult(
             content=original_block.to_string(),
             change=change
         )
@@ -385,30 +334,3 @@ class Coder:
         if not found and len(block_path) > 1:
             return self.find_by_path_recursive(codeblock, block_path[1:])
         return found
-
-    def _handle_tool_call(self, response):
-        tool_calls = response.choices[0].message.tool_calls
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            logger.debug(json.dumps(function_args, indent=2))
-
-            if function_name == "write_code":
-                if write_code:
-                    logger.warning(f"Multiple write_code functions found, ignoring the second one: {function_args}")
-                else:
-                    write_code = WriteCodeFunction.parse_obj(function_args)
-            else:
-                logger.warning(f"Unknown function: {function_name}")
-
-    def _save_message_log(self, messages: List[dict]):
-        if self._log_file:
-            content = ""
-            for message in messages:
-                if message:
-                    content += "\n\n" + ("=" * 80) + "\n\n"
-
-                content += f"{message['role']}:\n {message['content']}\n"
-
-            with open(self._log_file, "a") as file:
-                file.write(content)

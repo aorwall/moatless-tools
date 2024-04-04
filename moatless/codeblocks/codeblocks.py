@@ -82,8 +82,9 @@ INDEXED_BLOCKS = [
     CodeBlockType.TEST_CASE
 ]
 
+
 class PathTree(BaseModel):
-    show: bool = Field(default=False, description="Show the block.")
+    show: bool = Field(default=False, description="Show the block and all sub blocks.")
     tree: dict[str, 'PathTree'] = Field(default_factory=dict)
 
     @staticmethod
@@ -277,8 +278,8 @@ class CodeBlock(BaseModel):
                 self.indentation = self.pre_code
 
         self.content_lines = self.content.split("\n")
-        if self.indentation and self.pre_lines:
-            self.content_lines[1:] = [line[len(self.indentation):] for line in self.content_lines[1:]]
+        #if self.indentation and self.pre_lines:
+        #    self.content_lines[1:] = [line[len(self.indentation):] for line in self.content_lines[1:]]
 
     def insert_child(self, index: int, child: "CodeBlock"):
         if index == 0 and self.children[0].pre_lines == 0:
@@ -417,9 +418,11 @@ class CodeBlock(BaseModel):
 
         if self.pre_lines:
             contents += "\n" * (self.pre_lines - 1)
-            for line in self.content_lines:
-                if line:
+            for i, line in enumerate(self.content_lines):
+                if i == 0 and line:
                     contents += "\n" + self.indentation + line
+                elif line:
+                    contents += "\n" + line
                 else:
                     contents += "\n"
         else:

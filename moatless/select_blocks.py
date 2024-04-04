@@ -3,18 +3,18 @@ import logging
 import os
 import random
 import re
-from typing import List, Optional, Dict, Tuple
-import xml.etree.ElementTree as ET
+from typing import List, Tuple
 
 from litellm import completion
-from openai import BaseModel, OpenAI
+from llama_index.core import get_tokenizer
+from openai import OpenAI
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-from moatless.codeblocks.print import print_with_blockpath_comments
+from moatless.codeblocks.print_block import print_with_blockpath_comments
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.constants import SMART_MODEL
 from moatless.prompts import SELECT_BLOCKS_SYSTEM_PROMPT
-from moatless.types import Usage, BlockPath
+from moatless.types import Usage, BlockPath, ContextFile, BaseResponse
 
 logger = logging.getLogger(__name__)
 
@@ -40,25 +40,34 @@ JSON_SCHEMA = """{
 """
 
 
-class CodeSelectorResponse(BaseModel):
-    thoughts: Optional[str] = None
+class CodeSelectorResponse(BaseResponse):
     block_paths: List[BlockPath] = []
-    usage_stats: List[Usage] = []
 
 
 class CodeBlockSelector:
 
-    def __init__(self, repo_path: str, model_name: str = None):
+    def __init__(self,
+                 repo_path: str,
+                 max_tokens: int = 2048,
+                 model_name: str = None):
         self._model_name = model_name or SMART_MODEL
         self._repo_path = repo_path
+        self._tokenizer = get_tokenizer()
+        self._max_tokens = max_tokens
         self._parser = PythonParser()
         self._client = OpenAI()
 
     def select_blocks(self, instructions: str, file_path: str) -> CodeSelectorResponse:
-
         full_file_path = os.path.join(self._repo_path, file_path)
         with open(full_file_path, 'r') as f:
             file_content = f.read()
+
+        tokens = len(self._tokenizer(file_content))
+        if tokens < self._max_tokens:
+            thoughts = (f"File {file_path} has {tokens} tokens which is less than max tokens {self._max_tokens}."
+                        f" Will not select blocks but return the full file content.")
+            logger.info(thoughts)
+            return CodeSelectorResponse(thoughts=thoughts, block_paths=[])
 
         codeblock = self._parser.parse(file_content)
 
@@ -89,7 +98,7 @@ class CodeBlockSelector:
                     model=self._model_name,
                     temperature=0.01,
                     max_tokens=512,
-                    stop='</selected_blocks>',
+                    stop=None, # '</selected_blocks>',
                     messages=messages)
 
             if llm_response.usage:
@@ -107,7 +116,12 @@ class CodeBlockSelector:
                         if block_path_str.startswith("block_path: "): # Because GPT 3.5 adds "block_path:" again sometimes...
                             block_path_str = block_path_str[len("block_path: "):]
 
+                        if block_path_str == "start":
+                            block_paths.append(["__start__"])  # TODO: Would like to just add [] here and handle it properly...
+                            continue
+
                         block_path = block_path_str.split('.')
+
                         found_block = codeblock.find_by_path(block_path)
                         if not found_block:
                             found_blocks = codeblock.find_blocks_with_identifier(block_path[-1])

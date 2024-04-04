@@ -22,6 +22,7 @@ class NodeMatch:
     identifier_node: Node = None
     first_child: Node = None
     last_child: Node = None
+    check_child: Node = None
     parameters: List[Tuple[Node, Optional[Node]]] = field(default_factory=list)
     references: List[Tuple[Node, str]] = field(default_factory=list)
     query: str = None
@@ -192,8 +193,8 @@ class CodeParser:
         index = 0
 
         while next_node:
-            #if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
-            #    next_node = next_node.children[0]
+            if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
+                next_node = next_node.children[0]
 
             self.debug_log(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
@@ -232,7 +233,7 @@ class CodeParser:
             elif next_node.next_sibling:
                 next_node = next_node.next_sibling
             else:
-                next_parent_node = self.get_parent_next(next_node, node)
+                next_parent_node = self.get_parent_next(next_node, node_match.check_child or node)
                 if next_parent_node == next_node:
                     next_node = None
                 else:
@@ -265,15 +266,15 @@ class CodeParser:
         if self.apply_gpt_tweaks:
             match = self.find_match_with_gpt_tweaks(node)
             if match:
-                self.debug_log(f"GPT match: {match.block_type} on {node}")
+                self.debug_log(f"find_in_tree() GPT match: {match.block_type} on {node}")
                 return match
 
         match = self.find_match(node)
         if match:
-            self.debug_log(f"Found match on node type {node.type} with block type {match.block_type}")
+            self.debug_log(f"find_in_tree() Found match on node type {node.type} with block type {match.block_type}")
             return match
         else:
-            self.debug_log(f"Found no match on node type {node.type} set block type {CodeBlockType.CODE}")
+            self.debug_log(f"find_in_tree() Found no match on node type {node.type} set block type {CodeBlockType.CODE}")
             return NodeMatch(block_type=CodeBlockType.CODE)
 
     def find_match_with_gpt_tweaks(self, node: Node) -> Optional[NodeMatch]:
@@ -282,6 +283,7 @@ class CodeParser:
                 continue
             match = self._find_match(node, query, label, capture_from_parent=True)
             if match:
+                self.debug_log(f"find_match_with_gpt_tweaks() Found match on node {node.type} with query {label}")
                 if not match.query:
                     match.query = label
                 return match
@@ -289,11 +291,13 @@ class CodeParser:
         return None
 
     def find_match(self, node: Node) -> Optional[NodeMatch]:
+        self.debug_log(f"find_match() node type {node.type}")
         for label, node_type, query in self.queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
             match = self._find_match(node, query, label)
             if match:
+                self.debug_log(f"find_match() Found match on node {node.type} with query {label}")
                 if not match.query:
                     match.query = label
                 return match
@@ -327,9 +331,15 @@ class CodeParser:
                 return None
 
             if tag == "check_child":
-                return self.find_match(found_node)
+                self.debug_log(f"[{label}] Check child {found_node}")
+                node_match = self.find_match(found_node)
+                if node_match:
+                    node_match.check_child = found_node
+                return node_match
 
             if tag == "parse_child":
+                self.debug_log(f"[{label}] Parse child {found_node}")
+
                 child_match = self.find_match(found_node)
                 if child_match:
                     if child_match.references:
@@ -347,7 +357,7 @@ class CodeParser:
             if tag == "child.first" and not node_match.first_child:
                 node_match.first_child = found_node
 
-            if tag == "child.last"  and not node_match.last_child:
+            if tag == "child.last" and not node_match.last_child:
                 node_match.last_child = found_node
 
             if tag == "parameter.identifier":

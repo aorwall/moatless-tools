@@ -158,9 +158,9 @@
   (_) @child.first
 ) @root @definition.statement
 
-(block
-  (_) @check_child
-) @root
+;; (block
+;;  (_) @check_child
+;; ) @root
 
 (_
   (":")

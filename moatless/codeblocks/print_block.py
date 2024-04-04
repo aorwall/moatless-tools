@@ -29,9 +29,11 @@ def _print_content(codeblock: CodeBlock, block_marker: BlockMarker = None) -> st
             elif block_marker == BlockMarker.TAG:
                 contents += f"\n</block>\n{codeblock.indentation}\n<block id='{codeblock.path_string()}'>"
 
-        for line in codeblock.content_lines:
-            if line:
+        for i, line in enumerate(codeblock.content_lines):
+            if i == 0 and line:
                 contents += "\n" + codeblock.indentation + line
+            elif line:
+                contents += "\n" + line
             else:
                 contents += "\n"
     else:
@@ -43,15 +45,18 @@ def _print_content(codeblock: CodeBlock, block_marker: BlockMarker = None) -> st
 def print_block(
         codeblock: CodeBlock,
         path_tree: PathTree = None,
-        show_types: List[CodeBlockType] = None,
         block_marker: BlockMarker = None) -> str:
+    if not path_tree:
+        path_tree = PathTree()
+        path_tree.show = True
+
     content = ""
     if block_marker == BlockMarker.TAG:
         content += f"<block id='start'>\n\n"
     elif block_marker == BlockMarker.COMMENT:
-        content += codeblock.create_comment_block("start").to_string()
+        content += codeblock.create_comment_block("block_id: start").to_string() + "\n"
 
-    content += _print(codeblock, path_tree=path_tree, show_types=show_types, block_marker=block_marker)
+    content += _print(codeblock, path_tree=path_tree, block_marker=block_marker)
 
     if block_marker == BlockMarker.TAG:
         content += "\n</block>"
@@ -59,7 +64,18 @@ def print_block(
     return content
 
 
-def print_by_block_paths(codeblock: CodeBlock, block_paths: List[BlockPath], block_marker: BlockMarker = None) -> str:
+def print_by_block_path(codeblock: CodeBlock, block_path: BlockPath) -> str:
+    tree = PathTree()
+    if block_path:
+        tree.add_to_tree(block_path)
+    else:
+        tree.show = True
+    return print_block(codeblock, path_tree=tree)
+
+
+def print_by_block_paths(codeblock: CodeBlock,
+                         block_paths: List[BlockPath],
+                         block_marker: BlockMarker = None) -> str:
     tree = PathTree()
     tree.extend_tree(block_paths)
     return print_block(codeblock, path_tree=tree, block_marker=block_marker)
@@ -67,60 +83,33 @@ def print_by_block_paths(codeblock: CodeBlock, block_paths: List[BlockPath], blo
 
 def _print(
         codeblock: CodeBlock,
-        path_tree: PathTree = None,
-        show_everything: bool = False,
-        show_types: List[CodeBlockType] = [],
+        path_tree: PathTree,
         block_marker: BlockMarker = None) -> str:
+    if not path_tree:
+        raise ValueError("Path tree is None")
+
     contents = _print_content(codeblock, block_marker=block_marker)
 
     has_outcommented_code = False
-    for i, child in enumerate(codeblock.children):
-        if show_everything:
-            contents += _print(child, block_marker=block_marker, show_everything=True)
+    for child in codeblock.children:
+        if path_tree.show:
+            contents += _print(child, block_marker=block_marker, path_tree=path_tree)
             continue
 
         child_tree = path_tree.child_tree(child.identifier) if path_tree else None
         if child_tree and child_tree.show:
             if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
                 contents += child.create_commented_out_block("... other code").to_string()
-            contents += _print(codeblock=child, block_marker=block_marker, show_everything=True)
+            contents += _print(codeblock=child, path_tree=child_tree, block_marker=block_marker)
             has_outcommented_code = False
-        elif child_tree or child.type in show_types:
-            contents += _print(codeblock=child, path_tree=child_tree, show_types=show_types, block_marker=block_marker)
+        elif child_tree:
+            contents += _print(codeblock=child, path_tree=child_tree, block_marker=block_marker)
             has_outcommented_code = False
         elif child.type not in NON_CODE_BLOCKS:
             has_outcommented_code = True
 
     if codeblock.parent and has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
         contents += child.create_commented_out_block("... other code").to_string()
-
-    return contents
-
-
-def print_by_block_path(codeblock: CodeBlock, block_path: List[str] = None) -> str:
-    contents = ""
-
-    if codeblock.pre_lines:
-        contents += "\n" * (codeblock.pre_lines - 1)
-        for line in codeblock.content_lines:
-            if line:
-                contents += "\n" + codeblock.indentation + line
-            else:
-                contents += "\n"
-    else:
-        contents += codeblock.pre_code + codeblock.content
-
-    has_outcommented_code = False
-    for i, child in enumerate(codeblock.children):
-        if not block_path or block_path[-1] == child.identifier:
-            if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
-                contents += child.create_commented_out_block("... other code").to_string()
-                has_outcommented_code = False
-            contents += print_by_block_path(codeblock=child)
-        elif len(block_path) > 1 and block_path[0] == child.identifier:
-            contents += print_by_block_path(codeblock=child, block_path=block_path[1:])
-        else:
-            has_outcommented_code = True
 
     return contents
 

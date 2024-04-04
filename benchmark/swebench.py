@@ -10,7 +10,7 @@ from llama_index.core import get_tokenizer
 
 from benchmark.utils import diff_details, write_json, diff_file_names
 from moatless.coder import CoderResponse
-from moatless.planner import DevelopmentPlan
+from moatless.planner import PlannerResponse
 from moatless.selector import SelectFilesResponse
 from moatless.retriever import CodeSnippet
 
@@ -271,7 +271,7 @@ def display_files(data: dict, response: SelectFilesResponse):
     display(styled_df)
 
 
-def display_plan(plan: DevelopmentPlan):
+def display_plan(plan: PlannerResponse):
     from IPython.display import display, Markdown
 
     if plan.thoughts:
