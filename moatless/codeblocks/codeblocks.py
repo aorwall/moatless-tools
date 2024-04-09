@@ -1,6 +1,7 @@
 import copy
 import logging
 import re
+from collections import namedtuple
 from enum import Enum
 from typing import List, Optional, Callable, Tuple
 
@@ -81,6 +82,9 @@ INDEXED_BLOCKS = [
     CodeBlockType.TEST_SUITE,
     CodeBlockType.TEST_CASE
 ]
+
+
+Span = namedtuple('Span', ['start_line', 'end_line'])
 
 
 class PathTree(BaseModel):
@@ -239,6 +243,7 @@ class CodeBlock(BaseModel):
     type: CodeBlockType
     file_path: str = None  # TODO: Move to Module sub class
     identifier: Optional[str] = None
+    is_indexed: bool = False
     parameters: List[Parameter] = []  # TODO: Move to Function sub class
     references: List[Relationship] = []
     content_lines: List[str] = []
@@ -250,7 +255,6 @@ class CodeBlock(BaseModel):
     indentation: str = ""
     tokens: int = 0
     language: Optional[str] = None
-    merge_history: List[MergeAction] = []
     children: List["CodeBlock"] = []
     parent: Optional["CodeBlock"] = None
 
@@ -367,36 +371,6 @@ class CodeBlock(BaseModel):
         if path[0] not in node:
             node[path[0]] = {}
         self._replace_in_tree(node[path[0]], path[1:])
-
-    def build_reference_tree(self):
-        tree = PathTree()
-
-        if self.type == CodeBlockType.MODULE:
-            return tree
-
-        if self.type == CodeBlockType.CLASS:
-            references = [self._fix_reference_path(reference) for reference in self.get_all_references(exclude_types=[CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]) if
-                          reference and reference.scope != ReferenceScope.EXTERNAL]  # FIXME skip _fix_reference_path?
-        else:
-            references = [self._fix_reference_path(reference) for reference in self.get_all_references() if
-                          reference and reference.scope != ReferenceScope.EXTERNAL]  # FIXME skip _fix_reference_path?
-
-        for ref in references:
-            tree.add_to_tree(ref.path, exclude_types=INDEXED_BLOCKS)
-        return tree
-
-    def build_external_reference_tree(self):
-        tree = {}
-
-        references = [self._fix_reference_path(reference) for reference in self.get_all_references() if
-                      reference is not None and reference.scope != ReferenceScope.EXTERNAL]
-        for ref in references:
-            external_path = tuple(ref.external_path)
-            if external_path not in tree:
-                tree[external_path] = {}
-
-            self._insert_into_tree(tree[external_path], ref.path)
-        return tree
 
     def sum_tokens(self):
         tokens = self.tokens
@@ -531,6 +505,18 @@ class CodeBlock(BaseModel):
 
         return self.full_path() == other.full_path()
 
+    def find_type_in_parents(self, block_type: CodeBlockType) -> Optional["CodeBlock"]:
+        if not self.parent:
+            return None
+
+        if self.parent.type == block_type:
+            return self.parent
+
+        if self.parent:
+            return self.parent.find_type_in_parents(block_type)
+
+        return None
+
     def equal_contents(self, other: "CodeBlock"):
         if len(self.children) != len(other.children):
             return False
@@ -606,14 +592,6 @@ class CodeBlock(BaseModel):
 
         return references
 
-    def _fix_reference_path(self, reference: Relationship):
-        if reference.scope == ReferenceScope.CLASS:
-            if self.type == CodeBlockType.CLASS:
-                return Relationship(scope=reference.scope, path=[self.identifier] + reference.path)
-            elif self.parent:
-                return self.parent._fix_reference_path(reference)
-
-        return reference
 
     def is_complete(self):
         if self.type == CodeBlockType.COMMENTED_OUT_CODE:
@@ -638,7 +616,7 @@ class CodeBlock(BaseModel):
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
             indentation=self.indentation,
-            pre_lines=1,
+            pre_lines=2,
             content=self.create_comment(comment_out_str))
 
     def create_comment_block(self, comment: str = "..."):
@@ -780,413 +758,43 @@ class CodeBlock(BaseModel):
     def find_blocks_with_type(self, block_type: CodeBlockType) -> List["CodeBlock"]:
         return self.find_blocks_with_types([block_type])
 
-    def find_nested_matching_blocks(self, blocks: List["CodeBlock"], start_original: int = 0) -> List["CodeBlock"]:
-        matching_blocks = []
-        for child_block in self.children[start_original:]:
-            if any(child_block.has_equal_definition(block) for block in blocks):
-                matching_blocks.append(child_block)
-            elif child_block.children:
-                matching_blocks.extend(child_block.find_nested_matching_blocks(blocks))
-        return matching_blocks
 
-    def has_any_similarity(self, updated_block: "CodeBlock"):
-        if self.has_any_matching_child(updated_block.children):
-            return True
-        elif self.find_nested_matching_block(updated_block):
-            return True
-        return False
+    def find_indexed_blocks_by_spans(self, spans: List[Span]):
+        if self.is_block_within_spans(spans):
+            return [self]
 
-    def has_nested_matching_block(self, other: Optional["CodeBlock"], start_original: int = 0) -> bool:
-        if not other:
-            return False
-        return self.find_nested_matching_block(other, start_original)
+        if self.is_spans_within_block(spans):
+            if not self.get_indexed_blocks():
+                return [self]
 
-    def has_nested_blocks_with_types(self, find_types: Optional[List["CodeBlock"]], start_original: int = 0) -> bool:
-        if not find_types:
-            return False
-        for child_block in self.children[start_original:]:
-            if child_block.type in find_types:
-                return True
-            if child_block.has_nested_blocks_with_types(find_types):
-                return True
-        return False
-
-    def find_next_commented_out(self, start):
-        i = start
-        while i < len(self.children):
-            if self.children[i].type == CodeBlockType.COMMENTED_OUT_CODE:
-                return i
-            i += 1
-        return None
-
-    def find_next_matching_block(self, other_block: "CodeBlock", start_original: int, start_updated: int):
-        original_blocks = self.children
-        other_blocks = other_block.children
-
-        i = start_original
-
-        next_updated_incomplete = None
-        j = start_updated
-        while j < len(other_blocks):
-            if not other_blocks[j].is_complete() and other_blocks[j].type != CodeBlockType.COMMENTED_OUT_CODE:
-                next_updated_incomplete = j
-                break
-            j += 1
-
-        max_j = len(other_blocks) if next_updated_incomplete is None else next_updated_incomplete
-        while i < len(original_blocks):
-            j = start_updated
-            while j < max_j:
-                if original_blocks[i].content == other_blocks[j].content:
-                    return i, j
-                j += 1
-            i += 1
-
-        # try to find similar block if there are incomplete update blocks
-        if next_updated_incomplete:
-            similar_block = self.most_similar_block(other_blocks[next_updated_incomplete], start_original)
-            if similar_block:
-                logging.debug(f"Will return index for similar block `{self.children[similar_block].content}`")
-                return similar_block, next_updated_incomplete
-
-        return len(original_blocks), len(other_blocks)
-
-    def most_similar_block(self,
-                           other_block: "CodeBlock",
-                           start_original: int):
-        """Naive solution for finding similar blocks."""
-        # TODO: Check identifier and parameters
-
-        max_similarity = 0
-        max_i = None
-
-        i = start_original
-        while i < len(self.children):
-            if self.children[i].type == other_block.type:
-                common_chars = sum(
-                    c1 == c2 for c1, c2 in zip(self.children[i].content, other_block.content))
-                if common_chars > max_similarity:
-                    max_similarity = common_chars
-                    max_i = i
-            i += 1
-        return max_i
-
-    def find_matching_pairs(self, other_block: "CodeBlock") -> List[Tuple["CodeBlock", "CodeBlock"]]:
-        matching_pairs = []
-
-        for child_block in other_block.children:
-            if child_block.type in NON_CODE_BLOCKS:
-                continue
-            matching_children = self.find_blocks_with_identifier(child_block.identifier)
-            if len(matching_children) == 1:
-                logging.debug(f"Found matching child block `{child_block.identifier}` in `{self.identifier}`")
-                matching_pairs.append((matching_children[0], child_block))
-            else:
-                return []
-
-        return matching_pairs
-
-    def find_nested_matching_pairs(self, other_block: "CodeBlock") -> List[Tuple["CodeBlock", "CodeBlock"]]:
-        for child_block in self.children:
-            matching_children = child_block.find_matching_pairs(other_block)
-            if matching_children:
-                return matching_children
-
-            matching_children = child_block.find_nested_matching_pairs(other_block)
-            if matching_children:
-                return matching_children
-
-        return []
-
-    def merge(self, updated_block: "CodeBlock"):
-        logging.debug(f"Merging block `{self.type.value}: {self.path_string()}` ({len(self.children)} children) with "
-                      f"`{updated_block.type.value}: {updated_block.path_string()}` ({len(updated_block.children)} children)")
-
-        # If there are no matching child blocks on root level expect separate blocks to update on other levels
-        if not self.has_any_matching_child(updated_block.children):
-            update_pairs = self.find_nested_matching_pairs(updated_block)
-            if update_pairs:
-                for original_child, updated_child in update_pairs:
-                    original_indentation_length = len(original_child.indentation) + len(self.indentation)
-                    updated_indentation_length = len(updated_child.indentation) + len(updated_block.indentation)
-                    if original_indentation_length > updated_indentation_length:
-                        additional_indentation = ' ' * (original_indentation_length - updated_indentation_length)
-                        updated_child.add_indentation(additional_indentation)
-
-                    self.merge_history.append(MergeAction(action="find_nested_block", original_block=original_child, updated_block=updated_child))
-                    original_child._merge(updated_child)
-                return
-
-            raise ValueError(f"Didn't find matching blocks in `{self.identifier}``")
-
-        self._merge(updated_block)
-
-    def _merge(self, updated_block: "CodeBlock"):
-        logging.debug(f"Merging block `{self.type.value}: {self.path_string()}` ({len(self.children)} children) with "
-                      f"`{updated_block.type.value}: {updated_block.path_string()}` ({len(updated_block.children)} children)")
-
-        # Just replace if there are no code blocks in original block
-        if len(self.children) == 0 or all(child.type in NON_CODE_BLOCKS for child in self.children):
-            self.children = updated_block.children
-            self.merge_history.append(MergeAction(action="replace_non_code_blocks"))
-
-        # Find and replace if all children in a class are matching
-        if self.type == CodeBlockType.CLASS == updated_block.type:
-            update_pairs = self.find_matching_pairs(updated_block)
-            if update_pairs:
-                self.merge_history.append(
-                    MergeAction(action="all_children_match", original_block=self, updated_block=updated_block))
-
-                for original_child, updated_child in update_pairs:
-                    original_child._merge(updated_child)
-
-                return
-
-        # Replace if block is complete
-        # if updated_block.is_complete():
-        #     self.children = updated_block.children
-        #     self.merge_history.append(MergeAction(action="replace_complete", original_block=self, updated_block=updated_block))
-
-        self._merge_block_by_block(updated_block)
-
-    def _merge_block_by_block(self, updated_block: "CodeBlock"):
-        i = 0
-        j = 0
-
-        while j < len(updated_block.children):
-            if i >= len(self.children):
-                self.children.extend(updated_block.children[j:])
-                return
-
-            original_block_child = self.children[i]
-            updated_block_child = updated_block.children[j]
-
-            if original_block_child.equal_contents(updated_block_child):
-                original_block_child.merge_history.append(MergeAction(action="is_same"))
-                i += 1
-                j += 1
-            elif updated_block_child.type == CodeBlockType.COMMENTED_OUT_CODE:
-                j += 1
-                orig_next, update_next = self.find_next_matching_block(updated_block, i, j)
-
-                for commented_out_child in self.children[i:orig_next]:
-                    commented_out_child.merge_history.append(MergeAction(action="commented_out", original_block=commented_out_child, updated_block=None))
-
-                i = orig_next
-                if update_next > j:
-                    #  Clean up commented out code at the end
-                    last_updated_child = updated_block.children[update_next-1]
-                    if last_updated_child.type == CodeBlockType.COMMENTED_OUT_CODE:
-                        update_next -= 1
-
-                    self.children[i:i] = updated_block.children[j:update_next]
-                    i += update_next - j
-
-                j = update_next
-            elif (original_block_child.content == updated_block_child.content and
-                  original_block_child.children and updated_block_child.children):
-                original_block_child._merge(updated_block_child)
-                i += 1
-                j += 1
-            elif original_block_child.content == updated_block_child.content:
-                self.children[i] = updated_block_child
-                i += 1
-                j += 1
-            elif updated_block_child:
-                # we expect to update a block when the updated block is incomplete
-                # and will try the find the most similar block.
-                if not updated_block_child.is_complete():
-                    similar_original_block = self.most_similar_block(updated_block_child, i)
-                    logging.debug(f"Updated block with definition `{updated_block_child.content}` is not complete")
-                    if similar_original_block == i:
-                        self.merge_history.append(
-                            MergeAction(action="replace_similar", original_block=original_block_child,
-                                        updated_block=updated_block_child))
-
-                        original_block_child = CodeBlock(
-                            content=updated_block_child.content,
-                            identifier=updated_block_child.identifier,
-                            pre_code=updated_block_child.pre_code,
-                            type=updated_block_child.type,
-                            parent=self.parent,
-                            children=original_block_child.children
-                        )
-
-                        self.children[i] = original_block_child
-
-                        logging.debug(
-                            f"Will replace similar original block definition: `{original_block_child.content}`")
-                        original_block_child._merge(updated_block_child)
-                        i += 1
-                        j += 1
-
-                        continue
-                    elif not similar_original_block:
-                        logging.debug(f"No most similar original block found to `{original_block_child.content}")
-                    else:
-                        logging.debug(f"Expected most similar original block to be `{original_block_child.content}, "
-                                      f"but was {self.children[similar_original_block].content}`")
-
-                next_original_match = self.find_next_matching_child_block(i, updated_block_child)
-                next_updated_match = updated_block.find_next_matching_child_block(j, original_block_child)
-                next_commented_out = updated_block.find_next_commented_out(j)
-
-                if next_original_match:
-                    self.merge_history.append(
-                        MergeAction(action="next_original_match_replace", original_block=self.children[next_original_match],
-                                    updated_block=updated_block_child))
-
-                    # if it's not on the first level we expect the blocks to be replaced
-                    self.children = self.children[:i] + self.children[next_original_match:]
-                elif next_commented_out is not None and (
-                        not next_updated_match or next_commented_out < next_updated_match):
-                    # if there is commented out code after the updated block,
-                    # we will insert the lines before the commented out block in the original block
-                    self.merge_history.append(
-                        MergeAction(action="next_commented_out_insert",
-                                    original_block=original_block_child,
-                                    updated_block=updated_block.children[next_commented_out]))
-
-                    self.insert_children(i, updated_block.children[j:next_commented_out])
-                    i += next_commented_out - j
-                    j = next_commented_out
-                elif next_updated_match:
-                    # if there is a match in the updated block, we expect this to be an addition
-                    # and insert the lines before in the original block
-                    self.merge_history.append(
-                        MergeAction(action="next_original_match_insert",
-                                    original_block=original_block_child,
-                                    updated_block=updated_block.children[next_updated_match]))
-
-                    self.insert_children(i, updated_block.children[j:next_updated_match])
-                    diff = next_updated_match - j
-                    i += diff
-                    j = next_updated_match
-                else:
-                    self.children.pop(i)
-            else:
-                self.insert_child(i, updated_block_child)
-                j += 1
-                i += 1
-
-    def copy_with_trimmed_parents(self):
-        block_copy = CodeBlock(
-            type=self.type,
-            identifier=self.identifier,
-            content=self.content,
-            indentation=self.indentation,
-            pre_lines=self.pre_lines,
-            start_line=self.start_line,
-            children=self.children
-        )
-
-        if self.parent:
-            block_copy.parent = self.parent.trim_code_block(block_copy)
-        return block_copy
-
-    def trim_code_block(self, keep_child: "CodeBlock"):
-        children = []
-        for child in self.children:
-            if child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
-                children.append(child)
-            elif child.content != keep_child.content:  # TODO: Fix ID to compare to
-                if (child.type not in NON_CODE_BLOCKS and
-                        (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
-                    children.append(child.create_commented_out_block())
-            else:
-                children.append(keep_child)
-
-        trimmed_block = CodeBlock(
-            content=self.content,
-            identifier=self.identifier,
-            indentation=self.indentation,
-            pre_lines=self.pre_lines,
-            type=self.type,
-            start_line=self.start_line,
-            children=children
-        )
-
-        if trimmed_block.parent:
-            trimmed_block.parent = self.parent.trim_code_block(trimmed_block)
-
-        return trimmed_block
-
-    def get_indexable_blocks(self) -> List["CodeBlock"]:
-        """
-        Returns a list of blocks that can be indexed.
-        """
-        splitted_blocks = []
-        splitted_blocks.append(self)
-
-        if self.type in [CodeBlockType.CLASS, CodeBlockType.TEST_SUITE, CodeBlockType.MODULE]:
+            found_blocks = []
             for child in self.children:
-                if child.type in INDEXED_BLOCKS:
-                    splitted_blocks.extend(child.get_indexable_blocks())
+                # TODO: Filter out relevant spans
+                found_blocks.extend(child.find_indexed_blocks_by_spans(spans))
 
-        return splitted_blocks
+            return found_blocks
 
-    def trim(self,
-             keep_blocks: List["CodeBlock"] = [],
-             keep_level: int = 0,
-             include_types: List[CodeBlockType] = None,
-             exclude_types: List[CodeBlockType] = None,
-             first_level_types: List[CodeBlockType] = None,
-             keep_the_rest: bool = False,
-             comment_out_str: str = "..."):
-        children = []
+        else:
+            return []
+
+    def is_spans_within_block(self, spans: List[Span]) -> bool:
+        for span in spans:
+            if span.start_line >= self.start_line and span.end_line <= self.end_line:
+                return True
+        return False
+
+    def is_block_within_spans(self, spans: List[Span]) -> bool:
+        for span in spans:
+            if span.start_line <= self.start_line and span.end_line >= self.end_line:
+                return True
+        return False
+
+    def get_indexed_blocks(self) -> List["CodeBlock"]:
+        blocks = []
         for child in self.children:
-            if keep_level:
-                if child.children:
-                    children.append(
-                        child.trim(keep_blocks=keep_blocks, keep_level=keep_level - 1, comment_out_str=comment_out_str))
-                else:
-                    children.append(child)
-            elif child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
-                children.append(child)
-            elif any(child.has_equal_definition(block) for block in keep_blocks):
-                children.append(child)
-            elif first_level_types and child.type in first_level_types:
-                children.append(child.trim(keep_blocks, comment_out_str=comment_out_str))
-            elif (child.find_nested_matching_blocks(keep_blocks)
-                  or (include_types and child.type in include_types)):
-                children.append(child.trim(keep_blocks, keep_the_rest=keep_the_rest, comment_out_str=comment_out_str))
-            elif keep_the_rest and (not exclude_types or child.type not in exclude_types):
-                children.append(child.trim(keep_blocks, keep_the_rest=keep_the_rest, exclude_types=exclude_types, comment_out_str=comment_out_str))
-            elif (child.type not in NON_CODE_BLOCKS and
-                  (not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE)):
-                children.append(child.create_commented_out_block(comment_out_str))
+            if child.is_indexed:
+                blocks.append(child)
 
-        trimmed_block = CodeBlock(
-            content=self.content,
-            identifier=self.identifier,
-            pre_code=self.pre_code,
-            indentation=self.indentation,
-            pre_lines=self.pre_lines,
-            type=self.type,
-            start_line=self.start_line,
-            children=children,
-            parent=self.parent
-        )
+            blocks.extend(child.get_indexed_blocks())
 
-        return trimmed_block
-
-    def trim_with_types(self, show_block: "CodeBlock" = None, include_types: List[CodeBlockType] = None):
-        children = []
-        for child in self.children:
-            if child.type == CodeBlockType.BLOCK_DELIMITER:
-                children.append(copy.copy(child))
-            elif self == show_block or (include_types and child.type in include_types):
-                children.append(child.trim_with_types(show_block, include_types))
-            elif child.has_nested_matching_block(show_block) or child.has_nested_blocks_with_types(include_types):
-                children.append(child.trim_with_types(show_block, include_types))
-            elif not children or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE:
-                children.append(child.create_commented_out_block())
-
-        return CodeBlock(
-            content=self.content,
-            identifier=self.identifier,
-            pre_code=self.pre_code,
-            type=self.type,
-            parent=self.parent,
-            children=children
-        )
+        return blocks

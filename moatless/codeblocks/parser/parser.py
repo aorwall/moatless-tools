@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import List, Tuple, Optional, Callable
 
+from llama_index.core import get_tokenizer
 from tree_sitter import Node, Language, Parser
 
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, Relationship, ReferenceScope, Parameter, \
@@ -15,6 +16,7 @@ child_block_types = ["ERROR", "block"]
 module_types = ["program", "module"]
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class NodeMatch:
@@ -59,6 +61,7 @@ class CodeParser:
     def __init__(self,
                  language: Language,
                  encoding: str = "utf8",
+                 index_callback: Optional[Callable[[CodeBlock], bool]] = None,
                  tokenizer: Callable[[str], List] = None,
                  apply_gpt_tweaks: bool = False,
                  debug: bool = False):
@@ -70,12 +73,13 @@ class CodeParser:
             print(f"Could not get parser for language {language}.")
             raise e
         self.apply_gpt_tweaks = apply_gpt_tweaks
+        self.index_callback = index_callback
         self.debug = debug
         self.encoding = encoding
         self.gpt_queries = []
         self.queries = []
         self.reference_index = {}
-        self.tokenizer = tokenizer
+        self.tokenizer = tokenizer or get_tokenizer()
 
     @property
     def language(self):
@@ -102,8 +106,12 @@ class CodeParser:
                     raise e
             return parsed_queries
 
-
-    def parse_code(self, content_bytes: bytes, node: Node, start_byte: int = 0, level: int = 0) -> Tuple[CodeBlock, Node]:
+    def parse_code(self,
+                   content_bytes: bytes,
+                   node: Node,
+                   start_byte: int = 0,
+                   level: int = 0,
+                   parent_block: Optional[CodeBlock] = None) -> Tuple[CodeBlock, Node]:
         if node.type == "ERROR" or any(child.type == "ERROR" for child in node.children):
             node_match = NodeMatch(block_type=CodeBlockType.ERROR)
             self.debug_log(f"Found error node {node.type}")
@@ -136,6 +144,7 @@ class CodeParser:
         code_block = CodeBlock(
             type=node_match.block_type,
             identifier=identifier,
+            parent=parent_block,
             parameters=parameters,
             references=references,
             start_line=node.start_point[0] + 1,
@@ -198,7 +207,8 @@ class CodeParser:
 
             self.debug_log(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
-            child_block, child_last_node = self.parse_code(content_bytes, next_node, start_byte=end_byte, level=level+1)
+            child_block, child_last_node = self.parse_code(
+                content_bytes, next_node, start_byte=end_byte, level=level+1, parent_block=code_block)
             if not child_block.content:
                 if child_block.children:
                     child_block.children[0].pre_code = child_block.pre_code + child_block.children[0].pre_code
@@ -243,7 +253,7 @@ class CodeParser:
 
         self.post_process(code_block)
 
-        self.add_to_reference_index(code_block)
+        self.add_to_index(code_block)
 
         if level == 0 and not node.parent and node.end_byte > end_byte:
             code_block.append_child(CodeBlock(
@@ -464,13 +474,22 @@ class CodeParser:
     def process_match(self, node_match: NodeMatch, node: Node, content_bytes: bytes):
         return node_match
 
-    def add_to_reference_index(self, codeblock: CodeBlock):
-        for reference in codeblock.references:
-            if reference.identifier:
-                if reference.path and reference.path[0] in self.reference_index:
-                    self.reference_index[reference.identifier] = self.reference_index[reference.path[0]]
-                else:
-                    self.reference_index[reference.identifier] = reference
+    def add_to_index(self, codeblock: CodeBlock):
+        if self._should_be_indexed(codeblock):
+            codeblock.is_indexed = True
+            if self.index_callback:
+                self.index_callback(codeblock)
+
+    def _should_be_indexed(self, codeblock: CodeBlock):
+        if codeblock.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]:
+            return True
+
+        if codeblock.type == CodeBlockType.FUNCTION:
+            # Don't index inner functions
+            if not codeblock.find_type_in_parents(CodeBlockType.FUNCTION):
+                return True
+
+        return False
 
     def pre_process(self, codeblock: CodeBlock):
         pass

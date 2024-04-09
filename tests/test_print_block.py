@@ -2,22 +2,39 @@ from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import PathTree
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.print_block import print_by_line_numbers, print_by_block_path, print_by_block_paths, \
-    BlockMarker, print_block
+    BlockMarker, print_block, Span
 
 
 def test_print_by_line_numbers():
-    file_path = "/tmp/repos/pytest-dev_pytest/src/_pytest/faulthandler.py"
+    file_path = "data/python/print_block/schema.py"
 
     parser = PythonParser()
     with open(file_path) as f:
         codeblock = parser.parse(f.read())
 
     line_numbers = [
-        (1, 36),
-        (54, 205)
+        Span(1, 23),
+        Span(151, 152)
     ]
 
     print(print_by_line_numbers(codeblock, line_numbers))
+
+
+def test_print_with_references():
+    file_path = "data/python/marshmallow-code__marshmallow-1343/schema.py"
+
+    parser = PythonParser()
+    with open(file_path) as f:
+        codeblock = parser.parse(f.read())
+
+    line_numbers = [
+        Span(1, 23),
+        Span(151, 152)
+    ]
+
+    print(print_by_block_paths(codeblock,
+                               block_paths=[["BaseSchema", "_invoke_field_validators"]],
+                               include_references=True))
 
 
 
