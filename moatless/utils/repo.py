@@ -22,6 +22,8 @@ def get_repo_dir_name(repo: str):
 
 def maybe_clone(repo_url, repo_dir):
     if not os.path.exists(f"{repo_dir}/.git"):
+
+        print(f"Cloning repo '{repo_url}'")
         # Clone the repo if the directory doesn't exist
         result = subprocess.run(['git', 'clone', repo_url, repo_dir], check=True, text=True, capture_output=True)
 
@@ -30,8 +32,6 @@ def maybe_clone(repo_url, repo_dir):
         else:
             print(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
             raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
-    else:
-        print(f"Repo '{repo_url}' already exists in '{repo_dir}'")
 
 
 def checkout_commit(repo_dir, commit_hash):

@@ -8,7 +8,8 @@ from litellm import completion
 from llama_index.core import get_tokenizer
 from openai import BaseModel, OpenAI
 
-from moatless.codeblocks.codeblocks import PathTree, CodeBlockType
+from moatless.code_graph import CodeGraph
+from moatless.codeblocks.codeblocks import PathTree, CodeBlockType, CodeBlock
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.print_block import BlockMarker, print_by_block_paths, print_block
 from moatless.constants import SMART_MODEL
@@ -108,10 +109,11 @@ class Planner:
     def __init__(self, repo_path: str, model_name: str = None):
         self._model_name = model_name or SMART_MODEL
         self._repo_path = repo_path
-        self._parser = PythonParser()
+
         self._client = OpenAI()
         lunary.monitor(self._client)
         self._tokenizer = get_tokenizer()
+        self._show_relationships = True
         self._max_file_token_size = 2000
         self._min_tokens_for_planning = 500  # TODO: Find a good number of tokens where the LLM won't be lazy
 
@@ -127,11 +129,36 @@ class Planner:
 
             tokens += len(self._tokenizer(file_content))
 
-            codeblock = self._parser.parse(file_content)
+            # TODO: Just for verifying benchmark. Should be moved to a centralized code index!
+            code_graph = CodeGraph()
+
+            def add_to_graph(codeblock: CodeBlock):
+                code_graph.add_to_graph(file.file_path, codeblock)
+
+            parser = PythonParser(index_callback=add_to_graph)
+
+            codeblock = parser.parse(file_content)
+
+            block_paths = []
+
+            if self._show_relationships:
+                for selected_block_path in file.block_paths:
+                    block_paths.append(selected_block_path)
+
+                    related_blocks = code_graph.find_relationships(file.file_path, selected_block_path)
+                    if related_blocks:
+                        for related_block in related_blocks:
+                            if related_block.type in [CodeBlockType.CLASS, CodeBlockType.MODULE]:
+                                for child in related_block.children:
+                                    if not child.is_indexed and child.full_path() not in block_paths:
+                                        block_paths.append(child.full_path())
+
+                            elif related_block.full_path() not in block_paths:
+                                block_paths.append(related_block.full_path())
 
             if file.block_paths:
                 content = print_by_block_paths(codeblock,
-                                               block_paths=file.block_paths,
+                                               block_paths=block_paths,
                                                # show_types=[CodeBlockType.CLASS, CodeBlockType.FUNCTION],
                                                block_marker=BlockMarker.COMMENT)
                 # TODO: Check min / max_tokens and iterate

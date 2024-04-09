@@ -12,6 +12,7 @@ from llama_index.core.storage.docstore import SimpleDocumentStore, DocumentStore
 from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 
+from moatless.retriever import CodeSnippetRetriever
 from moatless.splitters.epic_split import EpicSplitter
 from moatless.store.simple_faiss import SimpleFaissVectorStore
 
@@ -62,7 +63,7 @@ class CodeBaseIngestionPipeline:
             **kwargs
         )
 
-    def run(self):
+    def run(self, input_files: list[str] = None):
         reader = SimpleDirectoryReader(
             input_dir=self.path,
             exclude=[  # TODO: Shouldn't be hardcoded and filtered
@@ -71,6 +72,7 @@ class CodeBaseIngestionPipeline:
                 "**/test_*.py",
                 "**/*_test.py",
             ],
+            input_files=input_files,
             filename_as_id=True,
             required_exts=[".py"],  # TODO: Shouldn't be hardcoded and filtered
             recursive=True,
@@ -112,6 +114,14 @@ class CodeBaseIngestionPipeline:
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {tokens} tokens")
 
         return len(embedded_nodes), tokens
+
+    def retriever(self, max_context_tokens: int = 200000):
+        return CodeSnippetRetriever(
+            vector_store=self.vector_store,
+            docstore=self.docstore,
+            embed_model=self._embed_model,
+            max_context_tokens=max_context_tokens
+        )
 
     def persist(self, persist_dir: str):
         self.vector_store.persist(persist_dir)

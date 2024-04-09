@@ -361,9 +361,11 @@ class EpicSplitter(NodeParser):
 
         if codeblock.pre_lines:
             contents += "\n" * (codeblock.pre_lines - 1)
-            for line in codeblock.content_lines:
-                if line:
+            for i, line in enumerate(codeblock.content_lines):
+                if i == 0 and line:
                     contents += "\n" + codeblock.indentation + line
+                elif line:
+                    contents += "\n" + line
                 else:
                     contents += "\n"
         else:

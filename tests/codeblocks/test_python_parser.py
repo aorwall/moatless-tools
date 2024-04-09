@@ -1,18 +1,18 @@
 from moatless.codeblocks import CodeBlockType
+from moatless.codeblocks.codeblocks import Span
 from moatless.codeblocks.parser.python import PythonParser
 
 
-def _verify_parsing(content, assertion):
-    parser = PythonParser(apply_gpt_tweaks=True, debug=True)
+def _verify_parsing(content, assertion, debug=True):
+    parser = PythonParser(apply_gpt_tweaks=True, debug=debug)
 
     codeblock = parser.parse(content)
 
-    print(codeblock.to_tree())
+    print(codeblock.to_tree(include_references=True))
 
     assert codeblock.to_string() == content
 
     assertion(codeblock)
-
 
 
 def test_function():
@@ -139,6 +139,67 @@ reduce these to 2 dimensions using the naxis kwarg.
     _verify_parsing(content, assertion)
 
 
+def test_referenced_blocks():
+    content = """class Event:
+    def __init__(self, name):
+        self.name = name
+    
+class EventLogger:
+    def __init__(self):
+        self.events = []
+
+    def log_event(self, event: Event):
+        self.events.append(event)
+        self.show_last_event()
+    
+    def show_last_event(self):
+        if self.events:
+            print(f"Last event: {self.events[-1]}")
+"""
+
+    def assertion(codeblock):
+        # TODO: Verify!
+        pass
+
+    _verify_parsing(content, assertion, debug=False)
+
+
+def test_decoratated_function():
+    content = """class Foo:
+    @classmethod
+    def bar(cls):
+        return 42
+"""
+
+    def assertion(codeblock):
+        assert content == codeblock.to_string()
+
+    _verify_parsing(content, assertion, debug=False)
+
+
+def test_find_indexed_blocks_by_spans():
+    with open("../data/python/marshmallow-code__marshmallow-1343/schema.py") as f:
+        content = f.read()
+
+    def assertion(codeblock):
+
+        spans = [
+            Span(8, 8),  # import decimal
+            Span(39, 40),  # _get_fields
+            Span(77, 180),  # SchemaMeta
+            Span(504, 510)  # BaseSchema.dump
+        ]
+
+        indexed_blocks = codeblock.find_indexed_blocks_by_spans(spans)
+
+        block_ids = [block.path_string() for block in indexed_blocks]
+        assert block_ids == ["decimal", "_get_fields", "SchemaMeta", "BaseSchema.dump"]
+
+    _verify_parsing(content, assertion, debug=False)
+
+
+
+
 def test_realworld_example():
     with open("data/python/pytest-dev__pytest-5808/updated_pastebin.py", "r") as f:
         content = f.read()
@@ -146,4 +207,6 @@ def test_realworld_example():
     def assertion(codeblock):
         pass
 
-    _verify_parsing(content, assertion)
+    _verify_parsing(content, assertion, debug=False)
+
+

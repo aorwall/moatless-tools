@@ -3,11 +3,14 @@ import os
 import uuid
 from typing import List
 
+from llama_index.embeddings.voyageai import VoyageEmbedding
 from pydantic import BaseModel
 
 from moatless.coder import Coder
+from moatless.ingestion import CodeBaseIngestionPipeline
 from moatless.planner import Planner
 from moatless.select_blocks import CodeBlockSelector
+from moatless.splitters.epic_split import EpicSplitter
 from moatless.types import ContextFile, BaseResponse, DevelopmentTask
 
 
@@ -47,10 +50,22 @@ class CodingPipeline:
                 with open(self._state_file_path, 'r') as f:
                     self._state = PipelineState.model_validate_json(f.read())
 
+        voyage_api_key = os.environ.get("VOYAGE_API_KEY", "your-api-key")
+        voyage_embedding = VoyageEmbedding(
+            model_name="voyage-code-2", voyage_api_key=voyage_api_key, truncation=False
+        )
+
+        self.ingestion_pipeline = CodeBaseIngestionPipeline.from_path(
+            path=self._path,
+            splitter=EpicSplitter(chunk_size=1000, min_chunk_size=100, language="python"),
+            embed_model=voyage_embedding
+        )
+
         self._block_selector = CodeBlockSelector(
             repo_path=self._path,
-            model_name='claude-3-haiku-20240307')
-
+            model_name='openrouter/anthropic/claude-3-haiku')
+# openrouter/anthropic/claude-3-haiku
+# claude-3-haiku-20240307
         self._planner = Planner(
             repo_path=self._path,
             model_name='gpt-4-0125-preview')
@@ -124,6 +139,7 @@ class CodingPipeline:
                 task.state = 'rejected'
                 continue
 
+            logger.info(f"Updating {task.file_path}::{'.'.join(task.block_path)}...")
             response = self._coder.write_code(
                 instructions=task.instructions,
                 file_path=task.file_path,

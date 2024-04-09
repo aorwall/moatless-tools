@@ -48,13 +48,12 @@ class PythonParser(CodeParser):
         new_references = []
         for reference in codeblock.references:
             if reference.path and reference.path[0] == "self":
-                reference.scope = ReferenceScope.CLASS
-                if len(reference.path) > 1:
-                    reference.path = reference.path[1:]
-                    reference.identifier = codeblock.identifier
-            elif codeblock.identifier and codeblock.identifier.startswith("self"):
-                reference.scope = ReferenceScope.CLASS
-                reference.identifier = codeblock.identifier[5:]
+                class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
+                if class_block:
+                    reference.scope = ReferenceScope.CLASS
+                    if len(reference.path) > 1:
+                        reference.path = class_block.full_path() + reference.path[1:2]
+                        reference.identifier = codeblock.identifier
 
             if (reference.path
                     and reference.path[0] in self.reference_index
