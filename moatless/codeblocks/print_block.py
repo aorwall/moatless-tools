@@ -47,6 +47,7 @@ def _print_content(codeblock: CodeBlock, block_marker: BlockMarker = None) -> st
 def print_block(
         codeblock: CodeBlock,
         path_tree: PathTree = None,
+        include_types=None,
         block_marker: BlockMarker = None) -> str:
     if not path_tree:
         path_tree = PathTree()
@@ -58,7 +59,7 @@ def print_block(
     elif block_marker == BlockMarker.COMMENT:
         content += codeblock.create_comment_block("block_id: start").to_string() + "\n"
 
-    content += _print(codeblock, path_tree=path_tree, block_marker=block_marker)
+    content += _print(codeblock, path_tree=path_tree, include_types=include_types, block_marker=block_marker)
 
     if block_marker == BlockMarker.TAG:
         content += "\n</block>"
@@ -101,6 +102,7 @@ def print_by_block_paths(codeblock: CodeBlock,
 def _print(
         codeblock: CodeBlock,
         path_tree: PathTree,
+        include_types=None,
         block_marker: BlockMarker = None) -> str:
     if not path_tree:
         raise ValueError("Path tree is None")
@@ -114,12 +116,12 @@ def _print(
             continue
 
         child_tree = path_tree.child_tree(child.identifier) if path_tree else None
-        if child_tree and child_tree.show:
+        if child_tree and child_tree.show and (not include_types or child.type in include_types):
             if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
                 contents += child.create_commented_out_block("... other code").to_string()
             contents += _print(codeblock=child, path_tree=child_tree, block_marker=block_marker)
             has_outcommented_code = False
-        elif child_tree:
+        elif child_tree and (not include_types or child.type in include_types):
             contents += _print(codeblock=child, path_tree=child_tree, block_marker=block_marker)
             has_outcommented_code = False
         elif child.type not in NON_CODE_BLOCKS:
@@ -131,15 +133,40 @@ def _print(
     return contents
 
 
+def print_definitions_by_types(
+        codeblock: CodeBlock,
+        types: List[CodeBlockType] = None) -> str:
+
+    if not types:
+        types = [CodeBlockType.FUNCTION, CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR, CodeBlockType.MODULE]
+
+    contents = _print_content(codeblock)
+
+    has_outcommented_code = False
+    for child in codeblock.children:
+        if child.type in types:
+            if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
+                contents += child.create_commented_out_block("... other code").to_string()
+            contents += print_definitions_by_types(codeblock=child, types=types)
+            has_outcommented_code = False
+        elif child.type not in NON_CODE_BLOCKS:
+            has_outcommented_code = True
+
+    if codeblock.parent and has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
+        contents += child.create_commented_out_block("... other code").to_string()
+
+    return contents
+
 def print_by_line_numbers(codeblock: CodeBlock,
                           spans: List[Span],
+                          include_types: List[CodeBlockType] = None,
                           block_marker: BlockMarker = None) -> str:
     contents = _print_content(codeblock, block_marker=block_marker)
 
     has_outcommented_code = False
     for child in codeblock.children:
         show_child = False
-        show_all = _is_block_within_spans(child, spans)
+        show_all = not spans or _is_block_within_spans(child, spans)
 
         if not show_all:
             show_child = _is_span_within_block(child, spans)
@@ -151,10 +178,10 @@ def print_by_line_numbers(codeblock: CodeBlock,
                 contents += child.create_commented_out_block("... other code").to_string()
 
         if show_all:
-            contents += print_block(child, block_marker=block_marker)
+            contents += print_block(child, include_types=include_types, block_marker=block_marker)
         elif show_child:
             # TODO: Filter out relevant spans
-            contents += print_by_line_numbers(child, spans, block_marker=block_marker)
+            contents += print_by_line_numbers(child, spans, include_types=include_types, block_marker=block_marker)
         else:
             has_outcommented_code = True
 
