@@ -20,7 +20,7 @@ class RetrieverScope(Enum):
 class CodeSnippet:
     id: str
     file_path: str
-    content: str
+    content: str = None
     distance: float = 0.0
     tokens: int = None
     language: str = "python"
