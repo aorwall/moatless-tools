@@ -1,3 +1,4 @@
+import cProfile
 import json
 import logging
 import os
@@ -7,27 +8,32 @@ import faiss
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
 from llama_index.core import get_tokenizer
+from llama_index.core.base.embeddings.base import BaseEmbedding
+from llama_index.core.node_parser import NodeParser
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
 from llama_index.embeddings.openai import OpenAIEmbedding
-from moatless.retrievers.golden_retriever import IngestionPipelineSetup, GoldenRetriever
-from moatless.retrievers.ingestion import CodeBaseIngestionPipeline
+from llama_index.embeddings.voyageai import VoyageEmbedding
 
+from benchmark.swebench import get_instances
+from moatless.ingestion import CodeBaseIngestionPipeline
+from moatless.retriever import CodeSnippetRetriever
 from moatless.splitters import report
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.store.simple_faiss import SimpleFaissVectorStore
+from moatless.utils.repo import setup_github_repo
 
 logger = logging.getLogger(__name__)
 
 
-def format_markdown_code_block(text, language=''):
-    text = str(text).replace('```', '\\`\\`\\`')
+def format_markdown_code_block(text, language=""):
+    text = str(text).replace("```", "\\`\\`\\`")
     return f"```{language}\n{text}\n```"
 
 
 def write_markdown(path, name, data):
-    problem_statement = format_markdown_code_block(data['problem_statement'])
-    hint = format_markdown_code_block(data['hints_text'])
+    problem_statement = format_markdown_code_block(data["problem_statement"])
+    hint = format_markdown_code_block(data["hints_text"])
     text = f"""# {data['instance_id']}
 
 * repo: {data['repo']}
@@ -59,71 +65,68 @@ def write_markdown(path, name, data):
 
 
 def write_file(path, text):
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(text)
         logger.info(f"File '{path}' was saved")
 
 
-def initiate_index(path: str, index_name: str, persist_dir: str = "/tmp/.storage"):
-    pipeline_setup = IngestionPipelineSetup(
-        name="epic-splitter-v4--100-750--comment-associate--text-embedding-3-small--1536",
-        splitter=EpicSplitter(min_chunk_size=100, chunk_size=750, language="python", comment_strategy=CommentStrategy.ASSOCIATE),
-        embed_model=OpenAIEmbedding(model="text-embedding-3-small")
+def run_instances(name: str):
+    instances = get_instances(
+        split="test", dataset_name="princeton-nlp/SWE-bench_Lite", data_dir="../data"
     )
 
-    if not os.path.exists(persist_dir):
-        os.makedirs(persist_dir)
+    embed_model = VoyageEmbedding(
+        model_name="voyage-code-2",
+        voyage_api_key=os.environ.get("VOYAGE_API_KEY"),
+        truncation=False,
+        embed_batch_size=60,
+    )
 
-    downloaded_existing_store = download_store(persist_dir, pipeline_setup.name, index_name)
+    splitter = EpicSplitter(
+        min_chunk_size=100,
+        chunk_size=1500,
+        hard_token_limit=2000,
+        max_chunks=200,
+        language="python",
+        comment_strategy=CommentStrategy.ASSOCIATE,
+    )
 
-    try:
-        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-    except:
-        faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(1536))
-        vector_store = SimpleFaissVectorStore(faiss_index)
+    pipeline_name = f"{embed_model.model_name}-100-1000"
 
-    try:
-        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
-    except:
-        docstore = SimpleDocumentStore()
-
-    if not downloaded_existing_store:
-        ingestion = CodeBaseIngestionPipeline(
-            vector_store=vector_store,
-            docstore=docstore,
-            pipeline_setup=pipeline_setup,
-            path=path,
-            perist_dir=persist_dir
+    for instance in instances:
+        print(
+            f"Running benchmark for {name}::{instance['instance_id']} on {instance['repo']} at commit {instance['base_commit']}"
         )
-        vectors, indexed_tokens = ingestion.run()
-        print(f"Indexed {vectors} vectors and {indexed_tokens} tokens.")
-
-        docstore.persist(persist_path=os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
-        logger.info(f"Persisted docstore to {persist_dir}")
-        vector_store.persist(persist_dir=persist_dir)
-        logger.info(f"Persisted vector store to {persist_dir}")
-
-        try:
-            upload_store(persist_dir, pipeline_setup.name, index_name)
-        except Exception as e:
-            logger.info(f"Failed to upload store: {e}")
-
-    retriever = GoldenRetriever(
-        vector_store=vector_store,
-        docstore=docstore,
-        embed_model=pipeline_setup.embed_model)
-
-    return retriever
+        benchmark_retrieve(name, instance, pipeline_name, embed_model, splitter)
 
 
-def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: str, path: str, repo_name: str, row_data: dict, commit: str, report_dir='benchmark/reports'):
-    persist_dir = f"/tmp/repos/{repo_name}-storage/{pipeline_setup.name}"
+def benchmark_retrieve(
+    benchmark_run: str,
+    row_data: dict,
+    pipeline_name: str,
+    embed_model: BaseEmbedding,
+    splitter: NodeParser,
+    repo_dir="/tmp/repos",
+    report_dir="benchmark/reports",
+):
+    instance_id = row_data["instance_id"]
+
+    if os.path.exists(f"{report_dir}/{benchmark_run}/{instance_id}/data.json"):
+        logger.info(f"Skipping {row_data['instance_id']} as it already exists.")
+        return
+
+    commit = row_data["base_commit"]
+    repo_name = row_data["repo"]
+
+    persist_dir = f"/tmp/storage/{repo_name}"
     if not os.path.exists(persist_dir):
         os.makedirs(persist_dir)
 
-    logger.info(f"Running benchmark for {pipeline_setup.name} on {repo_name} at commit {commit}")
+    repo_path = setup_github_repo(repo=repo_name, base_commit=commit, base_dir=repo_dir)
 
-    downloaded_existing_store = download_store(persist_dir, pipeline_setup.name, f"{repo_name}-{commit}")
+    downloaded_existing_store = download_store(
+        persist_dir, pipeline_name, f"{repo_name}-{commit}"
+    )
 
     try:
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
@@ -139,11 +142,11 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
 
     if not downloaded_existing_store:
         ingestion = CodeBaseIngestionPipeline(
+            path=repo_path,
             vector_store=vector_store,
             docstore=docstore,
-            pipeline_setup=pipeline_setup,
-            path=path,
-            perist_dir=persist_dir
+            embed_model=embed_model,
+            num_workers=1,
         )
         vectors, indexed_tokens = ingestion.run()
 
@@ -156,19 +159,20 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         logger.info(f"Persisted vector store to {persist_dir}")
 
         try:
-            upload_store(persist_dir, pipeline_setup.name, f"{repo_name}-{commit}")
+            upload_store(persist_dir, pipeline_name, f"{repo_name}-{commit}")
         except Exception as e:
             logger.info(f"Failed to upload store: {e}")
     else:
         row_data["vectors"] = len(docstore.docs)
 
-    retriever = GoldenRetriever(
+    retriever = CodeSnippetRetriever(
         vector_store=vector_store,
         docstore=docstore,
-        embed_model=pipeline_setup.embed_model)
+        embed_model=embed_model,
+        max_context_tokens=200000,
+    )
 
     patch_files = row_data["patch_files"]
-    instance_id = row_data["instance_id"]
 
     query = row_data["problem_statement"]
 
@@ -188,7 +192,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     md = ""
 
     md += "\n\n## Expected patch\n\n"
-    md += format_markdown_code_block(row_data["patch"], language='diff')
+    md += format_markdown_code_block(row_data["patch"], language="diff")
 
     missing_snippets = 0
 
@@ -207,7 +211,7 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     file_reports = {}
 
     for i, snippet in enumerate(result):
-        snippet_pos = i+1
+        snippet_pos = i + 1
         md_line = ""
 
         tokenizer = get_tokenizer()
@@ -223,12 +227,12 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
             file_pos += 1
 
             file_report = {
-                "file_path": snippet.file_path.replace(f"{path}/", ""),
-                "position": file_pos
+                "file_path": snippet.file_path.replace(f"{repo_path}/", ""),
+                "position": file_pos,
             }
 
             try:
-                with open(snippet.file_path, "r") as f:
+                with open(os.path.join(repo_path, snippet.file_path), "r") as f:
                     file_tokens = len(tokenizer(f.read()))
                     sum_file_tokens += file_tokens
                     file_report["tokens"] = file_tokens
@@ -272,7 +276,12 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
                         diff["file_pos"] = file_pos
                         diff["file_context_length"] = file_report["context_length"]
 
-                    if (snippet.start_line <= diff['start_line_old'] <= diff.get('end_line_old', diff['start_line_old']) <= snippet.end_line):
+                    if (
+                        snippet.start_line
+                        <= diff["start_line_old"]
+                        <= diff.get("end_line_old", diff["start_line_old"])
+                        <= snippet.end_line
+                    ):
                         found_snippets += 1
                         diff["pos"] = snippet_pos
                         diff["context_length"] = sum_tokens
@@ -290,9 +299,18 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
                         if not any_found_context_length:
                             any_found_context_length = sum_tokens
                     elif "pos" not in diff:
-                        line_distance = min(abs(snippet.start_line - diff['start_line_old']), abs(snippet.end_line - diff.get('end_line_old', diff['start_line_old'])))
+                        line_distance = min(
+                            abs(snippet.start_line - diff["start_line_old"]),
+                            abs(
+                                snippet.end_line
+                                - diff.get("end_line_old", diff["start_line_old"])
+                            ),
+                        )
 
-                        if "closest_snippet" not in diff or line_distance < diff["line_distance"]:
+                        if (
+                            "closest_snippet" not in diff
+                            or line_distance < diff["line_distance"]
+                        ):
                             diff["closest_snippet_id"] = snippet.id
                             diff["closest_snippet_line_distance"] = line_distance
 
@@ -317,7 +335,9 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
 
         md_line += f"| {tokens} | {sum_tokens} | {sum_file_tokens} | \n"
 
-        if (sum_tokens + tokens < 13000 and not all_found_context_length) or sum_file_tokens + tokens <= 200000:
+        if (
+            sum_tokens + tokens < 13000 and not all_found_context_length
+        ) or sum_file_tokens + tokens <= 200000:
             snippet_table_md += md_line
 
         if file_hit or i < 10:
@@ -331,8 +351,14 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
     row_data["snippets"] = snippet_reports
     row_data["files"] = list(file_reports.values())
 
+    os.makedirs(f"{report_dir}/{benchmark_run}/{instance_id}", exist_ok=True)
+
     try:
-        json.dump(row_data, open(f"{report_dir}/{benchmark_run}/{instance_id}/data.json", "w"), indent=2)
+        json.dump(
+            row_data,
+            open(f"{report_dir}/{benchmark_run}/{instance_id}/data.json", "w"),
+            indent=2,
+        )
     except Exception as e:
         logger.info(f"Failed to write data.json: {e}")
 
@@ -356,9 +382,9 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         for i, file_path in enumerate(patch_files, start=1):
             md += f"\n * {i}: {file_path}"
 
-    if row_data['hints_text']:
+    if row_data["hints_text"]:
         md += "\n\n### Hint\n\n"
-        md += format_markdown_code_block(row_data['hints_text'])
+        md += format_markdown_code_block(row_data["hints_text"])
 
     md += f"""\n
 ## Patch
@@ -391,8 +417,12 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
         md_header += f"| **Indexed tokens** | {indexed_tokens} |\n"
 
     md_header += f"| **No of patches** | {no_of_patches} |\n"
-    md_header += f"| **All found context length** | {all_found_context_length or '-'} |\n"
-    md_header += f"| **Any found context length** | {any_found_context_length or '-'} |\n"
+    md_header += (
+        f"| **All found context length** | {all_found_context_length or '-'} |\n"
+    )
+    md_header += (
+        f"| **Any found context length** | {any_found_context_length or '-'} |\n"
+    )
     md_header += f"| **Avg pos** | {avg_pos or '-'} |\n"
     md_header += f"| **Min pos** | {min_pos or '-'} |\n"
     md_header += f"| **Max pos** | {max_pos or '-'} |\n"
@@ -402,25 +432,33 @@ def benchmark_retrieve(pipeline_setup: IngestionPipelineSetup, benchmark_run: st
 
     md = md_header + md
 
-    os.makedirs(f"{report_dir}/{benchmark_run}/{instance_id}/patch_files", exist_ok=True)
+    os.makedirs(
+        f"{report_dir}/{benchmark_run}/{instance_id}/patch_files", exist_ok=True
+    )
 
     with open(f"{report_dir}/{benchmark_run}/{instance_id}/report.md", "w") as f:
         f.write(md)
 
     for file_path in patch_files:
-        if not os.path.exists(f"{path}/{file_path}"):
+        if not os.path.exists(f"{repo_path}/{file_path}"):
             continue
-        shutil.copy(f"{path}/{file_path}", f"{report_dir}/{benchmark_run}/{instance_id}/patch_files")
+        shutil.copy(
+            f"{repo_path}/{file_path}",
+            f"{report_dir}/{benchmark_run}/{instance_id}/patch_files",
+        )
 
         file_name = file_path.split("/")[-1]
 
-        split_report = report.generate_markdown(pipeline_setup.splitter, f"{path}/{file_path}")
-        with open(f"{report_dir}/{benchmark_run}/{instance_id}/patch_files/{file_name}_split.md", "w") as f:
+        split_report = report.generate_markdown(splitter, f"{repo_path}/{file_path}")
+        with open(
+            f"{report_dir}/{benchmark_run}/{instance_id}/patch_files/{file_name}_split.md",
+            "w",
+        ) as f:
             f.write(split_report)
 
 
 def upload_store(store_path: str, ingestion_name: str, file_name: str):
-    shutil.make_archive(file_name, 'zip', store_path)
+    shutil.make_archive(file_name, "zip", store_path)
 
     connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     if not connect_str:
@@ -441,21 +479,19 @@ def upload_store(store_path: str, ingestion_name: str, file_name: str):
 
 
 def download_store(store_path: str, ingestion_name: str, file_name: str):
-    zip_file = f"zips/{file_name}.zip"
-    if os.path.exists(zip_file):
-        logger.info(f"Found {zip_file} locally, skipping download.")
-        shutil.unpack_archive(zip_file, store_path)
-        return True
+    zip_file = f"{file_name}.zip"
 
     connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     if not connect_str:
-        logger.info("AZURE_STORAGE_CONNECTION_STRING is not set, cannot download store.")
+        logger.info(
+            "AZURE_STORAGE_CONNECTION_STRING is not set, cannot download store."
+        )
         return False
 
     block_storage_client = BlobServiceClient.from_connection_string(connect_str)
     _blob_storage = block_storage_client.get_container_client(container="stores")
 
-    blob_name = f"{ingestion_name}/{zip_file}"
+    blob_name = f"{ingestion_name}/{file_name}.zip"
 
     blob_client = _blob_storage.get_blob_client(blob=blob_name)
 
@@ -478,6 +514,20 @@ def download_store(store_path: str, ingestion_name: str, file_name: str):
     return True
 
 
+def benchmark():
+    run_instances("swe-bench-lite-voyage-code-2")
+
+
 if "__main__" == __name__:
     import dotenv
+
     dotenv.load_dotenv()
+
+    logging.basicConfig(level=logging.DEBUG)
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    cProfile.run("benchmark()", sort="cumulative")
