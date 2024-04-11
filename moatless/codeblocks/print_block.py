@@ -18,11 +18,22 @@ def _create_placeholder(codeblock: CodeBlock) -> str:
     return ""
 
 
-def _print_content(codeblock: CodeBlock, block_marker: BlockMarker = None) -> str:
+def _print_content(
+    codeblock: CodeBlock,
+    block_marker: BlockMarker = None,
+    show_line_numbers: bool = False,
+) -> str:
     contents = ""
 
     if codeblock.pre_lines:
         contents += "\n" * (codeblock.pre_lines - 1)
+
+        block_string = ""
+        if block_marker:
+            block_string = codeblock.path_string()
+
+        if show_line_numbers:
+            block_string += f" Lines {codeblock.start_line}-{codeblock.end_line}"
 
         if codeblock.type in [
             CodeBlockType.FUNCTION,
@@ -31,11 +42,20 @@ def _print_content(codeblock: CodeBlock, block_marker: BlockMarker = None) -> st
         ]:
             if block_marker == BlockMarker.COMMENT:
                 comment = codeblock.create_comment("block_path")
+
                 contents += (
                     f"\n{codeblock.indentation}{comment}: {codeblock.path_string()}"
                 )
+
+                if show_line_numbers:
+                    contents += f" Lines {codeblock.start_line}-{codeblock.end_line}"
+
             elif block_marker == BlockMarker.TAG:
-                contents += f"\n</block>\n{codeblock.indentation}\n<block id='{codeblock.path_string()}'>"
+                line_numbers = ""
+                if show_line_numbers:
+                    line_numbers += f" start_line={codeblock.start_line} end_line={codeblock.end_line}"
+
+                contents += f"\n</block>\n{codeblock.indentation}\n<block id='{codeblock.path_string()}'{line_numbers}'>"
 
         for i, line in enumerate(codeblock.content_lines):
             if i == 0 and line:
@@ -209,9 +229,12 @@ def print_by_line_numbers(
     spans: List[Span],
     only_show_signatures: bool = False,
     block_marker: BlockMarker = None,
+    show_line_numbers: bool = False,
     outcomment_code_comment: str = "...",
 ) -> str:
-    contents = _print_content(codeblock, block_marker=block_marker)
+    contents = _print_content(
+        codeblock, block_marker=block_marker, show_line_numbers=show_line_numbers
+    )
 
     has_outcommented_code = False
     for child in codeblock.children:
@@ -240,18 +263,13 @@ def print_by_line_numbers(
                     outcomment_code_comment
                 ).to_string()
 
-        if show_all:
-            contents += print_block(
-                child,
-                block_marker=block_marker,
-            )
-            has_outcommented_code = False
-        elif show_child:
+        if show_child:
             # TODO: Filter out relevant spans to provide as params
             contents += print_by_line_numbers(
                 child,
                 spans,
                 only_show_signatures=only_show_signatures,
+                show_line_numbers=show_line_numbers,
                 block_marker=block_marker,
             )
             has_outcommented_code = False
