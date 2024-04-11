@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from typing import List
 
 from litellm import completion
@@ -34,11 +35,11 @@ search_function = {
                     "description": "Names of a functions to find and get more details about.",
                     "items": {"type": "string"},
                 },
-                "keywords": {
-                    "type": "array",
-                    "description": "Keywords that should exist in the code.",
-                    "items": {"type": "string"},
-                },
+                # "keywords": {
+                #    "type": "array",
+                #    "description": "Keywords that should exist in the code.",
+                #    "items": {"type": "string"},
+                # },
                 "file_names": {
                     "type": "array",
                     "description": "Filter out search on specific file names.",
@@ -78,7 +79,7 @@ and file name if you're sure what these should be set to.
 If you specify the file name you will see the signatures of all classes and methods. 
 If you specify function names you will see the full content of those functions.
   
-You can specify more than one file, function and class name at the same time.
+Your objective is to find all relevant functionality. So you can specify more than one file, function and class name at the same time. 
 
 When you find the right file, you should use the finish function to select the file.
 
@@ -120,91 +121,194 @@ class Search:
             {"content": request, "role": "user"},
         ]
 
+        session_log = [
+            {"role": "user", "content": request},
+        ]
+
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        last_conversation = []
+
         while calls < 5:
             calls += 1
 
             # TODO: Filter out old messages and irrelevant context in a better way
-            if len(messages) > 5:
-                logger.info(f"Too many messages: {len(messages)}. Removing old messages. ")
-                messages = messages[:1] + messages[2:]
+            if len(messages) > 2:
+                logger.info(
+                    f"Too many messages: {len(messages)}. Removing old messages. "
+                )
+                messages = messages[:2] + messages[2:]
                 logger.info(f"TNow {len(messages)} messages.")
 
             try:
                 response = completion(
                     model=self._model,
-                    max_tokens=500,
+                    max_tokens=750,
                     temperature=0.0,
                     metadata=self._metadata,
                     tools=tools,
-                    messages=messages,
+                    messages=messages + last_conversation,
                 )
+
+                prompt_tokens += response.usage.prompt_tokens
+                completion_tokens += response.usage.completion_tokens
 
                 response_message = response["choices"][0]["message"]
             except Exception as e:
                 logger.warning(
-                    f"Failed to do request with messages: {messages}. Error {e}"
+                    f"Failed to do request with last_conversation: {last_conversation}. Error {e}"
                 )
+                session_log.append(
+                    {
+                        "role": "system",
+                        "content": "Failed to do request.",
+                        "error": str(e),
+                    }
+                )
+                with open(os.path.join(self._log_dir, f"session.json"), "w") as file:
+                    json.dump(session_log, file, indent=2)
+
                 raise e
 
-            if response_message.tool_calls:
-                tool_call = response_message.tool_calls[0]
-            else:
-                tool_call = None
+            tool_call = None
+            try:
+                if response_message.tool_calls:
+                    tool_call = response_message.tool_calls[0]
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse tool call: {response_message}. Error {e}"
+                )
+                session_log.append(
+                    {
+                        "role": "system",
+                        "content": "Failed to parse tool call.",
+                        "error": str(e),
+                    }
+                )
 
-            messages.append(response_message)
+            last_conversation.append(response_message)
 
             if response_message.content:
                 logger.info(f"thoughts: {response_message.content}")
 
-            if tool_call:
+            if not tool_call:
+                logger.warning("No tool call found in response.")
+                session_log.append(
+                    {"role": "system", "content": "No tool call found in response."}
+                )
+
+                last_conversation.append(
+                    {"role": "system", "content": "No tool call found in response."}
+                )
+
+                continue
+
+            session_log.append(
+                {
+                    "role": "system",
+                    "tool_call": tool_call.model_dump(),
+                    "thoughts": response_message.content,
+                }
+            )
+
+            try:
                 function_args = json.loads(tool_call.function.arguments)
 
                 logger.info(
                     f"{tool_call.function.name}:\n{json.dumps(function_args, indent=2)}"
                 )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse arguments: {tool_call.function.arguments}. Error {e}"
+                )
+                session_log.append(
+                    {
+                        "role": "system",
+                        "content": "Failed to parse arguments",
+                        "error": str(e),
+                    }
+                )
+                last_conversation.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "content": f"Failed to parse arguments: {tool_call.function.arguments}",
+                    }
+                )
+                continue
 
-                if tool_call.function.name == "finish":
-                    if "file_path" not in function_args:
-                        logger.warning("No file path found in response.")
-                        return None
+            if tool_call.function.name == "finish":
+                session_log.append(
+                    {
+                        "role": "system",
+                        "content": "Finished search.",
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                    }
+                )
 
-                    # TODO: Handle both aboslute and relative paths...
-                    file_path = function_args["file_path"]
-                    if file_path.startswith(self._path):
-                        return file_path[len(self._path) + 1 :]
-                    else:
-                        return file_path
+                with open(os.path.join(self._log_dir, f"session.json"), "w") as file:
+                    json.dump(session_log, file, indent=2)
 
-                if "query" in function_args:
-                    function_response = self._search(
-                        query=function_args["query"],
-                        file_names=function_args.get("file_names"),
-                        class_names=function_args.get("class_names"),
-                        function_names=function_args.get("function_names"),
-                        keywords=function_args.get("keywords"),
-                    )
+                if "file_path" not in function_args:
+                    logger.warning("No file path found in response.")
+                    return None
 
-                    if not function_response:
-                        function_response = "No results found."
-
-                    messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": tool_call.function.name,
-                            "content": function_response,
-                        }
-                    )
+                # TODO: Handle both aboslute and relative paths...
+                file_path = function_args["file_path"]
+                if file_path.startswith(self._path):
+                    return file_path[len(self._path) + 1 :]
                 else:
-                    logger.warning(f"Unknown response: {tool_call.function.name}")
+                    return file_path
 
-                    messages.append(
-                        {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "content": "Unknown response",
-                        }
-                    )
+            if "query" in function_args:
+                function_response = self._search(
+                    query=function_args["query"],
+                    file_names=function_args.get("file_names"),
+                    class_names=function_args.get("class_names"),
+                    function_names=function_args.get("function_names"),
+                    session_log=session_log,
+                    first_request=calls == 1,
+                )
+
+                if not function_response:
+                    function_response = "No results found."
+
+                    if "file_names" in function_args:
+                        function_response += " Try to remove the file name filter."
+
+                    if "class_names" in function_args:
+                        function_response += " Try to remove the class name filter."
+
+                    if "function_names" in function_args:
+                        function_response += " Try to remove the function name filter."
+
+                last_conversation.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": tool_call.function.name,
+                        "content": function_response,
+                    }
+                )
+            else:
+                logger.warning(f"Unknown response: {tool_call.function.name}")
+
+                last_conversation.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "content": "Unknown response",
+                    }
+                )
+
+        session_log.append(
+            {"role": "system", "content": "Max number of calls reached. Giving up!"}
+        )
+
+        with open(os.path.join(self._log_dir, f"session.json"), "w") as file:
+            json.dump(session_log, file, indent=2)
 
         logger.warning("Max number of calls reached. Giving up!")
         return None
@@ -223,60 +327,97 @@ class Search:
         file_names: List[str] = None,
         class_names: List[str] = None,
         function_names: List[str] = None,
-        keywords: List[str] = None,
+        session_log: List = None,
+        first_request: bool = False,
     ):
+
+        keywords = []
+
         full_query = ""
         if file_names:
             full_query += f"Files: {' '.join(file_names)}\n"
 
         if class_names:
             full_query += f"Classes: {' '.join(class_names)}\n"
+            keywords.extend(class_names)
 
         if function_names:
             full_query += f"Functions: {' '.join(function_names)}\n"
-
-        if keywords:
-            full_query += f"Keywords: {' '.join(keywords)}\n"
+            keywords.extend(function_names)
 
         full_query += query
 
-        snippets = self._code_index.retriever.retrieve(full_query)
+        snippets = self._code_index.retriever.retrieve(
+            full_query, file_names=file_names, keyword_filters=keywords
+        )
 
-        return self._create_response(snippets, file_names, class_names, function_names)
+        response = self._create_response(snippets, session_log=session_log)
+        tokens = len(self._tokenize(response))
+
+        if (file_names or keywords) and (first_request and tokens < self._max_tokens):
+            extra_snippets = []
+            if keywords:
+                extra_snippets = self._code_index.retriever.retrieve(
+                    full_query, keyword_filters=keywords, top_k=250
+                )
+
+            if not extra_snippets:
+                extra_snippets = self._code_index.retriever.retrieve(
+                    full_query, top_k=250
+                )
+
+            filtered_snippets = []
+            for extra_snippet in extra_snippets:
+                if not any(
+                    extra_snippet.file_path == snippet.file_path for snippet in snippets
+                ):
+                    filtered_snippets.append(extra_snippet)
+
+            logger.info(f"Found {len(filtered_snippets)} extra snippets on file names.")
+
+            response += self._create_response(
+                filtered_snippets, session_log=session_log, sum_tokens=tokens
+            )
+            tokens = len(self._tokenize(response))
+
+        logger.info(f"Responding with {tokens} tokens.")
+
+        session_log.append(
+            {
+                "type": "vector_search",
+                "query": full_query,
+                "file_names": file_names,
+                "tokens": tokens,
+                "keywords": keywords,
+                "results": len(snippets),
+            }
+        )
+
+        if not response:
+            logger.warning(f"No snippets found for query: {full_query}")
+            return None
+
+        return response
 
     def _create_response(
         self,
         snippets: List[CodeSnippet],
-        file_names: List[str] = None,
-        class_names: List[str] = None,
-        function_names: List[str] = None,
-        keywords: List[str] = None,
+        session_log: List = None,
+        sum_tokens: int = 0,
+        only_show_signatures: bool = False,
     ):
-
-        # Only show signatures of indexed blocks if no function names have been specified
-        only_show_signatures = not file_names and not class_names and not function_names
-
-        # Only show found snippets if no function name
-        only_show_found_snippets = not function_names
 
         blocks = {}
         spans_by_file = {}
         response = ""
-        sum_tokens = 0
+
+        only_show_signatures = (
+            len(snippets) > 50
+        )  # TODO: Do a smarter solution to determine the number of tokens to show in each snippet
 
         for snippet in snippets:
-            if file_names and not any(
-                file_name.lower() in snippet.file_path.lower()
-                for file_name in file_names
-            ):
-                continue
-
             if snippet.file_path in blocks:
                 codeblock = blocks[snippet.file_path]
-
-                # Already added to spans list
-                if not only_show_found_snippets:
-                    break
             else:
                 if os.path.exists(snippet.file_path):
                     file_path = snippet.file_path
@@ -296,93 +437,47 @@ class Search:
             # If class names or functions names is specified just find those blocks directly
             # TODO: Do BM25 on keywords?
 
-            if only_show_found_snippets:
-                indexed_blocks = codeblock.find_indexed_blocks_by_spans([Span(snippet.start_line, snippet.end_line)])
-
-                for block in indexed_blocks:
-                    if class_names and not any(
-                            class_name.lower() in block.path_string().lower()
-                            for class_name in class_names
-                    ):
-                        continue
-
-                    if keywords and not any(
-                            keyword.lower() in block.to_string().lower()
-                            for keyword in keywords
-                    ):
-                        continue
-
-                    span = Span(block.start_line, block.end_line)
-
-                    if snippet.file_path in spans_by_file and span in spans_by_file[snippet.file_path]:
-                        continue
-
-                    if only_show_signatures:
-                        tokens = block.tokens
-                    else:
-                        tokens = block.sum_tokens()
-
-                    if tokens + sum_tokens > self._max_file_tokens:
-                        break
-
-                    if snippet.file_path not in spans_by_file:
-                        spans_by_file[snippet.file_path] = []
-
-                    spans_by_file[snippet.file_path].append(span)
-                    sum_tokens += tokens
-            else:
-                indexed_blocks = codeblock.find_indexed_blocks()
-
-                spans = []
-
-                for block in indexed_blocks:
-                    span = Span(block.start_line, block.end_line)
-
-                    if span in spans:
-                        continue
-
-                    if function_names:
-                        if block.type == CodeBlockType.FUNCTION and any(
-                            function_name.lower() in block.identifier.lower()
-                            for function_name in function_names
-                        ):
-                            spans.append(span)
-
-                    elif class_names:
-                        if block.type == CodeBlockType.CLASS and any(
-                            class_name.lower() in block.identifier.lower()
-                            for class_name in class_names
-                        ):
-                            spans.append(span)
-
-                    else:
-                        spans.append(span)
-
-                if only_show_signatures:
-                    trimmed_content = print_by_line_numbers(
-                        codeblock, spans=spans, only_show_signatures=True
-                    )
-                else:
-                    trimmed_content = print_by_line_numbers(codeblock, spans=spans)
-
-                tokens = len(self._tokenize(trimmed_content))
-                if tokens + sum_tokens > self._max_file_tokens:
-                    break
-
-                logger.info(f"Found {len(spans)} in file {snippet.file_path} with {tokens} ({sum_tokens} tokens.")
-                response += (
-                    f"\n{snippet.file_path}\n```python\n{trimmed_content}\n```\n"
+            tokens = 0
+            if only_show_signatures:
+                indexed_blocks = codeblock.find_indexed_blocks_by_spans(
+                    [Span(snippet.start_line, snippet.end_line)]
                 )
-                sum_tokens += tokens
+                for block in indexed_blocks:
+                    tokens += block.tokens
+            else:
+                tokens = snippet.tokens
+
+            span = Span(snippet.start_line, snippet.end_line)
+
+            if (
+                snippet.file_path in spans_by_file
+                and span in spans_by_file[snippet.file_path]
+            ):
+                continue
+
+            if tokens is None:
+                continue
+
+            if tokens + sum_tokens > self._max_file_tokens:
+                break
+
+            if snippet.file_path not in spans_by_file:
+                spans_by_file[snippet.file_path] = []
+
+            spans_by_file[snippet.file_path].append(span)
+            sum_tokens += tokens
 
         if spans_by_file:
             for file_path, spans in spans_by_file.items():
                 codeblock = blocks[file_path]
                 trimmed_content = print_by_line_numbers(
                     codeblock, only_show_signatures=only_show_signatures, spans=spans
-                )
+                ).strip()
+
                 response += f"\n{file_path}\n```python\n{trimmed_content}\n```\n"
 
-            logger.info(f"Found {len(spans_by_file)} files with {sum_tokens} tokens.")
+                # TODO: Try one run handling empty content = len(self._tokenize(trimmed_content))
+
+        session_log.append({"type": "create_response", "spans_by_file": spans_by_file})
 
         return response
