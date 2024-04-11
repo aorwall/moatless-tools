@@ -2,9 +2,9 @@ import csv
 import json
 import logging
 import os
-
 import litellm
 import typer
+import subprocess
 from dotenv import load_dotenv
 from llama_index.embeddings.voyageai import VoyageEmbedding
 
@@ -14,7 +14,6 @@ from moatless.codeblocks.utils import Colors
 from moatless.search import Search
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.utils.repo import setup_github_repo
-
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
@@ -104,6 +103,7 @@ def run_instance(
         log_dir = f"logs/search/{instance_data['instance_id']}"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
+            return
 
         search = Search(
             code_index=code_index,
@@ -137,6 +137,7 @@ def run_instance(
             )
 
         return patch_file == file_path
+      
     except Exception as e:
         print(
             f"{Colors.RED}Failed to run instance: {instance_data['instance_id']}{Colors.RESET}"
@@ -206,8 +207,10 @@ def benchmark(
     run_instances(split, dataset_name, data_dir, model)
 
 
-if __name__ == "__main__":
-    # run_single_instance("django__django-11422")
-    run_instances(
-        split="test", dataset_name="princeton-nlp/SWE-bench_Lite", data_dir="../data"
+def run_instances(split: str, dataset_name: str, data_dir: str):
+    instances = swebench.get_instances(
+        split=split, dataset_name=dataset_name, data_dir=data_dir
     )
+    for instance_data in instances:
+        run_instance(instance_data, ingestion_name="voyage-code-2-100-1500")
+

@@ -218,6 +218,7 @@ class Search:
                 logger.info(
                     f"{tool_call.function.name}:\n{json.dumps(function_args, indent=2)}"
                 )
+                
             except Exception as e:
                 logger.warning(
                     f"Failed to parse arguments: {tool_call.function.arguments}. Error {e}"
