@@ -2,6 +2,8 @@ import csv
 import json
 import logging
 import os
+from typing import Optional
+
 import litellm
 import typer
 import subprocess
@@ -15,12 +17,6 @@ from moatless.search import Search
 from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.utils.repo import setup_github_repo
 
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 load_dotenv("../.env")
 
@@ -39,6 +35,7 @@ def run_instance(
     )
 
     csv_path = f"found_files_{model}.csv"
+    print(f"CSV path: {csv_path}")
 
     if os.path.exists(csv_path):
         with open(csv_path, "r") as file:
@@ -100,7 +97,7 @@ def run_instance(
             print(f"{Colors.RED}Failed to create retriever{Colors.RESET}")
             return None
 
-        log_dir = f"logs/search/{instance_data['instance_id']}"
+        log_dir = f"logs/search_{model}/{instance_data['instance_id']}"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
             return
@@ -117,6 +114,7 @@ def run_instance(
         patch_file = instance_data["patch_files"][0]
 
         with open(csv_path, "a") as file:
+            print(f"Writing to {csv_path}")
             csv_writer = csv.writer(file)
             csv_writer.writerow(
                 [
@@ -137,7 +135,7 @@ def run_instance(
             )
 
         return patch_file == file_path
-      
+
     except Exception as e:
         print(
             f"{Colors.RED}Failed to run instance: {instance_data['instance_id']}{Colors.RESET}"
@@ -192,9 +190,10 @@ def run_instances(
         if result:
             success += 1
 
-        print(
-            f"Benchmark run {total} / {len(instances)}, success rate: {success/total}"
-        )
+        if total:
+            print(
+                f"Benchmark run {total} / {len(instances)}, success rate: {success/total}"
+            )
 
 
 @app.command()
@@ -207,10 +206,19 @@ def benchmark(
     run_instances(split, dataset_name, data_dir, model)
 
 
-def run_instances(split: str, dataset_name: str, data_dir: str):
-    instances = swebench.get_instances(
-        split=split, dataset_name=dataset_name, data_dir=data_dir
+if "__main__" == __name__:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    for instance_data in instances:
-        run_instance(instance_data, ingestion_name="voyage-code-2-100-1500")
 
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger().setLevel(logging.INFO)
+    run_instances(
+        split="test",
+        dataset_name="princeton-nlp/SWE-bench_Lite",
+        data_dir="../data",
+        model="gpt-4-turbo",  # "claude-3-haiku-20240307"
+    )
