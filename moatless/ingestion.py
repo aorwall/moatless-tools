@@ -12,8 +12,12 @@ from llama_index.core.storage.docstore import SimpleDocumentStore, DocumentStore
 from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 
+from moatless.code_graph import CodeGraph
+from moatless.code_index import CodeIndex
+from moatless.codeblocks import CodeBlock
+from moatless.codeblocks.parser.python import PythonParser
 from moatless.retriever import CodeSnippetRetriever
-from moatless.splitters.epic_split import EpicSplitter
+from moatless.splitters.epic_split import EpicSplitter, CommentStrategy
 from moatless.store.simple_faiss import SimpleFaissVectorStore
 
 logger = logging.getLogger(__name__)
@@ -25,14 +29,23 @@ class CodeBaseIngestionPipeline:
                  vector_store: BasePydanticVectorStore,
                  docstore: DocumentStore,
                  path: str,
-                 splitter: NodeParser = None,
+                 min_chunk_size=100,
+                 chunk_size=1500,
+                 hard_token_limit=2000,
+                 max_chunks=200,
                  embed_model: BaseEmbedding = None,
                  num_workers: int = None):
         self.path = path
         self.vector_store = vector_store
         self.docstore = docstore
-        self._embed_model = embed_model or EpicSplitter()
-        self._splitter = splitter or OpenAIEmbedding(model="text-embedding-3-small")
+        self._embed_model = embed_model
+
+        self._code_graph = CodeGraph()
+
+        self._splitter = EpicSplitter(min_chunk_size=min_chunk_size, chunk_size=chunk_size,
+                                      code_graph=self._code_graph,  # TODO: Just to add all nodes to the code graph. This should be run after node parsing probably.
+                                      hard_token_limit=hard_token_limit, max_chunks=max_chunks,
+                                      language="python", comment_strategy=CommentStrategy.ASSOCIATE)
         self.num_workers = num_workers
 
     @classmethod
@@ -114,6 +127,9 @@ class CodeBaseIngestionPipeline:
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {tokens} tokens")
 
         return len(embedded_nodes), tokens
+
+    def index(self):
+        return CodeIndex(retriever=self.retriever(), graph=self._code_graph)
 
     def retriever(self, max_context_tokens: int = 200000):
         return CodeSnippetRetriever(

@@ -1,13 +1,25 @@
+import json
 import logging
 import os
 import re
+import shutil
 import sys
-from typing import List
+from typing import List, Optional
 
+import faiss
+import requests
 from llama_index.core import get_tokenizer
+from llama_index.core.base.embeddings.base import BaseEmbedding
+from llama_index.core.node_parser import NodeParser
+from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
 
-from moatless.retriever import CodeSnippet
-
+from moatless.code_index import CodeIndex
+from moatless.codeblocks import CodeBlock
+from moatless.codeblocks.codeblocks import Span
+from moatless.ingestion import CodeBaseIngestionPipeline
+from moatless.retriever import CodeSnippet, CodeSnippetRetriever
+from moatless.store.simple_faiss import SimpleFaissVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -179,62 +191,105 @@ def diff_details(text: str):
     return diffs
 
 
-if __name__ == "__main__":
-    text = """diff --git a/django/contrib/auth/migrations/0011_update_proxy_permissions.py b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
---- a/django/contrib/auth/migrations/0011_update_proxy_permissions.py
-+++ b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
-@@ -1,5 +1,18 @@
--from django.db import migrations
-+import sys
-+
-+from django.core.management.color import color_style
-+from django.db import migrations, transaction
- from django.db.models import Q
-+from django.db.utils import IntegrityError
-+
-+WARNING = \"""
-+    A problem arose migrating proxy model permissions for {old} to {new}.
-+
-+      Permission(s) for {new} already existed.
-+      Codenames Q: {query}
-+
-+    Ensure to audit ALL permissions for {old} and {new}.
-+\"""
- 
- 
- def update_proxy_model_permissions(apps, schema_editor, reverse=False):
-@@ -7,6 +20,7 @@ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
-     Update the content_type of proxy model permissions to use the ContentType
-     of the proxy model.
-     \"""
-+    style = color_style()
-     Permission = apps.get_model('auth', 'Permission')
-     ContentType = apps.get_model('contenttypes', 'ContentType')
-     for Model in apps.get_models():
-@@ -24,10 +38,16 @@ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
-         proxy_content_type = ContentType.objects.get_for_model(Model, for_concrete_model=False)
-         old_content_type = proxy_content_type if reverse else concrete_content_type
-         new_content_type = concrete_content_type if reverse else proxy_content_type
--        Permission.objects.filter(
--            permissions_query,
--            content_type=old_content_type,
--        ).update(content_type=new_content_type)
-+        try:
-+            with transaction.atomic():
-+                Permission.objects.filter(
-+                    permissions_query,
-+                    content_type=old_content_type,
-+                ).update(content_type=new_content_type)
-+        except IntegrityError:
-+            old = '{}_{}'.format(old_content_type.app_label, old_content_type.model)
-+            new = '{}_{}'.format(new_content_type.app_label, new_content_type.model)
-+            sys.stdout.write(style.WARNING(WARNING.format(old=old, new=new, query=permissions_query)))
+def get_block_paths_from_diffs(codeblock: CodeBlock, diffs: dict) -> List[dict]:
+    spans = []
+    for diff in diffs:
+        start_line = diff["start_line_old"]
+        spans.append(Span(start_line, diff.get("end_line_old", start_line)))
+
+    return [block.full_path() for block in codeblock.find_indexed_blocks_by_spans(spans)]
 
 
- def revert_proxy_model_permissions(apps, schema_editor):
+def get_blocks_from_diffs(codeblock: CodeBlock, diffs: dict) -> List[dict]:
+    spans = []
+    for diff in diffs:
+        start_line = diff["start_line_old"]
+        spans.append(Span(start_line, diff.get("end_line_old", start_line)))
 
-"""
+    return [{
+        "path": block.full_path() or "root",
+        "block_id":  block.path_string(),
+        "tokens":  block.sum_tokens(),
+        "start_line":  block.start_line,
+        "end_line":  block.end_line
+    } for block in codeblock.find_indexed_blocks_by_spans(spans)]
 
-    import json
-    diff = diff_details(text)
-    print(json.dumps(diff, indent=2))
+
+def download_or_create_index(persist_dir: str,
+                             ingestion_name: str,
+                             repo_path: str,
+                             repo_name: str,
+                             base_commit: str,
+                             embed_model: BaseEmbedding,
+                             splitter: NodeParser) -> Optional[CodeIndex]:
+    downloaded_existing_store = download_store(persist_dir, ingestion_name, repo_name, base_commit)
+
+    # TODO: Remove this
+    if not downloaded_existing_store:
+        return None
+
+    try:
+        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
+    except:
+        faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(1536))
+        vector_store = SimpleFaissVectorStore(faiss_index)
+
+    try:
+        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
+    except:
+        docstore = SimpleDocumentStore()
+
+    ingestion = CodeBaseIngestionPipeline(
+        path=repo_path,
+        vector_store=vector_store,
+        docstore=docstore,
+        embed_model=embed_model,
+        num_workers=1,
+    )
+
+    if not downloaded_existing_store:
+        ingestion.run()
+
+        docstore.persist(persist_path=os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
+        logger.info(f"Persisted docstore to {persist_dir}")
+        vector_store.persist(persist_dir=persist_dir)
+        logger.info(f"Persisted vector store to {persist_dir}")
+
+    #try:
+    #    upload_store(persist_dir, pipeline_name, f"{repo_name}-{commit}")
+    #except Exception as e:
+    #    logger.info(f"Failed to upload store: {e}")
+
+    return ingestion.index()
+
+
+def download_store(store_path: str, ingestion_name: str, repo_name: str, base_commit: str):
+    repo_file_name = repo_name.replace("/", "__")
+
+    base_url = "https://moatlesstools.blob.core.windows.net/stores"
+    zip_file = f"{repo_file_name}-{base_commit}.zip"
+    url = f"{base_url}/{ingestion_name}/{repo_name}-{base_commit}.zip"
+
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+
+        with open(zip_file, "wb") as data:
+            for chunk in response.iter_content(chunk_size=8192):
+                data.write(chunk)
+
+    except requests.exceptions.HTTPError as e:
+        logger.info(f"HTTP Error while fetching {zip_file}: {e}")
+        return False
+    except Exception as e:
+        logger.info(f"Failed to download {zip_file}: {e}")
+        return False
+
+    shutil.unpack_archive(zip_file, store_path)
+
+    logger.info(f"Downloaded {zip_file} from Azure Blob Storage.")
+
+    os.remove(f"{zip_file}")
+
+    return True
+

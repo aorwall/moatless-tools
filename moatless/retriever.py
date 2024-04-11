@@ -20,7 +20,7 @@ class RetrieverScope(Enum):
 class CodeSnippet:
     id: str
     file_path: str
-    content: str
+    content: str = None
     distance: float = 0.0
     tokens: int = None
     language: str = "python"
@@ -86,7 +86,7 @@ class CodeSnippetRetriever:
                 with open(node_doc.metadata['file_path'], "r") as f:
                     content = f.read()
                 code_snippet = CodeSnippet(
-                    id=node_doc.metadata['file_path'],
+                    id=node_doc.id_,
                     file_path=node_doc.metadata['file_path'],
                     distance=distance,
                     content=content,

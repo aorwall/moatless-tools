@@ -758,7 +758,6 @@ class CodeBlock(BaseModel):
     def find_blocks_with_type(self, block_type: CodeBlockType) -> List["CodeBlock"]:
         return self.find_blocks_with_types([block_type])
 
-
     def find_indexed_blocks_by_spans(self, spans: List[Span]):
         if self.is_block_within_spans(spans):
             return [self]
@@ -776,6 +775,32 @@ class CodeBlock(BaseModel):
 
         else:
             return []
+
+    def find_blocks_by_spans(
+        self,
+        spans: List[Span]
+    ):
+        if self.is_spans_within_block(spans):
+            found_blocks = []
+            for child in self.children:
+                if child.is_block_within_spans(spans):
+                    found_blocks.append(child)
+
+                found_blocks.extend(child.find_indexed_blocks_by_spans(spans))
+
+            return found_blocks
+
+        else:
+            return []
+
+    def find_indexed_blocks(self):
+        indexed_blocks = []
+        for child in self.children:
+            if child.is_indexed:
+                indexed_blocks.append(child)
+            indexed_blocks.extend(child.find_indexed_blocks())
+        return indexed_blocks
+
 
     def is_spans_within_block(self, spans: List[Span]) -> bool:
         for span in spans:

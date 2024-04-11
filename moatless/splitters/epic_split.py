@@ -10,8 +10,10 @@ from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode, NodeRelationship
 from llama_index.core.utils import get_tqdm_iterable, get_tokenizer
 
+from moatless.code_graph import CodeGraph
 from moatless.codeblocks import create_parser, CodeParser
 from moatless.codeblocks.codeblocks import PathTree, CodeBlock, CodeBlockType
+from moatless.codeblocks.parser.python import PythonParser
 
 CodeBlockChunk = List[CodeBlock]
 
@@ -89,6 +91,7 @@ class EpicSplitter(NodeParser):
     )
 
     _parser: CodeParser = PrivateAttr()
+    _code_graph: CodeGraph = PrivateAttr()
     #_fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
 
     def __init__(
@@ -99,6 +102,7 @@ class EpicSplitter(NodeParser):
         max_chunk_size: int = 1500,
         hard_token_limit: int = 6000,
         max_chunks: int = 100,
+        code_graph: CodeGraph = None,
         include_metadata: bool = True,
         include_prev_next_rel: bool = True,
         text_splitter: Optional[TextSplitter] = None,
@@ -113,12 +117,7 @@ class EpicSplitter(NodeParser):
 
         tokenizer = tokenizer or get_tokenizer()
 
-        try:
-            self._parser = create_parser(language, tokenizer=tokenizer)
-        except Exception as e:
-            logger.warning(
-                f"Could not get parser for language {language}. Error: {e}")
-            raise e
+        self._code_graph = code_graph
 
         #self._fallback_code_splitter = fallback_code_splitter
 
@@ -160,7 +159,13 @@ class EpicSplitter(NodeParser):
                 # TODO: Derive language from file extension
 
                 starttime = time.time_ns()
-                codeblock = self._parser.parse(content)
+
+                def add_to_graph(codeblock: CodeBlock):  # TODO: Temporary
+                    self._code_graph.add_to_graph(file_path, codeblock)
+
+                parser = PythonParser(index_callback=add_to_graph)
+
+                codeblock = parser.parse(content)
 
                 parse_time = time.time_ns() - starttime
                 if parse_time > 1e9:
