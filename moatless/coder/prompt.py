@@ -1,3 +1,54 @@
+import json
+
+from moatless.settings import Settings
+
+
+def json_schema():
+    # TODO: Change to pydantic object
+    schema = {
+        "type": "object",
+        "properties": {
+            "tasks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file that should be updated.",
+                        },
+                        "span_id": {
+                            "type": "string",
+                            "description": "Id to the code span that should be updated.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "If the code block should be added, removed or updated.",
+                            "enum": ["add", "remove", "update"],
+                        },
+                        "instructions": {
+                            "type": "string",
+                            "descriptions": "Instructions for editing the code block",
+                        },
+                    },
+                    "required": ["file_path", "action", "instructions"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["thoughts", "tasks"],
+        "additionalProperties": False,
+    }
+
+    if Settings.coder.enable_chain_of_thought:
+        schema["properties"]["thoughts"] = {
+            "type": "string",
+            "description": "Your thoughts on how to approach the task.",
+        }
+
+    return json.dumps(schema)
+
+
 JSON_SCHEMA = """{
     "type": "object",
     "properties": {

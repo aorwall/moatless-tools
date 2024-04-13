@@ -21,8 +21,10 @@ from moatless.coder.prompt import (
     CREATE_PLAN_SYSTEM_PROMPT,
     JSON_SCHEMA,
     CODER_SYSTEM_PROMPT,
+    json_schema,
 )
 from moatless.coder.write_code import write_code
+from moatless.settings import Settings
 from moatless.types import Usage, BaseResponse, ContextFile, CodingTask, Span
 
 logger = logging.getLogger(__name__)
@@ -56,22 +58,16 @@ class Coder:
         tags: List[str] = None,
         trace_id: str = None,
         session_id: str = None,
-        one_file_mode: bool = True,
-        model_name: str = "gpt-4-turbo-2024-04-09",
     ):
 
-        if one_file_mode and len(files) > 1:
+        if Settings.one_file_mode and len(files) > 1:
             raise ValueError(
                 "One file mode is enabled, but multiple files are provided."
             )
 
-        self._model_name = model_name
         self._repo_path = repo_path
         self._parser = PythonParser(apply_gpt_tweaks=True)
-        self._one_file_mode = one_file_mode
         self._tokenizer = get_tokenizer()
-
-        self._min_tokens_for_planning = 0
 
         self._trace_id = trace_id or uuid.uuid4().hex
         self._session_id = session_id or uuid.uuid4().hex
@@ -107,19 +103,6 @@ class Coder:
 
     def plan(self):
         file_context_content = self._file_context_content()
-        tokens = len(self._tokenizer(file_context_content))
-
-        if tokens < self._min_tokens_for_planning:
-            self._tasks.append(
-                CodingTask(
-                    file_path=file.file_path,
-                    instructions=self._requirement,
-                    state="planned",
-                    action="update",
-                )
-                for file in self._file_context
-            )
-            return True
 
         system_prompt = f"""# FILES:
 {file_context_content}
@@ -130,7 +113,7 @@ INSTRUCTIONS:
 {CREATE_PLAN_SYSTEM_PROMPT}
 
 Respond ONLY in JSON that follows the schema below:"
-{JSON_SCHEMA}
+{json_schema()}
 """
 
         system_message = {"content": system_prompt, "role": "system"}
@@ -147,13 +130,14 @@ Respond ONLY in JSON that follows the schema below:"
         retry = 0
         while retry < 2:
             response = completion(
-                model=self._model_name,
+                model=Settings.coder.planning_model,
                 max_tokens=750,
                 temperature=0.0,
                 response_format={"type": "json_object"},
                 # tools=tools,
                 metadata={
                     "generation_name": "coder-plan",
+                    "trace_name": "coder",
                     "session_id": self._session_id,
                     "trace_id": self._trace_id,
                     "tags": self._tags,
@@ -235,11 +219,21 @@ Respond ONLY in JSON that follows the schema below:"
             spans = task.span_id.split("_")
             expected_span = Span(int(spans[0]), int(spans[1]))
             expected_block = codeblock.find_block_with_span(expected_span)
+            if not expected_block:
+                logger.warning(
+                    f"Block with span {expected_span} not found in file {task.file_path}"
+                )
+                return False
             instruction_code = print_by_spans(codeblock, [expected_span])
         else:
             expected_span = None
             block_path = task.span_id.split(".")
             expected_block = codeblock.find_by_path(block_path)
+            if not expected_block:
+                logger.warning(
+                    f"Block with path {block_path} not found in file {task.file_path}"
+                )
+                return False
             instruction_code = print_by_block_path(codeblock, block_path)
 
         if task.span_id and len(self._file_context) > 1:
@@ -278,12 +272,13 @@ Respond ONLY in JSON that follows the schema below:"
         retry = 0
         while retry < 3:
             llm_response = completion(
-                model=self._model_name,
+                model=Settings.coder.coding_model,
                 temperature=0.0,
                 max_tokens=2000,
                 messages=messages,
                 metadata={
                     "generation_name": "coder-write-code",
+                    "trace_name": "coder",
                     "session_id": self._session_id,
                     "trace_id": self._trace_id,
                     "tags": self._tags,
