@@ -73,13 +73,19 @@ def generate_splits(file, query):
 
     query_embedding = embed_model._get_text_embedding(query)
 
-    similarities, ids = get_top_k_embeddings(query_embedding=query_embedding, embeddings=embeddings, embedding_ids=ids, similarity_top_k=25)
+    similarities, ids = get_top_k_embeddings(
+        query_embedding=query_embedding,
+        embeddings=embeddings,
+        embedding_ids=ids,
+        similarity_top_k=25,
+    )
 
     print("===== get_top_k_embeddings ====")
     for id in ids:
-        print(f"{chunks[id].metadata.get('start_line')} - {chunks[id].metadata.get('end_line')}")
+        print(
+            f"{chunks[id].metadata.get('start_line')} - {chunks[id].metadata.get('end_line')}"
+        )
         print(chunks[id].get_content())
-
 
 
 if __name__ == "__main__":

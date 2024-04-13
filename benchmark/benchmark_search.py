@@ -220,5 +220,5 @@ if "__main__" == __name__:
         split="test",
         dataset_name="princeton-nlp/SWE-bench_Lite",
         data_dir="../data",
-        model="gpt-4-turbo",  # "claude-3-haiku-20240307"
+        model="claude-3-opus-20240229",  # "claude-3-haiku-20240307"
     )

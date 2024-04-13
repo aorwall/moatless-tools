@@ -12,11 +12,15 @@ def instance_report(dir: str, file: str = "data.json") -> dict:
 
 
 def instance_reports(dir: str, file: str = "data.json") -> list[str]:
-    return [os.path.join(dir, subdir) for subdir in os.listdir(dir) if os.path.exists(os.path.join(dir, subdir, file))]
+    return [
+        os.path.join(dir, subdir)
+        for subdir in os.listdir(dir)
+        if os.path.exists(os.path.join(dir, subdir, file))
+    ]
 
 
 def sort_key(data_row):
-    text, number = data_row["instance_id"].rsplit('-', 1)
+    text, number = data_row["instance_id"].rsplit("-", 1)
     return text, int(number)
 
 
@@ -42,78 +46,109 @@ def generate_summary(dir: str):
 
         patch_diffs = 0
 
-        missed_by_devin = len(set(report["patch_files"]) - set(report["model_patch_files"]))
+        # missed_by_devin = len(set(report["patch_files"]) - set(report["model_patch_files"]))
 
-        for file_path, file_diff in report['patch_diff_details'].items():
+        for file_path, file_diff in report["patch_diff_details"].items():
 
-            for diff in file_diff['diffs']:
+            for diff in file_diff["diffs"]:
                 patch_diffs += 1
 
                 # Ignore new files
-                if diff.get('start_line_old', 0) == 0 and diff.get('end_line_old', 0) == 0:
+                if (
+                    diff.get("start_line_old", 0) == 0
+                    and diff.get("end_line_old", 0) == 0
+                ):
                     continue
 
-                if 'file_context_length' in diff:
-                    any_file_context = min(any_file_context or float('inf'), diff['file_context_length'])
+                if "file_context_length" in diff:
+                    any_file_context = min(
+                        any_file_context or float("inf"), diff["file_context_length"]
+                    )
 
                     if all_file_context is not None:
-                        all_file_context = max(all_file_context, diff['file_context_length'])
+                        all_file_context = max(
+                            all_file_context, diff["file_context_length"]
+                        )
                 else:
                     all_file_context = None
 
-                if 'context_length' in diff:
-                    any_snippet_context = min(any_snippet_context or float('inf'), diff['context_length'])
+                if "context_length" in diff:
+                    any_snippet_context = min(
+                        any_snippet_context or float("inf"), diff["context_length"]
+                    )
 
                     if all_snippet_context is not None:
-                        all_snippet_context = max(all_snippet_context, diff['context_length'])
+                        all_snippet_context = max(
+                            all_snippet_context, diff["context_length"]
+                        )
                 else:
-                    if 'closest_snippet_line_distance' in diff:
-                        avg_distance_to_snippet.append(diff['closest_snippet_line_distance'])
+                    if "closest_snippet_line_distance" in diff:
+                        avg_distance_to_snippet.append(
+                            diff["closest_snippet_line_distance"]
+                        )
                     all_snippet_context = None
 
         if select_report:
-            for file_path, file_diff in select_report['patch_diff_details'].items():
-                for diff in file_diff['diffs']:
-                    if 'file_context_length' in diff:
-                        any_files_selected_context = min(any_files_selected_context or float('inf'), diff['file_context_length'])
+            for file_path, file_diff in select_report["patch_diff_details"].items():
+                for diff in file_diff["diffs"]:
+                    if "file_context_length" in diff:
+                        any_files_selected_context = min(
+                            any_files_selected_context or float("inf"),
+                            diff["file_context_length"],
+                        )
 
                         if all_files_selected_context is not None:
-                            all_files_selected_context = max(all_files_selected_context, diff['file_context_length'])
+                            all_files_selected_context = max(
+                                all_files_selected_context, diff["file_context_length"]
+                            )
                     else:
                         all_files_selected_context = None
 
-        avg_distance_to_snippet = sum(avg_distance_to_snippet) / len(avg_distance_to_snippet) if avg_distance_to_snippet else None
+        avg_distance_to_snippet = (
+            sum(avg_distance_to_snippet) / len(avg_distance_to_snippet)
+            if avg_distance_to_snippet
+            else None
+        )
 
-        summary.append({
-            'instance_id': report['instance_id'],
-            'vectors': report['vectors'],
-            'patch_files': len(report['patch_diff_details']),
-            'patch_diffs': patch_diffs,
-            'any_file_context': any_file_context,
-            'any_snippet_context': any_snippet_context,
-            'all_file_context': all_file_context,
-            'all_snippet_context': all_snippet_context,
-            'avg_distance_to_snippet': avg_distance_to_snippet,
-            'has_select': select_report is not None,
-            'all_files_selected_context': all_files_selected_context,
-            'any_files_selected_context': any_files_selected_context,
-            'files_missed_by_devin': missed_by_devin,
-            'devin_pass_or_fail': report['pass_or_fail']
-        })
+        summary.append(
+            {
+                "instance_id": report["instance_id"],
+                "vectors": report["vectors"],
+                "patch_files": len(report["patch_diff_details"]),
+                "patch_diffs": patch_diffs,
+                "any_file_context": any_file_context,
+                "any_snippet_context": any_snippet_context,
+                "all_file_context": all_file_context,
+                "all_snippet_context": all_snippet_context,
+                "avg_distance_to_snippet": avg_distance_to_snippet,
+                "has_select": select_report is not None,
+                "all_files_selected_context": all_files_selected_context,
+                "any_files_selected_context": any_files_selected_context,
+                # "'files_missed_by_devin': missed_by_devin,
+                #'devin_pass_or_fail': report['pass_or_fail']
+            }
+        )
 
     summary.sort(key=sort_key)
     json.dump(summary, open(os.path.join(dir, "summary.json"), "w"), indent=2)
 
     return summary
 
+
 def generate_markdown(
-        dir: str,
-        dataset_name: str,
-        embedding_model: str,
-        splitter: str,
-        summary: list[dict]):
+    dir: str,
+    dataset_name: str,
+    embedding_model: str,
+    splitter: str,
+    summary: list[dict],
+):
     thresholds = [13000, 27000, 50000, 200000]
-    count_keys = ['all_snippet_context', 'any_snippet_context', 'all_file_context', 'any_file_context']
+    count_keys = [
+        "all_snippet_context",
+        "any_snippet_context",
+        "all_file_context",
+        "any_file_context",
+    ]
     counts = {key: [0] * len(thresholds) for key in count_keys}
 
     def update_counts(instance_report: dict):
@@ -137,17 +172,23 @@ def generate_markdown(
 
     for instance_report in summary:
         update_counts(instance_report)
-        instance_id = instance_report['instance_id']
+        instance_id = instance_report["instance_id"]
 
-        avg_distance_to_snippet = int(instance_report['avg_distance_to_snippet']) if instance_report['avg_distance_to_snippet'] else '-'
-        md_table += (f"| [{instance_id}]({instance_id}/report.md) "
-                     f"| {instance_report['vectors']} "
-                     f"| {instance_report['patch_files']} "
-                     f"| {instance_report['any_file_context'] or '-'} "
-                     f"| {instance_report['any_snippet_context'] or '-'} "
-                     f"| {instance_report['all_file_context'] or '-'} "
-                     f"| {instance_report['all_snippet_context'] or '-'} "
-                     f"| {avg_distance_to_snippet} |\n")
+        avg_distance_to_snippet = (
+            int(instance_report["avg_distance_to_snippet"])
+            if instance_report["avg_distance_to_snippet"]
+            else "-"
+        )
+        md_table += (
+            f"| [{instance_id}]({instance_id}/report.md) "
+            f"| {instance_report['vectors']} "
+            f"| {instance_report['patch_files']} "
+            f"| {instance_report['any_file_context'] or '-'} "
+            f"| {instance_report['any_snippet_context'] or '-'} "
+            f"| {instance_report['all_file_context'] or '-'} "
+            f"| {instance_report['all_snippet_context'] or '-'} "
+            f"| {avg_distance_to_snippet} |\n"
+        )
 
     md = "# Benchmark summary\n\n"
     md += f"* **Dataset:** {dataset_name}\n"
@@ -176,8 +217,9 @@ def generate_markdown(
     with open(f"{dir}/README.md", "w") as f:
         f.write(md)
 
+
 def generate_csv(summary: list[dict]):
-    with open('summary.csv', 'w') as f:
+    with open("summary.csv", "w") as f:
         writer = csv.writer(f)
         writer.writerow(summary[0].keys())
         for row in summary:
@@ -185,12 +227,13 @@ def generate_csv(summary: list[dict]):
 
 
 if __name__ == "__main__":
-    summary = generate_summary("reports/princeton-nlp-SWE-bench-devin")
+    summary = generate_summary("benchmark/reports/swe-bench-lite-voyage-code-2")
     generate_markdown(
-        "reports/princeton-nlp-SWE-bench-devin",
+        "benchmark/reports/swe-bench-lite-voyage-code-2",
         "princeton-nlp/SWE-bench_Lite",
-        "text-embedding-3-small",
-        "EpicSplitter(chunk_size=750, min_chunk_size=100, comment_strategy=CommentStrategy.ASSOCIATE",
-        summary)
+        "voyage-code-2",
+        "EpicSplitter(chunk_size=1000, min_chunk_size=100, comment_strategy=CommentStrategy.ASSOCIATE",
+        summary,
+    )
 
     generate_csv(summary)

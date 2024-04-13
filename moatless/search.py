@@ -8,7 +8,8 @@ from litellm import completion
 from llama_index.core import get_tokenizer
 
 from moatless.code_index import CodeIndex
-from moatless.codeblocks.codeblocks import Span, CodeBlockType
+from moatless.codeblocks.codeblocks import CodeBlockType
+from moatless.types import Span
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.print_block import print_by_line_numbers
 from moatless.retriever import CodeSnippet
@@ -83,12 +84,15 @@ Your objective is to find all relevant functionality. So you can specify more th
 
 When you find the right file, you should use the finish function to select the file.
 
-Think step by step and start by write out your thoughts on how to define the search parameters. 
-MAX 50 words. Do not write anything else!
+Do only use the search and finish functions. Do not provide any more information!
+
 </instructions>
 """
 
-
+STEP_BY_STEP = """
+Think step by step and start by write out your thoughts on how to define the search parameters. 
+MAX 50 words. Do not write anything else!
+"""
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +107,7 @@ class Search:
         metadata: dict = None,
         max_tokens: int = 16000,
         max_file_tokens: int = 6000,
+        messages_in_history: int = 4,
     ):
         self._code_index = code_index
         self._path = path
@@ -113,6 +118,7 @@ class Search:
         self._tokenize = get_tokenizer()
         self._model = model
         self._metadata = metadata
+        self._messages_in_history = messages_in_history
 
     def search(self, request: str):
         calls = 0
@@ -134,7 +140,7 @@ class Search:
             calls += 1
 
             # TODO: Filter out old messages and irrelevant context in a better way
-            if len(messages) > 2:
+            if len(messages) > self._messages_in_history:
                 logger.info(
                     f"Too many messages: {len(messages)}. Removing old messages. "
                 )
@@ -187,7 +193,7 @@ class Search:
                     }
                 )
 
-            last_conversation.append(response_message)
+            last_conversation.append(response_message.model_dump())
 
             if response_message.content:
                 logger.info(f"thoughts: {response_message.content}")
@@ -218,7 +224,7 @@ class Search:
                 logger.info(
                     f"{tool_call.function.name}:\n{json.dumps(function_args, indent=2)}"
                 )
-                
+
             except Exception as e:
                 logger.warning(
                     f"Failed to parse arguments: {tool_call.function.arguments}. Error {e}"
@@ -263,9 +269,14 @@ class Search:
                 else:
                     return file_path
 
-            if "query" in function_args:
+            if (
+                "query" in function_args
+                or "file_names" in function_args
+                or "class_names" in function_args
+                or "function_names" in function_args
+            ):
                 function_response = self._search(
-                    query=function_args["query"],
+                    query=function_args.get("query"),
                     file_names=function_args.get("file_names"),
                     class_names=function_args.get("class_names"),
                     function_names=function_args.get("function_names"),
@@ -346,7 +357,8 @@ class Search:
             full_query += f"Functions: {' '.join(function_names)}\n"
             keywords.extend(function_names)
 
-        full_query += query
+        if query:
+            full_query += query
 
         snippets = self._code_index.retriever.retrieve(
             full_query, file_names=file_names, keyword_filters=keywords

@@ -1,159 +1,220 @@
 import json
 import os
 import subprocess
-from typing import List
+from typing import List, Optional
 
+import litellm
 from dotenv import load_dotenv
 
 from benchmark import swebench
+from moatless.codeblocks.codeblocks import CodeBlock
+from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.utils import Colors
 from moatless.coder import Coder
-from moatless.planner import Planner, DevelopmentTask
-from moatless.types import BlockPath
+from moatless.types import ContextFile, Span
 from moatless.utils.repo import setup_github_repo
 
 import logging
 
-load_dotenv('../.env')
+load_dotenv("../.env")
+
+litellm.success_callback = ["langfuse"]
+litellm.failure_callback = ["langfuse"]
+
 
 logging.basicConfig(level=logging.INFO)
-logging.getLogger('LiteLLM').setLevel(logging.WARNING)
-logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class BenchmarkWorkspace:
+def benchmark_coding(
+    instance_data: dict, benchmark_run: str = None, base_dir="/tmp/repos"
+):
+    repo_path = setup_github_repo(
+        repo=instance_data["repo"],
+        base_commit=instance_data["base_commit"],
+        base_dir=base_dir,
+    )
+    print(f"{Colors.YELLOW}Cloned repo to path: {repo_path}{Colors.RESET}")
 
-    def __init__(self,
-                 instance_data: dict,
-                 base_dir: str = '/tmp/repos',
-                 benchmark_id: str = None):
-        self._instance_data = instance_data
-        self._path = setup_github_repo(repo=instance_data['repo'], base_commit=instance_data['base_commit'], base_dir=base_dir)
-        print(f"{Colors.YELLOW}Cloned repo to path: {self._path}{Colors.RESET}")
-        self._benchmark_id = benchmark_id
-        self._dev_planner = Planner(repo_path=self._path, model_name='gpt-4-0125-preview')
-        self._coder = Coder(repo_path=self._path, model_name='gpt-4-0125-preview', log_file=f"logs/coder_{benchmark_id}_{instance_data['instance_id']}.log")
+    parser = PythonParser()
 
-    def code(self, task):
-        print(f"{Colors.YELLOW}Updating code in {task.block_path} in {task.file_path}...{Colors.RESET}")
-        code_response = self._coder.write_code(main_objective=self._instance_data['problem_statement'],
-                                               instructions=task.instructions,
-                                               file_path=task.file_path,
-                                               block_path=task.block_path)
+    files = []
 
-        print(f"{Colors.GREEN}Updated code:")
-        print(f"{code_response.change}{Colors.RESET}")
+    for file_path in instance_data["patch_diff_details"].keys():
+        with open(os.path.join(repo_path, file_path), "r") as f:
+            file_content = f.read()
 
-        if code_response.error:
-            print(f"{Colors.GREEN}\nError: {code_response.error}{Colors.RESET}")
-        else:
-            print(f"{Colors.GREEN}\nDiff:\n{code_response.diff}{Colors.RESET}")
+        codeblock = parser.parse(file_content)
 
-        print(f"{Colors.YELLOW}Usage stats: {code_response.usage_stats}{Colors.RESET}")
+        diff_spans = []
+        for diff in instance_data["patch_diff_details"][file_path]["diffs"]:
+            diff_spans.append(
+                Span(
+                    diff["start_line_old"],
+                    diff.get("end_line_old", diff["start_line_old"]),
+                )
+            )
 
-        return code_response
+        context_spans = get_spans(codeblock, diff_spans)
 
-    def plan(self, block_paths: List[BlockPath] = None):
-        print(f"{Colors.YELLOW}Planning development...{Colors.RESET}")
+        files.append(ContextFile(file_path=file_path, spans=context_spans))
 
-        plan_response = self._dev_planner.plan_development(
-            instructions=self._instance_data['problem_statement'],
-            files=self._instance_data['patch_files'],
-            block_paths=block_paths)
-        print(f"{Colors.GREEN}Thoughts: {plan_response.thoughts}\n")
+    coder = Coder(
+        repo_path=repo_path,
+        requirement=instance_data["problem_statement"],
+        session_id=benchmark_run,
+        files=files,
+        tags=[instance_data["instance_id"]],
+    )
 
-        for i, task in enumerate(plan_response.tasks):
-            print(f"\n{Colors.GREEN}Task {i + 1}")
-            print(f"Instructions: {task.instructions}")
-            print(f"File path: {task.file_path}, Block path: {task.block_path}{Colors.RESET}")
+    coder.run()
 
-        print(f"{Colors.YELLOW}Usage stats: {plan_response.usage_stats}{Colors.RESET}")
+    print(f"{Colors.BLUE}Expected patch:\n{instance_data['patch']}{Colors.RESET}")
 
-        return plan_response
+    file_path = files[0].file_path
 
-    def run(self, block_paths: List[BlockPath] = None):
-        print(f"{Colors.BLUE}Problem statement: {self._instance_data['problem_statement']}")
-        print(f"Expected patch: {self._instance_data['patch']}{Colors.RESET}")
+    diff = subprocess.run(
+        ["git", "diff", file_path],
+        capture_output=True,
+        text=True,
+        cwd=repo_path,
+    )
 
-        result = []
-
-        plan_response = self.plan(block_paths=block_paths)
-        result.append(plan_response.dict())
-        for task in plan_response.tasks:
-            #input(f"{Colors.YELLOW}Press Enter to continue...{Colors.RESET}")
-            code_response = self.code(task)
-            result.append(code_response.dict())
-
-        print(f"{Colors.YELLOW}Finished with diff:{Colors.RESET}")
-
-        diff = subprocess.run(['git', 'diff'], cwd=self._path, check=True, text=True, capture_output=True)
-        print(f"{Colors.YELLOW}{diff.stdout}{Colors.RESET}")
+    if diff.stdout:
+        print(f"{Colors.GREEN}Git diff:\n{diff.stdout}{Colors.RESET}")
 
         prediction = {
-            "model_name_or_path": self._benchmark_id,
-            "instance_id": self._instance_data['instance_id'],
+            "model_name_or_path": benchmark_run,
+            "instance_id": instance_data["instance_id"],
             "model_patch": diff.stdout,
         }
 
-        with open(f"{self._benchmark_id}_preds.jsonl", 'a') as file:
+        with open(f"{benchmark_run}_predictions.jsonl", "a") as file:
             json_string = json.dumps(prediction)
-            file.write(json_string + '\n')
+            file.write(json_string + "\n")
 
-        return result
+    else:
+        print(f"{Colors.RED}No git diff{Colors.RESET}")
+
+
+def get_spans(codeblock: CodeBlock, spans: List[Span]):
+
+    # If block is withing one of the spans this should be returned
+    within_span = is_block_within_spans(codeblock, spans)
+    if within_span:
+        return [Span(codeblock.start_line, codeblock.end_line)]
+
+    # Return empty if there are no spans within the current block
+    spans_within_block = get_spans_within_block(codeblock, spans)
+    if not spans_within_block:
+        return []
+
+    # If there are ny indexed block the full block is returned
+    # TODO: Check size and just pick X lines around the each span
+    indexed_blocks = codeblock.get_indexed_blocks()
+    if not indexed_blocks:
+        return [Span(codeblock.start_line, codeblock.end_line)]
+
+    spans_for_blocks = []
+    for span_within_block in spans_within_block:
+        indexed_blocks_within_span = find_indexed_blocks_by_span(
+            codeblock, span_within_block
+        )
+
+        # If no indexed block within span, pick the span between the previous and next indexed block (or start/end of codeblock)
+        if not indexed_blocks_within_span:
+            start_line = codeblock.start_line
+            end_line = codeblock.end_line
+            for indexed_block in indexed_blocks:
+                if indexed_block.start_line < span_within_block.start_line:
+                    start_line = indexed_block.end_line + 1
+
+                if indexed_block.end_line > span_within_block.end_line:
+                    end_line = indexed_block.start_line - 1
+                    break
+
+            spans_for_blocks.append(Span(start_line, end_line))
+
+        else:
+            # Else, find the spans in the indexed blocks
+            for indexed_block in indexed_blocks_within_span:
+                spans_for_blocks.extend(get_spans(indexed_block, [span_within_block]))
+
+    return spans_for_blocks
+
+
+def get_spans_within_block(codeblock: CodeBlock, spans: List[Span]) -> List[Span]:
+    return [
+        span
+        for span in spans
+        if codeblock.start_line <= span.start_line
+        and codeblock.end_line >= span.end_line
+    ]
+
+
+def find_indexed_blocks_by_span(codeblock: CodeBlock, span: Span):
+    indexed_blocks = []
+    for child in codeblock.children:
+        if (
+            span.start_line >= child.start_line
+            and span.end_line <= child.end_line
+            and child.is_indexed
+        ):
+            indexed_blocks.append(child)
+
+        indexed_blocks.extend(find_indexed_blocks_by_span(child, span))
+    return indexed_blocks
+
+
+def is_block_within_spans(codeblock: CodeBlock, spans: List[Span]) -> Optional[Span]:
+    for span in spans:
+        if (
+            span.start_line <= codeblock.start_line
+            and span.end_line >= codeblock.end_line
+        ):
+            return span
+    return None
+
+
+def run_instances(benchmark_run: str):
+    existing_patches = set()
+    if os.path.exists(f"{benchmark_run}_predictions.jsonl"):
+        with open(f"{benchmark_run}_predictions.jsonl", "r") as file:
+            for line in file.readlines():
+                prediction = json.loads(line)
+                instance_id = prediction["instance_id"]
+                existing_patches.add(instance_id)
+
+    instances = swebench.get_instances(
+        dataset_name="princeton-nlp/SWE-bench_Lite", split="test", data_dir="../data"
+    )
+    for i, instance_data in enumerate(instances):
+        if instance_data["instance_id"] in existing_patches:
+            print(
+                f"{Colors.YELLOW}Skipping {instance_data['instance_id']}{Colors.RESET}"
+            )
+            continue
+
+        print(
+            f"{Colors.YELLOW}[{i}/{len(instances)}] Running {instance_data['instance_id']}{Colors.RESET}"
+        )
+        benchmark_coding(instance_data, benchmark_run=benchmark_run)
 
 
 def run_instance(instance_id):
-    instance_data = swebench.get_instance(instance_id, dataset_name='princeton-nlp/SWE-bench_Lite', split='dev', data_dir='../data')
-    workspace = BenchmarkWorkspace(instance_data)
-    workspace.run()
+    instance_data = swebench.get_instance(
+        instance_id,
+        dataset_name="princeton-nlp/SWE-bench_Lite",
+        split="test",
+        data_dir="../data",
+    )
+    benchmark_coding(instance_data, benchmark_run="testing")
 
 
-def run_task(instance_id):
-    instance_data = swebench.get_instance(instance_id, dataset_name='princeton-nlp/SWE-bench_Lite', split='dev', data_dir='../data')
-    workspace = BenchmarkWorkspace(instance_data)
-    workspace.code(DevelopmentTask(file_path='src/sqlfluff/rules/L060.py',
-                                   block_path='Rule_L060._eval',
-                                   instructions="Modify the `LintResult` call within the `_eval` method to include a dynamic error message. Capture the `context.segment.raw_upper` value and use it to construct a specific error message indicating the function that should be replaced. For example, if `context.segment.raw_upper` is 'IFNULL', the error message should be 'Use 'COALESCE' instead of 'IFNULL'.'. Similarly, if it is 'NVL', the message should be 'Use 'COALESCE' instead of 'NVL'.'. Use this dynamic message when creating the `LintResult` instance."))
+if __name__ == "__main__":
+    run_instances("moatless_gpt-4-turbo-2024-04-09_fully_assisted_context")
 
-
-def run_instances(test_run: str = None, select_code_results: str = None):
-    if test_run:
-        print(f"{Colors.YELLOW}Running test run: {test_run}{Colors.RESET}")
-        if os.path.exists(f"test_run_{test_run}.json"):
-            with open(f"test_run_{test_run}.json", 'r') as f:
-                test_run_data = json.load(f)
-        else:
-            test_run_data = {}
-
-    if select_code_results:
-        with open(select_code_results, 'r') as f:
-            select_code_data = json.load(f)
-    else:
-        select_code_data = {}
-
-    instances = swebench.get_instances(dataset_name='princeton-nlp/SWE-bench_Lite', split='dev', data_dir='../data')
-    for instance_data in instances:
-        if test_run and instance_data['instance_id'] in test_run_data:
-            print(f"{Colors.YELLOW}Skipping {instance_data['instance_id']}{Colors.RESET}")
-            continue
-
-        workspace = BenchmarkWorkspace(instance_data, benchmark_id=test_run)
-        #input(f"{Colors.YELLOW}Press Enter to run {instance_data['instance_id']}...{Colors.RESET}")
-
-        if instance_data['instance_id'] in select_code_data:
-            block_paths = select_code_data[instance_data['instance_id']]['block_paths']
-        else:
-            block_paths = []
-
-        result = workspace.run(block_paths=block_paths)
-
-        if test_run:
-            test_run_data[instance_data['instance_id']] = result
-            with open(f"test_run_{test_run}.json", 'w') as f:
-                json.dump(test_run_data, f)
-
-
-if __name__ == '__main__':
-    run_instances("moatless_gpt-4-0125_only_patch_block_paths", select_code_results="benchmark_select_test.json")
+    # run_instance("astropy__astropy-6938")

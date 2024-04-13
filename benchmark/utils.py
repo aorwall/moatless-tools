@@ -16,7 +16,7 @@ from llama_index.core.storage.docstore.types import DEFAULT_PERSIST_FNAME
 
 from moatless.code_index import CodeIndex
 from moatless.codeblocks import CodeBlock
-from moatless.codeblocks.codeblocks import Span
+from moatless.types import Span
 from moatless.ingestion import CodeBaseIngestionPipeline
 from moatless.retriever import CodeSnippet, CodeSnippetRetriever
 from moatless.store.simple_faiss import SimpleFaissVectorStore
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def write_file(path, text):
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(text)
         print(f"File '{path}' was saved", file=sys.stderr)
 
@@ -38,9 +38,7 @@ def write_json(path, name, data):
 
 def diff_file_names(text: str) -> list[str]:
     return [
-        line[len("+++ b/"):]
-        for line in text.split('\n')
-        if line.startswith('+++')
+        line[len("+++ b/") :] for line in text.split("\n") if line.startswith("+++")
     ]
 
 
@@ -66,7 +64,7 @@ def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: s
     file_reports = {}
 
     for i, snippet in enumerate(code_snippets):
-        snippet_pos = i+1
+        snippet_pos = i + 1
 
         tokenizer = get_tokenizer()
         tokens = len(tokenizer(snippet.content))
@@ -77,10 +75,7 @@ def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: s
         if not file_report:
             file_pos += 1
 
-            file_report = {
-                "file_path": snippet.file_path,
-                "position": file_pos
-            }
+            file_report = {"file_path": snippet.file_path, "position": file_pos}
 
             try:
                 with open(f"{repo_path}/{snippet.file_path}", "r") as f:
@@ -122,7 +117,12 @@ def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: s
                     diff["file_pos"] = file_pos
                     diff["file_context_length"] = file_report["context_length"]
 
-                if snippet.start_line and (snippet.start_line <= diff['start_line_old'] <= diff.get('end_line_old', diff['start_line_old']) <= snippet.end_line):
+                if snippet.start_line and (
+                    snippet.start_line
+                    <= diff["start_line_old"]
+                    <= diff.get("end_line_old", diff["start_line_old"])
+                    <= snippet.end_line
+                ):
                     found_snippets += 1
                     diff["pos"] = snippet_pos
                     diff["context_length"] = sum_tokens
@@ -132,9 +132,18 @@ def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: s
                         del diff["closest_snippet_line_distance"]
 
                 elif "pos" not in diff and snippet.start_line and snippet.end_line:
-                    line_distance = min(abs(snippet.start_line - diff['start_line_old']), abs(snippet.end_line - diff.get('end_line_old', diff['start_line_old'])))
+                    line_distance = min(
+                        abs(snippet.start_line - diff["start_line_old"]),
+                        abs(
+                            snippet.end_line
+                            - diff.get("end_line_old", diff["start_line_old"])
+                        ),
+                    )
 
-                    if "closest_snippet" not in diff or line_distance < diff["line_distance"]:
+                    if (
+                        "closest_snippet" not in diff
+                        or line_distance < diff["line_distance"]
+                    ):
                         diff["closest_snippet_id"] = snippet.id
                         diff["closest_snippet_line_distance"] = line_distance
 
@@ -146,40 +155,49 @@ def recall_report(row_data: dict, code_snippets: List[CodeSnippet], repo_path: s
 
 
 def diff_details(text: str):
-    lines = text.split('\n')
+    lines = text.split("\n")
     diffs = {}
     file_path = None
     for line in lines:
-        if line.startswith('diff --git'):
-            file_path = line.split(' ')[2][2:]  # Extract file name after 'b/'
+        if line.startswith("diff --git"):
+            file_path = line.split(" ")[2][2:]  # Extract file name after 'b/'
             diffs[file_path] = {"diffs": []}
-        elif line.startswith('@@'):
+        elif line.startswith("@@"):
             # Extract the start line and size for old file from the chunk info
-            match = re.search(r'\-(\d+),(\d+)', line)
+            match = re.search(r"\-(\d+),(\d+)", line)
             if match:
                 start_line_old, size_old = match.groups()
                 # Initialize tracking for the current diff chunk
-                diffs[file_path]["diffs"].append({
-                    "start_line_old": int(start_line_old),
-                    "lines_until_first_change": 0
-                })
+                diffs[file_path]["diffs"].append(
+                    {
+                        "start_line_old": int(start_line_old),
+                        "lines_until_first_change": 0,
+                    }
+                )
         elif file_path and diffs[file_path]["diffs"]:
             current_diff = diffs[file_path]["diffs"][-1]
 
-            if (line.startswith('+') or line.startswith('-')) and "lines_until_first_change" in current_diff:
-                current_diff["start_line_old"] += current_diff["lines_until_first_change"]
+            if (
+                line.startswith("+") or line.startswith("-")
+            ) and "lines_until_first_change" in current_diff:
+                current_diff["start_line_old"] += current_diff[
+                    "lines_until_first_change"
+                ]
                 del current_diff["lines_until_first_change"]
             elif "lines_until_first_change" in current_diff:
                 current_diff["lines_until_first_change"] += 1
 
-            if line.startswith('-'):
+            if line.startswith("-"):
                 if "lines_until_last_minus" not in current_diff:
                     current_diff["lines_until_last_minus"] = 0
                 else:
                     current_diff["lines_until_last_minus"] += 1
 
-                current_diff["end_line_old"] = current_diff["start_line_old"] + current_diff["lines_until_last_minus"]
-            elif not line.startswith('+') and "lines_until_last_minus" in current_diff:
+                current_diff["end_line_old"] = (
+                    current_diff["start_line_old"]
+                    + current_diff["lines_until_last_minus"]
+                )
+            elif not line.startswith("+") and "lines_until_last_minus" in current_diff:
                 current_diff["lines_until_last_minus"] += 1
 
     # Final adjustments: remove temporary tracking keys
@@ -197,7 +215,9 @@ def get_block_paths_from_diffs(codeblock: CodeBlock, diffs: dict) -> List[dict]:
         start_line = diff["start_line_old"]
         spans.append(Span(start_line, diff.get("end_line_old", start_line)))
 
-    return [block.full_path() for block in codeblock.find_indexed_blocks_by_spans(spans)]
+    return [
+        block.full_path() for block in codeblock.find_indexed_blocks_by_spans(spans)
+    ]
 
 
 def get_blocks_from_diffs(codeblock: CodeBlock, diffs: dict) -> List[dict]:
@@ -206,23 +226,30 @@ def get_blocks_from_diffs(codeblock: CodeBlock, diffs: dict) -> List[dict]:
         start_line = diff["start_line_old"]
         spans.append(Span(start_line, diff.get("end_line_old", start_line)))
 
-    return [{
-        "path": block.full_path() or "root",
-        "block_id":  block.path_string(),
-        "tokens":  block.sum_tokens(),
-        "start_line":  block.start_line,
-        "end_line":  block.end_line
-    } for block in codeblock.find_indexed_blocks_by_spans(spans)]
+    return [
+        {
+            "path": block.full_path() or "root",
+            "block_id": block.path_string(),
+            "tokens": block.sum_tokens(),
+            "start_line": block.start_line,
+            "end_line": block.end_line,
+        }
+        for block in codeblock.find_indexed_blocks_by_spans(spans)
+    ]
 
 
-def download_or_create_index(persist_dir: str,
-                             ingestion_name: str,
-                             repo_path: str,
-                             repo_name: str,
-                             base_commit: str,
-                             embed_model: BaseEmbedding,
-                             splitter: NodeParser) -> Optional[CodeIndex]:
-    downloaded_existing_store = download_store(persist_dir, ingestion_name, repo_name, base_commit)
+def download_or_create_index(
+    persist_dir: str,
+    ingestion_name: str,
+    repo_path: str,
+    repo_name: str,
+    base_commit: str,
+    embed_model: BaseEmbedding,
+    splitter: NodeParser,
+) -> Optional[CodeIndex]:
+    downloaded_existing_store = download_store(
+        persist_dir, ingestion_name, repo_name, base_commit
+    )
 
     # TODO: Remove this
     if not downloaded_existing_store:
@@ -255,15 +282,17 @@ def download_or_create_index(persist_dir: str,
         vector_store.persist(persist_dir=persist_dir)
         logger.info(f"Persisted vector store to {persist_dir}")
 
-    #try:
+    # try:
     #    upload_store(persist_dir, pipeline_name, f"{repo_name}-{commit}")
-    #except Exception as e:
+    # except Exception as e:
     #    logger.info(f"Failed to upload store: {e}")
 
     return ingestion.index()
 
 
-def download_store(store_path: str, ingestion_name: str, repo_name: str, base_commit: str):
+def download_store(
+    store_path: str, ingestion_name: str, repo_name: str, base_commit: str
+):
     repo_file_name = repo_name.replace("/", "__")
 
     base_url = "https://moatlesstools.blob.core.windows.net/stores"
@@ -292,4 +321,3 @@ def download_store(store_path: str, ingestion_name: str, repo_name: str, base_co
     os.remove(f"{zip_file}")
 
     return True
-

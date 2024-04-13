@@ -5,8 +5,8 @@ import networkx as nx
 from pydantic import BaseModel
 
 from moatless.codeblocks import CodeBlock
-from moatless.codeblocks.codeblocks import CodeBlockType, Span
-from moatless.types import BlockPath
+from moatless.codeblocks.codeblocks import CodeBlockType
+from moatless.types import BlockPath, Span
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +31,14 @@ class CodeGraph:
         if codeblock.type == CodeBlockType.MODULE:
             self._blocks_by_file_path[file_path] = codeblock
 
-        #if codeblock.type == CodeBlockType.CLASS:
+        # if codeblock.type == CodeBlockType.CLASS:
         #    self._add_node_with_instance_vars(file_path, codeblock, codeblock)
 
         self._add_relationships(file_path, codeblock, node)
 
-    def find(self, file_name: str = None, class_name: str = None, function_name: str = None) -> List[CodeSearchHit]:
+    def find(
+        self, file_name: str = None, class_name: str = None, function_name: str = None
+    ) -> List[CodeSearchHit]:
         results = {}
 
         if not file_name and not class_name and not function_name:
@@ -55,17 +57,23 @@ class CodeGraph:
             if file_name and file_name.lower() not in file_path.lower():
                 continue
 
-            if class_name and block.type == CodeBlockType.CLASS and class_name.lower() not in block.identifier.lower():
+            if (
+                class_name
+                and block.type == CodeBlockType.CLASS
+                and class_name.lower() not in block.identifier.lower()
+            ):
                 continue
 
-            if function_name and block.type == CodeBlockType.FUNCTION and function_name.lower() not in block.identifier.lower():
+            if (
+                function_name
+                and block.type == CodeBlockType.FUNCTION
+                and function_name.lower() not in block.identifier.lower()
+            ):
                 continue
 
             if file_path not in results:
                 results[file_path] = CodeSearchHit(
-                    file_path=file_path,
-                    block_paths=[],
-                    spans=[]
+                    file_path=file_path, block_paths=[], spans=[]
                 )
 
             results[file_path].block_paths.append(block.full_path())
@@ -98,12 +106,18 @@ class CodeGraph:
 
         return related_blocks
 
-    def _add_node_with_instance_vars(self, file_path: str, codeblock: CodeBlock, class_block: CodeBlock):
+    def _add_node_with_instance_vars(
+        self, file_path: str, codeblock: CodeBlock, class_block: CodeBlock
+    ):
         # TODO: Just experimantal workaround to point all instance variables to the class
         for child in codeblock.children:
-            if child.type == CodeBlockType.ASSIGNMENT and child.identifier.startswith("self."):
+            if child.type == CodeBlockType.ASSIGNMENT and child.identifier.startswith(
+                "self."
+            ):
                 identifier = child.identifier.split(".")[1]
-                node = self._create_node(file_path, class_block.full_path() + [identifier])
+                node = self._create_node(
+                    file_path, class_block.full_path() + [identifier]
+                )
                 self._graph.add_node(node, block=class_block)
             else:
                 self._add_node_with_instance_vars(file_path, child, class_block)

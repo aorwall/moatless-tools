@@ -1,15 +1,12 @@
-import copy
-import logging
 import re
-from collections import namedtuple
 from enum import Enum
-from typing import List, Optional, Callable, Tuple
+from typing import List, Optional, Callable
 
 from pydantic import BaseModel, validator, Field, root_validator
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
 from moatless.codeblocks.utils import Colors
-from moatless.types import BlockPath
+from moatless.types import BlockPath, Span
 
 
 class CodeBlockType(str, Enum):
@@ -41,7 +38,7 @@ class CodeBlockType(str, Enum):
     ERROR = "Error"
 
     @classmethod
-    def from_string(cls, tag: str) -> Optional['CodeBlockType']:
+    def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
         if not tag.startswith("definition"):
             return None
 
@@ -73,36 +70,33 @@ NON_CODE_BLOCKS = [
     CodeBlockType.EXPORT,
     CodeBlockType.IMPORT,
     CodeBlockType.ERROR,
-    CodeBlockType.SPACE
+    CodeBlockType.SPACE,
 ]
 
 INDEXED_BLOCKS = [
     CodeBlockType.FUNCTION,
     CodeBlockType.CLASS,
     CodeBlockType.TEST_SUITE,
-    CodeBlockType.TEST_CASE
+    CodeBlockType.TEST_CASE,
 ]
-
-
-Span = namedtuple('Span', ['start_line', 'end_line'])
 
 
 class PathTree(BaseModel):
     show: bool = Field(default=False, description="Show the block and all sub blocks.")
-    tree: dict[str, 'PathTree'] = Field(default_factory=dict)
+    tree: dict[str, "PathTree"] = Field(default_factory=dict)
 
     @staticmethod
-    def from_block_paths(block_paths: List[BlockPath]) -> 'PathTree':
+    def from_block_paths(block_paths: List[BlockPath]) -> "PathTree":
         tree = PathTree()
         for block_path in block_paths:
             tree.add_to_tree(block_path)
 
         return tree
 
-    def child_tree(self, key: str) -> Optional['PathTree']:
+    def child_tree(self, key: str) -> Optional["PathTree"]:
         return self.tree.get(key, None)
 
-    def merge(self, other: 'PathTree'):
+    def merge(self, other: "PathTree"):
         if other.show:
             self.show = True
 
@@ -135,6 +129,7 @@ class PathTree(BaseModel):
             self.tree[path[0]] = PathTree(show=False)
 
         self.tree[path[0]].add_to_tree(path[1:])
+
 
 class ReferenceScope(str, Enum):
     EXTERNAL = "external"
@@ -175,18 +170,26 @@ class MergeAction(BaseModel):
     updated_block: Optional["CodeBlock"] = None
 
     def __str__(self):
-        original_id = self.original_block.identifier if self.original_block else 'None'
-        updated_id = self.updated_block.identifier if self.updated_block else 'None'
+        original_id = self.original_block.identifier if self.original_block else "None"
+        updated_id = self.updated_block.identifier if self.updated_block else "None"
         return f"{self.action}: {original_id or '[]'} -> {updated_id or '[]'}"
 
 
 class Relationship(BaseModel):
     scope: ReferenceScope = Field(description="The scope of the reference.")
     identifier: Optional[str] = Field(default=None, description="ID")
-    type: RelationshipType = Field(default=RelationshipType.USES, description="The type of the reference.")
-    external_path: List[str] = Field(default=[], description="The path to the referenced parent code block.")
-    resolved_path: List[str] = Field(default=[], description="The path to the file with the referenced code block.")
-    path: List[str] = Field(default=[], description="The path to the referenced code block.")
+    type: RelationshipType = Field(
+        default=RelationshipType.USES, description="The type of the reference."
+    )
+    external_path: List[str] = Field(
+        default=[], description="The path to the referenced parent code block."
+    )
+    resolved_path: List[str] = Field(
+        default=[], description="The path to the file with the referenced code block."
+    )
+    path: List[str] = Field(
+        default=[], description="The path to the referenced code block."
+    )
 
     @root_validator(pre=True)
     def validate_path(cls, values):
@@ -234,7 +237,9 @@ class Visibility(str, Enum):
 
 
 class ShowBlock(BaseModel):
-    visibility: Visibility = Field(default=Visibility.EVERYTHING, description="The visibility of the block.")
+    visibility: Visibility = Field(
+        default=Visibility.EVERYTHING, description="The visibility of the block."
+    )
     tree: dict[str, "ShowBlock"] = Field(default={}, description="Child blocks")
 
 
@@ -258,7 +263,7 @@ class CodeBlock(BaseModel):
     children: List["CodeBlock"] = []
     parent: Optional["CodeBlock"] = None
 
-    @validator('type', pre=True, always=True)
+    @validator("type", pre=True, always=True)
     def validate_type(cls, v):
         if v is None:
             raise ValueError("Cannot create CodeBlock without type.")
@@ -270,8 +275,10 @@ class CodeBlock(BaseModel):
             child.parent = self
 
         if self.pre_code and not re.match(r"^[ \n\\]*$", self.pre_code):
-            raise ValueError(f"Failed to parse code block with type {self.type} and content `{self.content}`. "
-                             f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`")
+            raise ValueError(
+                f"Failed to parse code block with type {self.type} and content `{self.content}`. "
+                f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`"
+            )
 
         if self.pre_code and not self.indentation and not self.pre_lines:
             pre_code_lines = self.pre_code.split("\n")
@@ -282,7 +289,7 @@ class CodeBlock(BaseModel):
                 self.indentation = self.pre_code
 
         self.content_lines = self.content.split("\n")
-        #if self.indentation and self.pre_lines:
+        # if self.indentation and self.pre_lines:
         #    self.content_lines[1:] = [line[len(self.indentation):] for line in self.content_lines[1:]]
 
     def insert_child(self, index: int, child: "CodeBlock"):
@@ -315,15 +322,24 @@ class CodeBlock(BaseModel):
         child.parent = self
 
     def sync_indentation(self, original_block: "CodeBlock", updated_block: "CodeBlock"):
-        original_indentation_length = len(original_block.indentation) + len(self.indentation)
-        updated_indentation_length = len(updated_block.indentation) + len(updated_block.parent.indentation)
+        original_indentation_length = len(original_block.indentation) + len(
+            self.indentation
+        )
+        updated_indentation_length = len(updated_block.indentation) + len(
+            updated_block.parent.indentation
+        )
 
         # To handle separate code blocks provdided out of context
-        if original_indentation_length == updated_indentation_length and len(updated_block.indentation) == 0:
-            updated_block.indentation = ' ' * original_indentation_length
+        if (
+            original_indentation_length == updated_indentation_length
+            and len(updated_block.indentation) == 0
+        ):
+            updated_block.indentation = " " * original_indentation_length
 
         elif original_indentation_length > updated_indentation_length:
-            additional_indentation = ' ' * (original_indentation_length - updated_indentation_length)
+            additional_indentation = " " * (
+                original_indentation_length - updated_indentation_length
+            )
             updated_block.add_indentation(additional_indentation)
 
     def replace_children(self, index: int, children: List["CodeBlock"]):
@@ -384,7 +400,9 @@ class CodeBlock(BaseModel):
             blocks.extend(child.get_all_child_blocks())
         return blocks
 
-    def get_children(self, exclude_blocks: List[CodeBlockType] = []) -> List["CodeBlock"]:
+    def get_children(
+        self, exclude_blocks: List[CodeBlockType] = []
+    ) -> List["CodeBlock"]:
         return [child for child in self.children if child.type not in exclude_blocks]
 
     def _to_string(self) -> str:
@@ -407,7 +425,9 @@ class CodeBlock(BaseModel):
 
         return contents
 
-    def _build_path_tree(self, block_paths: List[str], include_references: bool = False):
+    def _build_path_tree(
+        self, block_paths: List[str], include_references: bool = False
+    ):
         path_tree = PathTree()
 
         for block_path in block_paths:
@@ -417,12 +437,24 @@ class CodeBlock(BaseModel):
                     block = self.find_by_path(path)
                     if block:
                         if self.type == CodeBlockType.CLASS:
-                            references = [self._fix_reference_path(reference) for reference in self.get_all_references(
-                                exclude_types=[CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]) if
-                                          reference and reference.scope != ReferenceScope.EXTERNAL]  # FIXME skip _fix_reference_path?
+                            references = [
+                                self._fix_reference_path(reference)
+                                for reference in self.get_all_references(
+                                    exclude_types=[
+                                        CodeBlockType.FUNCTION,
+                                        CodeBlockType.TEST_CASE,
+                                    ]
+                                )
+                                if reference
+                                and reference.scope != ReferenceScope.EXTERNAL
+                            ]  # FIXME skip _fix_reference_path?
                         else:
-                            references = [self._fix_reference_path(reference) for reference in self.get_all_references() if
-                                          reference and reference.scope != ReferenceScope.EXTERNAL]  # FIXME skip _fix_reference_path?
+                            references = [
+                                self._fix_reference_path(reference)
+                                for reference in self.get_all_references()
+                                if reference
+                                and reference.scope != ReferenceScope.EXTERNAL
+                            ]  # FIXME skip _fix_reference_path?
 
                         for ref in references:
                             path_tree.add_to_tree(ref.path)
@@ -433,37 +465,44 @@ class CodeBlock(BaseModel):
 
         return path_tree
 
-
-    def to_tree(self,
-                indent: int = 0,
-                only_identifiers: bool = False,
-                show_full_path: bool = True,
-                show_tokens: bool = False,
-                debug: bool = False,
-                include_line_numbers: bool = False,
-                include_types: List[CodeBlockType] = None,
-                include_parameters: bool = False,
-                include_block_delimiters: bool = False,
-                include_references: bool = False,
-                include_merge_history: bool = False,
-                color: bool = False):
+    def to_tree(
+        self,
+        indent: int = 0,
+        only_identifiers: bool = False,
+        show_full_path: bool = True,
+        show_tokens: bool = False,
+        debug: bool = False,
+        include_line_numbers: bool = False,
+        include_types: List[CodeBlockType] = None,
+        include_parameters: bool = False,
+        include_block_delimiters: bool = False,
+        include_references: bool = False,
+        include_merge_history: bool = False,
+        color: bool = False,
+    ):
 
         if not include_merge_history and self.type == CodeBlockType.BLOCK_DELIMITER:
             return ""
 
-        child_tree = "".join([
-            child.to_tree(indent=indent + 1,
-                          only_identifiers=only_identifiers,
-                          show_full_path=show_full_path,
-                          debug=debug,
-                          include_types=include_types,
-                          include_line_numbers=include_line_numbers,
-                          include_merge_history=include_merge_history,
-                          include_parameters=include_parameters,
-                          include_references=include_references,
-                          include_block_delimiters=include_block_delimiters,
-                          show_tokens=show_tokens)
-            for child in self.children if not include_types or child.type in include_types])
+        child_tree = "".join(
+            [
+                child.to_tree(
+                    indent=indent + 1,
+                    only_identifiers=only_identifiers,
+                    show_full_path=show_full_path,
+                    debug=debug,
+                    include_types=include_types,
+                    include_line_numbers=include_line_numbers,
+                    include_merge_history=include_merge_history,
+                    include_parameters=include_parameters,
+                    include_references=include_references,
+                    include_block_delimiters=include_block_delimiters,
+                    show_tokens=show_tokens,
+                )
+                for child in self.children
+                if not include_types or child.type in include_types
+            ]
+        )
         indent_str = " " * indent
 
         extra = ""
@@ -473,7 +512,11 @@ class CodeBlock(BaseModel):
         if include_references and self.references:
             extra += " references: " + ", ".join([str(ref) for ref in self.references])
 
-        content = Colors.YELLOW + (self.content.strip().replace("\n", "\\n") or "") + Colors.RESET
+        content = (
+            Colors.YELLOW
+            + (self.content.strip().replace("\n", "\\n") or "")
+            + Colors.RESET
+        )
 
         if self.identifier:
             if only_identifiers:
@@ -495,7 +538,9 @@ class CodeBlock(BaseModel):
             extra += f" properties: {self.properties}"
 
         if include_merge_history and self.merge_history:
-            extra += " merge_history: " + ", ".join([str(action) for action in self.merge_history])
+            extra += " merge_history: " + ", ".join(
+                [str(action) for action in self.merge_history]
+            )
 
         return f"{indent_str} {indent} {Colors.BLUE}{self.type.value}{Colors.RESET} `{content}`{extra}\n{child_tree}"
 
@@ -521,7 +566,12 @@ class CodeBlock(BaseModel):
         if len(self.children) != len(other.children):
             return False
 
-        child_equal = all([self.children[i].equal_contents(other.children[i]) for i in range(len(self.children))])
+        child_equal = all(
+            [
+                self.children[i].equal_contents(other.children[i])
+                for i in range(len(self.children))
+            ]
+        )
         return self.content == other.content and child_equal
 
     def dict(self, **kwargs):
@@ -546,7 +596,9 @@ class CodeBlock(BaseModel):
             return self.parent.root()
         return self
 
-    def get_blocks(self, has_identifier: bool, include_types: List[CodeBlockType] = None) -> List["CodeBlock"]:
+    def get_blocks(
+        self, has_identifier: bool, include_types: List[CodeBlockType] = None
+    ) -> List["CodeBlock"]:
         blocks = [self]
 
         for child in self.children:
@@ -563,12 +615,15 @@ class CodeBlock(BaseModel):
         for child in self.children:
             if child.type == CodeBlockType.IMPORT:
                 for reference in child.references:
-                    if reference.path[len(reference.path) - len(ref_path):] == ref_path:
+                    if (
+                        reference.path[len(reference.path) - len(ref_path) :]
+                        == ref_path
+                    ):
                         return reference
 
             child_path = child.full_path()
 
-            if child_path[len(child_path) - len(ref_path):] == ref_path:
+            if child_path[len(child_path) - len(ref_path) :] == ref_path:
                 if self.type == CodeBlockType.CLASS:
                     return Relationship(scope=ReferenceScope.CLASS, path=child_path)
                 if self.type == CodeBlockType.MODULE:
@@ -583,15 +638,18 @@ class CodeBlock(BaseModel):
 
         return None
 
-    def get_all_references(self, exclude_types: List[CodeBlockType] =[]) -> List[Relationship]:
+    def get_all_references(
+        self, exclude_types: List[CodeBlockType] = []
+    ) -> List[Relationship]:
         references = []
         references.extend(self.references)
         for childblock in self.children:
             if not exclude_types or childblock.type not in exclude_types:
-                references.extend(childblock.get_all_references(exclude_types=exclude_types))
+                references.extend(
+                    childblock.get_all_references(exclude_types=exclude_types)
+                )
 
         return references
-
 
     def is_complete(self):
         if self.type == CodeBlockType.COMMENTED_OUT_CODE:
@@ -617,14 +675,16 @@ class CodeBlock(BaseModel):
             type=CodeBlockType.COMMENTED_OUT_CODE,
             indentation=self.indentation,
             pre_lines=2,
-            content=self.create_comment(comment_out_str))
+            content=self.create_comment(comment_out_str),
+        )
 
     def create_comment_block(self, comment: str = "..."):
         return CodeBlock(
             type=CodeBlockType.COMMENT,
             indentation=self.indentation,
             pre_lines=1,
-            content=self.create_comment(comment))
+            content=self.create_comment(comment),
+        )
 
     def create_comment(self, comment: str) -> str:
         symbol = get_comment_symbol(self.root().language)
@@ -655,9 +715,15 @@ class CodeBlock(BaseModel):
 
         return self.parent.find_equal_parent(check_block)
 
-    def _get_matching_content(self, other_children: List["CodeBlock"], start_original: int) -> List["CodeBlock"]:
+    def _get_matching_content(
+        self, other_children: List["CodeBlock"], start_original: int
+    ) -> List["CodeBlock"]:
         original_contents = [child.content for child in self.children[start_original:]]
-        return [other_child for other_child in other_children if other_child.content in original_contents]
+        return [
+            other_child
+            for other_child in other_children
+            if other_child.content in original_contents
+        ]
 
     def get_matching_blocks(self, other_block: "CodeBlock") -> List["CodeBlock"]:
         matching_children = self._get_matching_content(other_block.children, 0)
@@ -678,27 +744,42 @@ class CodeBlock(BaseModel):
             return False
         return self._check_matching(other_children, all)
 
-    def _check_matching(self, other_children: List["CodeBlock"], operation: Callable) -> bool:
-        original_identifiers = [child.identifier for child in self.children if child.identifier]
-        updated_identifiers = [child.identifier for child in other_children if child.identifier]
-        return operation(ub_content in original_identifiers for ub_content in updated_identifiers)
+    def _check_matching(
+        self, other_children: List["CodeBlock"], operation: Callable
+    ) -> bool:
+        original_identifiers = [
+            child.identifier for child in self.children if child.identifier
+        ]
+        updated_identifiers = [
+            child.identifier for child in other_children if child.identifier
+        ]
+        return operation(
+            ub_content in original_identifiers for ub_content in updated_identifiers
+        )
 
     def find_next_matching_child_block(self, children_start, other_child_block):
         i = children_start
         while i < len(self.children):
             check_original_block = self.children[i]
-            if (check_original_block.content
-                    and check_original_block.content == other_child_block.content
-                    and check_original_block.type == other_child_block.type):
+            if (
+                check_original_block.content
+                and check_original_block.content == other_child_block.content
+                and check_original_block.type == other_child_block.type
+            ):
                 return i
             i += 1
         return None
 
-    def find_nested_matching_block(self, other: "CodeBlock", start_original: int = 0) -> Optional["CodeBlock"]:
+    def find_nested_matching_block(
+        self, other: "CodeBlock", start_original: int = 0
+    ) -> Optional["CodeBlock"]:
         for child_block in self.children[start_original:]:
             if child_block.children:
                 for other_child_block in other.children:
-                    if child_block.content == other_child_block.content and child_block.type == other_child_block.type:
+                    if (
+                        child_block.content == other_child_block.content
+                        and child_block.type == other_child_block.type
+                    ):
                         return child_block
 
                 nested_match = child_block.find_nested_matching_block(other)
@@ -721,7 +802,7 @@ class CodeBlock(BaseModel):
 
     def has_any_block(self, blocks: List["CodeBlock"]) -> bool:
         for block in blocks:
-            if block.full_path()[:len(self.full_path())] == self.full_path():
+            if block.full_path()[: len(self.full_path())] == self.full_path():
                 return True
         return False
 
@@ -743,16 +824,22 @@ class CodeBlock(BaseModel):
                 matching_blocks.append(child_block)
 
             if child_block.children:
-                matching_blocks.extend(child_block.find_incomplete_blocks_with_types(block_types))
+                matching_blocks.extend(
+                    child_block.find_incomplete_blocks_with_types(block_types)
+                )
 
         return matching_blocks
 
-    def find_blocks_with_types(self, block_types: List[CodeBlockType]) -> List["CodeBlock"]:
+    def find_blocks_with_types(
+        self, block_types: List[CodeBlockType]
+    ) -> List["CodeBlock"]:
         matching_blocks = []
         if self.type in block_types:
             matching_blocks.append(self)
         for child_block in self.children:
-            matching_blocks.extend(child_block.find_blocks_with_types(block_types=block_types))
+            matching_blocks.extend(
+                child_block.find_blocks_with_types(block_types=block_types)
+            )
         return matching_blocks
 
     def find_blocks_with_type(self, block_type: CodeBlockType) -> List["CodeBlock"]:
@@ -776,22 +863,30 @@ class CodeBlock(BaseModel):
         else:
             return []
 
-    def find_blocks_by_spans(
-        self,
-        spans: List[Span]
-    ):
+    def find_blocks_by_spans(self, spans: List[Span]):
         if self.is_spans_within_block(spans):
             found_blocks = []
             for child in self.children:
                 if child.is_block_within_spans(spans):
                     found_blocks.append(child)
 
-                found_blocks.extend(child.find_indexed_blocks_by_spans(spans))
+                found_blocks.extend(child.find_blocks_by_spans(spans))
 
             return found_blocks
 
         else:
             return []
+
+    def find_block_with_span(self, span: Span):
+        if not self.is_spans_within_block([span]):
+            return None
+
+        for child in self.children:
+            found_block = child.find_block_with_span(span)
+            if found_block:
+                return found_block
+
+        return self
 
     def find_indexed_blocks(self):
         indexed_blocks = []
@@ -800,7 +895,6 @@ class CodeBlock(BaseModel):
                 indexed_blocks.append(child)
             indexed_blocks.extend(child.find_indexed_blocks())
         return indexed_blocks
-
 
     def is_spans_within_block(self, spans: List[Span]) -> bool:
         for span in spans:

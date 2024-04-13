@@ -3,11 +3,11 @@ from enum import Enum
 from typing import List, Tuple
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-from moatless.codeblocks.codeblocks import PathTree, NON_CODE_BLOCKS, Span
-from moatless.types import BlockPath
+from moatless.codeblocks.codeblocks import PathTree, NON_CODE_BLOCKS
+from moatless.types import BlockPath, Span
 
 
-class BlockMarker(Enum):
+class SpanMarker(Enum):
     TAG = 1
     COMMENT = 2
 
@@ -20,42 +20,21 @@ def _create_placeholder(codeblock: CodeBlock) -> str:
 
 def _print_content(
     codeblock: CodeBlock,
-    block_marker: BlockMarker = None,
-    show_line_numbers: bool = False,
+    span_marker: SpanMarker = None,
+    span_id: str = None,
 ) -> str:
     contents = ""
 
-    if codeblock.pre_lines:
+    if codeblock.pre_lines is not None:
         contents += "\n" * (codeblock.pre_lines - 1)
 
-        block_string = ""
-        if block_marker:
-            block_string = codeblock.path_string()
+        if span_id:
+            if span_marker == SpanMarker.COMMENT:
+                comment = codeblock.create_comment("span_id")
+                contents += f"\n{codeblock.indentation}{comment}: {span_id}"
 
-        if show_line_numbers:
-            block_string += f" Lines {codeblock.start_line}-{codeblock.end_line}"
-
-        if codeblock.type in [
-            CodeBlockType.FUNCTION,
-            CodeBlockType.CLASS,
-            CodeBlockType.CONSTRUCTOR,
-        ]:
-            if block_marker == BlockMarker.COMMENT:
-                comment = codeblock.create_comment("block_path")
-
-                contents += (
-                    f"\n{codeblock.indentation}{comment}: {codeblock.path_string()}"
-                )
-
-                if show_line_numbers:
-                    contents += f" Lines {codeblock.start_line}-{codeblock.end_line}"
-
-            elif block_marker == BlockMarker.TAG:
-                line_numbers = ""
-                if show_line_numbers:
-                    line_numbers += f" start_line={codeblock.start_line} end_line={codeblock.end_line}"
-
-                contents += f"\n</block>\n{codeblock.indentation}\n<block id='{codeblock.path_string()}'{line_numbers}'>"
+            elif span_marker == SpanMarker.TAG:
+                contents += f"\n</span>\n{codeblock.indentation}\n<span id='{span_id}'>"
 
         for i, line in enumerate(codeblock.content_lines):
             if i == 0 and line:
@@ -74,16 +53,16 @@ def print_block(
     codeblock: CodeBlock,
     path_tree: PathTree = None,
     include_types=None,
-    block_marker: BlockMarker = None,
+    block_marker: SpanMarker = None,
 ) -> str:
     if not path_tree:
         path_tree = PathTree()
         path_tree.show = True
 
     content = ""
-    if block_marker == BlockMarker.TAG:
+    if block_marker == SpanMarker.TAG:
         content += f"<block id='start'>\n\n"
-    elif block_marker == BlockMarker.COMMENT:
+    elif block_marker == SpanMarker.COMMENT:
         content += codeblock.create_comment_block("block_id: start").to_string() + "\n"
 
     content += _print(
@@ -93,7 +72,7 @@ def print_block(
         block_marker=block_marker,
     )
 
-    if block_marker == BlockMarker.TAG:
+    if block_marker == SpanMarker.TAG:
         content += "\n</block>"
 
     return content
@@ -112,7 +91,7 @@ def print_by_block_paths(
     codeblock: CodeBlock,
     block_paths: List[BlockPath],
     include_references: bool = False,
-    block_marker: BlockMarker = None,
+    block_marker: SpanMarker = None,
 ) -> str:
 
     if include_references:
@@ -137,12 +116,12 @@ def _print(
     codeblock: CodeBlock,
     path_tree: PathTree,
     include_types=None,
-    block_marker: BlockMarker = None,
+    block_marker: SpanMarker = None,
 ) -> str:
     if not path_tree:
         raise ValueError("Path tree is None")
 
-    contents = _print_content(codeblock, block_marker=block_marker)
+    contents = _print_content(codeblock, span_marker=block_marker)
 
     has_outcommented_code = False
     for child in codeblock.children:
@@ -228,12 +207,13 @@ def print_by_line_numbers(
     codeblock: CodeBlock,
     spans: List[Span],
     only_show_signatures: bool = False,
-    block_marker: BlockMarker = None,
+    block_marker: SpanMarker = None,
     show_line_numbers: bool = False,
     outcomment_code_comment: str = "...",
 ) -> str:
+
     contents = _print_content(
-        codeblock, block_marker=block_marker, show_line_numbers=show_line_numbers
+        codeblock, span_marker=block_marker, show_line_numbers=show_line_numbers
     )
 
     has_outcommented_code = False
@@ -270,6 +250,67 @@ def print_by_line_numbers(
                 spans,
                 only_show_signatures=only_show_signatures,
                 show_line_numbers=show_line_numbers,
+                block_marker=block_marker,
+            )
+            has_outcommented_code = False
+        else:
+            has_outcommented_code = True
+
+    if has_outcommented_code and child.type not in [
+        CodeBlockType.COMMENT,
+        CodeBlockType.COMMENTED_OUT_CODE,
+    ]:
+        contents += child.create_commented_out_block(
+            outcomment_code_comment
+        ).to_string()
+
+    return contents
+
+
+def print_by_spans(
+    codeblock: CodeBlock,
+    spans: List[Span],
+    block_marker: SpanMarker = None,
+    outcomment_code_comment: str = "...",
+) -> str:
+    is_in_span = spans[0].start_line <= codeblock.start_line <= spans[0].end_line
+
+    span_id = None
+    if (
+        block_marker
+        and is_in_span
+        and (codeblock.start_line == spans[0].start_line or codeblock.is_indexed)
+    ):
+        if codeblock.is_indexed:
+            span_id = codeblock.path_string()
+        else:
+            span_id = f"{spans[0].start_line}_{spans[0].end_line}"
+
+    contents = _print_content(codeblock, span_marker=block_marker, span_id=span_id)
+
+    has_outcommented_code = False
+    for child in codeblock.children:
+        show_child = _is_span_within_block(child, spans) or _is_block_within_spans(
+            child, spans
+        )  # TODO Optimize
+        if spans[0].end_line < child.start_line:
+            spans = spans[1:]
+
+            if not spans:
+                break
+
+        if show_child and spans:
+            if has_outcommented_code and child.type not in [
+                CodeBlockType.COMMENT,
+                CodeBlockType.COMMENTED_OUT_CODE,
+            ]:
+                contents += child.create_commented_out_block(
+                    outcomment_code_comment
+                ).to_string()
+
+            contents += print_by_spans(
+                child,
+                spans,
                 block_marker=block_marker,
             )
             has_outcommented_code = False
