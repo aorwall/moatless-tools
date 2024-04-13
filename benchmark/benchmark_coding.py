@@ -85,19 +85,18 @@ def benchmark_coding(
 
     if diff.stdout:
         print(f"{Colors.GREEN}Git diff:\n{diff.stdout}{Colors.RESET}")
-
-        prediction = {
-            "model_name_or_path": benchmark_run,
-            "instance_id": instance_data["instance_id"],
-            "model_patch": diff.stdout,
-        }
-
-        with open(f"{benchmark_run}_predictions.jsonl", "a") as file:
-            json_string = json.dumps(prediction)
-            file.write(json_string + "\n")
-
     else:
-        print(f"{Colors.RED}No git diff{Colors.RESET}")
+        print(f"{Colors.RED}No git diff found{Colors.RESET}")
+
+    prediction = {
+        "model_name_or_path": benchmark_run,
+        "instance_id": instance_data["instance_id"],
+        "model_patch": diff.stdout,
+    }
+
+    with open(f"{benchmark_run}_predictions.jsonl", "a") as file:
+        json_string = json.dumps(prediction)
+        file.write(json_string + "\n")
 
 
 def get_spans(codeblock: CodeBlock, spans: List[Span]):
@@ -201,7 +200,12 @@ def run_instances(benchmark_run: str):
         print(
             f"{Colors.YELLOW}[{i}/{len(instances)}] Running {instance_data['instance_id']}{Colors.RESET}"
         )
-        benchmark_coding(instance_data, benchmark_run=benchmark_run)
+        try:
+            benchmark_coding(instance_data, benchmark_run=benchmark_run)
+        except Exception as e:
+            print(f"{Colors.RED}Error: {e}{Colors.RESET}")
+            with open(f"{benchmark_run}_errors.txt", "a") as file:
+                file.write(f"{instance_data['instance_id']}: {e}\n")
 
 
 def run_instance(instance_id):
