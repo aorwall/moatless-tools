@@ -6,6 +6,7 @@ class _CoderSettings:
     _planning_model = "gpt-4-turbo-2024-04-09"
     _coding_model = "gpt-4-turbo-2024-04-09"
     _enable_chain_of_thought = True
+    _min_tokens_for_split_span = 300
 
     @property
     def planning_model(self) -> str:
@@ -31,6 +32,14 @@ class _CoderSettings:
     def enable_chain_of_thought(self, enable_chain_of_thought: bool) -> None:
         """Set the LLM."""
         self._enable_chain_of_thought = enable_chain_of_thought
+
+    @property
+    def min_tokens_for_split_span(self) -> int:
+        return self._min_tokens_for_split_span
+
+    @min_tokens_for_split_span.setter
+    def min_tokens_for_split_span(self, min_tokens_for_split_span: int) -> None:
+        self._min_tokens_for_split_span = min_tokens_for_split_span
 
 
 @dataclass

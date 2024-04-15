@@ -2,6 +2,7 @@
 
 Extended version of the code splitter from llama-index.
 ."""
+
 import re
 from collections import namedtuple
 from typing import Any, Callable, List, Optional
@@ -23,7 +24,7 @@ SEPARATOR_TYPES = [
     "function_definition",
 ]
 
-Span = namedtuple('Span', ['start_byte', 'end_byte'])
+Span = namedtuple("Span", ["start_byte", "end_byte"])
 
 
 def index_id_func(i: int, doc: BaseNode) -> str:
@@ -82,7 +83,9 @@ class CodeSplitterV2(TextSplitter):
                 )
                 raise
         if not isinstance(parser, Parser):
-            raise ValueError(f"Parser must be a tree-sitter Parser object. Was {type(parser)}.")
+            raise ValueError(
+                f"Parser must be a tree-sitter Parser object. Was {type(parser)}."
+            )
 
         self._parser = parser
         self._tokenizer = tokenizer or get_tokenizer()
@@ -99,7 +102,6 @@ class CodeSplitterV2(TextSplitter):
             id_func=id_func,
         )
 
-
     @classmethod
     def class_name(cls) -> str:
         return "CodeSplitter"
@@ -108,11 +110,7 @@ class CodeSplitterV2(TextSplitter):
         tokenizer = self._tokenizer or get_tokenizer()
         return len(tokenizer(text))
 
-    def chunk_tree(
-        self,
-        tree,
-        source_code: bytes
-    ) -> list[Span]:
+    def chunk_tree(self, tree, source_code: bytes) -> list[Span]:
         from tree_sitter import Node
 
         def chunk_node(node: Node) -> list[Span]:
@@ -126,14 +124,19 @@ class CodeSplitterV2(TextSplitter):
                     else:
                         current_chunk = Span(child.start_byte, child.start_byte)
 
-                content = source_code[child.start_byte:child.end_byte].decode("utf-8")
-                if self._count_tokens(content) > self.chunk_size or child.type in SEPARATOR_TYPES:
+                content = source_code[child.start_byte : child.end_byte].decode("utf-8")
+                if (
+                    self._count_tokens(content) > self.chunk_size
+                    or child.type in SEPARATOR_TYPES
+                ):
                     chunks.append(current_chunk)
                     current_chunk = Span(child.end_byte, child.end_byte)
                     chunks.extend(chunk_node(child))
                     continue
 
-                content = source_code[current_chunk.start_byte:child.end_byte].decode("utf-8")
+                content = source_code[current_chunk.start_byte : child.end_byte].decode(
+                    "utf-8"
+                )
                 if self._count_tokens(content) > self.chunk_size:
                     chunks.append(current_chunk)
                     current_chunk = Span(child.start_byte, child.end_byte)
@@ -157,10 +160,14 @@ class CodeSplitterV2(TextSplitter):
         tokens = 0
         current_chunk = Span(chunks[0].start_byte, chunks[0].start_byte)
         for chunk in chunks:
-            current_chunk_content = source_code[current_chunk.start_byte:current_chunk.end_byte].decode("utf-8")
+            current_chunk_content = source_code[
+                current_chunk.start_byte : current_chunk.end_byte
+            ].decode("utf-8")
             current_chunk_tokens = self._count_tokens(current_chunk_content)
 
-            chunk_content = source_code[chunk.start_byte:chunk.end_byte].decode("utf-8")
+            chunk_content = source_code[chunk.start_byte : chunk.end_byte].decode(
+                "utf-8"
+            )
             chunk_tokens = self._count_tokens(chunk_content)
 
             if current_chunk_tokens + chunk_tokens < self.chunk_size:
@@ -181,9 +188,13 @@ class CodeSplitterV2(TextSplitter):
 
         if len(current_chunk) > 0:
             if tokens < DEFAULT_MIN_TOKENS:
-                chunk_content = source_code[combined_chunks[-1].start_byte:current_chunk.end_byte].decode("utf-8")
+                chunk_content = source_code[
+                    combined_chunks[-1].start_byte : current_chunk.end_byte
+                ].decode("utf-8")
                 if self._count_tokens(chunk_content) < DEFAULT_MAX_TOKENS:
-                    combined_chunks[-1] = Span(combined_chunks[-1].start_byte, current_chunk.end_byte)
+                    combined_chunks[-1] = Span(
+                        combined_chunks[-1].start_byte, current_chunk.end_byte
+                    )
                 else:
                     combined_chunks.append(current_chunk)
             else:
@@ -194,7 +205,9 @@ class CodeSplitterV2(TextSplitter):
     def get_line_number(self, index: int, source_code: str) -> int:
         total_chars = 0
         line_number = 0
-        for line_number, line in enumerate(source_code.splitlines(keepends=True), start=1):
+        for line_number, line in enumerate(
+            source_code.splitlines(keepends=True), start=1
+        ):
             total_chars += len(line)
             if total_chars > index:
                 return line_number - 1
@@ -216,7 +229,9 @@ class CodeSplitterV2(TextSplitter):
 
                 chunks = []
                 for span in spans:
-                    chunked_content = content_bytes[span.start_byte:span.end_byte].decode("utf-8")
+                    chunked_content = content_bytes[
+                        span.start_byte : span.end_byte
+                    ].decode("utf-8")
                     if len(chunked_content) == 0:
                         continue
 

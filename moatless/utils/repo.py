@@ -2,11 +2,11 @@ import os
 import subprocess
 
 
-def setup_github_repo(repo: str, base_commit: str, base_dir: str = '/tmp/repos'):
+def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos"):
     repo_name = get_repo_dir_name(repo)
-    repo_url = f'git@github.com:{repo}.git'
+    repo_url = f"git@github.com:{repo}.git"
 
-    path = f'{base_dir}/{repo_name}'
+    path = f"{base_dir}/{repo_name}"
     if not os.path.exists(path):
         os.makedirs(path)
         print(f"Directory '{path}' was created.")
@@ -17,7 +17,7 @@ def setup_github_repo(repo: str, base_commit: str, base_dir: str = '/tmp/repos')
 
 
 def get_repo_dir_name(repo: str):
-    return repo.replace('/', '_')
+    return repo.replace("/", "_")
 
 
 def maybe_clone(repo_url, repo_dir):
@@ -25,7 +25,12 @@ def maybe_clone(repo_url, repo_dir):
 
         print(f"Cloning repo '{repo_url}'")
         # Clone the repo if the directory doesn't exist
-        result = subprocess.run(['git', 'clone', repo_url, repo_dir], check=True, text=True, capture_output=True)
+        result = subprocess.run(
+            ["git", "clone", repo_url, repo_dir],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
 
         if result.returncode == 0:
             print(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
@@ -35,4 +40,4 @@ def maybe_clone(repo_url, repo_dir):
 
 
 def checkout_commit(repo_dir, commit_hash):
-    subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=repo_dir, check=True)
+    subprocess.run(["git", "reset", "--hard", commit_hash], cwd=repo_dir, check=True)

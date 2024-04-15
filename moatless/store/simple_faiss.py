@@ -17,7 +17,8 @@ from llama_index.core.vector_stores.types import (
     DEFAULT_PERSIST_DIR,
     VectorStoreQuery,
     VectorStoreQueryMode,
-    VectorStoreQueryResult, BasePydanticVectorStore,
+    VectorStoreQueryResult,
+    BasePydanticVectorStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,11 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         if not nodes:
             return []
 
-        vector_id = max([int(k) for k in self._data.vector_id_to_text_id.keys()]) if self._data.vector_id_to_text_id else 0
+        vector_id = (
+            max([int(k) for k in self._data.vector_id_to_text_id.keys()])
+            if self._data.vector_id_to_text_id
+            else 0
+        )
 
         logger.info(f"Adding {len(nodes)} nodes to index, start at id {vector_id}.")
 
@@ -144,9 +149,9 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
                 self._vector_ids_to_delete.append(vector_id)
 
     def query(
-            self,
-            query: VectorStoreQuery,
-            **kwargs: Any,
+        self,
+        query: VectorStoreQuery,
+        **kwargs: Any,
     ) -> VectorStoreQueryResult:
         """Query index for top k most similar nodes.
 
@@ -189,7 +194,9 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
                 not_found += 1
 
         if not_found or duplicates:
-            logger.warning(f"Skipped {not_found} not found nodes and {duplicates} duplicates in query result.")
+            logger.warning(
+                f"Skipped {not_found} not found nodes and {duplicates} duplicates in query result."
+            )
 
         return VectorStoreQueryResult(
             similarities=filtered_dists, ids=filtered_node_ids

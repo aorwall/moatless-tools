@@ -34,7 +34,6 @@ def generate_repomap(repo_dir: str):
     return repomap
 
 
-
 def _to_context_string(codeblock: CodeBlock) -> str:
     contents = ""
 
@@ -50,7 +49,11 @@ def _to_context_string(codeblock: CodeBlock) -> str:
 
     has_outcommented_code = False
     for i, child in enumerate(codeblock.children):
-        if child.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION, CodeBlockType.CONSTRUCTOR]:
+        if child.type in [
+            CodeBlockType.CLASS,
+            CodeBlockType.FUNCTION,
+            CodeBlockType.CONSTRUCTOR,
+        ]:
             if has_outcommented_code:
                 contents += child.create_commented_out_block("... code").to_string()
                 has_outcommented_code = False
@@ -62,6 +65,7 @@ def _to_context_string(codeblock: CodeBlock) -> str:
         contents += child.create_commented_out_block("... code").to_string()
 
     return contents
+
 
 if __name__ == "__main__":
     repomap = generate_repomap("/tmp/repos/django_django/django")

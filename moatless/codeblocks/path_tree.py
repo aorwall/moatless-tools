@@ -3,10 +3,9 @@ from pydantic import BaseModel, Field
 
 class PathTree(BaseModel):
     show: bool = Field(default=False, description="Show the block.")
-    tree: dict[str, 'PathTree'] = Field(default_factory=dict)
+    tree: dict[str, "PathTree"] = Field(default_factory=dict)
 
-
-    def merge(self, other: 'PathTree'):
+    def merge(self, other: "PathTree"):
         if other.show:
             self.show = True
 
@@ -35,4 +34,3 @@ class PathTree(BaseModel):
             self.tree[path[0]] = PathTree(show=False)
 
         self.tree[path[0]].add_to_tree(path[1:])
-

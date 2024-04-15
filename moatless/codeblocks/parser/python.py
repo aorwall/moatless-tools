@@ -3,15 +3,18 @@ import logging
 import tree_sitter_python as tspython
 from tree_sitter import Language
 
-from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlock, Relationship, ReferenceScope, \
-    RelationshipType
+from moatless.codeblocks.codeblocks import (
+    CodeBlockType,
+    CodeBlock,
+    Relationship,
+    ReferenceScope,
+    RelationshipType,
+)
 from moatless.codeblocks.parser.parser import CodeParser, commented_out_keywords
 
 child_block_types = ["ERROR", "block"]
 
-block_delimiters = [
-    ":"
-]
+block_delimiters = [":"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +37,16 @@ class PythonParser(CodeParser):
         return "python"
 
     def pre_process(self, codeblock: CodeBlock):
-        if codeblock.type == CodeBlockType.FUNCTION and codeblock.identifier == "__init__":
+        if (
+            codeblock.type == CodeBlockType.FUNCTION
+            and codeblock.identifier == "__init__"
+        ):
             codeblock.type = CodeBlockType.CONSTRUCTOR
 
     def post_process(self, codeblock: CodeBlock):
-        if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(codeblock.content):
+        if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(
+            codeblock.content
+        ):
             codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 
         if codeblock.type == CodeBlockType.ASSIGNMENT:
@@ -55,9 +63,11 @@ class PythonParser(CodeParser):
                         reference.path = class_block.full_path() + reference.path[1:2]
                         reference.identifier = codeblock.identifier
 
-            if (reference.path
-                    and reference.path[0] in self.reference_index
-                    and reference.scope in [ReferenceScope.CLASS, ReferenceScope.LOCAL]):
+            if (
+                reference.path
+                and reference.path[0] in self.reference_index
+                and reference.scope in [ReferenceScope.CLASS, ReferenceScope.LOCAL]
+            ):
                 existing_reference = self.reference_index[reference.path[0]]
                 if len(reference.path) > 1 and codeblock.type == CodeBlockType.CALL:
                     # add new full reference to the called function
@@ -65,7 +75,7 @@ class PythonParser(CodeParser):
                         scope=existing_reference.scope,
                         identifier=reference.identifier,
                         path=existing_reference.path + reference.path[1:],
-                        external_path=existing_reference.external_path
+                        external_path=existing_reference.external_path,
                     )
                     new_references.append(new_full_reference)
                     reference.path = reference.path[:1]
@@ -74,16 +84,25 @@ class PythonParser(CodeParser):
 
         if codeblock.type == CodeBlockType.CLASS:
             # the class block should refer to instance variables initiated from the constructor
-            constructor_blocks = [block for block in codeblock.children if block.type == CodeBlockType.CONSTRUCTOR]
+            constructor_blocks = [
+                block
+                for block in codeblock.children
+                if block.type == CodeBlockType.CONSTRUCTOR
+            ]
             if constructor_blocks:
                 init_block = constructor_blocks[0]
                 for reference in init_block.get_all_references():
                     if reference.scope == ReferenceScope.CLASS:
                         codeblock.references.append(reference)
 
-        if (codeblock.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
-                and len(codeblock.children) == 1 and codeblock.children[0].type == CodeBlockType.COMMENTED_OUT_CODE):
+        if (
+            codeblock.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
+            and len(codeblock.children) == 1
+            and codeblock.children[0].type == CodeBlockType.COMMENTED_OUT_CODE
+        ):
             codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 
     def is_outcommented_code(self, comment):
-        return comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords)
+        return comment.startswith("# ...") or any(
+            keyword in comment.lower() for keyword in commented_out_keywords
+        )

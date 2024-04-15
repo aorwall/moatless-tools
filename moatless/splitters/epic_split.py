@@ -63,7 +63,8 @@ class EpicSplitter(NodeParser):
     )
 
     non_code_file_extensions: List[str] = Field(
-        default=["md", "txt"], description="File extensions to consider as non code files."
+        default=["md", "txt"],
+        description="File extensions to consider as non code files.",
     )
 
     comment_strategy: CommentStrategy = Field(
@@ -78,13 +79,9 @@ class EpicSplitter(NodeParser):
         default=100, description="Max number of chunks to split a document into."
     )
 
-    min_chunk_size: int = Field(
-        default=256, description="Min tokens to split code."
-    )
+    min_chunk_size: int = Field(default=256, description="Min tokens to split code.")
 
-    max_chunk_size: int = Field(
-        default=2000, description="Max tokens in one chunk."
-    )
+    max_chunk_size: int = Field(default=2000, description="Max tokens in one chunk.")
 
     hard_token_limit: int = Field(
         default=6000, description="Hard token limit for a chunk."
@@ -92,12 +89,12 @@ class EpicSplitter(NodeParser):
 
     _parser: CodeParser = PrivateAttr()
     _code_graph: CodeGraph = PrivateAttr()
-    #_fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
+    # _fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
 
     def __init__(
         self,
         chunk_size: int = 750,
-        language: str = "python" , # TODO: Shouldn't have to set this
+        language: str = "python",  # TODO: Shouldn't have to set this
         min_chunk_size: int = 100,
         max_chunk_size: int = 1500,
         hard_token_limit: int = 6000,
@@ -107,7 +104,7 @@ class EpicSplitter(NodeParser):
         include_prev_next_rel: bool = True,
         text_splitter: Optional[TextSplitter] = None,
         comment_strategy: CommentStrategy = CommentStrategy.ASSOCIATE,
-        #fallback_code_splitter: Optional[TextSplitter] = None,
+        # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
         tokenizer: Optional[Callable] = None,
         non_code_file_extensions: Optional[List[str]] = ["md", "txt"],
@@ -119,7 +116,7 @@ class EpicSplitter(NodeParser):
 
         self._code_graph = code_graph
 
-        #self._fallback_code_splitter = fallback_code_splitter
+        # self._fallback_code_splitter = fallback_code_splitter
 
         super().__init__(
             chunk_size=chunk_size,
@@ -170,11 +167,13 @@ class EpicSplitter(NodeParser):
                 parse_time = time.time_ns() - starttime
                 if parse_time > 1e9:
                     logger.warning(
-                        f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds.")
+                        f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds."
+                    )
 
             except Exception as e:
                 logger.warning(
-                    f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split(). Error: {e}")
+                    f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split(). Error: {e}"
+                )
                 # TODO: Fall back to treesitter or text split
                 continue
 
@@ -183,11 +182,10 @@ class EpicSplitter(NodeParser):
             parse_time = time.time_ns() - starttime
             if parse_time > 1e8:
                 logger.warning(
-                    f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds.")
-            if len(chunks) > 100:
-                logger.info(
-                    f"Splitting file {file_path} in {len(chunks)} chunks"
+                    f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds."
                 )
+            if len(chunks) > 100:
+                logger.info(f"Splitting file {file_path} in {len(chunks)} chunks")
 
             starttime = time.time_ns()
             for chunk in chunks:
@@ -199,10 +197,13 @@ class EpicSplitter(NodeParser):
             parse_time = time.time_ns() - starttime
             if parse_time > 1e9:
                 logger.warning(
-                    f"Create noeds for file {file_path} took {parse_time / 1e9:.2f} seconds.")
+                    f"Create noeds for file {file_path} took {parse_time / 1e9:.2f} seconds."
+                )
         return all_nodes
 
-    def _chunk_contents(self, codeblock: CodeBlock = None, file_path: str = None) -> List[CodeBlockChunk]:
+    def _chunk_contents(
+        self, codeblock: CodeBlock = None, file_path: str = None
+    ) -> List[CodeBlockChunk]:
         tokens = codeblock.sum_tokens()
         if tokens == 0:
             logger.debug(f"Skipping file {file_path} because it has no tokens.")
@@ -210,16 +211,21 @@ class EpicSplitter(NodeParser):
 
         if codeblock.find_errors():
             logger.warning(
-                f"Failed to use spic splitter to split {file_path}. {len(codeblock.find_errors())} codeblocks with type ERROR. Fallback to treesitter_split()")
+                f"Failed to use spic splitter to split {file_path}. {len(codeblock.find_errors())} codeblocks with type ERROR. Fallback to treesitter_split()"
+            )
             # TODO: Fall back to treesitter or text split
             return []
 
         if tokens > self.hard_token_limit:
             for child in codeblock.children:
-                if child.type == CodeBlockType.COMMENT and "generated" in child.content.lower(): # TODO: Make a generic solution to detect files that shouldn't be indexed. Maybe ask an LLM?
+                if (
+                    child.type == CodeBlockType.COMMENT
+                    and "generated" in child.content.lower()
+                ):  # TODO: Make a generic solution to detect files that shouldn't be indexed. Maybe ask an LLM?
                     logger.info(
                         f"File {file_path} has {tokens} tokens and the word 'generated' in the first comments,"
-                        f" will assume it's a generated file.")
+                        f" will assume it's a generated file."
+                    )
                     return []
                 else:
                     break
@@ -230,7 +236,9 @@ class EpicSplitter(NodeParser):
 
         return self._chunk_block(codeblock, file_path)
 
-    def _chunk_block(self, codeblock: CodeBlock, file_path: str = None) -> list[CodeBlockChunk]:
+    def _chunk_block(
+        self, codeblock: CodeBlock, file_path: str = None
+    ) -> list[CodeBlockChunk]:
         chunks: List[CodeBlockChunk] = []
         current_chunk = []
         comment_chunk = []
@@ -246,20 +254,27 @@ class EpicSplitter(NodeParser):
                 elif self._ignore_comment(child) or ignoring_comment:
                     ignoring_comment = True
                     continue
-                elif self.comment_strategy == CommentStrategy.ASSOCIATE and not codeblock.parent:
+                elif (
+                    self.comment_strategy == CommentStrategy.ASSOCIATE
+                    and not codeblock.parent
+                ):
                     comment_chunk.append(child)
                     continue
             else:
                 if child.tokens > self.max_chunk_size:
                     start_content = child.content[:100]
-                    logger.warning(f"Skipping code block {child.path_string()} in {file_path} as it has {child.tokens} tokens which is"
-                                   f" more than chunk size {self.chunk_size}. Content: {start_content}...")
+                    logger.warning(
+                        f"Skipping code block {child.path_string()} in {file_path} as it has {child.tokens} tokens which is"
+                        f" more than chunk size {self.chunk_size}. Content: {start_content}..."
+                    )
                     continue
 
                 ignoring_comment = False
 
-            if ((child.type in SPLIT_BLOCK_TYPES and child.sum_tokens() > self.min_chunk_size)
-                    or parent_tokens + child.sum_tokens() > self.max_chunk_size):
+            if (
+                child.type in SPLIT_BLOCK_TYPES
+                and child.sum_tokens() > self.min_chunk_size
+            ) or parent_tokens + child.sum_tokens() > self.max_chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk)
                     current_chunk = []
@@ -273,7 +288,12 @@ class EpicSplitter(NodeParser):
                 if child_chunks:
                     first_child_chunk = child_chunks[0]
 
-                    if parent_tokens + child.tokens + count_chunk_tokens(first_child_chunk) < self.max_chunk_size:
+                    if (
+                        parent_tokens
+                        + child.tokens
+                        + count_chunk_tokens(first_child_chunk)
+                        < self.max_chunk_size
+                    ):
                         current_chunk.extend(first_child_chunk)
                         chunks.append(current_chunk)
                         chunks.extend(child_chunks[1:])
@@ -285,9 +305,14 @@ class EpicSplitter(NodeParser):
 
                 continue
 
-            new_token_count = parent_tokens + count_chunk_tokens(current_chunk) + child.sum_tokens()
-            if codeblock.type not in SPLIT_BLOCK_TYPES and new_token_count < self.max_chunk_size \
-                    or new_token_count < self.chunk_size:
+            new_token_count = (
+                parent_tokens + count_chunk_tokens(current_chunk) + child.sum_tokens()
+            )
+            if (
+                codeblock.type not in SPLIT_BLOCK_TYPES
+                and new_token_count < self.max_chunk_size
+                or new_token_count < self.chunk_size
+            ):
 
                 current_chunk.extend(comment_chunk)
                 current_chunk.append(child)
@@ -314,31 +339,53 @@ class EpicSplitter(NodeParser):
             should_continue = False
 
             for i, chunk in enumerate(chunks):
-                if count_chunk_tokens(chunk) < self.min_chunk_size or len(chunks) > self.max_chunks:
+                if (
+                    count_chunk_tokens(chunk) < self.min_chunk_size
+                    or len(chunks) > self.max_chunks
+                ):
 
                     if i == 0 and len(chunks) > 1:
-                        if count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                        if (
+                            count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk)
+                            <= self.hard_token_limit
+                        ):
                             chunks[1] = chunk + chunks[1]
                             should_continue = True
                         else:
                             merged_chunks.append(chunk)
 
                     elif i == len(chunks) - 1:
-                        if merged_chunks and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                        if (
+                            merged_chunks
+                            and count_chunk_tokens(merged_chunks[-1])
+                            + count_chunk_tokens(chunk)
+                            <= self.hard_token_limit
+                        ):
                             merged_chunks[-1] = merged_chunks[-1] + chunk
                             should_continue = True
                         else:
                             merged_chunks.append(chunk)
 
                     else:
-                        if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(chunks[i + 1]):
-                            if merged_chunks and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                        if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(
+                            chunks[i + 1]
+                        ):
+                            if (
+                                merged_chunks
+                                and count_chunk_tokens(merged_chunks[-1])
+                                + count_chunk_tokens(chunk)
+                                <= self.hard_token_limit
+                            ):
                                 merged_chunks[-1] = merged_chunks[-1] + chunk
                                 should_continue = True
                             else:
                                 merged_chunks.append(chunk)
                         else:
-                            if count_chunk_tokens(chunks[i + 1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
+                            if (
+                                count_chunk_tokens(chunks[i + 1])
+                                + count_chunk_tokens(chunk)
+                                <= self.hard_token_limit
+                            ):
                                 chunks[i + 1] = chunk + chunks[i + 1]
                                 should_continue = True
                             else:
@@ -346,12 +393,13 @@ class EpicSplitter(NodeParser):
                 else:
                     merged_chunks.append(chunk)
 
-            chunks = merged_chunks + chunks[i + 1:]
+            chunks = merged_chunks + chunks[i + 1 :]
 
             if len(chunks) < self.max_chunks or not should_continue:
                 break
 
         return chunks
+
     def _create_path_tree(cls, blocks: List[CodeBlock]) -> PathTree:
         path_tree = PathTree()
         for block in blocks:
@@ -359,7 +407,10 @@ class EpicSplitter(NodeParser):
         return path_tree
 
     def _ignore_comment(self, codeblock: CodeBlock) -> bool:
-        return re.search(r"(?i)copyright|license|author", codeblock.content) or not codeblock.content
+        return (
+            re.search(r"(?i)copyright|license|author", codeblock.content)
+            or not codeblock.content
+        )
 
     def _to_context_string(self, codeblock: CodeBlock, path_tree: PathTree) -> str:
         contents = ""
@@ -380,31 +431,52 @@ class EpicSplitter(NodeParser):
         for i, child in enumerate(codeblock.children):
             child_tree = path_tree.child_tree(child.identifier)
             if child_tree and child_tree.show:
-                if has_outcommented_code and child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
-                    if codeblock.type not in [CodeBlockType.CLASS, CodeBlockType.MODULE, CodeBlockType.TEST_SUITE]:
-                        contents += child.create_commented_out_block("... other code").to_string()
+                if has_outcommented_code and child.type not in [
+                    CodeBlockType.COMMENT,
+                    CodeBlockType.COMMENTED_OUT_CODE,
+                ]:
+                    if codeblock.type not in [
+                        CodeBlockType.CLASS,
+                        CodeBlockType.MODULE,
+                        CodeBlockType.TEST_SUITE,
+                    ]:
+                        contents += child.create_commented_out_block(
+                            "... other code"
+                        ).to_string()
                 contents += self._to_context_string(
-                    codeblock=child,
-                    path_tree=child_tree)
+                    codeblock=child, path_tree=child_tree
+                )
                 has_outcommented_code = False
             elif child_tree:
                 contents += self._to_context_string(
-                    codeblock=child,
-                    path_tree=child_tree)
+                    codeblock=child, path_tree=child_tree
+                )
                 has_outcommented_code = False
-            elif child.type not in [CodeBlockType.COMMENT, CodeBlockType.COMMENTED_OUT_CODE]:
+            elif child.type not in [
+                CodeBlockType.COMMENT,
+                CodeBlockType.COMMENTED_OUT_CODE,
+            ]:
                 has_outcommented_code = True
 
-        if has_outcommented_code and codeblock.type not in [CodeBlockType.CLASS, CodeBlockType.MODULE, CodeBlockType.TEST_SUITE]:
+        if has_outcommented_code and codeblock.type not in [
+            CodeBlockType.CLASS,
+            CodeBlockType.MODULE,
+            CodeBlockType.TEST_SUITE,
+        ]:
             contents += child.create_commented_out_block("... other code").to_string()
 
         return contents
 
     def _contains_block_paths(self, codeblock: CodeBlock, block_paths: List[List[str]]):
-        return [block_path for block_path in block_paths
-                if block_path[:len(codeblock.full_path())] == codeblock.full_path()]
+        return [
+            block_path
+            for block_path in block_paths
+            if block_path[: len(codeblock.full_path())] == codeblock.full_path()
+        ]
 
-    def _create_node(self, content: str, node: BaseNode, chunk: CodeBlockChunk = None) -> Optional[TextNode]:
+    def _create_node(
+        self, content: str, node: BaseNode, chunk: CodeBlockChunk = None
+    ) -> Optional[TextNode]:
         metadata = {
             "file_path": node.metadata.get("file_path"),
             "file_name": node.metadata.get("file_name"),

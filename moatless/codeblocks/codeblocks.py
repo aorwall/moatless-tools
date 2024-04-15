@@ -358,6 +358,7 @@ class CodeBlock(BaseModel):
             if child.identifier == path[0]:
                 if len(path) == 1:
                     self.replace_child(i, new_block)
+                    return
                 else:
                     child.replace_by_path(path[1:], new_block)
 
@@ -877,6 +878,41 @@ class CodeBlock(BaseModel):
         else:
             return []
 
+    def find_first_by_start_line(self, start_line: int) -> Optional["CodeBlock"]:
+        for child in self.children:
+            if child.is_indexed and child.start_line >= start_line:
+                return child
+
+            if child.end_line >= start_line:
+                found = child.find_first_by_start_line(start_line)
+                if found:
+                    return found
+
+        return None
+
+    def find_first_block_in_span(self, span: Span) -> Optional["CodeBlock"]:
+        if self.is_spans_within_block([span]):
+            for child in self.children:
+                if child.start_line == span.start_line:
+                    return child
+
+                if child.is_block_within_spans([span]):
+                    return child
+
+                found = child.find_first_block_in_span(span)
+                if found:
+                    return found
+        return None
+
+    def find_closest_indexed_parent(self) -> Optional["CodeBlock"]:
+        if self.is_indexed:
+            return self
+
+        if self.parent:
+            return self.parent.find_closest_indexed_parent()
+
+        return None
+
     def find_block_with_span(self, span: Span):
         if not self.is_spans_within_block([span]):
             return None
@@ -917,3 +953,39 @@ class CodeBlock(BaseModel):
             blocks.extend(child.get_indexed_blocks())
 
         return blocks
+
+    def copy_with_trimmed_parents(self):
+        block_copy = self.model_copy(deep=True)
+
+        if self.parent:
+            block_copy.parent = self.parent.trim_code_block(block_copy)
+        return block_copy
+
+    def trim_code_block(self, keep_child: "CodeBlock"):
+        children = []
+        for child in self.children:
+            if child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
+                children.append(child)
+            elif child.content != keep_child.content:  # TODO: Fix ID to compare to
+                if child.type not in NON_CODE_BLOCKS and (
+                    not children
+                    or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE
+                ):
+                    children.append(child.create_commented_out_block())
+            else:
+                children.append(keep_child)
+
+        trimmed_block = CodeBlock(
+            content=self.content,
+            identifier=self.identifier,
+            indentation=self.indentation,
+            pre_lines=self.pre_lines,
+            type=self.type,
+            start_line=self.start_line,
+            children=children,
+        )
+
+        if trimmed_block.parent:
+            trimmed_block.parent = self.parent.trim_code_block(trimmed_block)
+
+        return trimmed_block

@@ -23,9 +23,9 @@ class VerificationFailureItem(BaseModel):
 
 
 def get_number_of_tests(output: str) -> (int, int):
-    failed_match = re.search(r'(\d+) failed', output)
-    passed_match = re.search(r'(\d+) passed', output)
-    error_match = re.search(r'(\d+) errors', output)
+    failed_match = re.search(r"(\d+) failed", output)
+    passed_match = re.search(r"(\d+) passed", output)
+    error_match = re.search(r"(\d+) errors", output)
 
     if failed_match:
         failed_count = int(failed_match.group(1))
@@ -46,34 +46,47 @@ def get_number_of_tests(output: str) -> (int, int):
 
 
 def find_timed_out(output: str) -> List[VerificationFailureItem]:
-    match = re.search(r'(\w+.py)::(\w+)::(\w+)', output)
+    match = re.search(r"(\w+.py)::(\w+)::(\w+)", output)
     if match:
         file_name = match.group(1)
         class_name = match.group(2)
         method_name = match.group(3)
-        return [VerificationFailureItem(test_file=file_name, test_class=class_name, test_method=method_name, output="Timed out")]
+        return [
+            VerificationFailureItem(
+                test_file=file_name,
+                test_class=class_name,
+                test_method=method_name,
+                output="Timed out",
+            )
+        ]
 
-    match = re.search(r'(\w+.py)\s\.\.\.', output)
+    match = re.search(r"(\w+.py)\s\.\.\.", output)
     if match:
         file_name = match.group(1)
         return [VerificationFailureItem(test_file=file_name, output="Timed out")]
 
     return [VerificationFailureItem(output="Timed out")]
 
+
 def find_failed_tests(output: str) -> List[VerificationFailureItem]:
-    sections = output.split("======================================================================")
+    sections = output.split(
+        "======================================================================"
+    )
     failed_tests = [extract_test_details(section) for section in sections]
     return [test for test in failed_tests if test is not None]
 
+
 def extract_test_details(section: str) -> Optional[VerificationFailureItem]:
-    header_pattern = r'(FAIL|ERROR): ([^\s]+) \(([^.]+)\.([^\.]+)\.([^\)]+)\)'
+    header_pattern = r"(FAIL|ERROR): ([^\s]+) \(([^.]+)\.([^\.]+)\.([^\)]+)\)"
     body_pattern = r'[\s\S]+?.*File "([^"]+)", (.*)'
 
     file_pattern = re.compile(r'File "([^"]+)", ')
 
     # test_files = glob.glob(str(self.current_dir) + "/" + self.test_file_pattern, recursive=True)
 
-    splitted = section.split("----------------------------------------------------------------------")
+    splitted = section.split(
+        "----------------------------------------------------------------------"
+    )
     if len(splitted) >= 2:
         if "unittest.loader" in splitted[0]:
             test_load_fail = True
@@ -81,8 +94,8 @@ def extract_test_details(section: str) -> Optional[VerificationFailureItem]:
             test_load_fail = False
 
         file_path = None
-        #all_matches = file_pattern.findall(splitted[1])
-        #for match in all_matches:
+        # all_matches = file_pattern.findall(splitted[1])
+        # for match in all_matches:
         #    if match in test_files:
         #        file_path = match
         #        break
@@ -103,19 +116,21 @@ def extract_test_details(section: str) -> Optional[VerificationFailureItem]:
                 else:
                     file_path, traceback = body_match.groups()
 
-                #test_file = file_path.replace(str(self.current_dir) + "/", "")
+                # test_file = file_path.replace(str(self.current_dir) + "/", "")
 
             test_file = None
-            #traceback = traceback.replace(str(self.current_dir) + "/", "")
+            # traceback = traceback.replace(str(self.current_dir) + "/", "")
 
             return VerificationFailureItem(
                 test_method=test_method,
                 test_class=test_class,
                 test_file=test_file,
-                output=traceback.strip()
+                output=traceback.strip(),
             )
 
     return None
+
+
 def find_failed_tests(data: str) -> List[VerificationFailureItem]:
     test_output = ""
     test_file = None
@@ -134,30 +149,36 @@ def find_failed_tests(data: str) -> List[VerificationFailureItem]:
             continue
 
         if extract:
-            test_file_search = re.search(r'^(\w+\.py):(\d+)', line)
+            test_file_search = re.search(r"^(\w+\.py):(\d+)", line)
 
             if line.startswith("="):
                 failures.append(
-                    VerificationFailureItem(test_file=test_file,
-                                            test_linenumber=test_linenumber,
-                                            test_class=test_class,
-                                            test_method=test_method,
-                                            output=test_output,
-                                            test_code=test_code))
+                    VerificationFailureItem(
+                        test_file=test_file,
+                        test_linenumber=test_linenumber,
+                        test_class=test_class,
+                        test_method=test_method,
+                        output=test_output,
+                        test_code=test_code,
+                    )
+                )
                 return failures
             elif line.startswith("__"):
-                match = re.search(r'(\w+)\.(\w+)', line)
-                single_match = re.search(r'_\s(\w+)\s_', line)
+                match = re.search(r"(\w+)\.(\w+)", line)
+                single_match = re.search(r"_\s(\w+)\s_", line)
 
                 if match or single_match:
                     if test_file:
                         failures.append(
-                            VerificationFailureItem(test_file=test_file,
-                                                    test_linenumber=test_linenumber,
-                                                    test_class=test_class,
-                                                    test_method=test_method,
-                                                    output=test_output,
-                                                    test_code=test_code))
+                            VerificationFailureItem(
+                                test_file=test_file,
+                                test_linenumber=test_linenumber,
+                                test_class=test_class,
+                                test_method=test_method,
+                                output=test_output,
+                                test_code=test_code,
+                            )
+                        )
                         test_output = ""
                         test_code = None
                         test_file = None
@@ -186,12 +207,16 @@ def find_failed_tests(data: str) -> List[VerificationFailureItem]:
                     test_code += "\n" + line
 
     if test_file:
-        failures.append(VerificationFailureItem(test_file=test_file,
-                                                test_linenumber=test_linenumber,
-                                                test_class=test_class,
-                                                test_method=test_method,
-                                                output=test_output,
-                                                test_code=test_code))
+        failures.append(
+            VerificationFailureItem(
+                test_file=test_file,
+                test_linenumber=test_linenumber,
+                test_class=test_class,
+                test_method=test_method,
+                output=test_output,
+                test_code=test_code,
+            )
+        )
 
     return failures
 

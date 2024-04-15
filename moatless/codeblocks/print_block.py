@@ -25,7 +25,7 @@ def _print_content(
 ) -> str:
     contents = ""
 
-    if codeblock.pre_lines is not None:
+    if codeblock.pre_lines:
         contents += "\n" * (codeblock.pre_lines - 1)
 
         if span_id:
@@ -273,19 +273,13 @@ def print_by_spans(
     block_marker: SpanMarker = None,
     outcomment_code_comment: str = "...",
 ) -> str:
-    is_in_span = spans[0].start_line <= codeblock.start_line <= spans[0].end_line
-
     span_id = None
-    if (
-        block_marker
-        and is_in_span
-        and (codeblock.start_line == spans[0].start_line or codeblock.is_indexed)
-    ):
-        if codeblock.is_indexed:
-            span_id = codeblock.path_string()
-        else:
-            span_id = f"{spans[0].start_line}_{spans[0].end_line}"
+    if block_marker and spans[0].start_line == codeblock.start_line:
+        span_id = spans[0].span_id
+    elif codeblock.is_indexed:
+        span_id = codeblock.path_string()
 
+    # TODO: Remove span after it has been printed?
     contents = _print_content(codeblock, span_marker=block_marker, span_id=span_id)
 
     has_outcommented_code = False
@@ -331,17 +325,23 @@ def print_by_spans(
 def _is_span_within_block(codeblock: CodeBlock, spans: List[Span]) -> bool:
     for span in spans:
         if (
-            span.start_line >= codeblock.start_line
+            span.start_line
+            and span.start_line >= codeblock.start_line
             and span.end_line <= codeblock.end_line
         ):
             return True
+
     return False
 
 
 def _is_block_within_spans(codeblock: CodeBlock, spans: List[Span]) -> bool:
     for span in spans:
+        if codeblock.full_path()[: len(codeblock.full_path())] == spans[0].block_path:
+            return True
+
         if (
-            span.start_line <= codeblock.start_line
+            span.start_line
+            and span.start_line <= codeblock.start_line
             and span.end_line >= codeblock.end_line
         ):
             return True
@@ -363,43 +363,3 @@ def _is_block_within_line_numbers(
         if start_line <= codeblock.start_line and end_line >= codeblock.end_line:
             return True
     return False
-
-
-def print_with_blockpath_comments(
-    codeblock: CodeBlock, field_name: str = "block_path"
-) -> str:
-    return (
-        _print_with_blockpath_comments(codeblock, field_name=field_name) + "\n</block>"
-    )
-
-
-def _print_with_blockpath_comments(
-    codeblock: CodeBlock, field_name: str = "block_path"
-) -> str:
-    contents = ""
-
-    if not codeblock.parent:
-        contents += f"<block id='start'>\n\n"
-
-    if codeblock.pre_lines:
-        contents += "\n" * (codeblock.pre_lines - 1)
-
-        if codeblock.type in [
-            CodeBlockType.FUNCTION,
-            CodeBlockType.CLASS,
-            CodeBlockType.CONSTRUCTOR,
-        ]:
-            contents += f"\n</block>\n{codeblock.indentation}\n<block id='{codeblock.path_string()}'>"
-
-        for line in codeblock.content_lines:
-            if line:
-                contents += "\n" + codeblock.indentation + line
-            else:
-                contents += "\n"
-    else:
-        contents += codeblock.pre_code + codeblock.content
-
-    for i, child in enumerate(codeblock.children):
-        contents += _print_with_blockpath_comments(child, field_name=field_name)
-
-    return contents
