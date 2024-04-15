@@ -22,8 +22,7 @@ def test_parse_case_1():
 
 
 def test_split_case_1():
-    with open(
-            "/tmp/repos/sympy/sympy/integrals/rubi/rules/sine.py", "r") as file:
+    with open("/tmp/repos/sympy/sympy/integrals/rubi/rules/sine.py", "r") as file:
         content = file.read()
 
     parser = create_parser("python", tokenizer=get_tokenizer())
@@ -52,7 +51,6 @@ def test_split_case_1():
         print(paths)
 
         print(content)
-
 
 
 def test_split_case_2():

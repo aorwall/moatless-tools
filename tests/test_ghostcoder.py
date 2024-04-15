@@ -13,12 +13,8 @@ def test_pytest_dev__pytest_5808():
         updated_content = f.read()
 
     request = WriteCodeRequest(
-        updated_files=[
-            FileItem(file_path="pastebin.py", content=updated_content)
-        ],
-        file_context=[
-            FileItem(file_path="pastebin.py", content=existing_content)
-        ]
+        updated_files=[FileItem(file_path="pastebin.py", content=updated_content)],
+        file_context=[FileItem(file_path="pastebin.py", content=existing_content)],
     )
 
     resonse = code_writer.write_code(request)

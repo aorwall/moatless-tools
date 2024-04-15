@@ -7,10 +7,12 @@ import litellm
 from dotenv import load_dotenv
 
 from benchmark import swebench
+from benchmark.swebench import get_spans
 from moatless.codeblocks.codeblocks import CodeBlock
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.codeblocks.utils import Colors
 from moatless.coder import Coder
+from moatless.settings import Settings
 from moatless.types import ContextFile, Span
 from moatless.utils.repo import setup_github_repo
 
@@ -22,11 +24,7 @@ litellm.success_callback = ["langfuse"]
 litellm.failure_callback = ["langfuse"]
 
 
-logging.basicConfig(level=logging.INFO)
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+Settings.coder.enable_chain_of_thought = False
 
 
 def benchmark_coding(
@@ -53,8 +51,8 @@ def benchmark_coding(
         for diff in instance_data["patch_diff_details"][file_path]["diffs"]:
             diff_spans.append(
                 Span(
-                    diff["start_line_old"],
-                    diff.get("end_line_old", diff["start_line_old"]),
+                    start_line=diff["start_line_old"],
+                    end_line=diff.get("end_line_old", diff["start_line_old"]),
                 )
             )
 
@@ -99,85 +97,6 @@ def benchmark_coding(
         file.write(json_string + "\n")
 
 
-def get_spans(codeblock: CodeBlock, spans: List[Span]):
-
-    # If block is withing one of the spans this should be returned
-    within_span = is_block_within_spans(codeblock, spans)
-    if within_span:
-        return [Span(codeblock.start_line, codeblock.end_line)]
-
-    # Return empty if there are no spans within the current block
-    spans_within_block = get_spans_within_block(codeblock, spans)
-    if not spans_within_block:
-        return []
-
-    # If there are ny indexed block the full block is returned
-    # TODO: Check size and just pick X lines around the each span
-    indexed_blocks = codeblock.get_indexed_blocks()
-    if not indexed_blocks:
-        return [Span(codeblock.start_line, codeblock.end_line)]
-
-    spans_for_blocks = []
-    for span_within_block in spans_within_block:
-        indexed_blocks_within_span = find_indexed_blocks_by_span(
-            codeblock, span_within_block
-        )
-
-        # If no indexed block within span, pick the span between the previous and next indexed block (or start/end of codeblock)
-        if not indexed_blocks_within_span:
-            start_line = codeblock.start_line
-            end_line = codeblock.end_line
-            for indexed_block in indexed_blocks:
-                if indexed_block.start_line < span_within_block.start_line:
-                    start_line = indexed_block.end_line + 1
-
-                if indexed_block.end_line > span_within_block.end_line:
-                    end_line = indexed_block.start_line - 1
-                    break
-
-            spans_for_blocks.append(Span(start_line, end_line))
-
-        else:
-            # Else, find the spans in the indexed blocks
-            for indexed_block in indexed_blocks_within_span:
-                spans_for_blocks.extend(get_spans(indexed_block, [span_within_block]))
-
-    return spans_for_blocks
-
-
-def get_spans_within_block(codeblock: CodeBlock, spans: List[Span]) -> List[Span]:
-    return [
-        span
-        for span in spans
-        if codeblock.start_line <= span.start_line
-        and codeblock.end_line >= span.end_line
-    ]
-
-
-def find_indexed_blocks_by_span(codeblock: CodeBlock, span: Span):
-    indexed_blocks = []
-    for child in codeblock.children:
-        if (
-            span.start_line >= child.start_line
-            and span.end_line <= child.end_line
-            and child.is_indexed
-        ):
-            indexed_blocks.append(child)
-
-        indexed_blocks.extend(find_indexed_blocks_by_span(child, span))
-    return indexed_blocks
-
-
-def is_block_within_spans(codeblock: CodeBlock, spans: List[Span]) -> Optional[Span]:
-    for span in spans:
-        if (
-            span.start_line <= codeblock.start_line
-            and span.end_line >= codeblock.end_line
-        ):
-            return span
-    return None
-
-
 def run_instances(benchmark_run: str):
     existing_patches = set()
     if os.path.exists(f"{benchmark_run}_predictions.jsonl"):
@@ -219,6 +138,14 @@ def run_instance(instance_id):
 
 
 if __name__ == "__main__":
-    run_instances("moatless_gpt-4-turbo-2024-04-09_fully_assisted_context")
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
 
-    # run_instance("astropy__astropy-6938")
+    run_instances("moatless_gpt-4-turbo-2024-04-15_fully_assisted_context")
+
+    # run_instance("django__django-14752")

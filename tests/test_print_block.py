@@ -1,8 +1,14 @@
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import PathTree
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.codeblocks.print_block import print_by_line_numbers, print_by_block_path, print_by_block_paths, \
-    BlockMarker, print_block, Span
+from moatless.codeblocks.print_block import (
+    print_by_line_numbers,
+    print_by_block_path,
+    print_by_block_paths,
+    SpanMarker,
+    print_block,
+)
+from moatless.types import Span
 
 
 def test_print_by_line_numbers():
@@ -12,10 +18,7 @@ def test_print_by_line_numbers():
     with open(file_path) as f:
         codeblock = parser.parse(f.read())
 
-    line_numbers = [
-        Span(1, 23),
-        Span(151, 152)
-    ]
+    line_numbers = [Span(1, 23), Span(151, 152)]
 
     print(print_by_line_numbers(codeblock, line_numbers))
 
@@ -27,15 +30,15 @@ def test_print_with_references():
     with open(file_path) as f:
         codeblock = parser.parse(f.read())
 
-    line_numbers = [
-        Span(1, 23),
-        Span(151, 152)
-    ]
+    line_numbers = [Span(1, 23), Span(151, 152)]
 
-    print(print_by_block_paths(codeblock,
-                               block_paths=[["BaseSchema", "_invoke_field_validators"]],
-                               include_references=True))
-
+    print(
+        print_by_block_paths(
+            codeblock,
+            block_paths=[["BaseSchema", "_invoke_field_validators"]],
+            include_references=True,
+        )
+    )
 
 
 def test_print_with_comments():
@@ -51,6 +54,7 @@ def test_print_with_comments():
     print(printed)
 
     assert printed == content
+
 
 def test_print_by_block_path():
     file_path = "data/python/replace_function/original.py"
@@ -91,16 +95,37 @@ def test_print_by_block_paths_and_marker():
     with open(file_path) as f:
         codeblock = parser.parse(f.read())
 
-    block_paths = [["List","__init__"], ["List", "_bind_to_schema"]]
+    block_paths = [["List", "__init__"], ["List", "_bind_to_schema"]]
 
     list_block = codeblock.find_by_path(["List"])
     print(list_block.sum_tokens())
 
     print(list_block.to_tree(include_references=True))
 
-    printed = print_block(codeblock,
-                          path_tree=PathTree.from_block_paths(block_paths),
-                          block_marker=BlockMarker.COMMENT)
+    printed = print_block(
+        codeblock,
+        path_tree=PathTree.from_block_paths(block_paths),
+        block_marker=SpanMarker.COMMENT,
+    )
 
     print("Printed by block path:")
     print(printed)
+
+
+def test_print_by_line_numbers_astropy_wcs():
+    file_path = "data/python/astropy__astropy-7746/wcs.py"
+
+    parser = PythonParser()
+    with open(file_path) as f:
+        codeblock = parser.parse(f.read())
+
+    line_numbers = [
+        Span(start_line=1418, end_line=1556),
+        Span(start_line=1717, end_line=1814),
+    ]
+
+    print(
+        print_by_line_numbers(
+            codeblock, line_numbers, block_marker=SpanMarker.TAG, show_line_numbers=True
+        )
+    )

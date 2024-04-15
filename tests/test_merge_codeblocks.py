@@ -93,9 +93,15 @@ def test_merge_with_outcommented_function():
         assert foo_class.identifier == "Foo"
         assert len(foo_class.children) == 2
         assert foo_class.children[0].identifier == "foo"
-        assert foo_class.children[0].to_string() == "\n\n    def foo():\n        print('hello world')"
+        assert (
+            foo_class.children[0].to_string()
+            == "\n\n    def foo():\n        print('hello world')"
+        )
         assert foo_class.children[1].identifier == "bar"
-        assert foo_class.children[1].to_string() == "\n\n    def bar():\n        x = 1\n        y = x + 2"
+        assert (
+            foo_class.children[1].to_string()
+            == "\n\n    def bar():\n        x = 1\n        y = x + 2"
+        )
 
     _verify_merge(original_content, updated_content, assertion)
 
@@ -136,7 +142,9 @@ def test_pytest_dev__pytest_5808_only_function():
     with open("data/python/pytest-dev__pytest-5808/original_pastebin.py", "r") as f:
         original_content = f.read()
 
-    with open("data/python/pytest-dev__pytest-5808/update_pastebin_create_new_paste.py", "r") as f:
+    with open(
+        "data/python/pytest-dev__pytest-5808/update_pastebin_create_new_paste.py", "r"
+    ) as f:
         updated_content = f.read()
 
     with open("data/python/pytest-dev__pytest-5808/expected_pastebin.py", "r") as f:

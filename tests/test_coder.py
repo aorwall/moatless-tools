@@ -1,7 +1,7 @@
 import os
 
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.coder import Coder, do_diff
+from moatless.coder.base import Coder
 
 
 def test_update_part_of_code_block():
