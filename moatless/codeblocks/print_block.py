@@ -3,13 +3,8 @@ from enum import Enum
 from typing import List, Tuple
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-from moatless.codeblocks.codeblocks import PathTree, NON_CODE_BLOCKS
+from moatless.codeblocks.codeblocks import PathTree, NON_CODE_BLOCKS, SpanMarker
 from moatless.types import BlockPath, Span
-
-
-class SpanMarker(Enum):
-    TAG = 1
-    COMMENT = 2
 
 
 def _create_placeholder(codeblock: CodeBlock) -> str:
@@ -294,10 +289,15 @@ def print_by_spans(
                 break
 
         if show_child and spans:
-            if has_outcommented_code and child.type not in [
-                CodeBlockType.COMMENT,
-                CodeBlockType.COMMENTED_OUT_CODE,
-            ]:
+            if (
+                outcomment_code_comment
+                and has_outcommented_code
+                and child.type
+                not in [
+                    CodeBlockType.COMMENT,
+                    CodeBlockType.COMMENTED_OUT_CODE,
+                ]
+            ):
                 contents += child.create_commented_out_block(
                     outcomment_code_comment
                 ).to_string()
@@ -311,10 +311,15 @@ def print_by_spans(
         else:
             has_outcommented_code = True
 
-    if has_outcommented_code and child.type not in [
-        CodeBlockType.COMMENT,
-        CodeBlockType.COMMENTED_OUT_CODE,
-    ]:
+    if (
+        outcomment_code_comment
+        and has_outcommented_code
+        and child.type
+        not in [
+            CodeBlockType.COMMENT,
+            CodeBlockType.COMMENTED_OUT_CODE,
+        ]
+    ):
         contents += child.create_commented_out_block(
             outcomment_code_comment
         ).to_string()

@@ -1,6 +1,6 @@
 import re
 from enum import Enum
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict
 
 from pydantic import BaseModel, validator, Field, root_validator
 
@@ -9,33 +9,61 @@ from moatless.codeblocks.utils import Colors
 from moatless.types import BlockPath, Span
 
 
-class CodeBlockType(str, Enum):
-    DECLARATION = "Declaration"
-    IDENTIFIER = "Identifier"
-    PARAMETER = "Parameter"
+class SpanMarker(Enum):
+    TAG = 1
+    COMMENT = 2
 
-    MODULE = "Module"
-    CLASS = "Class"
-    FUNCTION = "Function"
-    CONSTRUCTOR = "Constructor"
 
-    TEST_SUITE = "TestSuite"
-    TEST_CASE = "TestCase"
+class CodeBlockTypeGroup(str, Enum):
+    STRUCTURE = "Structures"
+    IMPLEMENTATION = "Implementation"
+    IMPORT = "Imports"
 
-    IMPORT = "Import"
-    EXPORT = "Export"
-    STATEMENT = "Statement"
-    BLOCK = "Block"
-    ASSIGNMENT = "Assignment"
-    CALL = "Call"
-    CODE = "Code"
     BLOCK_DELIMITER = "BlockDelimiter"
+    SPACE = "Space"
 
     COMMENT = "Comment"
-    COMMENTED_OUT_CODE = "CommentedOutCode"  # TODO: Replace to PlaceholderComment
 
-    SPACE = "Space"
     ERROR = "Error"
+
+
+class CodeBlockType(Enum):
+
+    MODULE = ("Module", CodeBlockTypeGroup.STRUCTURE)
+    CLASS = ("Class", CodeBlockTypeGroup.STRUCTURE)
+    FUNCTION = ("Function", CodeBlockTypeGroup.STRUCTURE)
+
+    # TODO: Remove and add sub types to functions and classes
+    CONSTRUCTOR = ("Constructor", CodeBlockTypeGroup.STRUCTURE)
+    TEST_SUITE = ("TestSuite", CodeBlockTypeGroup.STRUCTURE)
+    TEST_CASE = ("TestCase", CodeBlockTypeGroup.STRUCTURE)
+
+    IMPORT = ("Import", CodeBlockTypeGroup.IMPORT)
+
+    EXPORT = ("Export", CodeBlockTypeGroup.IMPLEMENTATION)
+    STATEMENT = ("Statement", CodeBlockTypeGroup.IMPLEMENTATION)
+    BLOCK = ("Block", CodeBlockTypeGroup.IMPLEMENTATION)
+    ASSIGNMENT = ("Assignment", CodeBlockTypeGroup.IMPLEMENTATION)
+    CALL = ("Call", CodeBlockTypeGroup.IMPLEMENTATION)
+    CODE = ("Code", CodeBlockTypeGroup.IMPLEMENTATION)
+
+    # TODO: Incorporate in code block?
+    BLOCK_DELIMITER = ("BlockDelimiter", CodeBlockTypeGroup.BLOCK_DELIMITER)
+
+    # TODO: Remove as it's just to fill upp spaces at the end of the file?
+    SPACE = ("Space", CodeBlockTypeGroup.SPACE)
+
+    COMMENT = ("Comment", CodeBlockTypeGroup.COMMENT)
+    COMMENTED_OUT_CODE = (
+        "Placeholder",
+        CodeBlockTypeGroup.COMMENT,
+    )  # TODO: Replace to PlaceholderComment
+
+    ERROR = ("Error", CodeBlockTypeGroup.ERROR)
+
+    def __init__(self, value, group):
+        self._value_ = value
+        self.group = group
 
     @classmethod
     def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
@@ -231,9 +259,41 @@ class Parameter(BaseModel):
 
 
 class Visibility(str, Enum):
-    EVERYTHING = "everything"  # Show all blocks
+    EVERYTHING = "everything"  # Show all child blocks
+    SIGNATURE = "signature"  # Only show signature of functions and classes
     CODE = "code"  # Only show code but comment out function and class definitions
     NOTHING = "nothing"  # Comment out everything
+
+
+class SpanScope(str, Enum):
+    EVERYTHING = "everything"  # Include all code and all child blocks in span
+
+
+class SpanType(str, Enum):
+    INITATION = "initiation"
+    DESCRIPTION = "description"
+    STRUCTURE = "structure"
+    IMPLEMENTATION = "implementation"
+
+
+class BlockSpan(BaseModel):
+    span_id: str = Field()
+    span_type: SpanType = Field(description="Type of span.")
+    visible: bool = Field(default=True, description="If the span should be visible.")
+
+    start_index: int = Field(
+        description="Index of the child block that starts the span."
+    )
+    end_index: int = Field(description="Index of the child block that ends the span.")
+
+    # TODO: Decide if this should be used or if blocks should be set as children in the block + indexes
+    blocks: List["CodeBlock"] = Field(
+        default=[], description="List of blocks included in the span."
+    )
+    tokens: int = Field(default=0, description="Number of tokens in the span.")
+
+    def __str__(self):
+        return f"{self.span_id} ({self.span_type.value}, {self.tokens} tokens)"
 
 
 class ShowBlock(BaseModel):
@@ -251,6 +311,7 @@ class CodeBlock(BaseModel):
     is_indexed: bool = False
     parameters: List[Parameter] = []  # TODO: Move to Function sub class
     references: List[Relationship] = []
+    spans: List[BlockSpan] = []
     content_lines: List[str] = []
     start_line: int = 0
     end_line: int = 0
@@ -259,7 +320,12 @@ class CodeBlock(BaseModel):
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    language: Optional[str] = None
+    language: Optional[str] = None  # TODO: Move to Module sub class
+
+    # TODO: Use Span.visible instead?
+    visible: bool = Field(
+        default=True, description="If the block should be visible or not"
+    )
     children: List["CodeBlock"] = []
     parent: Optional["CodeBlock"] = None
 
@@ -406,6 +472,37 @@ class CodeBlock(BaseModel):
     ) -> List["CodeBlock"]:
         return [child for child in self.children if child.type not in exclude_blocks]
 
+    def hide_all(self):
+        self.visible = False
+        for child in self.children:
+            child.hide_all()
+
+    def show_all(self):
+        self.visible = True
+        for child in self.children:
+            child.show_all()
+
+    def show_span(self, block_path: List[str], span_id: str):
+        if not block_path:
+            span = self.find_span_by_id(span_id)
+            for block in span.blocks:
+                block.visible = True
+
+    def find_span_by_id(
+        self, span_id: str, recursive: bool = False
+    ) -> Optional[BlockSpan]:
+        for span in self.spans:
+            if span.span_id == span_id:
+                return span
+
+        if recursive:
+            for child in self.children:
+                span = child.find_span_by_id(span_id)
+                if span:
+                    return span
+
+        return None
+
     def _to_string(self) -> str:
         contents = ""
 
@@ -472,6 +569,7 @@ class CodeBlock(BaseModel):
         only_identifiers: bool = False,
         show_full_path: bool = True,
         show_tokens: bool = False,
+        show_spans: bool = False,
         debug: bool = False,
         include_line_numbers: bool = False,
         include_types: List[CodeBlockType] = None,
@@ -485,26 +583,37 @@ class CodeBlock(BaseModel):
         if not include_merge_history and self.type == CodeBlockType.BLOCK_DELIMITER:
             return ""
 
-        child_tree = "".join(
-            [
-                child.to_tree(
-                    indent=indent + 1,
-                    only_identifiers=only_identifiers,
-                    show_full_path=show_full_path,
-                    debug=debug,
-                    include_types=include_types,
-                    include_line_numbers=include_line_numbers,
-                    include_merge_history=include_merge_history,
-                    include_parameters=include_parameters,
-                    include_references=include_references,
-                    include_block_delimiters=include_block_delimiters,
-                    show_tokens=show_tokens,
-                )
-                for child in self.children
-                if not include_types or child.type in include_types
-            ]
-        )
         indent_str = " " * indent
+
+        current_span = None
+        spans = iter(self.spans)
+
+        child_tree = ""
+        for i, child in enumerate(self.children):
+            if not include_types or child.type in include_types:
+                if (
+                    show_spans
+                    and self.spans
+                    and (not current_span or i > current_span.end_index)
+                ):
+                    current_span = next(spans, None)
+                    if current_span:
+                        child_tree += f"{indent_str} {indent} {Colors.BLUE}Span: {current_span}{Colors.RESET}\n"
+
+            child_tree += child.to_tree(
+                indent=indent + 1,
+                only_identifiers=only_identifiers,
+                show_full_path=show_full_path,
+                show_tokens=show_tokens,
+                debug=debug,
+                show_spans=show_spans,
+                include_line_numbers=include_line_numbers,
+                include_types=include_types,
+                include_parameters=include_parameters,
+                include_block_delimiters=include_block_delimiters,
+                include_references=include_references,
+                include_merge_history=include_merge_history,
+            )
 
         extra = ""
         if show_tokens:
@@ -544,6 +653,90 @@ class CodeBlock(BaseModel):
             )
 
         return f"{indent_str} {indent} {Colors.BLUE}{self.type.value}{Colors.RESET} `{content}`{extra}\n{child_tree}"
+
+    def _span_by_index(self, index: int):
+        if not self.spans:
+            return None
+
+        for span in self.spans:
+            if index == span.start_index:
+                return span
+
+        return None
+
+    def _to_prompt_string(
+        self, span: BlockSpan = None, span_marker: SpanMarker = SpanMarker.COMMENT
+    ) -> str:
+        contents = ""
+
+        if span:
+            if self.pre_lines:
+                contents += "\n\n"
+
+            if span_marker == SpanMarker.COMMENT:
+                span_comment = self.create_comment(f"span_id: {span.span_id}")
+                contents += f"{self.indentation}{span_comment}"
+            elif SpanMarker.COMMENT == SpanMarker.TAG:
+                contents += f"</span>\n{self.indentation}\n<span id='{span.span_id}'>"
+
+            if not self.pre_lines:
+                contents += "\n"
+
+        if self.pre_lines:
+            for i, line in enumerate(self.content_lines):
+                if i == 0 and line:
+                    contents += "\n" + self.indentation + line
+                elif line:
+                    contents += "\n" + line
+                else:
+                    contents += "\n"
+        else:
+            contents += self.pre_code + self.content
+
+        return contents
+
+    def to_prompt(
+        self,
+        show_outcommented_code: bool = True,
+        outcomment_code_comment: str = "...",
+        show_span_id: bool = False,
+    ):
+
+        contents = ""
+
+        has_outcommented_code = False
+        for i, span in enumerate(self.spans):
+            if span.visible:
+                if has_outcommented_code:
+                    contents += span.create_commented_out_block(
+                        outcomment_code_comment
+                    ).to_string()
+                has_outcommented_code = False
+
+                contents += child._to_prompt_string(span)
+                contents += child.to_prompt(
+                    show_outcommented_code, outcomment_code_comment, show_span_id
+                )
+            elif show_outcommented_code and child.type not in [
+                CodeBlockType.COMMENT,
+                CodeBlockType.COMMENTED_OUT_CODE,
+            ]:
+                has_outcommented_code = True
+
+        if (
+            outcomment_code_comment
+            and has_outcommented_code
+            and child.type
+            not in [
+                CodeBlockType.COMMENT,
+                CodeBlockType.COMMENTED_OUT_CODE,
+            ]
+        ):
+            contents += child.create_commented_out_block(
+                outcomment_code_comment
+            ).to_string()
+
+        return contents
 
     def __eq__(self, other):
         if not isinstance(other, CodeBlock):
@@ -954,26 +1147,28 @@ class CodeBlock(BaseModel):
 
         return blocks
 
-    def copy_with_trimmed_parents(self):
+    def copy_with_trimmed_parents(self, add_placeholders: bool = True):
         block_copy = self.model_copy(deep=True)
 
         if self.parent:
-            block_copy.parent = self.parent.trim_code_block(block_copy)
+            block_copy.parent = self.parent.trim_code_block(
+                block_copy, add_placeholders
+            )
         return block_copy
 
-    def trim_code_block(self, keep_child: "CodeBlock"):
+    def trim_code_block(self, keep_child: "CodeBlock", add_placeholders: bool = True):
         children = []
         for child in self.children:
             if child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
                 children.append(child)
-            elif child.content != keep_child.content:  # TODO: Fix ID to compare to
+            elif child.identifier == keep_child.identifier:
+                children.append(keep_child)
+            elif add_placeholders:
                 if child.type not in NON_CODE_BLOCKS and (
                     not children
                     or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE
                 ):
                     children.append(child.create_commented_out_block())
-            else:
-                children.append(keep_child)
 
         trimmed_block = CodeBlock(
             content=self.content,

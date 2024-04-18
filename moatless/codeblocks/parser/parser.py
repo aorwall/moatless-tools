@@ -14,6 +14,9 @@ from moatless.codeblocks.codeblocks import (
     ReferenceScope,
     Parameter,
     RelationshipType,
+    BlockSpan,
+    CodeBlockTypeGroup,
+    SpanType,
 )
 from moatless.codeblocks.parser.comment import get_comment_symbol
 
@@ -88,6 +91,7 @@ class CodeParser:
         self.queries = []
         self.reference_index = {}
         self.tokenizer = tokenizer or get_tokenizer()
+        self._max_tokens_in_span = 300
 
     @property
     def language(self):
@@ -168,6 +172,7 @@ class CodeParser:
             parent=parent_block,
             parameters=parameters,
             references=references,
+            spans=[],
             start_line=node.start_point[0] + 1,
             end_line=end_line + 1,
             pre_code=pre_code,
@@ -222,10 +227,9 @@ class CodeParser:
     node.end_byte: {node.end_byte}"""
         )
 
-        # l = last_child.type if last_child else "none"
-        # print(f"start [{level}]: {code_block.content} (last child {l}, end byte {end_byte})")
-
         identifiers = set()
+
+        current_span = None
 
         index = 0
 
@@ -246,19 +250,32 @@ class CodeParser:
                 level=level + 1,
                 parent_block=code_block,
             )
-            if not child_block.content:
-                if child_block.children:
-                    child_block.children[0].pre_code = (
-                        child_block.pre_code + child_block.children[0].pre_code
-                    )
-                    code_block.append_children(child_block.children)
-            else:
-                code_block.append_child(child_block)
+            # if not child_block.content:  # TODO: This is to get rid of empty blocks from treesitter. Try to remove.
+            #    if child_block.children:
+            #        child_block.children[0].pre_code = (
+            #            child_block.pre_code + child_block.children[0].pre_code
+            #        )
+            #        code_block.append_children(child_block.children)
+            # else:
 
+            new_span = self._create_new_span(
+                current_span, code_block, child_block, index, code_block.spans
+            )
+            if new_span:
+                if current_span:
+                    code_block.spans.append(current_span)
+
+                current_span = new_span
+            else:
+                current_span.tokens += child_block.sum_tokens()
+                current_span.end_index = index
+
+            code_block.append_child(child_block)
+            current_span.blocks.append(child_block)
             index += 1
 
             if not child_block.identifier:
-                child_block.identifier = f"{index}"
+                child_block.identifier = f"{child_block.type.value}_{index}"
             elif child_block.identifier in identifiers:
                 child_block.identifier = f"{child_block.identifier}_{index}"
             else:
@@ -298,6 +315,10 @@ class CodeParser:
 
         self.add_to_index(code_block)
 
+        if current_span:
+            code_block.spans.append(current_span)
+
+        # TODO: Find a way to remove the Space end block
         if level == 0 and not node.parent and node.end_byte > end_byte:
             code_block.append_child(
                 CodeBlock(
@@ -630,6 +651,97 @@ class CodeParser:
 
     def get_content(self, node: Node, content_bytes: bytes) -> str:
         return content_bytes[node.start_byte : node.end_byte].decode(self.encoding)
+
+    def _create_new_span(
+        self,
+        current_span: Optional[BlockSpan],
+        parent_block: CodeBlock,
+        block: CodeBlock,
+        index: int,
+        spans: List[BlockSpan],
+    ) -> Optional[BlockSpan]:
+
+        too_large = (
+            current_span
+            and current_span.tokens + block.sum_tokens() > self._max_tokens_in_span
+        )
+        must_create_new_span = not current_span or too_large
+
+        in_description_phase = (
+            current_span and current_span.span_type == SpanType.DESCRIPTION
+        )
+        in_initation_phase = (
+            current_span and current_span.span_type == SpanType.INITATION
+        )
+
+        span_id = None
+        span_type = None
+
+        # Add class instance variables and constructors to one span
+        if (
+            (must_create_new_span or in_description_phase or in_initation_phase)
+            and parent_block.type == CodeBlockType.CLASS
+            and (
+                block.type.group != CodeBlockTypeGroup.STRUCTURE
+                or block.type == CodeBlockType.CONSTRUCTOR
+            )
+            and block.type.group != CodeBlockTypeGroup.COMMENT
+        ):
+            span_type = SpanType.INITATION
+            span_id = self._create_span_id("init", parent_block, spans, span_type)
+        elif (
+            (must_create_new_span or in_initation_phase)
+            and parent_block.type.group == CodeBlockTypeGroup.STRUCTURE
+            and block.type == CodeBlockType.COMMENT
+        ):
+            span_type = SpanType.DESCRIPTION
+            span_id = self._create_span_id(
+                "description", parent_block, spans, span_type
+            )
+        elif (
+            (must_create_new_span or in_description_phase)
+            and parent_block.type == CodeBlockType.MODULE
+            and block.type == CodeBlockType.IMPORT
+        ):
+            span_type = SpanType.INITATION
+            span_id = self._create_span_id("imports", parent_block, spans, span_type)
+        elif block.type.group == CodeBlockTypeGroup.STRUCTURE:
+            span_id = block.path_string()
+            span_type = SpanType.STRUCTURE
+        elif must_create_new_span or (
+            current_span.span_type != SpanType.IMPLEMENTATION
+            and block.type.group == CodeBlockTypeGroup.IMPLEMENTATION
+        ):
+            span_type = SpanType.IMPLEMENTATION
+            span_id = self._create_span_id(
+                "implementation", parent_block, spans, span_type
+            )
+
+        if span_id:
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                start_index=index,
+                end_index=index,
+                tokens=block.sum_tokens(),
+            )
+        else:
+            return None
+
+    def _create_span_id(
+        self, label: str, block: CodeBlock, spans: List[BlockSpan], span_type: SpanType
+    ):
+        span_id = ""
+        if block.path_string():
+            span_id += f"{block.path_string()}::"
+
+        span_id += label
+
+        # FIXME: Count by span type
+        if len(spans) > 0:
+            span_id += f"::{len(spans)}"
+
+        return span_id
 
     def _count_tokens(self, content: str):
         if not self.tokenizer:
