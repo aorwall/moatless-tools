@@ -5,8 +5,8 @@ import networkx as nx
 from pydantic import BaseModel
 
 from moatless.codeblocks import CodeBlock
-from moatless.codeblocks.codeblocks import CodeBlockType
-from moatless.types import BlockPath, Span
+from moatless.codeblocks.codeblocks import CodeBlockType, BlockPath
+from moatless.types import Span
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class CodeGraph:
                 self._add_node_with_instance_vars(file_path, child, class_block)
 
     def _add_relationships(self, file_path: str, codeblock: CodeBlock, from_node: str):
-        for rel in codeblock.references:
+        for rel in codeblock.relationships:
             self._add_edge(from_node, file_path, rel.path)
 
         for child in codeblock.children:

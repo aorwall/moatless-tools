@@ -10,7 +10,11 @@ from moatless.codeblocks.codeblocks import (
     ReferenceScope,
     RelationshipType,
 )
-from moatless.codeblocks.parser.parser import CodeParser, commented_out_keywords
+from moatless.codeblocks.parser.parser import (
+    CodeParser,
+    commented_out_keywords,
+    NodeMatch,
+)
 
 child_block_types = ["ERROR", "block"]
 
@@ -36,12 +40,26 @@ class PythonParser(CodeParser):
     def language(self):
         return "python"
 
-    def pre_process(self, codeblock: CodeBlock):
+    def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
         if (
             codeblock.type == CodeBlockType.FUNCTION
             and codeblock.identifier == "__init__"
         ):
             codeblock.type = CodeBlockType.CONSTRUCTOR
+
+        # Handle line breaks after assignment without \
+        if (
+            codeblock.type == CodeBlockType.ASSIGNMENT
+            and codeblock.content_lines[0].strip().endswith("=")
+            and node_match.check_child
+            and node_match.first_child
+            and node_match.check_child.start_point[0]
+            < node_match.first_child.start_point[0]
+        ):
+            logger.warning(
+                f"Parsed block with type ASSIGNMENT with line break but no ending \: {codeblock.content_lines[0]}"
+            )
+            codeblock.content_lines[0] = codeblock.content_lines[0] + " \\"
 
     def post_process(self, codeblock: CodeBlock):
         if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(
@@ -50,11 +68,13 @@ class PythonParser(CodeParser):
             codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 
         if codeblock.type == CodeBlockType.ASSIGNMENT:
-            for reference in codeblock.references:
+            for reference in codeblock.relationships:
                 reference.type = RelationshipType.TYPE
 
         new_references = []
-        for reference in codeblock.references:
+        for reference in codeblock.relationships:
+
+            # Set parent class path as reference path on self
             if reference.path and reference.path[0] == "self":
                 class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
                 if class_block:
@@ -63,37 +83,27 @@ class PythonParser(CodeParser):
                         reference.path = class_block.full_path() + reference.path[1:2]
                         reference.identifier = codeblock.identifier
 
-            if (
-                reference.path
-                and reference.path[0] in self.reference_index
-                and reference.scope in [ReferenceScope.CLASS, ReferenceScope.LOCAL]
-            ):
-                existing_reference = self.reference_index[reference.path[0]]
-                if len(reference.path) > 1 and codeblock.type == CodeBlockType.CALL:
-                    # add new full reference to the called function
-                    new_full_reference = Relationship(
-                        scope=existing_reference.scope,
-                        identifier=reference.identifier,
-                        path=existing_reference.path + reference.path[1:],
-                        external_path=existing_reference.external_path,
-                    )
-                    new_references.append(new_full_reference)
-                    reference.path = reference.path[:1]
+            # Set parent classes super class path as reference path on super()
+            # TODO: make a solution where this can be derived even further (by checking import)
+            if reference.path and reference.path[0] == "super()":
+                class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
+                if class_block:
 
-        codeblock.references.extend(new_references)
+                    is_a_rel = [
+                        rel
+                        for rel in class_block.relationships
+                        if rel.type == RelationshipType.IS_A
+                    ]
+                    if is_a_rel:
+                        super_class = codeblock.root().find_by_path(is_a_rel[0].path)
 
-        if codeblock.type == CodeBlockType.CLASS:
-            # the class block should refer to instance variables initiated from the constructor
-            constructor_blocks = [
-                block
-                for block in codeblock.children
-                if block.type == CodeBlockType.CONSTRUCTOR
-            ]
-            if constructor_blocks:
-                init_block = constructor_blocks[0]
-                for reference in init_block.get_all_references():
-                    if reference.scope == ReferenceScope.CLASS:
-                        codeblock.references.append(reference)
+                        if super_class:
+                            reference.path = (
+                                super_class.full_path() + reference.path[1:2]
+                            )
+                            reference.identifier = super_class.identifier
+
+        codeblock.relationships.extend(new_references)
 
         if (
             codeblock.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]

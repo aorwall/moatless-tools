@@ -3,8 +3,13 @@ from enum import Enum
 from typing import List, Tuple
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-from moatless.codeblocks.codeblocks import PathTree, NON_CODE_BLOCKS, SpanMarker
-from moatless.types import BlockPath, Span
+from moatless.codeblocks.codeblocks import (
+    PathTree,
+    NON_CODE_BLOCKS,
+    SpanMarker,
+    BlockPath,
+)
+from moatless.types import Span
 
 
 def _create_placeholder(codeblock: CodeBlock) -> str:
@@ -95,7 +100,7 @@ def print_by_block_paths(
             if not block:
                 continue
 
-            for reference in block.references:
+            for reference in block.relationships:
                 referenced_block = block.find_by_path(reference.path)
 
                 # TODO: Check tokens max tokens

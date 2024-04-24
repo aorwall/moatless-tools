@@ -5,6 +5,9 @@ from typing import Optional, List, Union
 
 from pydantic import BaseModel
 
+from moatless.codeblocks import CodeBlock
+from moatless.codeblocks.codeblocks import BlockSpan
+
 logger = logging.getLogger(__name__)
 
 
@@ -12,6 +15,20 @@ class CodePart(BaseModel):
     file_path: Optional[str] = None
     language: Optional[str] = None
     content: str
+
+
+def create_instruction_code_block(codeblock: CodeBlock, span: BlockSpan) -> str:
+    expected_block = codeblock.find_by_path(span.parent_block_path)
+    trimmed_block = expected_block.copy_with_trimmed_parents(add_placeholders=False)
+    comment = "Write the implementation here..."
+    if trimmed_block.children:
+        comment_block = trimmed_block.children[0].create_comment_block(comment)
+    else:
+        comment_block = trimmed_block.create_comment_block(comment)
+
+    comment_block.pre_lines = 1
+    trimmed_block.children = [comment_block]
+    return trimmed_block.root().to_string()
 
 
 def extract_response_parts(response: str) -> List[Union[str, CodePart]]:

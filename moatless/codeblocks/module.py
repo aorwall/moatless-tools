@@ -1,0 +1,136 @@
+import logging
+import re
+from enum import Enum
+from typing import List, Optional, Callable, Dict
+
+from networkx import DiGraph
+from pydantic import (
+    BaseModel,
+    validator,
+    Field,
+    root_validator,
+    field_validator,
+    ConfigDict,
+)
+
+from moatless.codeblocks import CodeBlock, CodeBlockType
+from moatless.codeblocks.codeblocks import BlockSpan, SpanType
+
+logger = logging.getLogger(__name__)
+
+
+class Module(CodeBlock):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    content: str = None
+    type: CodeBlockType = CodeBlockType.MODULE
+    file_path: str = None
+    spans_by_id: Dict[str, BlockSpan] = {}
+    language: Optional[str] = None
+    parent: Optional[CodeBlock] = None
+
+    _graph: DiGraph = None  # TODO: Move to central CodeGraph
+
+    def __init__(self, **data):
+        super().__init__(**data)
+
+    def find_span_by_id(self, span_id: str) -> Optional[BlockSpan]:
+        return self.spans_by_id.get(span_id)
+
+    def show_spans(
+        self,
+        span_ids: List[str] = None,
+        show_related: bool = False,
+        max_tokens: int = 2000,
+    ) -> bool:
+
+        for span in self.spans_by_id.values():
+            span.visible = False
+
+        checked_span_ids = set()
+        span_ids_to_check = []
+
+        tokens = 0
+        for span_id in span_ids:
+            span = self.spans_by_id.get(span_id)
+            if not span:
+                return False
+
+            tokens += span.tokens
+            checked_span_ids.add(span_id)
+            span_ids_to_check.append(span_id)
+            span.visible = True
+
+        if not show_related:
+            return True
+
+        # Add imports from module
+        for span in self.spans.values():
+            if (
+                span.span_type == SpanType.INITATION
+                and span.span_id not in checked_span_ids
+            ):
+                span_ids_to_check.append(span.span_id)
+
+        while span_ids_to_check:
+            span_id = span_ids_to_check.pop(0)
+            related_spans = self.find_related_spans(span_id)
+
+            print(f"Related spans: {len(related_spans)} for {span_id}")
+
+            # TODO: Go through priotiized related spans to make sure that the most relevant are added first
+            # TODO: Verify span token size
+            for span in related_spans:
+                if span.tokens + tokens > max_tokens:
+                    print(
+                        f"Max tokens reached: {span.tokens} + {tokens} > {max_tokens}"
+                    )
+                    return True
+
+                span.visible = True
+                tokens += span.tokens
+
+                if span.span_id not in checked_span_ids:
+                    checked_span_ids.add(span.span_id)
+                    span_ids_to_check.append(span.span_id)
+
+        print(f"Max tokens reached {tokens} < {max_tokens}")
+
+        return True
+
+    def find_related_spans(self, span_id: str = None) -> List[BlockSpan]:
+        related_spans = []
+
+        blocks = self.find_blocks_by_span_id(span_id)
+        for block in blocks:
+            # Find successors (outgoing relationships)
+            successors = list(self._graph.successors(block.path_string()))
+            for succ in successors:
+                node_data = self._graph.nodes[succ]
+                if "block" in node_data:
+                    span = node_data["block"].belongs_to_span
+                    if span not in related_spans:
+                        related_spans.append(span)
+
+            # Find predecessors (incoming relationships)
+            predecessors = list(self._graph.predecessors(block.path_string()))
+            for pred in predecessors:
+                node_data = self._graph.nodes[pred]
+                if "block" in node_data:
+                    span = node_data["block"].belongs_to_span
+                    if span not in related_spans:
+                        related_spans.append(span)
+
+            # Always add parent class initation span
+            if block.parent and block.parent.type == CodeBlockType.CLASS:
+                for span in block.parent.spans.values():
+                    if span.span_type == SpanType.INITATION:
+                        if not any(
+                            [
+                                span.span_id == related_span.span_id
+                                for related_span in related_spans
+                            ]
+                        ):
+                            related_spans.append(span)
+
+        return related_spans

@@ -2,8 +2,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional, Callable, Dict
 
+import networkx as nx
 from llama_index.core import get_tokenizer
 from tree_sitter import Node, Language, Parser
 
@@ -18,6 +19,7 @@ from moatless.codeblocks.codeblocks import (
     CodeBlockTypeGroup,
     SpanType,
 )
+from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.comment import get_comment_symbol
 
 commented_out_keywords = ["rest of the code", "existing code", "other code"]
@@ -35,7 +37,7 @@ class NodeMatch:
     last_child: Node = None
     check_child: Node = None
     parameters: List[Tuple[Node, Optional[Node]]] = field(default_factory=list)
-    references: List[Tuple[Node, str]] = field(default_factory=list)
+    relationships: List[Tuple[Node, str]] = field(default_factory=list)
     query: str = None
 
 
@@ -71,6 +73,8 @@ class CodeParser:
         self,
         language: Language,
         encoding: str = "utf8",
+        visible_spans: bool = True,
+        max_tokens_in_span: int = 500,
         index_callback: Optional[Callable[[CodeBlock], bool]] = None,
         tokenizer: Callable[[str], List] = None,
         apply_gpt_tweaks: bool = False,
@@ -81,7 +85,7 @@ class CodeParser:
             self.tree_parser.set_language(language)
             self.tree_language = language
         except Exception as e:
-            print(f"Could not get parser for language {language}.")
+            logger.warning(f"Could not get parser for language {language}.")
             raise e
         self.apply_gpt_tweaks = apply_gpt_tweaks
         self.index_callback = index_callback
@@ -89,9 +93,17 @@ class CodeParser:
         self.encoding = encoding
         self.gpt_queries = []
         self.queries = []
-        self.reference_index = {}
+        self._visible_spans = visible_spans
+
+        # TODO: How to handle these in a thread safe way?
+        self.spans_by_id = {}
+        self.comments_with_no_span = []
+
+        # TODO: Move this to CodeGraph
+        self._graph = None
+
         self.tokenizer = tokenizer or get_tokenizer()
-        self._max_tokens_in_span = 300
+        self._max_tokens_in_span = max_tokens_in_span
 
     @property
     def language(self):
@@ -133,7 +145,8 @@ class CodeParser:
         start_byte: int = 0,
         level: int = 0,
         parent_block: Optional[CodeBlock] = None,
-    ) -> Tuple[CodeBlock, Node]:
+        current_span: BlockSpan = None,
+    ) -> Tuple[CodeBlock, Node, BlockSpan]:
         if node.type == "ERROR" or any(
             child.type == "ERROR" for child in node.children
         ):
@@ -163,30 +176,103 @@ class CodeParser:
 
         self.process_match(node_match, node, content_bytes)
 
-        references = self.create_references(code, content_bytes, identifier, node_match)
-        parameters = self.create_parameters(content_bytes, node_match, references)
-
-        code_block = CodeBlock(
-            type=node_match.block_type,
-            identifier=identifier,
-            parent=parent_block,
-            parameters=parameters,
-            references=references,
-            spans=[],
-            start_line=node.start_point[0] + 1,
-            end_line=end_line + 1,
-            pre_code=pre_code,
-            content=code,
-            language=self.language,
-            tokens=self._count_tokens(code),
-            children=[],
-            properties={
-                "query": node_match.query,
-                "tree_sitter_type": node.type,
-            },
+        relationships = self.create_references(
+            code, content_bytes, identifier, node_match
         )
+        parameters = self.create_parameters(content_bytes, node_match, relationships)
 
-        self.pre_process(code_block)
+        if parent_block:
+            code_block = CodeBlock(
+                type=node_match.block_type,
+                identifier=identifier,
+                parent=parent_block,
+                parameters=parameters,
+                relationships=relationships,
+                spans={},
+                start_line=node.start_point[0] + 1,
+                end_line=end_line + 1,
+                pre_code=pre_code,
+                content=code,
+                language=self.language,
+                tokens=self._count_tokens(code),
+                children=[],
+                properties={
+                    "query": node_match.query,
+                    "tree_sitter_type": node.type,
+                },
+            )
+
+            self.pre_process(code_block, node_match)
+
+            # Set a unique identifier on each code block
+            existing_identifiers = [
+                b.identifier for b in parent_block.children if b.type == code_block.type
+            ]
+            if not code_block.identifier:
+                code_block.identifier = (
+                    f"{code_block.type.value}_{len(existing_identifiers)}"
+                )
+            elif code_block.identifier in existing_identifiers:
+                code_block.identifier = (
+                    f"{code_block.identifier}_{len(existing_identifiers)}"
+                )
+
+            if (
+                code_block.type == CodeBlockType.COMMENT
+                and len(current_span.block_paths) > 1
+            ):
+                # TODO: Find a more robust way to connect comments to the right span
+                self.comments_with_no_span.append(code_block)
+            else:
+                new_span = self._create_new_span(
+                    current_span=current_span, block=code_block
+                )
+                if new_span:
+                    current_span = new_span
+                    self.spans_by_id[current_span.span_id] = current_span
+                    parent_block.spans[current_span.span_id] = current_span
+
+                for comment_block in self.comments_with_no_span:
+                    comment_block.belongs_to_span = current_span
+                    current_span.block_paths.append(comment_block.full_path())
+                    current_span.tokens += comment_block.tokens
+
+                current_span.block_paths.append(code_block.full_path())
+                current_span.tokens += code_block.tokens
+
+                code_block.belongs_to_span = current_span
+
+                self.comments_with_no_span = []
+
+            self._graph.add_node(code_block.path_string(), block=code_block)
+
+            for relationship in relationships:
+                self._graph.add_edge(
+                    code_block.path_string(), ".".join(relationship.path)
+                )
+
+        else:
+            current_span = BlockSpan(
+                span_id="initiation",
+                span_type=SpanType.INITATION,
+                parent_block_path=[],
+                visible=self._visible_spans,
+            )
+            code_block = Module(
+                type=CodeBlockType.MODULE,
+                identifier=None,
+                content="",
+                spans_by_id={current_span.span_id: current_span},
+                start_line=node.start_point[0] + 1,
+                end_line=end_line + 1,
+                language=self.language,
+                children=[],
+                properties={
+                    "query": node_match.query,
+                    "tree_sitter_type": node.type,
+                },
+            )
+            self.spans_by_id[current_span.span_id] = current_span
 
         # Workaround to get the module root object when we get invalid content from GPT
         wrong_level_mode = (
@@ -198,7 +284,7 @@ class CodeParser:
         if wrong_level_mode:
             self.debug_log(f"wrong_level_mode: block_type: {code_block.type}")
 
-            code_block = CodeBlock(
+            code_block = Module(
                 type=CodeBlockType.MODULE,
                 identifier=None,
                 properties={
@@ -216,7 +302,9 @@ class CodeParser:
             next_node = node_match.first_child
 
         self.debug_log(
-            f"""block_type: {code_block.type} 
+            f"""Created code block
+    content: {code_block.content[:50]} 
+    block_type: {code_block.type} 
     node_type: {node.type}
     next_node: {next_node.type if next_node else "none"}
     wrong_level_mode: {wrong_level_mode}
@@ -226,10 +314,6 @@ class CodeParser:
     node.start_byte: {node.start_byte}
     node.end_byte: {node.end_byte}"""
         )
-
-        identifiers = set()
-
-        current_span = None
 
         index = 0
 
@@ -243,12 +327,13 @@ class CodeParser:
                 f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}"
             )
 
-            child_block, child_last_node = self.parse_code(
+            child_block, child_last_node, child_span = self.parse_code(
                 content_bytes,
                 next_node,
                 start_byte=end_byte,
                 level=level + 1,
                 parent_block=code_block,
+                current_span=current_span,
             )
             # if not child_block.content:  # TODO: This is to get rid of empty blocks from treesitter. Try to remove.
             #    if child_block.children:
@@ -258,28 +343,12 @@ class CodeParser:
             #        code_block.append_children(child_block.children)
             # else:
 
-            new_span = self._create_new_span(
-                current_span, code_block, child_block, index, code_block.spans
-            )
-            if new_span:
-                if current_span:
-                    code_block.spans.append(current_span)
-
-                current_span = new_span
-            else:
-                current_span.tokens += child_block.sum_tokens()
-                current_span.end_index = index
+            if child_span.span_id != current_span.span_id:
+                current_span = child_span
 
             code_block.append_child(child_block)
-            current_span.blocks.append(child_block)
-            index += 1
 
-            if not child_block.identifier:
-                child_block.identifier = f"{child_block.type.value}_{index}"
-            elif child_block.identifier in identifiers:
-                child_block.identifier = f"{child_block.identifier}_{index}"
-            else:
-                identifiers.add(child_block.identifier)
+            index += 1
 
             if child_last_node:
                 self.debug_log(f"next  [{level}]: child_last_node -> {child_last_node}")
@@ -311,12 +380,16 @@ class CodeParser:
 
         self.debug_log(f"end   [{level}]: {code_block.content}")
 
+        for comment_block in self.comments_with_no_span:
+            comment_block.belongs_to_span = current_span
+            current_span.block_paths.append(comment_block.full_path())
+            current_span.tokens += comment_block.tokens
+
+        self.comments_with_no_span = []
+
         self.post_process(code_block)
 
         self.add_to_index(code_block)
-
-        if current_span:
-            code_block.spans.append(current_span)
 
         # TODO: Find a way to remove the Space end block
         if level == 0 and not node.parent and node.end_byte > end_byte:
@@ -333,7 +406,7 @@ class CodeParser:
                 )
             )
 
-        return code_block, next_node
+        return code_block, next_node, current_span
 
     def is_commented_out_code(self, node: Node):
         comment = node.text.decode("utf8").strip()
@@ -433,11 +506,11 @@ class CodeParser:
 
                 child_match = self.find_match(found_node)
                 if child_match:
-                    if child_match.references:
+                    if child_match.relationships:
                         self.debug_log(
-                            f"[{label}] Found {len(child_match.references)} references on child {found_node}"
+                            f"[{label}] Found {len(child_match.relationships)} references on child {found_node}"
                         )
-                        node_match.references = child_match.references
+                        node_match.relationships = child_match.relationships
                     if child_match.parameters:
                         self.debug_log(
                             f"[{label}] Found {len(child_match.parameters)} parameters on child {found_node}"
@@ -462,7 +535,7 @@ class CodeParser:
                 node_match.parameters[-1] = (node_match.parameters[-1][0], found_node)
 
             if root_node and tag.startswith("reference"):
-                node_match.references.append((found_node, tag))
+                node_match.relationships.append((found_node, tag))
 
             if not node_match.block_type:
                 node_match.block_type = CodeBlockType.from_string(tag)
@@ -477,16 +550,16 @@ class CodeParser:
 
     def create_references(self, code, content_bytes, identifier, node_match):
         references = []
-        if node_match.block_type == CodeBlockType.IMPORT and node_match.references:
+        if node_match.block_type == CodeBlockType.IMPORT and node_match.relationships:
             module_nodes = [
-                ref for ref in node_match.references if ref[1] == "reference.module"
+                ref for ref in node_match.relationships if ref[1] == "reference.module"
             ]
             if module_nodes:
                 module_reference_id = self.get_content(
                     module_nodes[0][0], content_bytes
                 )
-                if len(node_match.references) > 1:
-                    for ref_node in node_match.references:
+                if len(node_match.relationships) > 1:
+                    for ref_node in node_match.relationships:
                         if ref_node == module_nodes[0]:
                             continue
                         elif ref_node[1] == "reference.alias":
@@ -521,7 +594,7 @@ class CodeParser:
                         )
                     )
         else:
-            for reference in node_match.references:
+            for reference in node_match.relationships:
                 reference_id = self.get_content(reference[0], content_bytes)
 
                 reference_id_path = reference_id.split(".")
@@ -600,7 +673,7 @@ class CodeParser:
 
         return False
 
-    def pre_process(self, codeblock: CodeBlock):
+    def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
         pass
 
     def post_process(self, codeblock: CodeBlock):
@@ -635,7 +708,7 @@ class CodeParser:
             return any(self.has_error(child) for child in node.children)
         return False
 
-    def parse(self, content) -> CodeBlock:
+    def parse(self, content, file_path: str = None) -> Module:
         if isinstance(content, str):
             content_in_bytes = bytes(content, self.encoding)
         elif isinstance(content, bytes):
@@ -643,103 +716,115 @@ class CodeParser:
         else:
             raise ValueError("Content must be either a string or bytes")
 
+        self.spans_by_id = {}  # TODO: make thread safe?
+        self._graph = nx.DiGraph()  # TODO: Should me moved to a central CodeGraph
         tree = self.tree_parser.parse(content_in_bytes)
-        codeblock, _ = self.parse_code(content_in_bytes, tree.walk().node)
-
-        codeblock.language = self.language
-        return codeblock
+        module, _, _ = self.parse_code(content_in_bytes, tree.walk().node)
+        module.spans_by_id = self.spans_by_id
+        module.file_path = file_path
+        module.language = self.language
+        module._graph = self._graph
+        return module
 
     def get_content(self, node: Node, content_bytes: bytes) -> str:
         return content_bytes[node.start_byte : node.end_byte].decode(self.encoding)
 
     def _create_new_span(
-        self,
-        current_span: Optional[BlockSpan],
-        parent_block: CodeBlock,
-        block: CodeBlock,
-        index: int,
-        spans: List[BlockSpan],
+        self, current_span: BlockSpan, block: CodeBlock
     ) -> Optional[BlockSpan]:
 
-        too_large = (
-            current_span
-            and current_span.tokens + block.sum_tokens() > self._max_tokens_in_span
-        )
-        must_create_new_span = not current_span or too_large
-
-        in_description_phase = (
-            current_span and current_span.span_type == SpanType.DESCRIPTION
-        )
-        in_initation_phase = (
-            current_span and current_span.span_type == SpanType.INITATION
-        )
-
-        span_id = None
-        span_type = None
-
-        # Add class instance variables and constructors to one span
-        if (
-            (must_create_new_span or in_description_phase or in_initation_phase)
-            and parent_block.type == CodeBlockType.CLASS
-            and (
-                block.type.group != CodeBlockTypeGroup.STRUCTURE
-                or block.type == CodeBlockType.CONSTRUCTOR
-            )
-            and block.type.group != CodeBlockTypeGroup.COMMENT
+        # Set initation phase if the span is for a class declaration (block) or if the block isn't a function and we're
+        # still in th initation phase
+        if block.type in [CodeBlockType.CLASS] or (
+            current_span.span_type == SpanType.INITATION
+            and block.type not in [CodeBlockType.FUNCTION]
         ):
             span_type = SpanType.INITATION
-            span_id = self._create_span_id("init", parent_block, spans, span_type)
-        elif (
-            (must_create_new_span or in_initation_phase)
-            and parent_block.type.group == CodeBlockTypeGroup.STRUCTURE
-            and block.type == CodeBlockType.COMMENT
-        ):
-            span_type = SpanType.DESCRIPTION
-            span_id = self._create_span_id(
-                "description", parent_block, spans, span_type
-            )
-        elif (
-            (must_create_new_span or in_description_phase)
-            and parent_block.type == CodeBlockType.MODULE
-            and block.type == CodeBlockType.IMPORT
-        ):
-            span_type = SpanType.INITATION
-            span_id = self._create_span_id("imports", parent_block, spans, span_type)
-        elif block.type.group == CodeBlockTypeGroup.STRUCTURE:
-            span_id = block.path_string()
-            span_type = SpanType.STRUCTURE
-        elif must_create_new_span or (
-            current_span.span_type != SpanType.IMPLEMENTATION
-            and block.type.group == CodeBlockTypeGroup.IMPLEMENTATION
-        ):
+        else:
             span_type = SpanType.IMPLEMENTATION
-            span_id = self._create_span_id(
-                "implementation", parent_block, spans, span_type
-            )
 
-        if span_id:
+        span_id = self._create_span_id(block, span_type)
+
+        # create a new span on new structure blocks:except constructors, in classes or modules.
+        # * except constructors
+        # * if the block isn't directly under a module or class
+        # * if the parent block doesn't have a span
+        if (
+            block.type.group == CodeBlockTypeGroup.STRUCTURE
+            and block.type != CodeBlockType.CONSTRUCTOR
+            and block.parent.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]
+            and current_span.parent_block_path == block.parent.full_path()
+        ):
+            if len(current_span.parent_block_path) < len(block.full_path()):
+                # If there is a current span from the parent block it should be set to is_partial
+                current_span.is_partial = True
+
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
-                start_index=index,
-                end_index=index,
-                tokens=block.sum_tokens(),
+                parent_block_path=block.full_path(),
+                visible=self._visible_spans,
             )
+
+        # if current span is from a child block
+        if len(current_span.parent_block_path) > len(block.parent.full_path()):
+            if block.type.group == CodeBlockTypeGroup.STRUCTURE:
+                parent_block_path = block.full_path()
+            else:
+                parent_block_path = block.parent.full_path()
+
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                parent_block_path=parent_block_path,
+                visible=self._visible_spans,
+            )
+
+        # Create new span if the current is too large and the parent block is a structure block
+        if (
+            current_span.tokens + block.sum_tokens() > self._max_tokens_in_span
+            and block.parent.type.group == CodeBlockTypeGroup.STRUCTURE
+        ):
+            current_span.is_partial = True
+
+            index = current_span.index + 1
+
+            if span_id in self.spans_by_id:
+                span_id += f":{index}"
+
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                is_partial=True,
+                index=index,
+                parent_block_path=current_span.parent_block_path,
+                visible=self._visible_spans,
+            )
+
+        return None
+
+    def _create_span(self, block: CodeBlock, span_type: SpanType):
+        span_id = self._create_span_id(block, span_type)
+
+        return BlockSpan(
+            span_id=span_id, span_type=span_type, visible=self._visible_spans
+        )
+
+    def _create_span_id(self, block: CodeBlock, span_type: SpanType):
+        if block.type.group == CodeBlockTypeGroup.STRUCTURE:
+            structure_block = block
         else:
-            return None
+            structure_block = block.find_type_group_in_parents(
+                CodeBlockTypeGroup.STRUCTURE
+            )
 
-    def _create_span_id(
-        self, label: str, block: CodeBlock, spans: List[BlockSpan], span_type: SpanType
-    ):
-        span_id = ""
-        if block.path_string():
-            span_id += f"{block.path_string()}::"
+        span_id = structure_block.path_string()
 
-        span_id += label
+        if not span_id or span_id in self.spans_by_id:
+            span_id = block.path_string()
 
-        # FIXME: Count by span type
-        if len(spans) > 0:
-            span_id += f"::{len(spans)}"
+        if not span_id or span_id in self.spans_by_id:
+            span_id += str(len(structure_block.spans))
 
         return span_id
 

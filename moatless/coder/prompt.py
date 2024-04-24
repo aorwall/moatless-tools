@@ -43,7 +43,7 @@ def json_schema():
                         "action": {
                             "type": "string",
                             "description": "How to update the code. ",
-                            "enum": ["add", "update"],
+                            "enum": ["add", "update", "remove"],
                         },
                         "instructions": {
                             "type": "string",

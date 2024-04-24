@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-BlockPath = List[str]
+from moatless.codeblocks.codeblocks import BlockSpan
 
 
 class Span(BaseModel):
@@ -18,12 +18,8 @@ class Span(BaseModel):
         if self.block_path:
             _span_id += f"{'.'.join(self.block_path)}"
 
-        if _span_id:
-            _span_id += "_"
-        _span_id += f"L{self.start_line}"
-
-        if self.end_line:
-            _span_id += f"_L{self.end_line}"
+        if self.is_partial:
+            _span_id += f"_L{self.start_line}-L{self.end_line}"
 
         return _span_id
 
@@ -33,13 +29,13 @@ class Span(BaseModel):
 
 class ContextFile(BaseModel):
     file_path: str
-    spans: List[Span] = None
+    span_ids: List[str] = None  # TODO: Define relevant spans in a central place
 
 
 class CodingTask(BaseModel):
     file_path: str
     instructions: str
-    span: Optional[Span] = None
+    span: Optional[BlockSpan] = None
     action: str = "update"  # add, remove, update
     state: str = "planned"  # completed, planned, rejected, failed
 

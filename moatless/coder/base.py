@@ -10,7 +10,7 @@ from llama_index.core import get_tokenizer
 from pydantic import BaseModel
 
 from moatless.analytics import send_event
-from moatless.codeblocks import CodeBlock
+from moatless.codeblocks import CodeBlock, CodeParser
 from moatless.codeblocks.print_block import (
     print_by_block_path,
     SpanMarker,
@@ -18,7 +18,12 @@ from moatless.codeblocks.print_block import (
     print_block,
 )
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.coder.code_utils import extract_response_parts, do_diff, CodePart
+from moatless.coder.code_utils import (
+    extract_response_parts,
+    do_diff,
+    CodePart,
+    create_instruction_code_block,
+)
 from moatless.coder.prompt import (
     CREATE_PLAN_SYSTEM_PROMPT,
     JSON_SCHEMA,
@@ -58,6 +63,7 @@ class Coder:
         repo_path: str,
         requirement: str,
         files: List[ContextFile],
+        parser: CodeParser = None,
         tags: List[str] = None,
         trace_id: str = None,
         session_id: str = None,
@@ -69,7 +75,7 @@ class Coder:
             )
 
         self._repo_path = repo_path
-        self._parser = PythonParser(apply_gpt_tweaks=True)
+        self._parser = parser or PythonParser(apply_gpt_tweaks=True)
         self._tokenizer = get_tokenizer()
 
         self._trace_id = trace_id or uuid.uuid4().hex
@@ -185,44 +191,9 @@ class Coder:
                                 continue
 
                             if span_id:
-                                block_path = re.sub(r"_L\d+_L\d+$", "", span_id).split(
-                                    "."
-                                )
-
-                                for file in self._file_context:
-                                    if file.file_path != file_path:
-                                        continue
-
-                                    for span in file.spans:
-                                        if span.span_id != span_id:
-                                            continue
-
-                                        task.span = span
-                                        break
-
-                                if not task.span:
-                                    # Fall back to block paths if no span_id exists.
-                                    # TODO: Look into a span regstrity with allowed span_ids to change
-
-                                    codeblock = self._codeblocks[file_path]
-                                    block_in_span = codeblock.find_by_path(block_path)
-
-                                    if not block_in_span and task.action == "add":
-                                        # TODO: Fall back to parent if the LLM might refer to the block it wants to add
-                                        block_path = block_path[:-1]
-                                        block_in_span = codeblock.find_by_path(
-                                            block_path
-                                        )
-
-                                    if block_in_span:
-                                        task.span = Span(
-                                            start_line=block_in_span.start_line,
-                                            end_line=block_in_span.end_line,
-                                            block_path=block_path,
-                                        )
-                                    else:
-                                        correction += f"Block {span_id} not found in file {file_path}. "
-
+                                codeblock = self._codeblocks[file_path]
+                                span = codeblock.find_span_by_id(span_id)
+                                task.span = span
                                 if not task.span:
                                     correction += f"Span {span_id} not found in file {file_path}. "
 
@@ -262,7 +233,7 @@ class Coder:
                 send_event(
                     session_id=self._session_id,
                     event="task_planning_failed",
-                    properties={"error": "no_message", "tags": self._tags},
+                    properties={"error_type": "no_message", "tags": self._tags},
                 )
 
                 raise ValueError("No message found in response.")
@@ -280,39 +251,13 @@ class Coder:
         codeblock = self._codeblocks[task.file_path]
 
         if not task.span:
-            instruction_code = codeblock.to_string()
+            instruction_code = ""
         else:
-            if task.span.block_path:
-                expected_block = codeblock.find_by_path(task.span.block_path)
-            else:
-                expected_block = codeblock.find_block_with_span(task.span)
+            instruction_code = create_instruction_code_block(codeblock, task.span)
 
-            if not expected_block:
-                logger.warning(f"Block not found with path {task.span.block_path}")
-                return False
-
-            if task.action == "add":
-                trimmed_block = expected_block.copy_with_trimmed_parents()
-                comment = "Write the implementation here...\n"
-                if trimmed_block.children:
-                    comment_block = trimmed_block.children[0].create_comment_block(
-                        comment
-                    )
-                else:
-                    comment_block = trimmed_block.create_comment_block(comment)
-                comment_block.pre_lines = 2
-                trimmed_block.children = [comment_block]
-                instruction_code = trimmed_block.root().to_string()
-            else:
-                instruction_code = print_by_spans(codeblock, [task.span])
-
-        num_spans = sum([len(file.spans) for file in self._file_context])
-        if num_spans > 1:
-            file_context_content = (
-                f"File context:\n\n{self._file_context_content(span_marker=None)}"
-            )
-        else:
-            file_context_content = ""
+        file_context_content = (
+            f"File context:\n\n{self._file_context_content(span_marker=None)}"
+        )
 
         # TODO: Adjust system prompt depending on action and the type of code span
 
@@ -330,7 +275,7 @@ class Coder:
 
 {task.instructions}
 
-# Code to be updated:
+# Fill in the implementation and return this code block:
 
 ```python
 {instruction_code.strip()}
@@ -347,7 +292,7 @@ class Coder:
             llm_response = completion(
                 model=Settings.coder.coding_model,
                 temperature=0.0,
-                max_tokens=2000,
+                max_tokens=4000,
                 messages=messages,
                 metadata={
                     "generation_name": "coder-write-code",
@@ -379,7 +324,7 @@ class Coder:
                 send_event(
                     session_id=self._session_id,
                     event="code_update_failed",
-                    properties={"error": "no changes", "tags": self._tags},
+                    properties={"error_type": "no_changes", "tags": self._tags},
                 )
 
                 return False
@@ -393,11 +338,11 @@ class Coder:
                 updated_block = self._parser.parse(changes[0].content)
             except Exception as e:
                 logger.error(f"Failed to parse block content: {e}")
-                corrections = f"There was a syntax error in the code block. Please correct it and try again. Error {e}"
+                corrections = f"There was a syntax error in the code block. Please correct it and try again. Error: '{e}'"
                 send_event(
                     session_id=self._session_id,
                     event="code_update_failed",
-                    properties={"error": "syntax_error", "tags": self._tags},
+                    properties={"error_type": "syntax_error", "tags": self._tags},
                 )
                 updated_block = None
 
@@ -405,7 +350,7 @@ class Coder:
                 response = write_code(
                     codeblock,
                     updated_block,
-                    expected_span=task.span,
+                    span=task.span,
                     action=task.action,
                 )
 
@@ -442,33 +387,12 @@ class Coder:
                             "added_lines": len(added_lines),
                             "removed_lines": len(removed_lines),
                             "file": task.file_path,
-                            "expected_block": (
-                                ".".join(task.span.block_path)
-                                if task.span.block_path
-                                else None
-                            ),
-                            "start_line": task.span.start_line,
-                            "end_line": task.span.end_line,
+                            "span_id": (task.span.span_id if task.span else None),
                             "tags": self._tags,
                         },
                     )
 
                     task.state = "completed"
-
-                    # Adjust spans in planned tasks if lines were added or removed
-                    line_diff = len(added_lines) - len(removed_lines)
-                    if line_diff != 0:
-                        for planned_task in self._tasks:
-                            if (
-                                planned_task.file_path == task.file_path
-                                and planned_task.state == "planned"
-                                and planned_task.span.start_line
-                                and planned_task.span.start_line >= task.span.end_line
-                            ):
-                                if planned_task.span.start_line:
-                                    planned_task.span.start_line += line_diff
-                                if planned_task.span.end_line:
-                                    planned_task.span.end_line += line_diff
 
                     self._codeblocks[task.file_path] = self._parser.parse(
                         response.content
@@ -486,14 +410,18 @@ class Coder:
                     send_event(
                         session_id=self._session_id,
                         event="code_update_failed",
-                        properties={"error": response.error, "tags": self._tags},
+                        properties={
+                            "error_message": response.error,
+                            "error_type": response.error_type,
+                            "tags": self._tags,
+                        },
                     )
                     corrections = f"The code isn't correct.\n{response.error}\n"
                 else:
                     send_event(
                         session_id=self._session_id,
                         event="code_update_failed",
-                        properties={"error": "no changes", "tags": self._tags},
+                        properties={"error_type": "no changes", "tags": self._tags},
                     )
                     corrections = "No changes detected."
 
@@ -516,14 +444,15 @@ class Coder:
             error="Failed to update code blocks.",
         )
 
-    def _file_context_content(self, span_marker: SpanMarker = SpanMarker.COMMENT):
+    def _file_context_content(
+        self, span_marker: Optional[SpanMarker] = SpanMarker.COMMENT
+    ):
         file_context_content = ""
         for file in self._file_context:
             codeblock = self._codeblocks[file.file_path]
-            if file.spans:
-                content = print_by_spans(
-                    codeblock, file.spans, block_marker=span_marker
-                )
+            if file.span_ids:
+                codeblock.show_spans(span_ids=file.span_ids)
+                content = codeblock.to_prompt(show_span_id=True)
             else:
                 content = print_block(codeblock)
             file_context_content += f"{file.file_path}\n```\n{content}\n```\n"

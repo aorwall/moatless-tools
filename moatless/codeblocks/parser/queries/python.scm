@@ -15,6 +15,15 @@
 
 (class_definition
   (identifier) @identifier
+  (argument_list
+    (
+      [
+        (identifier) @reference.type
+      ]
+      (",")?
+    )*
+  )?
+  (":")
   (block . (_) @child.first)
 ) @root @definition.class
 
@@ -55,7 +64,7 @@
     (
       (comment) ? @child.first
       (block
-        (_) @child.last .
+        (_)
       )
     )
     (
@@ -102,6 +111,11 @@
 (assignment
   left: [
     (identifier) @identifier
+    (attribute
+      (identifier)
+      (".")
+      (identifier)
+    ) @identifier @reference.dependency
     (attribute) @identifier
   ]
   (
