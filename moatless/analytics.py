@@ -1,9 +1,20 @@
 import os
 
+from moatless.settings import Settings
+
 _posthog = None
 
 
 def send_event(session_id: str, event: str, properties: dict = None):
+    if Settings.analytics_file:
+        with open(Settings.analytics_file, "a") as f:
+            log = {
+                "session_id": session_id,
+                "event": event,
+                "properties": properties,
+            }
+            f.write(f"{log}\n")
+
     global _posthog
 
     if not os.getenv("POSTHOG_API_KEY"):

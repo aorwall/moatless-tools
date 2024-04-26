@@ -1,7 +1,7 @@
 import logging
 import re
 from enum import Enum
-from typing import List, Optional, Callable, Dict
+from typing import List, Optional, Callable, Dict, Set
 
 from networkx import DiGraph
 from pydantic import (
@@ -98,8 +98,8 @@ class Module(CodeBlock):
 
         return True
 
-    def find_related_spans(self, span_id: str = None) -> List[BlockSpan]:
-        related_spans = []
+    def find_related_span_ids(self, span_id: str = None) -> Set[str]:
+        related_span_ids = set()
 
         blocks = self.find_blocks_by_span_id(span_id)
         for block in blocks:
@@ -109,8 +109,7 @@ class Module(CodeBlock):
                 node_data = self._graph.nodes[succ]
                 if "block" in node_data:
                     span = node_data["block"].belongs_to_span
-                    if span not in related_spans:
-                        related_spans.append(span)
+                    related_span_ids.add(span.span_id)
 
             # Find predecessors (incoming relationships)
             predecessors = list(self._graph.predecessors(block.path_string()))
@@ -118,19 +117,21 @@ class Module(CodeBlock):
                 node_data = self._graph.nodes[pred]
                 if "block" in node_data:
                     span = node_data["block"].belongs_to_span
-                    if span not in related_spans:
-                        related_spans.append(span)
+                    related_span_ids.add(span.span_id)
 
             # Always add parent class initation span
             if block.parent and block.parent.type == CodeBlockType.CLASS:
-                for span in block.parent.spans.values():
-                    if span.span_type == SpanType.INITATION:
-                        if not any(
-                            [
-                                span.span_id == related_span.span_id
-                                for related_span in related_spans
-                            ]
-                        ):
-                            related_spans.append(span)
+                related_span_ids.add(block.belongs_to_span.span_id)
+                for class_child in block.parent.children:
+                    if class_child.belongs_to_span.span_type == SpanType.INITATION:
+                        related_span_ids.add(class_child.belongs_to_span.span_id)
 
-        return related_spans
+        # Always add module initation span
+        for span in self.spans_by_id.values():
+            if (
+                span.block_type == CodeBlockType.MODULE
+                and span.span_type == SpanType.INITATION
+            ):
+                related_span_ids.add(span.span_id)
+
+        return related_span_ids

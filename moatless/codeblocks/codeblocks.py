@@ -1,11 +1,12 @@
 import re
 from enum import Enum
-from typing import List, Optional, Callable, Dict
+from typing import List, Optional, Dict, Set
 
 from pydantic import BaseModel, validator, Field, root_validator
+from typing_extensions import deprecated
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
-from moatless.codeblocks.utils import Colors
+from moatless.utils.colors import Colors
 
 BlockPath = List[str]
 
@@ -110,6 +111,7 @@ INDEXED_BLOCKS = [
 ]
 
 
+@deprecated("Use BlockSpans to define code block visibility instead")
 class PathTree(BaseModel):
     show: bool = Field(default=False, description="Show the block and all sub blocks.")
     tree: dict[str, "PathTree"] = Field(default_factory=dict)
@@ -182,28 +184,6 @@ class RelationshipType(str, Enum):
     TYPE = "type"
 
 
-class DiffAction(Enum):
-    ADD = "add"
-    REMOVE = "remove"
-    UPDATE = "update"
-
-
-class BlockDiff(BaseModel):
-    block_path: List[str] = Field()
-    action: DiffAction = Field()
-
-
-class MergeAction(BaseModel):
-    action: str
-    original_block: Optional["CodeBlock"] = None
-    updated_block: Optional["CodeBlock"] = None
-
-    def __str__(self):
-        original_id = self.original_block.identifier if self.original_block else "None"
-        updated_id = self.updated_block.identifier if self.updated_block else "None"
-        return f"{self.action}: {original_id or '[]'} -> {updated_id or '[]'}"
-
-
 class Relationship(BaseModel):
     scope: ReferenceScope = Field(description="The scope of the reference.")
     identifier: Optional[str] = Field(default=None, description="ID")
@@ -259,25 +239,18 @@ class Parameter(BaseModel):
     type: Optional[str] = Field(description="The type of the parameter.")
 
 
-class Visibility(str, Enum):
-    EVERYTHING = "everything"  # Show all child blocks
-    SIGNATURE = "signature"  # Only show signature of functions and classes
-    CODE = "code"  # Only show code but comment out function and class definitions
-    NOTHING = "nothing"  # Comment out everything
-
-
-class SpanScope(str, Enum):
-    EVERYTHING = "everything"  # Include all code and all child blocks in span
-
-
 class SpanType(str, Enum):
-    INITATION = "initiation"
-    IMPLEMENTATION = "implementation"
+    INITATION = "init"
+    DOCUMENTATION = "docs"
+    IMPLEMENTATION = "impl"
 
 
 class BlockSpan(BaseModel):
     span_id: str = Field()
     span_type: SpanType = Field(description="Type of span.")
+    block_type: CodeBlockType = Field(description="Type of block.")
+
+    # TODO: Remove
     visible: bool = Field(default=True, description="If the span should be visible.")
 
     index: int = 0
@@ -309,11 +282,17 @@ class BlockSpan(BaseModel):
             return block_path
 
 
-class ShowBlock(BaseModel):
-    visibility: Visibility = Field(
-        default=Visibility.EVERYTHING, description="The visibility of the block."
+class LineSpan(BaseModel):
+    start_line: int = Field(description="Start line of the span.")
+    end_line: int = Field(description="End line of the span.")
+
+    parent_block_path: BlockPath = Field(
+        default=None,
+        description="Path to the parent block of the span.",
     )
-    tree: dict[str, "ShowBlock"] = Field(default={}, description="Child blocks")
+
+    def __str__(self):
+        return f"{self.parent_block_path} ({self.start_line}-{self.end_line})"
 
 
 class CodeBlock(BaseModel):
@@ -323,7 +302,7 @@ class CodeBlock(BaseModel):
     is_indexed: bool = False
     parameters: List[Parameter] = []  # TODO: Move to Function sub class
     relationships: List[Relationship] = []
-    spans: Dict[str, BlockSpan] = {}
+    span_ids: Set[str] = set()
     belongs_to_span: Optional[BlockSpan] = None
     content_lines: List[str] = []
     start_line: int = 0
@@ -379,6 +358,7 @@ class CodeBlock(BaseModel):
 
     def append_child(self, child: "CodeBlock"):
         self.children.append(child)
+        self.span_ids.update(child.span_ids)
         child.parent = self
 
     def append_children(self, children: List["CodeBlock"]):
@@ -435,32 +415,11 @@ class CodeBlock(BaseModel):
                 else:
                     child.replace_by_path(path[1:], new_block)
 
-    def has_equal_definition(self, other: "CodeBlock") -> bool:
-        # TODO: should be replaced an expression that checks the actual identifier and parameters
-        return other.content in self.content and other.type == self.type
-
     def __str__(self):
         return self.to_string()
 
     def to_string(self):
         return self._to_string()
-
-    def _insert_into_tree(self, node, path):
-        if not path:
-            return
-        if path[0] not in node:
-            node[path[0]] = {}
-        self._insert_into_tree(node[path[0]], path[1:])
-
-    def _replace_in_tree(self, node, path):
-        if not path:
-            return
-        if len(path) == 1:
-            node[path[0]] = {}
-            return
-        if path[0] not in node:
-            node[path[0]] = {}
-        self._replace_in_tree(node[path[0]], path[1:])
 
     def sum_tokens(self):
         tokens = self.tokens
@@ -478,20 +437,6 @@ class CodeBlock(BaseModel):
         self, exclude_blocks: List[CodeBlockType] = []
     ) -> List["CodeBlock"]:
         return [child for child in self.children if child.type not in exclude_blocks]
-
-    def hide_all(self):
-        for span in self.spans.values():
-            span.visible = False
-
-        for child in self.children:
-            child.hide_all()
-
-    def show_all(self):
-        for span in self.spans.values():
-            span.visible = True
-
-        for child in self.children:
-            child.show_all()
 
     def show_related_spans(
         self,
@@ -579,11 +524,13 @@ class CodeBlock(BaseModel):
         self,
         indent: int = 0,
         current_span: BlockSpan = None,
+        highlight_spans: Set[str] = None,
         only_identifiers: bool = False,
         show_full_path: bool = True,
         show_tokens: bool = False,
         show_spans: bool = False,
         debug: bool = False,
+        exclude_not_highlighted: bool = False,
         include_line_numbers: bool = False,
         include_types: List[CodeBlockType] = None,
         include_parameters: bool = False,
@@ -597,22 +544,37 @@ class CodeBlock(BaseModel):
 
         indent_str = " " * indent
 
+        highlighted = False
+
         child_tree = ""
         for i, child in enumerate(self.children):
+
             if child.belongs_to_span and (
                 not current_span
                 or current_span.span_id != child.belongs_to_span.span_id
             ):
                 current_span = child.belongs_to_span
+
+                highlighted = highlight_spans is None or (
+                    current_span is not None and current_span.span_id in highlight_spans
+                )
+
                 if show_spans:
-                    color = (
-                        Colors.BLUE if child.belongs_to_span.visible else Colors.GRAY
-                    )
+                    color = Colors.WHITE if highlighted else Colors.GRAY
                     child_tree += f"{indent_str} {indent} {color}Span: {current_span}{Colors.RESET}\n"
+
+            if (
+                exclude_not_highlighted
+                and not highlighted
+                and not child.has_any_span(highlight_spans)
+            ):
+                continue
 
             child_tree += child.to_tree(
                 indent=indent + 1,
                 current_span=current_span,
+                highlight_spans=highlight_spans,
+                exclude_not_highlighted=exclude_not_highlighted,
                 only_identifiers=only_identifiers,
                 show_full_path=show_full_path,
                 show_tokens=show_tokens,
@@ -626,7 +588,7 @@ class CodeBlock(BaseModel):
                 include_merge_history=include_merge_history,
             )
 
-        is_visible = self.is_visible or self.has_visible_children()
+        is_visible = not highlight_spans or self.belongs_to_any_span(highlight_spans)
         extra = ""
         if show_tokens:
             extra += f" ({self.tokens} tokens)"
@@ -671,18 +633,11 @@ class CodeBlock(BaseModel):
         type_color = Colors.BLUE if is_visible else Colors.GRAY
         return f"{indent_str} {indent} {type_color}{self.type.value}{Colors.RESET} `{content}`{extra}{Colors.RESET}\n{child_tree}"
 
-    def _span_by_index(self, index: int):
-        if not self.spans:
-            return None
-
-        for span in self.spans.values():
-            if index == span.start_index:
-                return span
-
-        return None
-
     def _to_prompt_string(
-        self, show_span_id: bool = False, span_marker: SpanMarker = SpanMarker.COMMENT
+        self,
+        show_span_id: bool = False,
+        span_marker: SpanMarker = SpanMarker.COMMENT,
+        show_line_numbers: bool = False,
     ) -> str:
         contents = ""
 
@@ -699,52 +654,88 @@ class CodeBlock(BaseModel):
             if not self.pre_lines:
                 contents += "\n"
 
-        elif self.pre_lines:
-            contents += "\n" * (min(2, self.pre_lines) - 1)
+        # elif self.pre_lines:
+        #    contents += "\n" * (min(2, self.pre_lines) - 1)
+
+        def ln(line_number):
+            if not show_line_numbers:
+                return ""
+            return str(line_number).ljust(6)
+
+        # Just to write out the first line number...
+        if self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
+            contents += ln(self.start_line)
 
         if self.pre_lines:
-            for i, line in enumerate(self.content_lines):
-                if i == 0 and line:
-                    contents += "\n" + self.indentation + line
-                elif line:
-                    contents += "\n" + line
-                else:
-                    contents += "\n"
-        else:
-            contents += self.pre_code + self.content
+            for i in range(self.pre_lines):
+                contents += "\n"
+                contents += ln(self.start_line - self.pre_lines + i + 1)
+
+        contents += self.indentation + self.content_lines[0]
+
+        for i, line in enumerate(self.content_lines[1:]):
+            contents += "\n"
+            contents += ln(self.start_line + i + 1)
+            contents += line
 
         return contents
 
     def to_prompt(
         self,
+        span_ids: Set[str] = None,
+        start_line: int = None,
+        end_line: int = None,
         show_outcommented_code: bool = True,
         outcomment_code_comment: str = "...",
         show_span_id: bool = False,
         current_span_id: str = None,
+        show_line_numbers: bool = False,
     ):
         contents = ""
 
         has_outcommented_code = False
         for i, child in enumerate(self.children):
-            if child.is_visible or child.has_visible_children():
+            show_child = True
+
+            if span_ids:
+                show_child = child.has_any_span(span_ids)
+
+            if show_child and start_line and end_line:
+                show_child = child.has_lines(
+                    start_line, end_line
+                ) or child.is_within_lines(start_line, end_line)
+
+            if show_child:
                 if has_outcommented_code:
                     contents += child.create_commented_out_block(
                         outcomment_code_comment
                     ).to_string()
+
                 has_outcommented_code = False
 
-                show_new_span_id = show_span_id and (
-                    not current_span_id
-                    or current_span_id != child.belongs_to_span.span_id
+                show_new_span_id = (
+                    show_span_id
+                    and child.belongs_to_span
+                    and (
+                        not current_span_id
+                        or current_span_id != child.belongs_to_span.span_id
+                    )
                 )
-                current_span_id = child.belongs_to_span.span_id
+                if child.belongs_to_span:
+                    current_span_id = child.belongs_to_span.span_id
 
-                contents += child._to_prompt_string(show_span_id=show_new_span_id)
+                contents += child._to_prompt_string(
+                    show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
+                )
                 contents += child.to_prompt(
-                    show_outcommented_code,
-                    outcomment_code_comment,
-                    show_span_id,
-                    current_span_id,
+                    span_ids=span_ids,
+                    start_line=start_line,
+                    end_line=end_line,
+                    show_outcommented_code=show_outcommented_code,
+                    outcomment_code_comment=outcomment_code_comment,
+                    show_span_id=show_span_id,
+                    current_span_id=current_span_id,
+                    show_line_numbers=show_line_numbers,
                 )
             elif show_outcommented_code and child.type not in [
                 CodeBlockType.COMMENT,
@@ -759,11 +750,14 @@ class CodeBlock(BaseModel):
             not in [
                 CodeBlockType.COMMENT,
                 CodeBlockType.COMMENTED_OUT_CODE,
+                CodeBlockType.SPACE,
             ]
         ):
+            contents += f"\n.    " if show_line_numbers else "\n"
             contents += child.create_commented_out_block(
                 outcomment_code_comment
             ).to_string()
+            contents += f"\n"
 
         return contents
 
@@ -832,18 +826,6 @@ class CodeBlock(BaseModel):
 
         return spans
 
-    def equal_contents(self, other: "CodeBlock"):
-        if len(self.children) != len(other.children):
-            return False
-
-        child_equal = all(
-            [
-                self.children[i].equal_contents(other.children[i])
-                for i in range(len(self.children))
-            ]
-        )
-        return self.content == other.content and child_equal
-
     def dict(self, **kwargs):
         # TODO: Add **kwargs to dict call
         return super().dict(exclude={"parent", "merge_history"})
@@ -861,10 +843,14 @@ class CodeBlock(BaseModel):
 
         return path
 
-    def root(self) -> "Module":
+    def module(self) -> "Module":
         if self.parent:
             return self.parent.root()
         return self
+
+    @deprecated("Use module()")
+    def root(self) -> "Module":
+        return self.module()
 
     def get_blocks(
         self, has_identifier: bool, include_types: List[CodeBlockType] = None
@@ -944,7 +930,8 @@ class CodeBlock(BaseModel):
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
             indentation=self.indentation,
-            pre_lines=2,
+            parent=self,
+            pre_lines=1,
             content=self.create_comment(comment_out_str),
         )
 
@@ -952,6 +939,7 @@ class CodeBlock(BaseModel):
         return CodeBlock(
             type=CodeBlockType.COMMENT,
             indentation=self.indentation,
+            parent=self,
             pre_lines=1,
             content=self.create_comment(comment),
         )
@@ -976,87 +964,6 @@ class CodeBlock(BaseModel):
         for child in self.children:
             child.add_indentation(indentation)
 
-    def find_equal_parent(self, check_block: "CodeBlock") -> Optional["CodeBlock"]:
-        if not self.parent:
-            return None
-
-        if self.parent == check_block:
-            return self
-
-        return self.parent.find_equal_parent(check_block)
-
-    def _get_matching_content(
-        self, other_children: List["CodeBlock"], start_original: int
-    ) -> List["CodeBlock"]:
-        original_contents = [child.content for child in self.children[start_original:]]
-        return [
-            other_child
-            for other_child in other_children
-            if other_child.content in original_contents
-        ]
-
-    def get_matching_blocks(self, other_block: "CodeBlock") -> List["CodeBlock"]:
-        matching_children = self._get_matching_content(other_block.children, 0)
-        if matching_children:
-            return matching_children
-
-        nested_match = self.find_nested_matching_block(other_block)
-        if nested_match:
-            return [nested_match]
-
-        return []
-
-    def has_any_matching_child(self, other_children: List["CodeBlock"]) -> bool:
-        return self._check_matching(other_children, any)
-
-    def has_all_matching_children(self, other_children: List["CodeBlock"]) -> bool:
-        if len(self.children) != len(other_children):
-            return False
-        return self._check_matching(other_children, all)
-
-    def _check_matching(
-        self, other_children: List["CodeBlock"], operation: Callable
-    ) -> bool:
-        original_identifiers = [
-            child.identifier for child in self.children if child.identifier
-        ]
-        updated_identifiers = [
-            child.identifier for child in other_children if child.identifier
-        ]
-        return operation(
-            ub_content in original_identifiers for ub_content in updated_identifiers
-        )
-
-    def find_next_matching_child_block(self, children_start, other_child_block):
-        i = children_start
-        while i < len(self.children):
-            check_original_block = self.children[i]
-            if (
-                check_original_block.content
-                and check_original_block.content == other_child_block.content
-                and check_original_block.type == other_child_block.type
-            ):
-                return i
-            i += 1
-        return None
-
-    def find_nested_matching_block(
-        self, other: "CodeBlock", start_original: int = 0
-    ) -> Optional["CodeBlock"]:
-        for child_block in self.children[start_original:]:
-            if child_block.children:
-                for other_child_block in other.children:
-                    if (
-                        child_block.content == other_child_block.content
-                        and child_block.type == other_child_block.type
-                    ):
-                        return child_block
-
-                nested_match = child_block.find_nested_matching_block(other)
-                if nested_match:
-                    return nested_match
-        return None
-
     def find_by_path(self, path: List[str]) -> Optional["CodeBlock"]:
         if path is None:
             return None
@@ -1072,6 +979,17 @@ class CodeBlock(BaseModel):
                     return child.find_by_path(path[1:])
 
         return None
+
+    def find_blocks_by_span_id(self, span_id: str) -> List["CodeBlock"]:
+        blocks = []
+        if self.belongs_to_span and self.belongs_to_span.span_id == span_id:
+            blocks.append(self)
+
+        for child in self.children:
+            # TODO: Optimize to just check relevant children (by mapping spans?
+            blocks.extend(child.find_blocks_by_span_id(span_id))
+
+        return blocks
 
     def find_last_before_span(
         self, span_id: str, last_before_span: Optional["CodeBlock"] = None
@@ -1119,6 +1037,12 @@ class CodeBlock(BaseModel):
             if block.full_path()[: len(self.full_path())] == self.full_path():
                 return True
         return False
+
+    def find_by_identifier(self, identifier: str):
+        for child in self.children:
+            if child.identifier == identifier:
+                return child
+        return None
 
     def find_blocks_with_identifier(self, identifier: str) -> List["CodeBlock"]:
         blocks = []
@@ -1237,9 +1161,20 @@ class CodeBlock(BaseModel):
         return trimmed_block
 
     def get_all_span_ids(self):
-        span_ids = set()
-        if self.belongs_to_span:
-            span_ids.add(self.belongs_to_span.span_id)
-        for child in self.children:
-            span_ids.update(child.get_all_span_ids())
-        return span_ids
+        return self.span_ids
+
+    def has_span(self, span_id: str):
+        return span_id in self.span_ids
+
+    def has_any_span(self, span_ids: Set[str]):
+        return any([span_id in self.span_ids for span_id in span_ids])
+
+    def belongs_to_any_span(self, span_ids: Set[str]):
+        return self.belongs_to_span and self.belongs_to_span.span_id in span_ids
+
+    def has_lines(self, start_line: int, end_line: int):
+        # Returns True if any part of the block is within the provided line range
+        return not (self.end_line < start_line or self.start_line > end_line)
+
+    def is_within_lines(self, start_line: int, end_line: int):
+        return self.start_line >= start_line and self.end_line <= end_line

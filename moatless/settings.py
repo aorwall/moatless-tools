@@ -18,8 +18,10 @@ class _CoderSettings:
     _planning_model = "gpt-4-turbo-2024-04-09"
     _coding_model = "gpt-4-turbo-2024-04-09"
     _enable_chain_of_thought = True
-    _max_span_tokens = 300
+    _min_tokens_for_split_span = 200
     _debug_mode = False
+    _use_line_numbers = False
+    _use_spans = True
 
     _context: _ContextSettings = _ContextSettings()
 
@@ -49,12 +51,28 @@ class _CoderSettings:
         self._enable_chain_of_thought = enable_chain_of_thought
 
     @property
+    def use_spans(self) -> bool:
+        return self._use_spans
+
+    @use_spans.setter
+    def use_spans(self, use_spans: bool) -> None:
+        self._use_spans = use_spans
+
+    @property
+    def use_line_numbers(self) -> bool:
+        return self._use_line_numbers
+
+    @use_line_numbers.setter
+    def use_line_numbers(self, use_line_numbers: bool) -> None:
+        self._use_line_numbers = use_line_numbers
+
+    @property
     def min_tokens_for_split_span(self) -> int:
-        return self._max_span_tokens
+        return self._min_tokens_for_split_span
 
     @min_tokens_for_split_span.setter
     def min_tokens_for_split_span(self, min_tokens_for_split_span: int) -> None:
-        self._max_span_tokens = min_tokens_for_split_span
+        self._min_tokens_for_split_span = min_tokens_for_split_span
 
     @property
     def debug_mode(self) -> bool:
@@ -70,6 +88,7 @@ class _Settings:
 
     _one_file_mode = True
     _coder: _CoderSettings = _CoderSettings()
+    _analytics_file: str = None
 
     @property
     def coder(self) -> _CoderSettings:
@@ -82,6 +101,14 @@ class _Settings:
     @one_file_mode.setter
     def one_file_mode(self, one_file_mode: bool) -> None:
         self._one_file_mode = one_file_mode
+
+    @property
+    def analytics_file(self) -> str:
+        return self._analytics_file
+
+    @analytics_file.setter
+    def analytics_file(self, analytics_file: str) -> None:
+        self._analytics_file = analytics_file
 
 
 Settings = _Settings()

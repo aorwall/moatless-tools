@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from moatless.codeblocks import CodeBlock
 from moatless.codeblocks.codeblocks import BlockSpan
+from moatless.coder.types import CodingTask
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +18,37 @@ class CodePart(BaseModel):
     content: str
 
 
-def create_instruction_code_block(codeblock: CodeBlock, span: BlockSpan) -> str:
-    expected_block = codeblock.find_by_path(span.parent_block_path)
-    trimmed_block = expected_block.copy_with_trimmed_parents(add_placeholders=False)
-    comment = "Write the implementation here..."
-    if trimmed_block.children:
-        comment_block = trimmed_block.children[0].create_comment_block(comment)
+def create_instruction_code_block(codeblock: CodeBlock, task: CodingTask) -> str:
+    if task.action == "update":
+        expected_block = codeblock.find_by_path(task.block_path)
+        if task.start_index is not None and task.end_index is not None:
+            start_line = expected_block.children[task.start_index].start_line
+            end_line = expected_block.children[task.end_index].end_line
+            return codeblock.to_prompt(
+                start_line=start_line,
+                end_line=end_line,
+                show_outcommented_code=True,
+                outcomment_code_comment="... other code",
+            )
+        elif task.span_id:
+            return codeblock.to_prompt(
+                span_ids={task.span_id},
+                show_outcommented_code=True,
+                outcomment_code_comment="... other code",
+            )
+        else:
+            return codeblock.to_prompt()
     else:
-        comment_block = trimmed_block.create_comment_block(comment)
-
-    comment_block.pre_lines = 1
-    trimmed_block.children = [comment_block]
-    return trimmed_block.root().to_string()
+        span = codeblock.find_span_by_id(task.span_id)
+        trimmed_block = codeblock.copy_with_trimmed_parents(add_placeholders=False)
+        comment = "Write the implementation here..."
+        if trimmed_block.children:
+            comment_block = trimmed_block.children[0].create_comment_block(comment)
+        else:
+            comment_block = trimmed_block.create_comment_block(comment)
+        comment_block.pre_lines = 1
+        trimmed_block.children = [comment_block]
+        return trimmed_block.root().to_string()
 
 
 def extract_response_parts(response: str) -> List[Union[str, CodePart]]:

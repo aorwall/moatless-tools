@@ -2,7 +2,7 @@ import os
 import subprocess
 
 
-def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos"):
+def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
     repo_name = get_repo_dir_name(repo)
     repo_url = f"git@github.com:{repo}.git"
 

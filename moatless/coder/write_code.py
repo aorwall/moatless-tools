@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from pydantic import BaseModel
 
@@ -7,6 +7,7 @@ from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup
 from moatless.codeblocks.module import Module
 from moatless.coder.code_utils import create_instruction_code_block
+from moatless.coder.types import UpdateCodeTask
 from moatless.settings import Settings
 from moatless.types import Span
 
@@ -258,7 +259,7 @@ def remove_span(original_block: Module, span: BlockSpan):
     return WriteCodeResult(content=original_block.to_string())
 
 
-def _find_start_and_end_index(block: CodeBlock, span: BlockSpan):
+def _find_start_and_end_index(block: CodeBlock, span_id: str):
     start_index = None
     end_index = None
 
@@ -267,21 +268,21 @@ def _find_start_and_end_index(block: CodeBlock, span: BlockSpan):
     for i, child_block in enumerate(block.children):
         if not in_span and (
             not child_block.belongs_to_span
-            or child_block.belongs_to_span.span_id != span.span_id
+            or child_block.belongs_to_span.span_id != span_id
         ):
             continue
 
         if (
             not in_span
             and child_block.belongs_to_span
-            and child_block.belongs_to_span.span_id == span.span_id
+            and child_block.belongs_to_span.span_id == span_id
         ):
             in_span = True
             start_index = i
 
         if in_span and (
             not child_block.belongs_to_span
-            or child_block.belongs_to_span.span_id != span.span_id
+            or child_block.belongs_to_span.span_id != span_id
         ):
             return start_index, end_index
         elif in_span:
@@ -295,3 +296,82 @@ def find_by_path_recursive(codeblock, block_path: List[str]):
     if not found and len(block_path) > 1:
         return find_by_path_recursive(codeblock, block_path[1:])
     return found
+
+
+def select_block(
+    module: Module, span_id: str, start_line: int, end_line: int
+) -> UpdateCodeTask:
+    span = module.find_span_by_id(span_id)
+    span_block = module.find_by_path(span.parent_block_path)
+    return _find_block_that_has_lines(span_block, start_line, end_line, span_id)
+
+
+def _find_block_that_has_lines(
+    codeblock: CodeBlock, start_line: int, end_line: int, span_id: str = None
+):
+    # If codeblock is smaller than min_tokens_for_split_span just return the whole block
+    if codeblock.sum_tokens() < Settings.coder.min_tokens_for_split_span:
+        return codeblock, None, None
+
+    blocks_before_start_line = []
+    tokens_before_start_line = 0
+    blocks_in_span = []
+    tokens_in_span = 0
+    blocks_after_end_line = []
+    tokens_after_end_line = 0
+
+    for child in codeblock.children:
+        if not (
+            span_id
+            and child.belongs_to_span
+            and child.belongs_to_span.span_id == span_id
+        ):
+            continue
+
+        # Go to block that covers all lines and is bigger than min tokens, check that block
+        if (
+            child.start_line <= start_line
+            and child.end_line >= end_line
+            and child.sum_tokens() > Settings.coder.min_tokens_for_split_span
+        ):
+            return _find_block_that_has_lines(child, start_line, end_line)
+
+        # If the block is before the start line or not in span, add it to the blocks_before_start_line list
+        if child.end_line < start_line:
+            blocks_before_start_line.append(child)
+            tokens_before_start_line += child.sum_tokens()
+
+        # If the block is after the end line, add it to the blocks_after_end_line list
+        elif child.start_line > end_line:
+            blocks_after_end_line.append(child)
+            tokens_after_end_line += child.sum_tokens()
+
+        # If the block is within the span, add it to the blocks_in_span list
+        else:
+            blocks_in_span.append(child)
+            tokens_in_span += child.sum_tokens()
+
+    # If tokens in span is higher than min_tokens, return the start and end index of the span
+    if tokens_in_span > Settings.coder.min_tokens_for_split_span:
+        start_index = codeblock.children.index(blocks_in_span[0])
+        end_index = codeblock.children.index(blocks_in_span[-1])
+        return codeblock, start_index, end_index
+
+    # Loop to add blocks from before and after until min_tokens_for_split_span is exceeded
+    additional_blocks = blocks_before_start_line[::-1] + blocks_after_end_line
+    for block in additional_blocks:
+        tokens_in_span += block.sum_tokens()
+        blocks_in_span.append(block)
+        if tokens_in_span > Settings.coder.min_tokens_for_split_span:
+            sorted_blocks = sorted(blocks_in_span, key=lambda x: x.start_line)
+            start_index = codeblock.children.index(sorted_blocks[0])
+            end_index = codeblock.children.index(sorted_blocks[-1])
+            return codeblock, start_index, end_index
+
+    # If still not enough tokends in classes or modules, return span limits
+    start_idx, end_idx = _find_start_and_end_index(codeblock, span_id)
+    if start_idx is None:
+        logger.warning(f"Couldn't find start index for span {span_id}")
+        return None, None, None
+
+    return codeblock, start_idx, end_idx

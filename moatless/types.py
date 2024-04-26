@@ -1,9 +1,10 @@
 from collections import namedtuple
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
-from moatless.codeblocks.codeblocks import BlockSpan
+from moatless.codeblocks.codeblocks import BlockSpan, LineSpan
+from moatless.codeblocks.module import Module
 
 
 class Span(BaseModel):
@@ -29,15 +30,8 @@ class Span(BaseModel):
 
 class ContextFile(BaseModel):
     file_path: str
-    span_ids: List[str] = None  # TODO: Define relevant spans in a central place
-
-
-class CodingTask(BaseModel):
-    file_path: str
-    instructions: str
-    span: Optional[BlockSpan] = None
-    action: str = "update"  # add, remove, update
-    state: str = "planned"  # completed, planned, rejected, failed
+    module: Module
+    span_ids: Set[str] = None
 
 
 class Usage(BaseModel):

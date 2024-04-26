@@ -25,15 +25,14 @@ from moatless.coder.code_utils import (
     create_instruction_code_block,
 )
 from moatless.coder.prompt import (
-    CREATE_PLAN_SYSTEM_PROMPT,
-    JSON_SCHEMA,
-    CODER_SYSTEM_PROMPT,
-    json_schema,
     create_system_prompt,
+    CODER_SYSTEM_PROMPT,
 )
-from moatless.coder.write_code import write_code
+from moatless.coder.types import CodingTask, UpdateCodeTask
+from moatless.coder.update_code import update_code
+from moatless.coder.write_code import write_code, select_block
 from moatless.settings import Settings
-from moatless.types import Usage, BaseResponse, ContextFile, CodingTask, Span
+from moatless.types import Usage, BaseResponse, ContextFile
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +88,9 @@ class Coder:
 
         self._tasks = []
 
+        # TODO: Just use file_context
         for file in files:
-            full_file_path = os.path.join(self._repo_path, file.file_path)
-            with open(full_file_path, "r") as f:
-                content = f.read()
-
-            codeblock = self._parser.parse(content)
-            self._codeblocks[file.file_path] = codeblock
+            self._codeblocks[file.file_path] = file.module
 
     def run(self, mock_responses: List[str] = None):
         mock_response = mock_responses.pop(0) if mock_responses else None
@@ -176,29 +171,40 @@ class Coder:
                         )
 
                         for task_json in devplan_json["tasks"]:
-                            span_id = task_json.get("span_id")
-                            file_path = task_json.get("file_path")
+                            task = CodingTask.parse_obj(task_json)
 
-                            task = CodingTask(
-                                file_path=file_path,
-                                instructions=task_json.get("instructions"),
-                                action=task_json.get("action", "update"),
-                                state="planned",
-                            )
-
-                            if not file_path:
+                            if not task.file_path:
                                 correction += "No file path found in response. "
                                 continue
 
-                            if span_id:
-                                codeblock = self._codeblocks[file_path]
-                                span = codeblock.find_span_by_id(span_id)
-                                task.span = span
-                                if not task.span:
-                                    correction += f"Span {span_id} not found in file {file_path}. "
+                            if task.span_id:
+                                codeblock = self._codeblocks[task.file_path]
+                                span = codeblock.find_span_by_id(task.span_id)
+                                if not span:
+                                    correction += f"Span {task.span_id} not found in file {task.file_path}. "
+
+                                if task.start_line and task.action == "update":
+                                    # TODO: Handle invalid input
+                                    update_block, start_index, end_index = select_block(
+                                        module=codeblock,
+                                        span_id=task.span_id,
+                                        start_line=task.start_line,
+                                        end_line=task.end_line,
+                                    )
+
+                                    task = UpdateCodeTask(
+                                        file_path=task.file_path,
+                                        block_path=update_block.full_path(),
+                                        span_id=task.span_id,
+                                        start_index=start_index,
+                                        end_index=end_index,
+                                        instructions=task.instructions,
+                                        action=task.action,
+                                        state=task.state,
+                                    )
 
                             logger.info(
-                                f"Created task: {task.file_path} - {task.span} {task.instructions}"
+                                f"Created task: {task.file_path} - {task.action}: {task.span_id} {task.instructions}"
                             )
                             self._tasks.append(task)
 
@@ -212,12 +218,14 @@ class Coder:
                     logger.warning(
                         f"Error parsing message {response.choices[0].message.content}. Error {type(e)}: {e} "
                     )
-                    correction = f"Error parsing message: {e}. Please respond with JSON that follows the schema below:\n{JSON_SCHEMA}"
+                    correction = f"Error parsing message: {e}. Please respond with JSON that follows the schema."
                     send_event(
                         session_id=self._session_id,
                         event="task_planning_failed",
                         properties={"tags": self._tags},
                     )
+
+                    raise e
 
                 messages.append(
                     {
@@ -246,18 +254,14 @@ class Coder:
             logger.error(f"File {task.file_path} not found in code blocks.")
             return False
 
-        logger.debug(f"Write code to {task.file_path} and span {task.span}")
+        logger.debug(f"Write code to {task.file_path}")
 
         codeblock = self._codeblocks[task.file_path]
+        span = codeblock.find_span_by_id(task.span_id)
 
-        if not task.span:
-            instruction_code = ""
-        else:
-            instruction_code = create_instruction_code_block(codeblock, task.span)
+        instruction_code = create_instruction_code_block(codeblock=codeblock, task=task)
 
-        file_context_content = (
-            f"File context:\n\n{self._file_context_content(span_marker=None)}"
-        )
+        file_context_content = f"File context:\n\n{self._file_context_content(span_marker=None, show_line_numbers=False)}"
 
         # TODO: Adjust system prompt depending on action and the type of code span
 
@@ -347,12 +351,18 @@ class Coder:
                 updated_block = None
 
             if updated_block:
-                response = write_code(
-                    codeblock,
-                    updated_block,
-                    span=task.span,
-                    action=task.action,
-                )
+                if task.action == "update":
+                    response = update_code(
+                        original_module=codeblock,
+                        updated_module=updated_block,
+                        block_path=task.block_path,
+                        start_index=task.start_index,
+                        end_index=task.end_index,
+                    )
+                else:
+                    response = write_code(
+                        codeblock, updated_block, span=span, action=task.action
+                    )
 
                 if not response.error and response.content:
                     full_file_path = os.path.join(self._repo_path, task.file_path)
@@ -387,7 +397,7 @@ class Coder:
                             "added_lines": len(added_lines),
                             "removed_lines": len(removed_lines),
                             "file": task.file_path,
-                            "span_id": (task.span.span_id if task.span else None),
+                            "span_id": (task.span_id if task.span_id else None),
                             "tags": self._tags,
                         },
                     )
@@ -445,15 +455,19 @@ class Coder:
         )
 
     def _file_context_content(
-        self, span_marker: Optional[SpanMarker] = SpanMarker.COMMENT
+        self,
+        span_marker: Optional[SpanMarker] = SpanMarker.COMMENT,
+        show_line_numbers=True,
     ):
         file_context_content = ""
         for file in self._file_context:
             codeblock = self._codeblocks[file.file_path]
-            if file.span_ids:
-                codeblock.show_spans(span_ids=file.span_ids)
-                content = codeblock.to_prompt(show_span_id=True)
-            else:
-                content = print_block(codeblock)
+            content = codeblock.to_prompt(
+                show_span_id=Settings.coder.use_spans,
+                show_line_numbers=Settings.coder.use_line_numbers and show_line_numbers,
+                span_ids=file.span_ids,
+                show_outcommented_code=False,
+            )
+
             file_context_content += f"{file.file_path}\n```\n{content}\n```\n"
         return file_context_content

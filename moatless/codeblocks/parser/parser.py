@@ -73,8 +73,8 @@ class CodeParser:
         self,
         language: Language,
         encoding: str = "utf8",
-        visible_spans: bool = True,
         max_tokens_in_span: int = 500,
+        min_tokens_for_docs_span: int = 100,
         index_callback: Optional[Callable[[CodeBlock], bool]] = None,
         tokenizer: Callable[[str], List] = None,
         apply_gpt_tweaks: bool = False,
@@ -93,17 +93,18 @@ class CodeParser:
         self.encoding = encoding
         self.gpt_queries = []
         self.queries = []
-        self._visible_spans = visible_spans
 
         # TODO: How to handle these in a thread safe way?
         self.spans_by_id = {}
         self.comments_with_no_span = []
+        self._span_counter = {}
 
         # TODO: Move this to CodeGraph
         self._graph = None
 
         self.tokenizer = tokenizer or get_tokenizer()
         self._max_tokens_in_span = max_tokens_in_span
+        self._min_tokens_for_docs_span = min_tokens_for_docs_span
 
     @property
     def language(self):
@@ -188,7 +189,7 @@ class CodeParser:
                 parent=parent_block,
                 parameters=parameters,
                 relationships=relationships,
-                spans={},
+                span_ids=set(),
                 start_line=node.start_point[0] + 1,
                 end_line=end_line + 1,
                 pre_code=pre_code,
@@ -219,6 +220,8 @@ class CodeParser:
 
             if (
                 code_block.type == CodeBlockType.COMMENT
+                and current_span
+                and current_span.span_type != SpanType.DOCUMENTATION
                 and len(current_span.block_paths) > 1
             ):
                 # TODO: Find a more robust way to connect comments to the right span
@@ -230,7 +233,7 @@ class CodeParser:
                 if new_span:
                     current_span = new_span
                     self.spans_by_id[current_span.span_id] = current_span
-                    parent_block.spans[current_span.span_id] = current_span
+                    code_block.span_ids.add(current_span.span_id)
 
                 for comment_block in self.comments_with_no_span:
                     comment_block.belongs_to_span = current_span
@@ -241,6 +244,7 @@ class CodeParser:
                 current_span.tokens += code_block.tokens
 
                 code_block.belongs_to_span = current_span
+                code_block.span_ids.add(current_span.span_id)
 
                 self.comments_with_no_span = []
 
@@ -252,17 +256,12 @@ class CodeParser:
                 )
 
         else:
-            current_span = BlockSpan(
-                span_id="initiation",
-                span_type=SpanType.INITATION,
-                parent_block_path=[],
-                visible=self._visible_spans,
-            )
+            current_span = None
             code_block = Module(
                 type=CodeBlockType.MODULE,
                 identifier=None,
                 content="",
-                spans_by_id={current_span.span_id: current_span},
+                spans_by_id={},
                 start_line=node.start_point[0] + 1,
                 end_line=end_line + 1,
                 language=self.language,
@@ -272,7 +271,6 @@ class CodeParser:
                     "tree_sitter_type": node.type,
                 },
             )
-            self.spans_by_id[current_span.span_id] = current_span
 
         # Workaround to get the module root object when we get invalid content from GPT
         wrong_level_mode = (
@@ -343,7 +341,7 @@ class CodeParser:
             #        code_block.append_children(child_block.children)
             # else:
 
-            if child_span.span_id != current_span.span_id:
+            if not current_span or child_span.span_id != current_span.span_id:
                 current_span = child_span
 
             code_block.append_child(child_block)
@@ -382,6 +380,7 @@ class CodeParser:
 
         for comment_block in self.comments_with_no_span:
             comment_block.belongs_to_span = current_span
+            comment_block.span_ids.add(current_span.span_id)
             current_span.block_paths.append(comment_block.full_path())
             current_span.tokens += comment_block.tokens
 
@@ -716,8 +715,13 @@ class CodeParser:
         else:
             raise ValueError("Content must be either a string or bytes")
 
-        self.spans_by_id = {}  # TODO: make thread safe?
-        self._graph = nx.DiGraph()  # TODO: Should me moved to a central CodeGraph
+        # TODO: make thread safe?
+        self.spans_by_id = {}
+        self._span_counter = {}
+
+        # TODO: Should me moved to a central CodeGraph
+        self._graph = nx.DiGraph()
+
         tree = self.tree_parser.parse(content_in_bytes)
         module, _, _ = self.parse_code(content_in_bytes, tree.walk().node)
         module.spans_by_id = self.spans_by_id
@@ -733,25 +737,58 @@ class CodeParser:
         self, current_span: BlockSpan, block: CodeBlock
     ) -> Optional[BlockSpan]:
 
-        # Set initation phase if the span is for a class declaration (block) or if the block isn't a function and we're
-        # still in th initation phase
-        if block.type in [CodeBlockType.CLASS] or (
-            current_span.span_type == SpanType.INITATION
+        # Set documentation phase on comments in the start of structure blocks if more than min_tokens_for_docs_span
+        # TODO: This is isn't valid in other languages, try to set block type to docstring?
+        block_types_with_document_span = [
+            CodeBlockType.MODULE
+        ]  # TODO: Make this configurable
+        if block.type == CodeBlockType.COMMENT and (
+            not current_span
+            or current_span.block_type in block_types_with_document_span
+            and (
+                current_span.span_type != SpanType.IMPLEMENTATION
+                or current_span.index == 0
+            )
+        ):
+            span_type = SpanType.DOCUMENTATION
+            span_id = self._create_span_id(block, label="docstring")
+
+        # Set initation phase when block is a class and until first fuction:
+        elif block.type == CodeBlockType.CLASS or (
+            current_span
+            and current_span.block_type == CodeBlockType.CLASS
+            and current_span.span_type != SpanType.IMPLEMENTATION
             and block.type not in [CodeBlockType.FUNCTION]
         ):
             span_type = SpanType.INITATION
+            span_id = self._create_span_id(block)
+
+        # Set initation phase on imports in module blocks
+        elif block.type == CodeBlockType.IMPORT and (
+            not current_span or current_span.block_type == CodeBlockType.MODULE
+        ):
+            span_type = SpanType.INITATION
+            span_id = self._create_span_id(block, label="imports")
+
         else:
             span_type = SpanType.IMPLEMENTATION
+            span_id = self._create_span_id(block)
 
-        span_id = self._create_span_id(block, span_type)
+        # if no curent_span exists, expected to be on Module level
+        if not current_span:
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                block_type=CodeBlockType.MODULE,
+                parent_block_path=[],
+            )
 
-        # create a new span on new structure blocks:except constructors, in classes or modules.
+        # create a new span on new functions and classes in classes or modules.
         # * except constructors
         # * if the block isn't directly under a module or class
         # * if the parent block doesn't have a span
         if (
-            block.type.group == CodeBlockTypeGroup.STRUCTURE
-            and block.type != CodeBlockType.CONSTRUCTOR
+            block.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
             and block.parent.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]
             and current_span.parent_block_path == block.parent.full_path()
         ):
@@ -762,8 +799,8 @@ class CodeParser:
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
+                block_type=block.type,
                 parent_block_path=block.full_path(),
-                visible=self._visible_spans,
             )
 
         # if current span is from a child block
@@ -776,41 +813,39 @@ class CodeParser:
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
+                block_type=block.type,
                 parent_block_path=parent_block_path,
-                visible=self._visible_spans,
+            )
+
+        # Create new span if span type has changed
+        if span_type != current_span.span_type:
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                block_type=current_span.block_type,
+                parent_block_path=current_span.parent_block_path,
             )
 
         # Create new span if the current is too large and the parent block is a structure block
+        split_on_block_type = [CodeBlockType.MODULE]  # Only split on Module level
         if (
             current_span.tokens + block.sum_tokens() > self._max_tokens_in_span
-            and block.parent.type.group == CodeBlockTypeGroup.STRUCTURE
+            and block.parent.type in [split_on_block_type]
         ):
             current_span.is_partial = True
-
-            index = current_span.index + 1
-
-            if span_id in self.spans_by_id:
-                span_id += f":{index}"
 
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
-                is_partial=True,
-                index=index,
+                block_type=current_span.block_type,
                 parent_block_path=current_span.parent_block_path,
-                visible=self._visible_spans,
+                is_partial=True,
+                index=current_span.index + 1,
             )
 
         return None
 
-    def _create_span(self, block: CodeBlock, span_type: SpanType):
-        span_id = self._create_span_id(block, span_type)
-
-        return BlockSpan(
-            span_id=span_id, span_type=span_type, visible=self._visible_spans
-        )
-
-    def _create_span_id(self, block: CodeBlock, span_type: SpanType):
+    def _create_span_id(self, block: CodeBlock, label: str = None):
         if block.type.group == CodeBlockTypeGroup.STRUCTURE:
             structure_block = block
         else:
@@ -819,12 +854,18 @@ class CodeParser:
             )
 
         span_id = structure_block.path_string()
+        if label and span_id:
+            span_id += f":{label}"
+        elif label and not span_id:
+            span_id = label
+        elif not span_id:
+            span_id = "impl"
 
-        if not span_id or span_id in self.spans_by_id:
-            span_id = block.path_string()
-
-        if not span_id or span_id in self.spans_by_id:
-            span_id += str(len(structure_block.spans))
+        if span_id in self._span_counter:
+            self._span_counter[span_id] += 1
+            span_id += f":{self._span_counter[span_id]}"
+        else:
+            self._span_counter[span_id] = 1
 
         return span_id
 
