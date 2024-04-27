@@ -1,23 +1,35 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
+from instructor import OpenAISchema
 from pydantic import BaseModel
 
-from moatless.codeblocks import CodeBlock
+from moatless.types import BaseResponse
 
 
-class CodingTask(BaseModel):
+class WriteCodeResult(BaseModel):
+    content: Optional[str] = None
+    error: Optional[str] = None
+    change: Optional[str] = None
+
+
+class CoderResponse(BaseResponse):
     file_path: str
-    instructions: str
-    span_id: Optional[str] = None
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
-    action: str = "update"  # add, remove, update
-    state: str = "planned"  # completed, planned, rejected, failed
+    diff: Optional[str] = None
+    error: Optional[str] = None
+    change: Optional[str] = None
 
 
-class UpdateCodeTask(CodingTask):
-    action: str = "update"
-    file_path: Optional[str] = None
-    block_path: Optional[List[str]] = None
-    start_index: Optional[int] = None
-    end_index: Optional[int] = None
+class CodeFunction(OpenAISchema):
+    file_path: str
+
+    @classmethod
+    @property
+    def openai_tool_spec(cls) -> Dict[str, Any]:
+        return {"type": "function", "function": cls.openai_schema}
+
+
+class WriteCodeResult(BaseModel):
+    content: Optional[str] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    change: Optional[str] = None

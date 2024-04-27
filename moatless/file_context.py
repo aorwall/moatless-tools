@@ -1,158 +1,72 @@
+import difflib
+import logging
 import os
-from typing import List, Dict, Optional
+from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
-from moatless.codeblocks import CodeBlock, CodeBlockType
+from moatless.codeblocks import CodeBlockType
+from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.codeblocks.print_block import (
-    _print_content,
-    SpanMarker,
-    _is_span_within_block,
-)
-from moatless.types import ContextFile, Span
 
 _parser = PythonParser()
 
+logger = logging.getLogger(__name__)
 
-class ContextFile:
 
-    def __init__(self, file_path: str, content: str, spans: Dict[str, Span] = None):
-        self._file_path = file_path
+class ContextFile(BaseModel):
+    file_path: str
+    module: Module
+    span_ids: Set[str] = None
 
-        self._module_block = _parser.parse(content)
-        self._show_header_types = [CodeBlockType.IMPORT]
+    def to_prompt(self, show_span_ids=False, show_line_numbers=False):
+        code = self.module.to_prompt(
+            show_span_id=show_span_ids,
+            show_line_numbers=show_line_numbers,
+            span_ids=self.span_ids,
+            show_outcommented_code=False,
+            exclude_block_types=[CodeBlockType.COMMENT],
+        )
 
-        self._spans = spans
+        return f"{self.file_path}\n```\n{code}\n```\n"
 
-        self._span_index = {}
-        self._span_marker = SpanMarker.COMMENT
 
-    def to_prompt(self):
-        return self._to_prompt(self._module_block)
-
-    def _to_prompt(self, codeblock: CodeBlock) -> str:
-        span_id = None
-
-        _current_span = self._span_by_start_line(codeblock.start_line)
-        if _current_span:
-            span_id = _current_span.span_id
-        elif codeblock.is_indexed:
-            span_id = codeblock.path_string()
-
-        contents = _print_content(codeblock, span_id=span_id)
-
-        has_outcommented_code = False
-        for child in codeblock.children:
-            show_child = _is_span_within_block(
-                child, spans
-            ) or self._is_block_within_spans(
-                child, spans
-            )  # TODO Optimize
-            if spans[0].end_line < child.start_line:
-                spans = spans[1:]
-
-                if not spans:
-                    break
-
-            if show_child and spans:
-                if (
-                    outcomment_code_comment
-                    and has_outcommented_code
-                    and child.type
-                    not in [
-                        CodeBlockType.COMMENT,
-                        CodeBlockType.COMMENTED_OUT_CODE,
-                    ]
-                ):
-                    contents += child.create_commented_out_block(
-                        outcomment_code_comment
-                    ).to_string()
-
-                contents += self._to_prompt(child, spans)
-                has_outcommented_code = False
-            else:
-                has_outcommented_code = True
-
-        if (
-            outcomment_code_comment
-            and has_outcommented_code
-            and child.type
-            not in [
-                CodeBlockType.COMMENT,
-                CodeBlockType.COMMENTED_OUT_CODE,
-            ]
-        ):
-            contents += child.create_commented_out_block(
-                outcomment_code_comment
-            ).to_string()
-
-        return contents
-
-    def _span_by_start_line(self, start_line: int) -> Optional[Span]:
-        for span in self._spans:
-            if span.start_line == start_line:
-                return span
-
-        return None
-
-    def _is_span_within_block(self, codeblock: CodeBlock, spans: List[Span]) -> bool:
-        for span in spans:
-            if (
-                span.start_line
-                and span.start_line >= codeblock.start_line
-                and span.end_line <= codeblock.end_line
-            ):
-                return True
-
-        return False
-
-    def _is_block_within_spans(self, codeblock: CodeBlock, spans: List[Span]) -> bool:
-        for span in spans:
-            if (
-                codeblock.full_path()[: len(codeblock.full_path())]
-                == spans[0].block_path
-            ):
-                return True
-
-            if (
-                span.start_line
-                and span.start_line <= codeblock.start_line
-                and span.end_line >= codeblock.end_line
-            ):
-                return True
-        return False
+def do_diff(
+    file_path: str, original_content: str, updated_content: str
+) -> Optional[str]:
+    return "".join(
+        difflib.unified_diff(
+            original_content.strip().splitlines(True),
+            updated_content.strip().splitlines(True),
+            fromfile=file_path,
+            tofile=file_path,
+            lineterm="\n",
+        )
+    )
 
 
 class FileContext:
 
-    def __init__(self, repo_path: str, files: List[ContextFile]):
-        self._repo_path = repo_path
+    def __init__(self, files: List[ContextFile], repo_path: str = None):
         self._parser = PythonParser()
+        self._repo_path = repo_path
+        self._files = {file.file_path: file for file in files}
 
-        self._files = files
-        self._codeblocks = {}
-        self._span_index = {}
+    def is_in_context(self, file_path):
+        return file_path in self._files
 
-        # Settings
-        self._span_marker = SpanMarker.COMMENT
-        self._show_header = True
+    def get_module(self, file_path):
+        return self._files[file_path].module
 
-        for file in files:
-            full_file_path = os.path.join(self._repo_path, file.file_path)
-            with open(full_file_path, "r") as f:
-                content = f.read()
+    def update_module(self, file_path: str, module: Module):
+        full_file_path = os.path.join(self._repo_path, file_path)
+        logger.debug(f"Writing updated content to {full_file_path}")
 
-            codeblock = self._parser.parse(content)
-            self._codeblocks[file.file_path] = codeblock
+        with open(full_file_path, "w") as f:
+            f.write(module.to_string())
 
-    def create_prompt(self):
+    def create_prompt(self, show_span_ids=False, show_line_numbers=False):
         file_context_content = ""
-        for file in self._files:
-            codeblock = self._codeblocks[file.file_path]
-            if file.spans:
-                content = self.print_by_spans(codeblock, file.spans)
-            else:
-                content = self._print_block(codeblock)
-            file_context_content += f"{file.file_path}\n```\n{content}\n```\n"
+        for file in self._files.values():
+            file_context_content += file.to_prompt(show_span_ids, show_line_numbers)
         return file_context_content

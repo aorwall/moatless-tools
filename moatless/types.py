@@ -28,12 +28,6 @@ class Span(BaseModel):
         return hash((self.start_line, self.end_line)) + hash(str(self.block_path))
 
 
-class ContextFile(BaseModel):
-    file_path: str
-    module: Module
-    span_ids: Set[str] = None
-
-
 class Usage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0

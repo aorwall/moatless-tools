@@ -169,12 +169,53 @@
 
 (return_statement
   ("return")
-  (_) @child.first
-) @root @definition.statement
+  (_) @child.first @definition.statement
+) @root
 
-;; (block
-;;  (_) @check_child
-;; ) @root
+(if_statement
+  (":")
+  (block . (_) @child.first)
+) @root @definition.compound
+
+(for_statement
+  (":")
+  (block . (_) @child.first)
+) @root @definition.compound
+
+(while_statement
+  (":")
+  (block . (_) @child.first)
+) @root @definition.compound
+
+(with_statement
+  (":")
+  (block . (_) @child.first)
+) @root @definition.compound
+
+(match_statement
+  (":")
+  (block . (_) @child.first)
+) @root @definition.compound
+
+(elif_clause
+  (":")
+  (block . (_) @child.first)
+) @root @definition.dependent_clause
+
+(else_clause
+  (":")
+  (block . (_) @child.first)
+) @root @definition.dependent_clause
+
+(except_clause
+  (":")
+  (block . (_) @child.first)
+) @root @definition.dependent_clause
+
+(finally_clause
+  (":")
+  (block . (_) @child.first)
+) @root @definition.dependent_clause
 
 (_
   (":")

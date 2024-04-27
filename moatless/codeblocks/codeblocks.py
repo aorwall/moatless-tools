@@ -43,10 +43,14 @@ class CodeBlockType(Enum):
     IMPORT = ("Import", CodeBlockTypeGroup.IMPORT)
 
     EXPORT = ("Export", CodeBlockTypeGroup.IMPLEMENTATION)
-    STATEMENT = ("Statement", CodeBlockTypeGroup.IMPLEMENTATION)
+    COMPOUND = ("Compound", CodeBlockTypeGroup.IMPLEMENTATION)
     BLOCK = ("Block", CodeBlockTypeGroup.IMPLEMENTATION)
     ASSIGNMENT = ("Assignment", CodeBlockTypeGroup.IMPLEMENTATION)
     CALL = ("Call", CodeBlockTypeGroup.IMPLEMENTATION)
+    STATEMENT = ("Statement", CodeBlockTypeGroup.IMPLEMENTATION)
+
+    # Dependent clauses are clauses that are dependent on another compound statement and can't be shown on their own
+    DEPENDENT_CLAUSE = ("DependentClause", CodeBlockTypeGroup.IMPLEMENTATION)
     CODE = ("Code", CodeBlockTypeGroup.IMPLEMENTATION)
 
     # TODO: Incorporate in code block?
@@ -63,7 +67,7 @@ class CodeBlockType(Enum):
 
     ERROR = ("Error", CodeBlockTypeGroup.ERROR)
 
-    def __init__(self, value, group):
+    def __init__(self, value: str, group: CodeBlockTypeGroup):
         self._value_ = value
         self.group = group
 
@@ -80,7 +84,9 @@ class CodeBlockType(Enum):
             "definition.class": cls.CLASS,
             "definition.code": cls.CODE,
             "definition.comment": cls.COMMENT,
+            "definition.compound": cls.COMPOUND,
             "definition.constructor": cls.CONSTRUCTOR,
+            "definition.dependent_clause": cls.DEPENDENT_CLAUSE,
             "definition.error": cls.ERROR,
             "definition.export": cls.EXPORT,
             "definition.function": cls.FUNCTION,
@@ -654,28 +660,25 @@ class CodeBlock(BaseModel):
             if not self.pre_lines:
                 contents += "\n"
 
-        # elif self.pre_lines:
-        #    contents += "\n" * (min(2, self.pre_lines) - 1)
-
-        def ln(line_number):
+        def print_line(line_number):
             if not show_line_numbers:
                 return ""
             return str(line_number).ljust(6)
 
-        # Just to write out the first line number...
+        # Just to write out the first line number when there are no pre_lines on first block
         if self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
-            contents += ln(self.start_line)
+            contents += print_line(self.start_line)
 
         if self.pre_lines:
             for i in range(self.pre_lines):
                 contents += "\n"
-                contents += ln(self.start_line - self.pre_lines + i + 1)
+                contents += print_line(self.start_line - self.pre_lines + i + 1)
 
         contents += self.indentation + self.content_lines[0]
 
         for i, line in enumerate(self.content_lines[1:]):
             contents += "\n"
-            contents += ln(self.start_line + i + 1)
+            contents += print_line(self.start_line + i + 1)
             contents += line
 
         return contents
@@ -690,6 +693,7 @@ class CodeBlock(BaseModel):
         show_span_id: bool = False,
         current_span_id: str = None,
         show_line_numbers: bool = False,
+        exclude_block_types: List[CodeBlockType] = None,
     ):
         contents = ""
 
@@ -697,7 +701,10 @@ class CodeBlock(BaseModel):
         for i, child in enumerate(self.children):
             show_child = True
 
-            if span_ids:
+            if exclude_block_types and child.type in exclude_block_types:
+                show_child = False
+
+            if show_child and span_ids:
                 show_child = child.has_any_span(span_ids)
 
             if show_child and start_line and end_line:

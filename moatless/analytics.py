@@ -5,7 +5,8 @@ from moatless.settings import Settings
 _posthog = None
 
 
-def send_event(session_id: str, event: str, properties: dict = None):
+def send_event(event: str, properties: dict = None):
+    session_id = "test"  # FIXME
     if Settings.analytics_file:
         with open(Settings.analytics_file, "a") as f:
             log = {

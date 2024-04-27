@@ -205,18 +205,26 @@ class CodeParser:
 
             self.pre_process(code_block, node_match)
 
+            if code_block.identifier:
+                identifier = code_block.identifier
+            else:
+                if code_block.content:
+                    identifier = code_block.content.split("\n")[0].strip()[0:25]
+                    identifier = re.sub(r"\W+", "_", identifier)
+                else:
+                    identifier = code_block.type.value.lower()
+
             # Set a unique identifier on each code block
+            # TODO: Just count occurrences of the identifier
             existing_identifiers = [
                 b.identifier for b in parent_block.children if b.type == code_block.type
             ]
-            if not code_block.identifier:
-                code_block.identifier = (
-                    f"{code_block.type.value}_{len(existing_identifiers)}"
-                )
-            elif code_block.identifier in existing_identifiers:
+            if identifier in existing_identifiers:
                 code_block.identifier = (
                     f"{code_block.identifier}_{len(existing_identifiers)}"
                 )
+            else:
+                code_block.identifier = identifier
 
             if (
                 code_block.type == CodeBlockType.COMMENT
