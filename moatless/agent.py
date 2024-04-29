@@ -5,15 +5,14 @@ from typing import List
 
 from litellm import completion
 from llama_index.core import get_tokenizer
-from pydantic import ValidationError
 
-from moatless.coder.add_code import AddCodeBlock, AddCodeAction
+from moatless.coder.add_code import AddCode, AddCodeAction
 from moatless.coder.prompt import (
     CREATE_PLAN_PROMPT,
 )
 from moatless.coder.remove_code import RemoveCode, RemoveCodeAction
 from moatless.coder.types import FunctionResponse
-from moatless.coder.update_code import UpdateCode
+from moatless.coder.update_code import UpdateCode, UpdateCodeAction
 from moatless.file_context import FileContext
 from moatless.session import Session
 from moatless.settings import Settings
@@ -28,15 +27,14 @@ class Coder:
         self._tokenizer = get_tokenizer()
 
         self._trace_id = uuid.uuid4().hex
-        self._add_action = AddCodeAction(
-            file_context=self._file_context, trace_id=self._trace_id
-        )
+        self._update_action = UpdateCodeAction(file_context=self._file_context, trace_id=self._trace_id)
+        self._add_action = AddCodeAction(file_context=self._file_context, trace_id=self._trace_id)
         self._remove_action = RemoveCodeAction(file_context=self._file_context)
         self._max_retries = max_retries
 
     def run(self, requirement: str, mock_response: List[str] = None):
         file_context_content = self._file_context.create_prompt(
-            show_span_ids=True, show_line_numbers=True, exclude_comments=True
+            show_span_ids=True, show_line_numbers=True
         )
 
         system_prompt = f"""# Instructions
@@ -61,7 +59,7 @@ class Coder:
 
         tools = [
             UpdateCode.openai_tool_spec,
-            AddCodeBlock.openai_tool_spec,
+            AddCode.openai_tool_spec,
             RemoveCode.openai_tool_spec,
         ]
 
@@ -83,7 +81,7 @@ class Coder:
                 messages=messages,
             )
             response_message = response.choices[0].message
-            messages.append(response_message.dict())
+            messages.append(response_message)
 
             if response_message.content:
                 logger.info(f"Response message: {response_message.content}")
@@ -93,42 +91,19 @@ class Coder:
                 for tool_call in response_message.tool_calls:
                     logger.info(f"Execute action: {tool_call.function.name}")
 
-                    try:
-                        if tool_call.function.name == UpdateCode.name:
-                            func = UpdateCode.model_validate_json(
-                                tool_call.function.arguments, strict=True
-                            )
-
-                            func._requirement = requirement  # TODO: FIx this
-                            func._file_context = self._file_context  # TODO: Make nicer
-                            func._trace_id = self._trace_id
-                            response = func.call()
-                        elif tool_call.function.name == AddCodeBlock.name:
-                            task = AddCodeBlock.model_validate_json(
-                                tool_call.function.arguments, strict=True
-                            )
-                            response = self._add_action.execute(task)
-                        elif tool_call.function.name == RemoveCode.name:
-                            task = RemoveCode.model_validate_json(
-                                tool_call.function.arguments, strict=True
-                            )
-                            response = self._remove_action.execute(task)
-                        else:
-                            logger.warning(
-                                f"Unknown function: {tool_call.function.name}"
-                            )
-                            response = FunctionResponse(
-                                error=f"Unknown function: {tool_call.function.name}"
-                            )
-                    except ValidationError as e:
-                        logger.warning(f"Failed to validate function call. Error: {e}")
-                        error_messages.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "role": "tool",
-                                "name": tool_call.function.name,
-                                "content": str(e),
-                            }
+                    if tool_call.function.name == UpdateCode.name:
+                        task = UpdateCode.model_validate_json(tool_call.function.arguments)
+                        response = self._update_action.execute(task)
+                    elif tool_call.function.name == AddCode.name:
+                        task = AddCode.model_validate_json(tool_call.function.arguments)
+                        response = self._add_action.execute(task)
+                    elif tool_call.function.name == RemoveCode.name:
+                        task = RemoveCode.model_validate_json(tool_call.function.arguments)
+                        response = self._remove_action.execute(task)
+                    else:
+                        logger.warning(f"Unknown function: {tool_call.function.name}")
+                        response = FunctionResponse(
+                            error=f"Unknown function: {tool_call.function.name}"
                         )
 
                     if response.error:
@@ -150,7 +125,7 @@ class Coder:
                 ]
 
             if error_messages:
-                messages.extend(error_messages)
+                messages.append(error_messages)
                 retries += 1
             else:
                 return True

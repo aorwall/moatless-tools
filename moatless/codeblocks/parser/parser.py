@@ -784,16 +784,29 @@ class CodeParser:
 
         # if no curent_span exists, expected to be on Module level
         if not current_span:
+            if block.type.group == CodeBlockTypeGroup.STRUCTURE:
+                return BlockSpan(
+                    span_id=span_id,
+                    span_type=span_type,
+                    block_type=block.type,
+                    parent_block_path=block.full_path(),
+                )
+            else:
+                return BlockSpan(
+                    span_id=span_id,
+                    span_type=span_type,
+                    block_type=block.parent.type,
+                    parent_block_path=block.parent.full_path(),
+                )
+
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
                 block_type=CodeBlockType.MODULE,
-                parent_block_path=[],
+                parent_block_path=parent_block_path,
             )
 
         # create a new span on new functions and classes in classes or modules.
-        # * except constructors
-        # * if the block isn't directly under a module or class
         # * if the parent block doesn't have a span
         if (
             block.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
@@ -838,7 +851,7 @@ class CodeParser:
         split_on_block_type = [CodeBlockType.MODULE]  # Only split on Module level
         if (
             current_span.tokens + block.sum_tokens() > self._max_tokens_in_span
-            and block.parent.type in [split_on_block_type]
+            and block.parent.type in split_on_block_type
         ):
             current_span.is_partial = True
 

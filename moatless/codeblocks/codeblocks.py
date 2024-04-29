@@ -371,6 +371,15 @@ class CodeBlock(BaseModel):
         for child in children:
             self.append_child(child)
 
+    def replace_children(
+        self, start_index: int, end_index: int, children: List["CodeBlock"]
+    ):
+        self.children = (
+            self.children[:start_index] + children + self.children[end_index:]
+        )
+        for child in children:
+            child.parent = self
+
     def replace_child(self, index: int, child: "CodeBlock"):
         # TODO: Do a proper update of everything when replacing child blocks
         child.pre_code = self.children[index].pre_code
@@ -379,6 +388,9 @@ class CodeBlock(BaseModel):
 
         self.children[index] = child
         child.parent = self
+
+    def remove_child(self, index: int):
+        del self.children[index]
 
     def sync_indentation(self, original_block: "CodeBlock", updated_block: "CodeBlock"):
         original_indentation_length = len(original_block.indentation) + len(
@@ -400,14 +412,6 @@ class CodeBlock(BaseModel):
                 original_indentation_length - updated_indentation_length
             )
             updated_block.add_indentation(additional_indentation)
-
-    def replace_children(self, index: int, children: List["CodeBlock"]):
-        for child in children:
-            self.replace_child(index, child)
-            index += 1
-
-    def remove_child(self, index: int):
-        del self.children[index]
 
     def replace_by_path(self, path: List[str], new_block: "CodeBlock"):
         if not path:
@@ -743,6 +747,7 @@ class CodeBlock(BaseModel):
                     show_span_id=show_span_id,
                     current_span_id=current_span_id,
                     show_line_numbers=show_line_numbers,
+                    exclude_block_types=exclude_block_types,
                 )
             elif show_outcommented_code and child.type not in [
                 CodeBlockType.COMMENT,
@@ -850,6 +855,7 @@ class CodeBlock(BaseModel):
 
         return path
 
+    @property
     def module(self) -> "Module":
         if self.parent:
             return self.parent.root()
@@ -857,7 +863,7 @@ class CodeBlock(BaseModel):
 
     @deprecated("Use module()")
     def root(self) -> "Module":
-        return self.module()
+        return self.module
 
     def get_blocks(
         self, has_identifier: bool, include_types: List[CodeBlockType] = None
@@ -942,12 +948,12 @@ class CodeBlock(BaseModel):
             content=self.create_comment(comment_out_str),
         )
 
-    def create_comment_block(self, comment: str = "..."):
+    def create_comment_block(self, comment: str = "...", pre_lines: int = 1):
         return CodeBlock(
             type=CodeBlockType.COMMENT,
             indentation=self.indentation,
             parent=self,
-            pre_lines=1,
+            pre_lines=pre_lines,
             content=self.create_comment(comment),
         )
 
@@ -1128,44 +1134,6 @@ class CodeBlock(BaseModel):
             blocks.extend(child.get_indexed_blocks())
 
         return blocks
-
-    def copy_with_trimmed_parents(self, add_placeholders: bool = True):
-        block_copy = self.model_copy(deep=True)
-
-        if self.parent:
-            block_copy.parent = self.parent.trim_code_block(
-                block_copy, add_placeholders
-            )
-        return block_copy
-
-    def trim_code_block(self, keep_child: "CodeBlock", add_placeholders: bool = True):
-        children = []
-        for child in self.children:
-            if child.type == CodeBlockType.BLOCK_DELIMITER and child.pre_lines > 0:
-                children.append(child)
-            elif child.identifier == keep_child.identifier:
-                children.append(keep_child)
-            elif add_placeholders:
-                if child.type not in NON_CODE_BLOCKS and (
-                    not children
-                    or children[-1].type != CodeBlockType.COMMENTED_OUT_CODE
-                ):
-                    children.append(child.create_commented_out_block())
-
-        trimmed_block = CodeBlock(
-            content=self.content,
-            identifier=self.identifier,
-            indentation=self.indentation,
-            pre_lines=self.pre_lines,
-            type=self.type,
-            start_line=self.start_line,
-            children=children,
-        )
-
-        if trimmed_block.parent:
-            trimmed_block.parent = self.parent.trim_code_block(trimmed_block)
-
-        return trimmed_block
 
     def get_all_span_ids(self):
         return self.span_ids

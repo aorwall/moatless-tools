@@ -1,26 +1,36 @@
 import json
 import logging
-from typing import Optional, Tuple
+import uuid
+from typing import Optional, Tuple, List, Dict
 
-from instructor import OpenAISchema
-from pydantic import Field
+from litellm import completion, Message
+from pydantic import Field, Extra, PrivateAttr
 
+from moatless.analytics import send_event
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, BlockPath
 from moatless.codeblocks.module import Module
-from moatless.coder.code_action import CodeAction, respond_with_invalid_block
-from moatless.coder.types import WriteCodeResult, CodeFunction
+from moatless.codeblocks.parser.python import PythonParser
+from moatless.coder.code_action import (
+    CodeAction,
+    respond_with_invalid_block,
+    CodeAgentFunction,
+)
+from moatless.coder.code_utils import extract_response_parts, CodePart, do_diff
+from moatless.coder.prompt import CODER_SYSTEM_PROMPT
+from moatless.coder.types import FunctionResponse, CodeFunction, Function
 from moatless.file_context import FileContext
+from moatless.session import Session
 from moatless.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
-class UpdateCode(CodeFunction):
+class UpdateCode(CodeAgentFunction):
     """Update the code in one span. You can provide line numbers if only one part of the span should be updated."""
 
     instructions: str = Field(
-        ..., description="Detailed instructions about what should be updated."
+        ..., description="Detailed instructions on how to update the code."
     )
     file_path: str = Field(description="The file path of the code to be updated.")
     span_id: str = Field(description="The span id of the code to be updated.")
@@ -33,53 +43,178 @@ class UpdateCode(CodeFunction):
         default=None,
     )
 
+    _max_retries: int = PrivateAttr(default=2)
+    _max_tokens_for_span: int = PrivateAttr(default=500)
 
-class UpdateCodeAction(CodeAction):
+    _start_index: Optional[int] = PrivateAttr(default=None)
+    _end_index: Optional[int] = PrivateAttr(default=None)
+    _original_block: CodeBlock = PrivateAttr()
+    _original_module: Module = PrivateAttr()
 
-    def __init__(self, file_context: FileContext = None):
-        super().__init__(file_context)
+    _file_context: FileContext = PrivateAttr()
+    _trace_id: str = PrivateAttr(default=None)
+    _retries: int = PrivateAttr(default=0)
+    _messages: List[Dict] = PrivateAttr(default_factory=list)
 
-    def _execute(
-        self, task: UpdateCode, original_module: Module, updated_module: Module
-    ) -> WriteCodeResult:
-        # TODO: Refactor to not have to do this twice!
-        original_block, start_index, end_index = self._find_block_and_span(
-            original_module, task.span_id, task.start_line, task.end_line
+    _mock_response: Optional[str] = PrivateAttr(default=None)
+
+    def call(self) -> FunctionResponse:
+        original_file = self._file_context.get_file(self.file_path)
+        if not original_file:
+            logger.warning(f"File {self.file_path} not found in file context.")
+            return FunctionResponse(
+                file_path=self.file_path,
+                error=f"{self.file_path} was not found in the file context.",
+            )
+
+        self._original_module = original_file.module
+
+        if self.start_line:
+            logger.info(
+                f"Updating code in file {self.file_path}, span {self.span_id} and lines {self.start_line}-{self.end_line}"
+            )
+        else:
+            logger.info(f"Updating code in file {self.file_path}, span {self.span_id}")
+
+        self._set_block_and_span()
+
+        span = self._original_module.find_span_by_id(self.span_id)
+        if (
+            span.tokens > self._max_tokens_for_span
+            and self.start_line is None
+            and self.end_line is None
+        ):
+            logger.warning(
+                f"Span {self.span_id} is too big ({span.tokens} tokens). Try to narrow it down by defining a start and end line."
+            )
+            return self._fail(
+                error_type="span_too_big",
+                message=f"The span is too big, try to narrow it down by defining a start and end line",
+            )
+
+        task_instructions = self._task_instructions()
+
+        file_context_content = self._file_context.create_prompt(exclude_comments=True)
+
+        system_message = {
+            "role": "system",
+            "content": f"""{CODER_SYSTEM_PROMPT}
+
+# File context:
+{file_context_content}
+""",
+        }
+
+        instruction_message = {
+            "role": "user",
+            "content": task_instructions,
+        }
+
+        self._messages = [system_message, instruction_message]
+
+        while self._retries < self._max_retries:
+            response = self._code_loop()
+            if response:
+                return response
+            self._retries += 1
+
+        return FunctionResponse(
+            error=f"Failed to update code. No rejection reason provided."
         )
+
+    def _code_loop(self) -> Optional[FunctionResponse]:
+        logger.info(f"Starting code update loop, retry {self._retries}")
+
+        llm_response = completion(
+            model=Settings.coder.coding_model,
+            temperature=0.0,
+            max_tokens=2000,
+            messages=self._messages,
+            metadata={
+                "generation_name": "coder-write-code",
+                "trace_name": "coder",
+                "trace_id": self._trace_id,
+                "session_id": Session.session_id,
+                "tags": Session.tags,
+            },
+            mock_response=self._mock_response,
+        )
+        choice = llm_response.choices[0]
+        self._messages.append(choice.message.dict())
+
+        extracted_parts = extract_response_parts(choice.message.content)
+
+        changes = [part for part in extracted_parts if isinstance(part, CodePart)]
+
+        thoughts = [part for part in extracted_parts if isinstance(part, str)]
+        thoughts = "\n".join([thought for thought in thoughts])
+
+        if thoughts:
+            logger.info(f"Thoughts: {thoughts}")
+
+        if not changes:
+            if choice.finish_reason == "length":
+                self.log_failure(
+                    error_type="token_limit_exceeded",
+                    message="No changed found, probably exeeded token limit.",
+                )
+                # TODO: Handle in a more graceful way than aborting the flow
+                # To not spend to many tokens...
+                raise Exception(f"Token limit exceeded. ")
+            else:
+                self.log_failure(error_type="no_changes")
+                return FunctionResponse(
+                    error=f"No code changes found in the updated code. {thoughts}"
+                )
+
+        if len(changes) > 1:
+            logger.warning(
+                f"Multiple code blocks found in response, ignoring all but the first one."
+            )
+
+        try:
+            parser = PythonParser(apply_gpt_tweaks=True)  # FIXME
+            updated_module = parser.parse(changes[0].content)
+        except Exception as e:
+            # TODO: Not sure if it's a good idea to retry on exceptions...
+            rejection_reason = f"There was a syntax error in the code block. Please correct it and try again. Error: '{e}'"
+            return self._reject(
+                rejection_code="syntax_error", rejection_reason=rejection_reason
+            )
+
+        original_content = self._original_module.to_string()
 
         updated_block = self._find_updated_block(
-            updated_module, original_block.full_path()
+            updated_module, self._original_block.full_path()
         )
         if not updated_block:
-            return respond_with_invalid_block(
-                f"Couldn't find the expected block with path {task.block_path}",
-                error_type="block_not_found",
+            rejection_reason = (
+                f"Couldn't find the expected block {self._original_block.identifier}"
+            )
+            return self._reject(
+                rejection_code="block_not_found", rejection_reason=rejection_reason
             )
 
         # TODO: Verify that only the expected code is returned
 
         error_blocks = updated_block.find_errors()
         if error_blocks:
-            logger.warning(
-                f"Syntax errors found in updated block:\n{updated_block.to_string()}"
-            )
             error_block_report = "\n\n".join(
                 [f"```{block.content}```" for block in error_blocks]
             )
-            return respond_with_invalid_block(
-                f"There are syntax errors in the updated file:\n\n{error_block_report}. "
-                f"Correct the errors and try again.",
-                error_type="syntax_error",
+            rejection_reason = f"There are syntax errors in the updated file:\n\n{error_block_report}. Correct the errors and try again."
+            return self._reject(
+                rejection_code="syntax_error", rejection_reason=rejection_reason
             )
 
-        if task.start_index is not None and task.end_index is not None:
+        if self._start_index is not None and self._end_index is not None:
             new_child_blocks = [
                 child
                 for child in updated_block.children
                 if child.type not in [CodeBlockType.COMMENTED_OUT_CODE]
             ]
 
-            if len(new_child_blocks) < (task.end_index - task.start_index / 2) and (
+            if len(new_child_blocks) < (self._end_index - self._start_index / 2) and (
                 (
                     new_child_blocks[0].type.group == CodeBlockTypeGroup.COMMENT
                     and new_child_blocks[0].type != CodeBlockType.COMMENT
@@ -87,59 +222,93 @@ class UpdateCodeAction(CodeAction):
                 or new_child_blocks[-1].type.group == CodeBlockTypeGroup.COMMENT
                 and new_child_blocks[-1].type != CodeBlockType.COMMENT
             ):
-                logger.warning(
-                    f"Suspected placeholders in code block because of size difference. Expected {task.end_index - task.start_index} "
-                    f"child blocks, received {len(new_child_blocks)}. {updated_block.to_string()}"
+                rejection_reason = (
+                    "The updated code is only half the size of the original code. If this is expected, return "
+                    "same response again. Otherwise write out the full code block, don't comment out any existing code!"
                 )
-                return respond_with_invalid_block(
-                    "The updated code is only half the size of the original code. If this is expected, return same response again. Otherwise write out the full code block, don't comment out any existing code!",
-                    error_type="suspected_incomplete_code",
+                return self._reject(
+                    rejection_code="suspected_incomplete_code",
+                    rejection_reason=rejection_reason,
                 )
 
-            original_block.children[start_index : end_index + 1] = new_child_blocks
-
+            self._original_block.replace_children(
+                self._start_index, self._end_index + 1, new_child_blocks
+            )
         else:
             if not updated_block.is_complete():
-                logger.warning(
-                    f"Updated block isn't complete:\n{updated_block.to_string()}"
+                rejection_reason = f"The code is not fully implemented. Write out all code in {updated_block.path_string()} "
+                return self._reject(
+                    rejection_code="incomplete_code", rejection_reason=rejection_reason
                 )
-                return respond_with_invalid_block(
-                    f"The code is not fully implemented. Write out all code in the {updated_block.path_string()}",
-                    error_type="incomplete_code",
-                )
-            original_index = original_block.parent.children.index(original_block)
-            original_block.parent.children[original_index] = updated_block
 
-        return WriteCodeResult()
+            original_index = self._original_block.parent.children.index(
+                self._original_block
+            )
+            self._original_block.parent.replace_child(original_index, updated_block)
 
-    def _task_instructions(self, task: UpdateCode, module: Module) -> str:
-        code_block, start_index, end_index = self._find_block_and_span(
-            module, task.span_id, task.start_line, task.end_line
+        updated_content = self._original_module.to_string()
+        diff = do_diff(self.file_path, original_content, updated_content)
+
+        if diff:
+            # TODO: Move this to let the agent decide if content should be saved
+            self._file_context.save_file(self.file_path)
+            logger.info(f"Code updated and saved successfully.")
+        else:
+            logger.warning("No changes detected.")
+
+        diff_lines = diff.split("\n")
+        added_lines = [
+            line
+            for line in diff_lines
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+        removed_lines = [
+            line
+            for line in diff_lines
+            if line.startswith("-") and not line.startswith("---")
+        ]
+
+        send_event(
+            event="updated_code",
+            properties={
+                "added_lines": len(added_lines),
+                "removed_lines": len(removed_lines),
+                "file": self.file_path,
+                "span_id": (self.span_id if self.span_id else None),
+            },
         )
 
-        if start_index is not None and end_index is not None:
-            start_line = code_block.children[start_index].start_line
-            end_line = code_block.children[end_index].end_line
-        else:
-            start_line = code_block.start_line
-            end_line = code_block.end_line
+        return FunctionResponse(message=diff)
 
-        code = module.to_prompt(
+    def _task_instructions(self) -> str:
+        if self._start_index is not None and self._end_index is not None:
+            start_line = self._original_block.children[self._start_index].start_line
+            end_line = self._original_block.children[self._end_index].end_line
+        else:
+            start_line = self._original_block.start_line
+            end_line = self._original_block.end_line
+
+        code = self._original_module.to_prompt(
             start_line=start_line,
             end_line=end_line,
+            span_ids={self.span_id},
             show_outcommented_code=True,
             outcomment_code_comment="... other code",
         )
 
         code = code.strip()
 
-        return f"""{task.instructions}
-
-# Update the part of the implementation in {code_block.identifier}. Leave all placeholder comments as is.
+        return f"""# INSTRUCTIONS:
+{self.instructions}
+    
+# CODE TO UPDATE:
+Update the part of the implementation in {self._original_block.identifier}. 
+Leave all placeholder comments named ` ... other code` as is!
 
 ```python
 {code}
-```"""
+```
+"""
 
     def _find_updated_block(
         self, codeblock: CodeBlock, block_path: BlockPath
@@ -176,22 +345,40 @@ class UpdateCodeAction(CodeAction):
         else:
             return None
 
-    def _find_block_and_span(
-        self, module: Module, span_id: str, start_line: int, end_line: int
-    ) -> Tuple[CodeBlock, Optional[int], Optional[int]]:
-        span = module.find_span_by_id(span_id)
-        span_block = module.find_by_path(span.parent_block_path)
-        return self._find_block_that_has_lines(
-            span_block, start_line, end_line, span_id
+    def _set_block_and_span(self):
+        span = self._original_module.find_span_by_id(self.span_id)
+        span_block = self._original_module.find_by_path(span.parent_block_path)
+
+        if self.start_line is None:
+            self._original_block = span_block
+            return
+
+        if self.end_line is None:
+            self.end_line = span_block.end_line
+
+        if span_block.end_line == self.start_line - 1:
+            logger.info(
+                f"Span {self.span_id} end line {span_block.endline} is one line before suggested start line "
+                f"{self.start_line}. Will change start line as it might just be a new addition"
+            )
+            self.start_line = span_block.end_line
+
+        if (
+            span_block.end_line < self.start_line
+            or span_block.start_line > self.end_line
+        ):
+            raise ValueError(
+                f"Line  {self.start_line}-{self.end_line} is not within the block {span_block.identifier} on line"
+                f" {span_block.start_line}-{span_block.end_line}"
+            )
+
+        self._original_block, self._start_index, self._end_index = (
+            self._find_block_that_has_lines(span_block)
         )
 
     def _find_block_that_has_lines(
-        self, codeblock: CodeBlock, start_line: int, end_line: int, span_id: str = None
+        self, codeblock: CodeBlock
     ) -> Tuple[CodeBlock, Optional[int], Optional[int]]:
-
-        # Out of scope
-        if codeblock.end_line < start_line or codeblock.start_line > end_line:
-            return None, None, None
 
         # If codeblock is smaller than min_tokens_for_split_span just return the whole block
         if codeblock.sum_tokens() < Settings.coder.min_tokens_for_split_span:
@@ -214,21 +401,20 @@ class UpdateCodeAction(CodeAction):
         tokens_after_end_line = 0
 
         for child in codeblock.children:
-            if not (span_id and span_id in child.span_ids):
+            if not (self.span_id and self.span_id in child.span_ids):
                 continue
 
             # Go to block that covers all lines and is bigger than min tokens, check that block
             if (
-                child.start_line <= start_line
-                and child.end_line >= end_line
+                child.start_line <= self.start_line
+                and child.end_line >= self.end_line
                 and child.sum_tokens() > Settings.coder.min_tokens_for_split_span
+                and child.children
             ):
-                return self._find_block_that_has_lines(
-                    child, start_line, end_line, span_id
-                )
+                return self._find_block_that_has_lines(child)
 
             # If the block is before the start line or not in span, add it to the blocks_before_start_line list
-            if child.end_line < start_line:
+            if child.end_line < self.start_line:
                 if child.type == CodeBlockType.COMMENT and child.sum_tokens() > 25:
                     # cut off on large comments
                     blocks_before_start_line = []
@@ -238,7 +424,7 @@ class UpdateCodeAction(CodeAction):
                     tokens_before_start_line += child.sum_tokens()
 
             # If the block is after the end line, add it to the blocks_after_end_line list
-            elif child.start_line > end_line:
+            elif child.start_line > self.end_line:
                 blocks_after_end_line.append(child)
                 tokens_after_end_line += child.sum_tokens()
 
@@ -246,7 +432,6 @@ class UpdateCodeAction(CodeAction):
             else:
                 blocks_in_span.append(child)
                 tokens_in_span += child.sum_tokens()
-                print(f"Add block in span: {child.identifier} ({child.type})")
 
         # If tokens in span is higher than min_tokens, return the start and end index of the span
         if tokens_in_span > Settings.coder.min_tokens_for_split_span:
@@ -267,3 +452,31 @@ class UpdateCodeAction(CodeAction):
         start_index = codeblock.children.index(sorted_blocks[0])
         end_index = codeblock.children.index(sorted_blocks[-1])
         return codeblock, start_index, end_index
+
+    def _fail(self, error_type: str, message: str):
+        logger.warning(f"code_update_failed:{error_type}: {message}")
+        send_event(
+            event="code_update_failed",
+            properties={"error_type": error_type, "retries": self._retries},
+        )
+        return FunctionResponse(error=f"Failed to update code. Error: {message}")
+
+    def _reject(self, rejection_code: str, rejection_reason: str):
+        logger.info(f"code_update_rejected:{rejection_code}: {rejection_reason}")
+        send_event(
+            event="code_update_rejected",
+            properties={
+                "error_type": "syntax_error",
+                "rejection_reason": rejection_reason,
+                "retries": self._retries,
+            },
+        )
+
+        self._messages.append(
+            {
+                "role": "user",
+                "content": f"Sorry, I couldn't update the code. {rejection_reason}",
+            }
+        )
+
+        return None

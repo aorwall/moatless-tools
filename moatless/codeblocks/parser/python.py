@@ -57,7 +57,7 @@ class PythonParser(CodeParser):
             < node_match.first_child.start_point[0]
         ):
             logger.warning(
-                f"Parsed block with type ASSIGNMENT with line break but no ending \: {codeblock.content_lines[0]}"
+                f"Parsed block with type ASSIGNMENT with line break but no ending \\: {codeblock.content_lines[0]}"
             )
             codeblock.content_lines[0] = codeblock.content_lines[0] + " \\"
 

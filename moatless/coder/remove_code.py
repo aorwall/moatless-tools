@@ -3,13 +3,13 @@ import logging
 from instructor import OpenAISchema
 from pydantic import Field
 
-from moatless.coder.types import WriteCodeResult, CoderResponse, CodeFunction
+from moatless.coder.types import FunctionResponse, CoderResponse, CodeFunction, Function
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
 
 
-class RemoveCode(CodeFunction):
+class RemoveCode(Function):
     """
     Remove all code in one span. If parts of the code should be removed you should use the function 'update'.
     """
@@ -24,36 +24,34 @@ class RemoveCodeAction:
         self._file_context = file_context
 
     def execute(self, task: RemoveCode):
-        if self._file_context.is_in_context(task.file_path):
+        file = self._file_context.get_file(task.file_path)
+        if not file:
             logger.error(f"File {task.file_path} not found in file context.")
             return CoderResponse(
                 file_path=task.file_path,
                 error="The provided file isn't found in the file context.",
             )
 
-        original_module = self._file_context.get_module(task.file_path)
-        span = original_module.find_by_span_id(task.span_id)
+        original_module = file.module
+        first_block = original_module.find_first_by_span_id(task.span_id)
 
-        first_path_in_span = span.block_paths[0]
-        last_path_in_span = span.block_paths[-1]
-
+        parent_block = first_block.parent
         logger.info(
-            f"Will remove span {span.span_id} from block path {first_path_in_span} to {last_path_in_span}"
+            f"Will remove span {task.span_id} from block path {parent_block.full_path()}"
         )
-
-        if len(first_path_in_span) > 1:
-            parent_block = original_module.find_by_path(first_path_in_span[:-1])
-        else:
-            parent_block = original_module
 
         remaining_children = []
         for child in parent_block.children:
             if (
                 not child.belongs_to_span
-                or child.belongs_to_span.span_id != span.span_id
+                or child.belongs_to_span.span_id != task.span_id
             ):
                 remaining_children.append(child)
 
+        logger.info(
+            f"Will remove {len(parent_block.children) - len(remaining_children)} children from {parent_block.full_path()}"
+        )
+
         parent_block.children = remaining_children
 
-        return WriteCodeResult()
+        return FunctionResponse()
