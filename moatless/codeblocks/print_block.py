@@ -1,5 +1,3 @@
-from collections import namedtuple
-from enum import Enum
 from typing import List, Tuple
 
 from moatless.codeblocks import CodeBlock, CodeBlockType

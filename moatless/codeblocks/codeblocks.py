@@ -1,6 +1,6 @@
 import re
 from enum import Enum
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Set
 
 from pydantic import BaseModel, validator, Field, root_validator
 from typing_extensions import deprecated
@@ -31,7 +31,7 @@ class CodeBlockTypeGroup(str, Enum):
 
 class CodeBlockType(Enum):
 
-    MODULE = ("Module", CodeBlockTypeGroup.STRUCTURE)
+    MODULE = ("Module", CodeBlockTypeGroup.STRUCTURE)  # TODO: Remove Stucture from Module
     CLASS = ("Class", CodeBlockTypeGroup.STRUCTURE)
     FUNCTION = ("Function", CodeBlockTypeGroup.STRUCTURE)
 

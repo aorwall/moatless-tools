@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import List, Tuple, Optional, Callable, Dict
+from typing import List, Tuple, Optional, Callable
 
 import networkx as nx
 from llama_index.core import get_tokenizer

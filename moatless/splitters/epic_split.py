@@ -10,8 +10,8 @@ from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode, NodeRelationship
 from llama_index.core.utils import get_tqdm_iterable, get_tokenizer
 
-from moatless.code_graph import CodeGraph
-from moatless.codeblocks import create_parser, CodeParser
+from moatless.index.code_graph import CodeGraph
+from moatless.codeblocks import CodeParser
 from moatless.codeblocks.codeblocks import PathTree, CodeBlock, CodeBlockType
 from moatless.codeblocks.parser.python import PythonParser
 

@@ -10,11 +10,11 @@ from llama_index.core import get_tokenizer
 from openai import OpenAI
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-from moatless.codeblocks.print_block import print_with_blockpath_comments
 from moatless.codeblocks.parser.python import PythonParser
+from moatless.codeblocks.print_block import print_with_blockpath_comments
 from moatless.constants import SMART_MODEL
 from moatless.prompts import SELECT_BLOCKS_SYSTEM_PROMPT
-from moatless.types import Usage, BlockPath, ContextFile, BaseResponse
+from moatless.types import Usage, BlockPath, BaseResponse
 
 logger = logging.getLogger(__name__)
 

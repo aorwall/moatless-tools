@@ -6,7 +6,6 @@ from tree_sitter import Language
 from moatless.codeblocks.codeblocks import (
     CodeBlockType,
     CodeBlock,
-    Relationship,
     ReferenceScope,
     RelationshipType,
 )

@@ -1,10 +1,8 @@
-import json
 import logging
-import uuid
 from typing import Optional, Tuple, List, Dict
 
-from litellm import completion, Message
-from pydantic import Field, Extra, PrivateAttr
+from litellm import completion
+from pydantic import Field, PrivateAttr
 
 from moatless.analytics import send_event
 from moatless.codeblocks import CodeBlock, CodeBlockType
@@ -12,13 +10,11 @@ from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, BlockPath
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.coder.code_action import (
-    CodeAction,
-    respond_with_invalid_block,
     CodeAgentFunction,
 )
 from moatless.coder.code_utils import extract_response_parts, CodePart, do_diff
-from moatless.coder.prompt import CODER_SYSTEM_PROMPT
-from moatless.coder.types import FunctionResponse, CodeFunction, Function
+from moatless.coder.prompt import CODER_SYSTEM_PROMPT, UPDATE_CODE_RESPONSE_FORMAT
+from moatless.coder.types import FunctionResponse, Omissible
 from moatless.file_context import FileContext
 from moatless.session import Session
 from moatless.settings import Settings
@@ -34,13 +30,13 @@ class UpdateCode(CodeAgentFunction):
     )
     file_path: str = Field(description="The file path of the code to be updated.")
     span_id: str = Field(description="The span id of the code to be updated.")
-    start_line: Optional[int] = Field(
+    start_line: Omissible[int] = Field(
         description="The start line of the code to be updated if just a part of the span should be updated.",
-        default=None,
+        default=None
     )
-    end_line: Optional[int] = Field(
+    end_line: Omissible[int] = Field(
         description="The end line of the code to be updated if just a part of the span should be updated.",
-        default=None,
+        default=None
     )
 
     _max_retries: int = PrivateAttr(default=2)
@@ -75,8 +71,35 @@ class UpdateCode(CodeAgentFunction):
             )
         else:
             logger.info(f"Updating code in file {self.file_path}, span {self.span_id}")
+        span = self._original_module.find_span_by_id(self.span_id)
+        span_block = self._original_module.find_by_path(span.parent_block_path)
 
-        self._set_block_and_span()
+        if self.start_line is None:
+            self._original_block = span_block
+        else:
+            if self.end_line is None:
+                self.end_line = span_block.end_line
+
+            if span_block.end_line == self.start_line - 1:
+                logger.info(
+                    f"Span {self.span_id} end line {span_block.endline} is one line before suggested start line "
+                    f"{self.start_line}. Will change start line as it might just be a new addition"
+                )
+                self.start_line = span_block.end_line
+
+            if (
+                span_block.end_line < self.start_line
+                or span_block.start_line > self.end_line
+            ):
+                self._fail(
+                    error_type="line_not_in_block",
+                    message=f"Line {self.start_line}-{self.end_line} is not within the block {span_block.identifier} on line"
+                    f" {span_block.start_line}-{span_block.end_line}"
+                )
+
+            self._original_block, self._start_index, self._end_index = (
+                self._find_block_that_has_lines(span_block)
+            )
 
         span = self._original_module.find_span_by_id(self.span_id)
         if (
@@ -100,6 +123,8 @@ class UpdateCode(CodeAgentFunction):
             "role": "system",
             "content": f"""{CODER_SYSTEM_PROMPT}
 
+{UPDATE_CODE_RESPONSE_FORMAT}
+
 # File context:
 {file_context_content}
 """,
@@ -113,7 +138,7 @@ class UpdateCode(CodeAgentFunction):
         self._messages = [system_message, instruction_message]
 
         while self._retries < self._max_retries:
-            response = self._code_loop()
+            response = self._dev_loop()
             if response:
                 return response
             self._retries += 1
@@ -122,13 +147,13 @@ class UpdateCode(CodeAgentFunction):
             error=f"Failed to update code. No rejection reason provided."
         )
 
-    def _code_loop(self) -> Optional[FunctionResponse]:
+    def _dev_loop(self) -> Optional[FunctionResponse]:
         logger.info(f"Starting code update loop, retry {self._retries}")
 
         llm_response = completion(
             model=Settings.coder.coding_model,
             temperature=0.0,
-            max_tokens=2000,
+            max_tokens=1500,
             messages=self._messages,
             metadata={
                 "generation_name": "coder-write-code",
@@ -154,17 +179,16 @@ class UpdateCode(CodeAgentFunction):
 
         if not changes:
             if choice.finish_reason == "length":
-                self.log_failure(
+                self._fail(
                     error_type="token_limit_exceeded",
                     message="No changed found, probably exeeded token limit.",
                 )
-                # TODO: Handle in a more graceful way than aborting the flow
-                # To not spend to many tokens...
-                raise Exception(f"Token limit exceeded. ")
+                # TODO: Handle in a more graceful way than just aborting the flow
+                raise ValueError("Token limit exceeded")
             else:
-                self.log_failure(error_type="no_changes")
-                return FunctionResponse(
-                    error=f"No code changes found in the updated code. {thoughts}"
+                return self._fail(
+                    error_type="no_changes",
+                    message=f"No code changes found in the updated code. {thoughts}"
                 )
 
         if len(changes) > 1:
@@ -188,8 +212,15 @@ class UpdateCode(CodeAgentFunction):
             updated_module, self._original_block.full_path()
         )
         if not updated_block:
+            blocks = updated_module.find_blocks_with_identifier(self._original_block.identifier)
+            if len(blocks) == 1:
+                if len(blocks[0].full_path()) < len(self._original_block.full_path()):
+                    rejection_reason = f"Found {self._original_block.identifier} on the wrong level, expected it to be inside {self._original_block.full_path()}. Return the code as instructed in CODE TO UPDATE."
+                    return self._reject(
+                        rejection_code="block_on_wrong_level", rejection_reason=rejection_reason
+                    )
             rejection_reason = (
-                f"Couldn't find the expected block {self._original_block.identifier}"
+                f"Couldn't find the expected block {self._original_block.identifier}. Return the code as instructed in CODE TO UPDATE. "
             )
             return self._reject(
                 rejection_code="block_not_found", rejection_reason=rejection_reason
@@ -298,13 +329,28 @@ class UpdateCode(CodeAgentFunction):
 
         code = code.strip()
 
+        if self._original_block.type.group == CodeBlockTypeGroup.STRUCTURE:
+            closest_structure_block = self._original_block
+        else:
+            closest_structure_block = self._original_block.find_type_group_in_parents(CodeBlockTypeGroup.STRUCTURE)
+
+        code_instructions = ""
+        if closest_structure_block.parent and closest_structure_block.parent.type == CodeBlockType.CLASS:
+            code_instructions += f"You must keep the class signature for `{closest_structure_block.parent.identifier}`. "
+
+        if closest_structure_block.type != CodeBlockType.MODULE:
+            code_instructions += f"Only update the code inside the {closest_structure_block.type.value.lower()} `{closest_structure_block.identifier}`. "
+
+        if (self._start_index is not None and self._end_index is not None) or not code_instructions:
+            code_instructions += f"Only update the code that is not out commented. "
+
         return f"""# INSTRUCTIONS:
 {self.instructions}
-    
-# CODE TO UPDATE:
-Update the part of the implementation in {self._original_block.identifier}. 
-Leave all placeholder comments named ` ... other code` as is!
 
+# CODE UPDATE INSTRUCTIONS:
+{code_instructions}
+
+# CODE TO UPDATE:
 ```python
 {code}
 ```
@@ -345,36 +391,12 @@ Leave all placeholder comments named ` ... other code` as is!
         else:
             return None
 
-    def _set_block_and_span(self):
-        span = self._original_module.find_span_by_id(self.span_id)
-        span_block = self._original_module.find_by_path(span.parent_block_path)
-
-        if self.start_line is None:
-            self._original_block = span_block
-            return
-
-        if self.end_line is None:
-            self.end_line = span_block.end_line
-
-        if span_block.end_line == self.start_line - 1:
-            logger.info(
-                f"Span {self.span_id} end line {span_block.endline} is one line before suggested start line "
-                f"{self.start_line}. Will change start line as it might just be a new addition"
-            )
-            self.start_line = span_block.end_line
-
-        if (
-            span_block.end_line < self.start_line
-            or span_block.start_line > self.end_line
-        ):
-            raise ValueError(
-                f"Line  {self.start_line}-{self.end_line} is not within the block {span_block.identifier} on line"
-                f" {span_block.start_line}-{span_block.end_line}"
-            )
-
-        self._original_block, self._start_index, self._end_index = (
-            self._find_block_that_has_lines(span_block)
-        )
+    def _find_block_by_identifer(self, codeblock: CodeBlock):
+        blocks = self._original_module.find_blocks_with_identifier(codeblock.identifier)
+        if len(blocks) == 1:
+            return blocks[0]
+        else:
+            return None
 
     def _find_block_that_has_lines(
         self, codeblock: CodeBlock
@@ -466,7 +488,7 @@ Leave all placeholder comments named ` ... other code` as is!
         send_event(
             event="code_update_rejected",
             properties={
-                "error_type": "syntax_error",
+                "error_type": rejection_code,
                 "rejection_reason": rejection_reason,
                 "retries": self._retries,
             },

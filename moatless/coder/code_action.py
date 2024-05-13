@@ -8,7 +8,7 @@ from moatless.analytics import send_event
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.coder.code_utils import extract_response_parts, CodePart, do_diff
-from moatless.coder.types import CoderResponse, FunctionResponse, CodeFunction, Function
+from moatless.coder.types import FunctionResponse, CodeFunction, Function
 from moatless.file_context import FileContext
 from moatless.prompts import CODER_SYSTEM_PROMPT
 from moatless.session import Session

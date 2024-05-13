@@ -1,9 +1,8 @@
 import logging
 
-from instructor import OpenAISchema
 from pydantic import Field
 
-from moatless.coder.types import FunctionResponse, CoderResponse, CodeFunction, Function
+from moatless.coder.types import FunctionResponse, CoderResponse, Function
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)

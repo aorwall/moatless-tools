@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from typing import List
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class Coder:
 
-    def __init__(self, file_context: FileContext, max_retries: int = 3):
+    def __init__(self, file_context: FileContext, max_retries: int = 2):
         self._file_context = file_context
         self._tokenizer = get_tokenizer()
 
@@ -88,7 +87,7 @@ class Coder:
             if response_message.content:
                 logger.info(f"Response message: {response_message.content}")
 
-            error_messages = []
+            error_message = None
             if hasattr(response_message, "tool_calls"):
                 for tool_call in response_message.tool_calls:
                     logger.info(f"Execute action: {tool_call.function.name}")
@@ -120,39 +119,36 @@ class Coder:
                             response = FunctionResponse(
                                 error=f"Unknown function: {tool_call.function.name}"
                             )
+
+                        if response.error:
+                            logger.info(f"Function error response: {response.error}")
+                            error_message = {
+                                    "tool_call_id": tool_call.id,
+                                    "role": "tool",
+                                    "name": tool_call.function.name,
+                                    "content": response.error,
+                                }
+
                     except ValidationError as e:
                         logger.warning(f"Failed to validate function call. Error: {e}")
-                        error_messages.append(
-                            {
+                        error_message = {
                                 "tool_call_id": tool_call.id,
                                 "role": "tool",
                                 "name": tool_call.function.name,
                                 "content": str(e),
                             }
-                        )
 
-                    if response.error:
-                        logger.info(f"Function error response: {response.error}")
-                        error_messages.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "role": "tool",
-                                "name": tool_call.function.name,
-                                "content": response.error,
-                            }
-                        )
             else:
-                error_messages = [
-                    {
+                error_message = {
                         "role": "user",
                         "content": "You must use one of the functions.",
                     }
-                ]
 
-            if error_messages:
-                messages.extend(error_messages)
+            if error_message:
+                messages.append(error_message)
                 retries += 1
             else:
                 return True
 
+        logger.warning(f"Failed to execute the plan after {retries} retries.")
         return False

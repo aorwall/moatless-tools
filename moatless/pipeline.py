@@ -1,16 +1,13 @@
 import logging
 import os
-import uuid
 from typing import List
 
 from llama_index.embeddings.voyageai import VoyageEmbedding
 from pydantic import BaseModel
 
-from moatless.coder import Coder
 from moatless.ingestion import CodeBaseIngestionPipeline
 from moatless.select_blocks import CodeBlockSelector
 from moatless.splitters.epic_split import EpicSplitter
-from moatless.types import ContextFile, CodingTask
 
 
 class PipelineStep(BaseModel):

@@ -1,8 +1,8 @@
-from abc import abstractmethod
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any, TypeVar, Annotated, Type
 
 from instructor import OpenAISchema
-from pydantic import BaseModel, Extra
+from pydantic import BaseModel, Extra, GetCoreSchemaHandler
+from pydantic_core import core_schema
 
 from moatless.types import BaseResponse
 
@@ -25,6 +25,15 @@ class FunctionResponse(BaseModel):
     error: Optional[str] = None
     error_type: Optional[str] = None
 
+class NotNullable:
+    def __get_pydantic_core_schema__(self, source: Type[Any], handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
+        schema = handler(source)
+        assert schema["type"] == "nullable"
+        return schema["schema"]
+
+
+T = TypeVar("T")
+Omissible = Annotated[Optional[T], NotNullable()]
 
 class Function(OpenAISchema):
 

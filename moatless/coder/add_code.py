@@ -3,7 +3,6 @@ import logging
 from pydantic import Field
 
 from moatless.codeblocks.codeblocks import (
-    CodeBlockTypeGroup,
     CodeBlockType,
     CodeBlock,
     BlockPath,

@@ -1,10 +1,6 @@
-from collections import namedtuple
-from typing import List, Optional, Set
+from typing import List, Optional
 
 from pydantic import BaseModel
-
-from moatless.codeblocks.codeblocks import BlockSpan, LineSpan
-from moatless.codeblocks.module import Module
 
 
 class Span(BaseModel):

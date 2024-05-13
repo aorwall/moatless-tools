@@ -1,52 +1,38 @@
-import json
 import logging
 import uuid
 from typing import List
 
 from litellm import completion
-from llama_index.core import get_tokenizer
+from litellm.utils import FunctionCall
 
-from moatless.coder.add_code import AddCode, AddCodeAction
-from moatless.coder.prompt import (
-    CREATE_PLAN_PROMPT,
-)
+from moatless.coder.add_code import AddCodeBlock, AddCodeAction
 from moatless.coder.remove_code import RemoveCode, RemoveCodeAction
 from moatless.coder.types import FunctionResponse
-from moatless.coder.update_code import UpdateCode, UpdateCodeAction
-from moatless.file_context import FileContext
+from moatless.coder.update_code import UpdateCode
+from moatless.prompts import AGENT_SYSTEM_PROMPT
+from moatless.search import Search
 from moatless.session import Session
 from moatless.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
-class Coder:
+class Finish(FunctionCall):
+    """
+    Finish the coding task and submit the solution.
+    """
 
-    def __init__(self, file_context: FileContext, max_retries: int = 3):
-        self._file_context = file_context
-        self._tokenizer = get_tokenizer()
 
+class MoatlessAgent:
+
+    def __init__(self, max_iterations: int = 10):
         self._trace_id = uuid.uuid4().hex
-        self._update_action = UpdateCodeAction(file_context=self._file_context, trace_id=self._trace_id)
-        self._add_action = AddCodeAction(file_context=self._file_context, trace_id=self._trace_id)
-        self._remove_action = RemoveCodeAction(file_context=self._file_context)
-        self._max_retries = max_retries
+        self._add_action = AddCodeAction(trace_id=self._trace_id)
+        self._remove_action = RemoveCodeAction()
+        self._max_iterations = max_iterations
 
     def run(self, requirement: str, mock_response: List[str] = None):
-        file_context_content = self._file_context.create_prompt(
-            show_span_ids=True, show_line_numbers=True
-        )
-
-        system_prompt = f"""# Instructions
-{CREATE_PLAN_PROMPT}
-
-# File context
-
-{file_context_content}
-
-"""
-
-        system_message = {"content": system_prompt, "role": "system"}
+        system_message = {"content": AGENT_SYSTEM_PROMPT, "role": "system"}
         instruction_message = {
             "content": f"# Requirement\n{requirement}",
             "role": "user",
@@ -58,14 +44,16 @@ class Coder:
         ]
 
         tools = [
+            Search.openai_tool_spec,
             UpdateCode.openai_tool_spec,
-            AddCode.openai_tool_spec,
+            AddCodeBlock.openai_tool_spec,
             RemoveCode.openai_tool_spec,
+            Finish.openai_tool_spec,
         ]
 
-        retries = 0
+        iterations = 0
 
-        while retries < self._max_retries:
+        while iterations < self._max_iterations:
             response = completion(
                 model=Settings.coder.planning_model,
                 max_tokens=750,
@@ -91,14 +79,25 @@ class Coder:
                 for tool_call in response_message.tool_calls:
                     logger.info(f"Execute action: {tool_call.function.name}")
 
-                    if tool_call.function.name == UpdateCode.name:
-                        task = UpdateCode.model_validate_json(tool_call.function.arguments)
+                    if tool_call.function.name == Search.name:
+                        func = Search.model_validate_json(tool_call.function.arguments)
+                        response = func.execute()
+                    elif tool_call.function.name == Finish.name:
+                        return True
+                    elif tool_call.function.name == UpdateCode.name:
+                        task = UpdateCode.model_validate_json(
+                            tool_call.function.arguments
+                        )
                         response = self._update_action.execute(task)
-                    elif tool_call.function.name == AddCode.name:
-                        task = AddCode.model_validate_json(tool_call.function.arguments)
+                    elif tool_call.function.name == AddCodeBlock.name:
+                        task = AddCodeBlock.model_validate_json(
+                            tool_call.function.arguments
+                        )
                         response = self._add_action.execute(task)
                     elif tool_call.function.name == RemoveCode.name:
-                        task = RemoveCode.model_validate_json(tool_call.function.arguments)
+                        task = RemoveCode.model_validate_json(
+                            tool_call.function.arguments
+                        )
                         response = self._remove_action.execute(task)
                     else:
                         logger.warning(f"Unknown function: {tool_call.function.name}")
@@ -116,6 +115,16 @@ class Coder:
                                 "content": response.error,
                             }
                         )
+                    else:
+                        logger.info(f"Function response: {response.diff}")
+                        messages.append(
+                            {
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": tool_call.function.name,
+                                "content": response.content,
+                            }
+                        )
             else:
                 error_messages = [
                     {
@@ -126,8 +135,7 @@ class Coder:
 
             if error_messages:
                 messages.append(error_messages)
-                retries += 1
-            else:
-                return True
+
+            iterations += 1
 
         return False

@@ -6,11 +6,10 @@ Do not suggest any other changes than the ones requested.
  
 Each code file has its contents divided into spans, with each span preceded by a unique span id tag. 
 
-You can update the code by calling the available functions for each part of the code file you want to update.
+You will update the code by calling the available functions for each part of the code file you want to update.
 
-You can call more than one function but only one function per span so make sure to include all instructions needed to update the span.
-
-If you only need to update a part of a span you can provide the line numbers. If it's a one line change you still need to provide both start line and end line. 
+If you only need to update a part of a span you must provide the line numbers. 
+If it's a one line change you still need to provide both start line and end line. 
 
 If you need to do changes in different spans you call the function one time for each span.
 
@@ -34,11 +33,36 @@ When you update a code block you must follow the rules below:
 * Leave NO todo's, placeholders or missing pieces
 * Ensure code is complete! 
 * Write out ALL existing code in the provided code span!
-* KEEP the placeholder comments named "# ... other code". DO NOT remove them or implement them. 
+* KEEP the placeholder comments named "# ... other code". DO NOT remove them or implement them.  
+"""
+
+UPDATE_CODE_RESPONSE_FORMAT = """
 
 Respond with the updated code in a code block like:
 
 ```python
 # ... code here
 ```
+"""
+
+SEARCH_REPLACE_RESPONSE_FORMAT = """Respond with a *SEARCH/REPLACE block* like:
+
+[file_name]
+<search>
+# code to replace
+</search>
+<replace>
+# new code
+</replace>
+
+Example:
+
+main.py
+<search>
+from flask import Flask
+</search>
+<replace>
+import math
+from flask import Flask
+</replace>
 """
