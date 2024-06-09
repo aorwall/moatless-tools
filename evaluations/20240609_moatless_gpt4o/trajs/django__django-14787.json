@@ -1,0 +1,117 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "method_decorator() should preserve wrapper assignments\nDescription\n\t\nthe function that is passed to the decorator is a partial object and does not have any of the attributes expected from a function i.e. __name__, __module__ etc...\nconsider the following case\ndef logger(func):\n\t@wraps(func)\n\tdef inner(*args, **kwargs):\n\t\ttry:\n\t\t\tresult = func(*args, **kwargs)\n\t\texcept Exception as e:\n\t\t\tresult = str(e)\n\t\tfinally:\n\t\t\tlogger.debug(f\"{func.__name__} called with args: {args} and kwargs: {kwargs} resulting: {result}\")\n\treturn inner\nclass Test:\n\t@method_decorator(logger)\n\tdef hello_world(self):\n\t\treturn \"hello\"\nTest().test_method()\nThis results in the following exception\nAttributeError: 'functools.partial' object has no attribute '__name__'\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "method_decorator"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/utils/decorators.py",
+                "spans": [
+                  {
+                    "span_id": "method_decorator",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.0056300000000000005
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The method_decorator function is responsible for applying decorators to methods. The issue described involves the decorator not preserving attributes like __name__ and __module__, which is relevant to this function.",
+            "files_with_spans": [
+              {
+                "file_path": "django/utils/decorators.py",
+                "span_ids": [
+                  "method_decorator"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.007935000000000001
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Update the _multi_decorate function to ensure that the partial object has the necessary attributes like __name__, __module__, etc., by using update_wrapper on the bound_method inside the _wrapper function.",
+            "file_path": "django/utils/decorators.py",
+            "span_id": "_multi_decorate"
+          },
+          "output": {
+            "response": "def _multi_decorate(decorators, method):\n    \"\"\"\n    Decorate `method` with one or more function decorators. `decorators` can be\n    a single decorator or an iterable of decorators.\n    \"\"\"\n    if hasattr(decorators, '__iter__'):\n        # Apply a list/tuple of decorators if 'decorators' is one. Decorator\n        # functions are applied so that the call order is the same as the\n        # order in which they appear in the iterable.\n        decorators = decorators[::-1]\n    else:\n        decorators = [decorators]\n\n    def _wrapper(self, *args, **kwargs):\n        # bound_method has the signature that 'decorator' expects i.e. no\n        # 'self' argument, but it's a closure over self so it can call\n        # 'func'. Also, wrap method.__get__() in a function because new\n        # attributes can't be set on bound method objects, only on functions.\n        bound_method = partial(method.__get__(self, type(self)))\n        for dec in decorators:\n            bound_method = dec(bound_method)\n        return bound_method(*args, **kwargs)\n\n    # Copy any attributes that a decorator adds to the function it decorates.\n    for dec in decorators:\n        _update_method_wrapper(_wrapper, dec)\n    # Preserve any existing attributes of 'method', including the name.\n    update_wrapper(_wrapper, method)\n    return _wrapper"
+          }
+        }
+      ],
+      "completion_cost": 0.00588
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/utils/decorators.py",
+            "span_id": "_multi_decorate",
+            "start_line": 22,
+            "end_line": 50,
+            "replacement_code": "\ndef _multi_decorate(decorators, method):\n    \"\"\"\n    Decorate `method` with one or more function decorators. `decorators` can be\n    a single decorator or an iterable of decorators.\n    \"\"\"\n    if hasattr(decorators, '__iter__'):\n        decorators = decorators[::-1]\n    else:\n        decorators = [decorators]\n\n    def _wrapper(self, *args, **kwargs):\n        bound_method = partial(method.__get__(self, type(self)))\n        update_wrapper(bound_method, method)\n        for dec in decorators:\n            bound_method = dec(bound_method)\n        return bound_method(*args, **kwargs)\n\n    for dec in decorators:\n        _update_method_wrapper(_wrapper, dec)\n    update_wrapper(_wrapper, method)\n    return _wrapper\n"
+          },
+          "output": {
+            "diff": "--- django/utils/decorators.py\n+++ django/utils/decorators.py\n@@ -25,27 +25,19 @@\n     a single decorator or an iterable of decorators.\n     \"\"\"\n     if hasattr(decorators, '__iter__'):\n-        # Apply a list/tuple of decorators if 'decorators' is one. Decorator\n-        # functions are applied so that the call order is the same as the\n-        # order in which they appear in the iterable.\n         decorators = decorators[::-1]\n     else:\n         decorators = [decorators]\n \n     def _wrapper(self, *args, **kwargs):\n-        # bound_method has the signature that 'decorator' expects i.e. no\n-        # 'self' argument, but it's a closure over self so it can call\n-        # 'func'. Also, wrap method.__get__() in a function because new\n-        # attributes can't be set on bound method objects, only on functions.\n         bound_method = partial(method.__get__(self, type(self)))\n+        update_wrapper(bound_method, method)\n         for dec in decorators:\n             bound_method = dec(bound_method)\n         return bound_method(*args, **kwargs)\n \n-    # Copy any attributes that a decorator adds to the function it decorates.\n     for dec in decorators:\n         _update_method_wrapper(_wrapper, dec)\n-    # Preserve any existing attributes of 'method', including the name.\n     update_wrapper(_wrapper, method)\n     return _wrapper\n \n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.010685
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue has been resolved by updating the _multi_decorate function to ensure that the partial object has the necessary attributes like __name__, __module__, etc., by using update_wrapper on the bound_method inside the _wrapper function."
+          }
+        }
+      ],
+      "completion_cost": 0.007555000000000001
+    }
+  ],
+  "output": {
+    "message": "The issue has been resolved by updating the _multi_decorate function to ensure that the partial object has the necessary attributes like __name__, __module__, etc., by using update_wrapper on the bound_method inside the _wrapper function."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-14787",
+    "trace_id": "coder_django__django-14787_20240609-124448",
+    "submission": "diff --git a/django/utils/decorators.py b/django/utils/decorators.py\nindex 5c9a5d01c7..b5dc93c945 100644\n--- a/django/utils/decorators.py\n+++ b/django/utils/decorators.py\n@@ -25,27 +25,19 @@ def _multi_decorate(decorators, method):\n     a single decorator or an iterable of decorators.\n     \"\"\"\n     if hasattr(decorators, '__iter__'):\n-        # Apply a list/tuple of decorators if 'decorators' is one. Decorator\n-        # functions are applied so that the call order is the same as the\n-        # order in which they appear in the iterable.\n         decorators = decorators[::-1]\n     else:\n         decorators = [decorators]\n \n     def _wrapper(self, *args, **kwargs):\n-        # bound_method has the signature that 'decorator' expects i.e. no\n-        # 'self' argument, but it's a closure over self so it can call\n-        # 'func'. Also, wrap method.__get__() in a function because new\n-        # attributes can't be set on bound method objects, only on functions.\n         bound_method = partial(method.__get__(self, type(self)))\n+        update_wrapper(bound_method, method)\n         for dec in decorators:\n             bound_method = dec(bound_method)\n         return bound_method(*args, **kwargs)\n \n-    # Copy any attributes that a decorator adds to the function it decorates.\n     for dec in decorators:\n         _update_method_wrapper(_wrapper, dec)\n-    # Preserve any existing attributes of 'method', including the name.\n     update_wrapper(_wrapper, method)\n     return _wrapper\n \n",
+    "duration": 7.589306592941284,
+    "total_cost": 0.037685
+  }
+}

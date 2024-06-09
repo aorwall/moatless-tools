@@ -1,0 +1,200 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Add get_response_async for ASGIStaticFilesHandler\nDescription\n\t\nIt looks like the StaticFilesHandlerMixin is missing the the async response function.\nWithout this, when trying to use the ASGIStaticFilesHandler, this is the traceback:\nException inside application: 'NoneType' object is not callable\nTraceback (most recent call last):\n File \".../lib/python3.7/site-packages/daphne/cli.py\", line 30, in asgi\n\tawait self.app(scope, receive, send)\n File \".../src/django/django/contrib/staticfiles/handlers.py\", line 86, in __call__\n\treturn await super().__call__(scope, receive, send)\n File \".../src/django/django/core/handlers/asgi.py\", line 161, in __call__\n\tresponse = await self.get_response_async(request)\n File \".../src/django/django/core/handlers/base.py\", line 148, in get_response_async\n\tresponse = await self._middleware_chain(request)\nTypeError: 'NoneType' object is not callable\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "class_name": "StaticFilesHandlerMixin"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/contrib/staticfiles/handlers.py",
+                "spans": [
+                  {
+                    "span_id": "StaticFilesHandlerMixin",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin.load_middleware",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin.get_base_url",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin._should_handle",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin.file_path",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin.serve",
+                    "tokens": 571
+                  },
+                  {
+                    "span_id": "StaticFilesHandlerMixin.get_response",
+                    "tokens": 571
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        },
+        {
+          "name": "search",
+          "input": {
+            "class_name": "ASGIStaticFilesHandler"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/contrib/staticfiles/handlers.py",
+                "spans": [
+                  {
+                    "span_id": "ASGIStaticFilesHandler",
+                    "tokens": 2000
+                  },
+                  {
+                    "span_id": "ASGIStaticFilesHandler.__call__",
+                    "tokens": 2000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.006345000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "get_response_async"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/core/handlers/base.py",
+                "spans": [
+                  {
+                    "span_id": "BaseHandler.get_response_async",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.008190000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The StaticFilesHandlerMixin class lacks the async response function, which is causing the issue when using ASGIStaticFilesHandler. The get_response_async function in BaseHandler provides the necessary implementation.",
+            "files_with_spans": [
+              {
+                "file_path": "django/contrib/staticfiles/handlers.py",
+                "span_ids": [
+                  "StaticFilesHandlerMixin",
+                  "ASGIStaticFilesHandler"
+                ]
+              },
+              {
+                "file_path": "django/core/handlers/base.py",
+                "span_ids": [
+                  "BaseHandler.get_response_async"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.01037
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Add the async response function get_response_async to the StaticFilesHandlerMixin class to handle asynchronous requests in ASGIStaticFilesHandler.",
+            "file_path": "django/contrib/staticfiles/handlers.py",
+            "span_id": "StaticFilesHandlerMixin"
+          },
+          "output": {
+            "response": "class StaticFilesHandlerMixin:\n    \"\"\"\n    Common methods used by WSGI and ASGI handlers.\n    \"\"\"\n    # May be used to differentiate between handler types (e.g. in a\n    # request_finished signal)\n    handles_files = True"
+          }
+        }
+      ],
+      "completion_cost": 0.006145000000000001
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/contrib/staticfiles/handlers.py",
+            "span_id": "StaticFilesHandlerMixin",
+            "start_line": 13,
+            "end_line": 19,
+            "replacement_code": "\nclass StaticFilesHandlerMixin:\n    \"\"\"\n    Common methods used by WSGI and ASGI handlers.\n    \"\"\"\n    # May be used to differentiate between handler types (e.g. in a\n    # request_finished signal)\n    handles_files = True\n\n    async def get_response_async(self, request):\n        \"\"\"\n        Asynchronous version of get_response for handling static files.\n        \"\"\"\n        set_urlconf(settings.ROOT_URLCONF)\n        try:\n            static_file_response = await sync_to_async(serve)(request, url2pathname(request.path_info))\n            static_file_response._resource_closers.append(request.close)\n            return static_file_response\n        except Http404:\n            return await self.application(scope, receive, send)\n        except Exception as e:\n            return response_for_exception(request, e)\n"
+          },
+          "output": {
+            "diff": "--- django/contrib/staticfiles/handlers.py\n+++ django/contrib/staticfiles/handlers.py\n@@ -17,6 +17,20 @@\n     # May be used to differentiate between handler types (e.g. in a\n     # request_finished signal)\n     handles_files = True\n+\n+    async def get_response_async(self, request):\n+        \"\"\"\n+        Asynchronous version of get_response for handling static files.\n+        \"\"\"\n+        set_urlconf(settings.ROOT_URLCONF)\n+        try:\n+            static_file_response = await sync_to_async(serve)(request, url2pathname(request.path_info))\n+            static_file_response._resource_closers.append(request.close)\n+            return static_file_response\n+        except Http404:\n+            return await self.application(scope, receive, send)\n+        except Exception as e:\n+            return response_for_exception(request, e)\n \n     def load_middleware(self):\n         # Middleware are already loaded for self.application; no need to reload\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": [
+              "StaticFilesHandlerMixin.get_response_async"
+            ]
+          }
+        }
+      ],
+      "completion_cost": 0.00922
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The async response function get_response_async has been successfully added to the StaticFilesHandlerMixin class to handle asynchronous requests in ASGIStaticFilesHandler."
+          }
+        }
+      ],
+      "completion_cost": 0.00789
+    }
+  ],
+  "output": {
+    "message": "The async response function get_response_async has been successfully added to the StaticFilesHandlerMixin class to handle asynchronous requests in ASGIStaticFilesHandler."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-12915",
+    "trace_id": "coder_django__django-12915_20240609-124020",
+    "submission": "diff --git a/django/contrib/staticfiles/handlers.py b/django/contrib/staticfiles/handlers.py\nindex 711d8864ad..9ef40b9385 100644\n--- a/django/contrib/staticfiles/handlers.py\n+++ b/django/contrib/staticfiles/handlers.py\n@@ -18,6 +18,20 @@ class StaticFilesHandlerMixin:\n     # request_finished signal)\n     handles_files = True\n \n+    async def get_response_async(self, request):\n+        \"\"\"\n+        Asynchronous version of get_response for handling static files.\n+        \"\"\"\n+        set_urlconf(settings.ROOT_URLCONF)\n+        try:\n+            static_file_response = await sync_to_async(serve)(request, url2pathname(request.path_info))\n+            static_file_response._resource_closers.append(request.close)\n+            return static_file_response\n+        except Http404:\n+            return await self.application(scope, receive, send)\n+        except Exception as e:\n+            return response_for_exception(request, e)\n+\n     def load_middleware(self):\n         # Middleware are already loaded for self.application; no need to reload\n         # them for self.\n",
+    "duration": 9.393495559692383,
+    "total_cost": 0.04816000000000001
+  }
+}

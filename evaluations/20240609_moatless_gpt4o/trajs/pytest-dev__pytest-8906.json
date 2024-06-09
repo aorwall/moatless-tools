@@ -1,0 +1,501 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Improve handling of skip for module level\nThis is potentially about updating docs, updating error messages or introducing a new API.\r\n\r\nConsider the following scenario:\r\n\r\n`pos_only.py` is using Python 3,8 syntax:\r\n```python\r\ndef foo(a, /, b):\r\n    return a + b\r\n```\r\n\r\nIt should not be tested under Python 3.6 and 3.7.\r\nThis is a proper way to skip the test in Python older than 3.8:\r\n```python\r\nfrom pytest import raises, skip\r\nimport sys\r\nif sys.version_info < (3, 8):\r\n    skip(msg=\"Requires Python >= 3.8\", allow_module_level=True)\r\n\r\n# import must be after the module level skip:\r\nfrom pos_only import *\r\n\r\ndef test_foo():\r\n    assert foo(10, 20) == 30\r\n    assert foo(10, b=20) == 30\r\n    with raises(TypeError):\r\n        assert foo(a=10, b=20)\r\n```\r\n\r\nMy actual test involves parameterize and a 3.8 only class, so skipping the test itself is not sufficient because the 3.8 class was used in the parameterization.\r\n\r\nA naive user will try to initially skip the module like:\r\n\r\n```python\r\nif sys.version_info < (3, 8):\r\n    skip(msg=\"Requires Python >= 3.8\")\r\n```\r\nThis issues this error:\r\n\r\n>Using pytest.skip outside of a test is not allowed. To decorate a test function, use the @pytest.mark.skip or @pytest.mark.skipif decorators instead, and to skip a module use `pytestmark = pytest.mark.{skip,skipif}.\r\n\r\nThe proposed solution `pytestmark = pytest.mark.{skip,skipif}`, does not work  in my case: pytest continues to process the file and fail when it hits the 3.8 syntax (when running with an older version of Python).\r\n\r\nThe correct solution, to use skip as a function is actively discouraged by the error message.\r\n\r\nThis area feels a bit unpolished.\r\nA few ideas to improve:\r\n\r\n1. Explain skip with  `allow_module_level` in the error message. this seems in conflict with the spirit of the message.\r\n2. Create an alternative API to skip a module to make things easier: `skip_module(\"reason\")`, which can call `_skip(msg=msg, allow_module_level=True)`.\r\n\r\n\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "improve handling of skip for module level",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "src/_pytest/python.py",
+                "spans": [
+                  {
+                    "span_id": "Module._importtestmodule",
+                    "tokens": 367
+                  },
+                  {
+                    "span_id": "Package._collectfile",
+                    "tokens": 129
+                  },
+                  {
+                    "span_id": "PyCollector._matches_prefix_or_glob_option",
+                    "tokens": 50
+                  }
+                ]
+              },
+              {
+                "file_path": "bench/skip.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 308
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 308
+                  },
+                  {
+                    "span_id": "test_foo",
+                    "tokens": 308
+                  }
+                ]
+              },
+              {
+                "file_path": "testing/python/collect.py",
+                "spans": [
+                  {
+                    "span_id": "TestFunction.test_parametrize_skipif_no_skip",
+                    "tokens": 258
+                  },
+                  {
+                    "span_id": "TestFunction.test_parametrize_skip",
+                    "tokens": 258
+                  },
+                  {
+                    "span_id": "TestTracebackCutting.test_skip_simple",
+                    "tokens": 217
+                  },
+                  {
+                    "span_id": "TestTracebackCutting",
+                    "tokens": 217
+                  },
+                  {
+                    "span_id": "TestTracebackCutting.test_traceback_argsetup",
+                    "tokens": 217
+                  },
+                  {
+                    "span_id": "test_modulecol_roundtrip",
+                    "tokens": 217
+                  },
+                  {
+                    "span_id": "TestFunction.test_parametrize_skipif",
+                    "tokens": 153
+                  },
+                  {
+                    "span_id": "TestModule.test_invalid_test_module_name",
+                    "tokens": 79
+                  },
+                  {
+                    "span_id": "TestModule.test_module_considers_pluginmanager_at_import",
+                    "tokens": 79
+                  },
+                  {
+                    "span_id": "TestModule.test_syntax_error_in_module",
+                    "tokens": 79
+                  },
+                  {
+                    "span_id": "TestModule",
+                    "tokens": 43
+                  },
+                  {
+                    "span_id": "TestModule.test_failing_import",
+                    "tokens": 43
+                  },
+                  {
+                    "span_id": "TestModule.test_import_duplicate",
+                    "tokens": 43
+                  }
+                ]
+              },
+              {
+                "file_path": "doc/en/example/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 182
+                  }
+                ]
+              },
+              {
+                "file_path": "src/_pytest/config/__init__.py",
+                "spans": [
+                  {
+                    "span_id": "_iter_rewritable_modules",
+                    "tokens": 109
+                  },
+                  {
+                    "span_id": "_args_converter",
+                    "tokens": 109
+                  }
+                ]
+              },
+              {
+                "file_path": "testing/example_scripts/collect/package_infinite_recursion/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "pytest_ignore_collect",
+                    "tokens": 93
+                  }
+                ]
+              },
+              {
+                "file_path": "doc/en/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 67
+                  }
+                ]
+              },
+              {
+                "file_path": "src/_pytest/doctest.py",
+                "spans": [
+                  {
+                    "span_id": "DoctestModule.collect.MockAwareDocTestFinder:2",
+                    "tokens": 58
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.007355
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "skip module level",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "doc/en/example/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 423
+                  }
+                ]
+              },
+              {
+                "file_path": "doc/en/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 354
+                  }
+                ]
+              },
+              {
+                "file_path": "testing/example_scripts/collect/package_infinite_recursion/conftest.py",
+                "spans": [
+                  {
+                    "span_id": "pytest_ignore_collect",
+                    "tokens": 297
+                  }
+                ]
+              },
+              {
+                "file_path": "bench/skip.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 249
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 249
+                  },
+                  {
+                    "span_id": "test_foo",
+                    "tokens": 249
+                  }
+                ]
+              },
+              {
+                "file_path": "src/_pytest/python.py",
+                "spans": [
+                  {
+                    "span_id": "Module._importtestmodule",
+                    "tokens": 209
+                  }
+                ]
+              },
+              {
+                "file_path": "testing/python/collect.py",
+                "spans": [
+                  {
+                    "span_id": "TestModule.test_invalid_test_module_name",
+                    "tokens": 176
+                  },
+                  {
+                    "span_id": "TestModule.test_module_considers_pluginmanager_at_import",
+                    "tokens": 176
+                  },
+                  {
+                    "span_id": "TestModule.test_syntax_error_in_module",
+                    "tokens": 176
+                  },
+                  {
+                    "span_id": "test_customized_python_discovery",
+                    "tokens": 125
+                  },
+                  {
+                    "span_id": "test_package_with_modules",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "TestModule",
+                    "tokens": 65
+                  },
+                  {
+                    "span_id": "TestModule.test_failing_import",
+                    "tokens": 65
+                  },
+                  {
+                    "span_id": "TestModule.test_import_duplicate",
+                    "tokens": 65
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 65
+                  },
+                  {
+                    "span_id": "TestFunction.test_parametrize_skipif",
+                    "tokens": 56
+                  }
+                ]
+              },
+              {
+                "file_path": "src/_pytest/config/__init__.py",
+                "spans": [
+                  {
+                    "span_id": "_iter_rewritable_modules",
+                    "tokens": 148
+                  },
+                  {
+                    "span_id": "_args_converter",
+                    "tokens": 148
+                  }
+                ]
+              },
+              {
+                "file_path": "doc/en/example/pythoncollection.py",
+                "spans": [
+                  {
+                    "span_id": "test_function",
+                    "tokens": 106
+                  },
+                  {
+                    "span_id": "TestClass.test_anothermethod",
+                    "tokens": 106
+                  },
+                  {
+                    "span_id": "TestClass",
+                    "tokens": 106
+                  },
+                  {
+                    "span_id": "docstring",
+                    "tokens": 106
+                  },
+                  {
+                    "span_id": "TestClass.test_method",
+                    "tokens": 106
+                  }
+                ]
+              },
+              {
+                "file_path": "src/_pytest/pathlib.py",
+                "spans": [
+                  {
+                    "span_id": "import_path",
+                    "tokens": 76
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.018135000000000002
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "allow_module_level",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "src/_pytest/python.py",
+                "spans": [
+                  {
+                    "span_id": "Module._importtestmodule",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 code spans with code that matches the exact query `allow_module_level`."
+          }
+        }
+      ],
+      "completion_cost": 0.021245000000000003
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The code spans identified are related to the handling of module-level skips and the error messages associated with them. These are crucial for improving the handling of skip for module level.",
+            "files_with_spans": [
+              {
+                "file_path": "src/_pytest/python.py",
+                "span_ids": [
+                  "Module",
+                  "Module._importtestmodule"
+                ]
+              },
+              {
+                "file_path": "testing/python/collect.py",
+                "span_ids": [
+                  "TestFunction",
+                  "TestFunction.test_parametrize_skip",
+                  "TestFunction.test_parametrize_skipif_no_skip",
+                  "TestTracebackCutting",
+                  "TestTracebackCutting.test_skip_simple"
+                ]
+              },
+              {
+                "file_path": "src/_pytest/doctest.py",
+                "span_ids": [
+                  "DoctestModule",
+                  "DoctestModule.collect",
+                  "DoctestModule.collect.MockAwareDocTestFinder",
+                  "DoctestModule.collect.MockAwareDocTestFinder:2"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.02579
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Add a new function `skip_module` to provide an easier way to skip a module. This function will call `_skip` with `allow_module_level=True`.",
+            "file_path": "src/_pytest/python.py",
+            "span_id": "impl"
+          },
+          "output": {
+            "response": "if TYPE_CHECKING:"
+          }
+        }
+      ],
+      "completion_cost": 0.023145000000000002
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "src/_pytest/python.py",
+            "span_id": "impl",
+            "start_line": 78,
+            "end_line": 78,
+            "replacement_code": "\ndef skip_module(msg: str):\n    skip(msg=msg, allow_module_level=True)\n\nif TYPE_CHECKING:\n"
+          },
+          "output": {
+            "diff": "--- src/_pytest/python.py\n+++ src/_pytest/python.py\n@@ -75,6 +75,9 @@\n from _pytest.warning_types import PytestCollectionWarning\n from _pytest.warning_types import PytestUnhandledCoroutineWarning\n \n+def skip_module(msg: str):\n+    skip(msg=msg, allow_module_level=True)\n+\n if TYPE_CHECKING:\n     from typing_extensions import Literal\n     from _pytest.fixtures import _Scope\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": [
+              "impl:4",
+              "skip_module"
+            ]
+          }
+        }
+      ],
+      "completion_cost": 0.023785
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Update the error message to include information about `allow_module_level` when using `pytest.skip`.",
+            "file_path": "src/_pytest/python.py",
+            "span_id": "Module._importtestmodule"
+          },
+          "output": {
+            "response": "    def _importtestmodule(self):\n        # We assume we are only called once per module.\n        importmode = self.config.getoption(\"--import-mode\")\n        try:\n            mod = import_path(self.path, mode=importmode, root=self.config.rootpath)\n        except SyntaxError as e:\n            raise self.CollectError(\n                ExceptionInfo.from_current().getrepr(style=\"short\")\n            ) from e\n        except ImportPathMismatchError as e:\n            raise self.CollectError(\n                \"import file mismatch:\\n\"\n                \"imported module %r has this __file__ attribute:\\n\"\n                \"  %s\\n\"\n                \"which is not the same as the test file we want to collect:\\n\"\n                \"  %s\\n\"\n                \"HINT: remove __pycache__ / .pyc files and/or use a \"\n                \"unique basename for your test file modules\" % e.args\n            ) from e\n        except ImportError as e:\n            exc_info = ExceptionInfo.from_current()\n            if self.config.getoption(\"verbose\") < 2:\n                exc_info.traceback = exc_info.traceback.filter(filter_traceback)\n            exc_repr = (\n                exc_info.getrepr(style=\"short\")\n                if exc_info.traceback\n                else exc_info.exconly()\n            )\n            formatted_tb = str(exc_repr)\n            raise self.CollectError(\n                \"ImportError while importing test module '{path}'.\\n\"\n                \"Hint: make sure your test modules/packages have valid Python names.\\n\"\n                \"Traceback:\\n\"\n                \"{traceback}\".format(path=self.path, traceback=formatted_tb)\n            ) from e\n        except skip.Exception as e:\n            if e.allow_module_level:\n                raise\n            raise self.CollectError(\n                \"Using pytest.skip outside of a test is not allowed. \"\n                \"To decorate a test function, use the @pytest.mark.skip \"\n                \"or @pytest.mark.skipif decorators instead, and to skip a \"\n                \"module use `pytestmark = pytest.mark.{skip,skipif}.\"\n            ) from e\n        self.config.pluginmanager.consider_module(mod)\n        return mod"
+          }
+        }
+      ],
+      "completion_cost": 0.024225000000000003
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "src/_pytest/python.py",
+            "span_id": "Module._importtestmodule",
+            "start_line": 575,
+            "end_line": 620,
+            "replacement_code": "\n    def _importtestmodule(self):\n        # We assume we are only called once per module.\n        importmode = self.config.getoption(\"--import-mode\")\n        try:\n            mod = import_path(self.path, mode=importmode, root=self.config.rootpath)\n        except SyntaxError as e:\n            raise self.CollectError(\n                ExceptionInfo.from_current().getrepr(style=\"short\")\n            ) from e\n        except ImportPathMismatchError as e:\n            raise self.CollectError(\n                \"import file mismatch:\\n\"\n                \"imported module %r has this __file__ attribute:\\n\"\n                \"  %s\\n\"\n                \"which is not the same as the test file we want to collect:\\n\"\n                \"  %s\\n\"\n                \"HINT: remove __pycache__ / .pyc files and/or use a \"\n                \"unique basename for your test file modules\" % e.args\n            ) from e\n        except ImportError as e:\n            exc_info = ExceptionInfo.from_current()\n            if self.config.getoption(\"verbose\") < 2:\n                exc_info.traceback = exc_info.traceback.filter(filter_traceback)\n            exc_repr = (\n                exc_info.getrepr(style=\"short\")\n                if exc_info.traceback\n                else exc_info.exconly()\n            )\n            formatted_tb = str(exc_repr)\n            raise self.CollectError(\n                \"ImportError while importing test module '{path}'.\\n\"\n                \"Hint: make sure your test modules/packages have valid Python names.\\n\"\n                \"Traceback:\\n\"\n                \"{traceback}\".format(path=self.path, traceback=formatted_tb)\n            ) from e\n        except skip.Exception as e:\n            if e.allow_module_level:\n                raise\n            raise self.CollectError(\n                \"Using pytest.skip outside of a test is not allowed. \"\n                \"To decorate a test function, use the @pytest.mark.skip \"\n                \"or @pytest.mark.skipif decorators instead, and to skip a \"\n                \"module use `pytestmark = pytest.mark.{skip,skipif}`. \"\n                \"To skip a module programmatically, use `skip(msg, allow_module_level=True)`.\"\n            ) from e\n        self.config.pluginmanager.consider_module(mod)\n        return mod\n"
+          },
+          "output": {
+            "diff": "--- src/_pytest/python.py\n+++ src/_pytest/python.py\n@@ -614,7 +614,8 @@\n                 \"Using pytest.skip outside of a test is not allowed. \"\n                 \"To decorate a test function, use the @pytest.mark.skip \"\n                 \"or @pytest.mark.skipif decorators instead, and to skip a \"\n-                \"module use `pytestmark = pytest.mark.{skip,skipif}.\"\n+                \"module use `pytestmark = pytest.mark.{skip,skipif}`. \"\n+                \"To skip a module programmatically, use `skip(msg, allow_module_level=True)`.\"\n             ) from e\n         self.config.pluginmanager.consider_module(mod)\n         return mod\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.033505
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The required changes have been implemented: a new `skip_module` function was added, and the error message was updated to include information about `allow_module_level`."
+          }
+        }
+      ],
+      "completion_cost": 0.02535
+    }
+  ],
+  "output": {
+    "message": "The required changes have been implemented: a new `skip_module` function was added, and the error message was updated to include information about `allow_module_level`."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "pytest-dev__pytest-8906",
+    "trace_id": "coder_pytest-dev__pytest-8906_20240609-163206",
+    "submission": "diff --git a/src/_pytest/python.py b/src/_pytest/python.py\nindex 79dfb7320..f32170026 100644\n--- a/src/_pytest/python.py\n+++ b/src/_pytest/python.py\n@@ -75,6 +75,9 @@ from _pytest.pathlib import visit\n from _pytest.warning_types import PytestCollectionWarning\n from _pytest.warning_types import PytestUnhandledCoroutineWarning\n \n+def skip_module(msg: str):\n+    skip(msg=msg, allow_module_level=True)\n+\n if TYPE_CHECKING:\n     from typing_extensions import Literal\n     from _pytest.fixtures import _Scope\n@@ -611,7 +614,8 @@ class Module(nodes.File, PyCollector):\n                 \"Using pytest.skip outside of a test is not allowed. \"\n                 \"To decorate a test function, use the @pytest.mark.skip \"\n                 \"or @pytest.mark.skipif decorators instead, and to skip a \"\n-                \"module use `pytestmark = pytest.mark.{skip,skipif}.\"\n+                \"module use `pytestmark = pytest.mark.{skip,skipif}`. \"\n+                \"To skip a module programmatically, use `skip(msg, allow_module_level=True)`.\"\n             ) from e\n         self.config.pluginmanager.consider_module(mod)\n         return mod\n",
+    "duration": 21.795824766159058,
+    "total_cost": 0.20253500000000002
+  }
+}

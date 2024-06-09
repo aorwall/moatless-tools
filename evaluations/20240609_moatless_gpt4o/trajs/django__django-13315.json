@@ -1,0 +1,240 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "limit_choices_to on a ForeignKey can render duplicate options in formfield\nDescription\n\t\nIf you pass a Q object as limit_choices_to on a ForeignKey field involving a join, you may end up with duplicate options in your form.\nSee regressiontest in patch for a clear view on the problem.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "limit_choices_to on a ForeignKey can render duplicate options in formfield",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/db/models/fields/related.py",
+                "spans": [
+                  {
+                    "span_id": "RelatedField.formfield",
+                    "tokens": 324
+                  },
+                  {
+                    "span_id": "ForeignKey.formfield",
+                    "tokens": 228
+                  }
+                ]
+              },
+              {
+                "file_path": "django/contrib/admin/filters.py",
+                "spans": [
+                  {
+                    "span_id": "RelatedOnlyFieldListFilter.field_choices",
+                    "tokens": 271
+                  },
+                  {
+                    "span_id": "impl:6",
+                    "tokens": 271
+                  },
+                  {
+                    "span_id": "RelatedOnlyFieldListFilter",
+                    "tokens": 271
+                  }
+                ]
+              },
+              {
+                "file_path": "django/forms/models.py",
+                "spans": [
+                  {
+                    "span_id": "construct_instance",
+                    "tokens": 191
+                  },
+                  {
+                    "span_id": "model_to_dict",
+                    "tokens": 191
+                  },
+                  {
+                    "span_id": "apply_limit_choices_to_to_formfield",
+                    "tokens": 191
+                  },
+                  {
+                    "span_id": "ModelChoiceField.has_changed",
+                    "tokens": 161
+                  },
+                  {
+                    "span_id": "ModelChoiceField.validate",
+                    "tokens": 161
+                  },
+                  {
+                    "span_id": "ModelChoiceField:9",
+                    "tokens": 161
+                  },
+                  {
+                    "span_id": "ModelChoiceField.to_python",
+                    "tokens": 161
+                  },
+                  {
+                    "span_id": "ModelChoiceField.prepare_value",
+                    "tokens": 161
+                  },
+                  {
+                    "span_id": "fields_for_model",
+                    "tokens": 136
+                  },
+                  {
+                    "span_id": "modelform_defines_fields",
+                    "tokens": 115
+                  },
+                  {
+                    "span_id": "ModelMultipleChoiceField.prepare_value",
+                    "tokens": 115
+                  },
+                  {
+                    "span_id": "ModelMultipleChoiceField.has_changed",
+                    "tokens": 115
+                  },
+                  {
+                    "span_id": "ModelChoiceField.label_from_instance",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField.get_limit_choices_to",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField.__deepcopy__",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField:7",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField._get_queryset",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceField._set_queryset",
+                    "tokens": 97
+                  },
+                  {
+                    "span_id": "ModelChoiceIteratorValue.__str__",
+                    "tokens": 83
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.0053
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The identified code spans are related to the handling of ForeignKey fields and their formfield representations, which are relevant to addressing the issue of duplicate options in formfields when using limit_choices_to.",
+            "files_with_spans": [
+              {
+                "file_path": "django/db/models/fields/related.py",
+                "span_ids": [
+                  "RelatedField",
+                  "RelatedField.formfield",
+                  "ForeignKey",
+                  "ForeignKey.formfield"
+                ]
+              },
+              {
+                "file_path": "django/contrib/admin/filters.py",
+                "span_ids": [
+                  "RelatedOnlyFieldListFilter",
+                  "RelatedOnlyFieldListFilter.field_choices"
+                ]
+              },
+              {
+                "file_path": "django/forms/models.py",
+                "span_ids": [
+                  "apply_limit_choices_to_to_formfield"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.017205
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Update the formfield method in the RelatedField class to ensure that the queryset is distinct to avoid duplicate options.",
+            "file_path": "django/db/models/fields/related.py",
+            "span_id": "RelatedField.formfield"
+          },
+          "output": {
+            "response": "    def formfield(self, **kwargs):\n        \"\"\"\n        Pass ``limit_choices_to`` to the field being constructed.\n\n        Only passes it if there is a type that supports related fields.\n        This is a similar strategy used to pass the ``queryset`` to the field\n        being constructed.\n        \"\"\"\n        defaults = {}\n        if hasattr(self.remote_field, 'get_related_field'):\n            # If this is a callable, do not invoke it here. Just pass\n            # it in the defaults for when the form class will later be\n            # instantiated.\n            limit_choices_to = self.remote_field.limit_choices_to\n            defaults.update({\n                'limit_choices_to': limit_choices_to,\n            })\n        defaults.update(kwargs)\n        return super().formfield(**defaults)"
+          }
+        }
+      ],
+      "completion_cost": 0.019625000000000004
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/db/models/fields/related.py",
+            "span_id": "RelatedField.formfield",
+            "start_line": 401,
+            "end_line": 419,
+            "replacement_code": "\n    def formfield(self, **kwargs):\n        \"\"\"\n        Pass ``limit_choices_to`` to the field being constructed.\n\n        Only passes it if there is a type that supports related fields.\n        This is a similar strategy used to pass the ``queryset`` to the field\n        being constructed.\n        \"\"\"\n        defaults = {}\n        if hasattr(self.remote_field, 'get_related_field'):\n            # If this is a callable, do not invoke it here. Just pass\n            # it in the defaults for when the form class will later be\n            # instantiated.\n            limit_choices_to = self.remote_field.limit_choices_to\n            defaults.update({\n                'limit_choices_to': limit_choices_to,\n            })\n        defaults.update(kwargs)\n        formfield = super().formfield(**defaults)\n        if hasattr(formfield, 'queryset'):\n            formfield.queryset = formfield.queryset.distinct()\n        return formfield\n"
+          },
+          "output": {
+            "diff": "--- django/db/models/fields/related.py\n+++ django/db/models/fields/related.py\n@@ -416,7 +416,10 @@\n                 'limit_choices_to': limit_choices_to,\n             })\n         defaults.update(kwargs)\n-        return super().formfield(**defaults)\n+        formfield = super().formfield(**defaults)\n+        if hasattr(formfield, 'queryset'):\n+            formfield.queryset = formfield.queryset.distinct()\n+        return formfield\n \n     def related_query_name(self):\n         \"\"\"\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.024375
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue with duplicate options in formfield due to limit_choices_to on a ForeignKey has been resolved by ensuring the queryset is distinct in the formfield method."
+          }
+        }
+      ],
+      "completion_cost": 0.019450000000000002
+    }
+  ],
+  "output": {
+    "message": "The issue with duplicate options in formfield due to limit_choices_to on a ForeignKey has been resolved by ensuring the queryset is distinct in the formfield method."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-13315",
+    "trace_id": "coder_django__django-13315_20240609-124100",
+    "submission": "diff --git a/django/db/models/fields/related.py b/django/db/models/fields/related.py\nindex 397146a354..960be539d4 100644\n--- a/django/db/models/fields/related.py\n+++ b/django/db/models/fields/related.py\n@@ -416,7 +416,10 @@ class RelatedField(FieldCacheMixin, Field):\n                 'limit_choices_to': limit_choices_to,\n             })\n         defaults.update(kwargs)\n-        return super().formfield(**defaults)\n+        formfield = super().formfield(**defaults)\n+        if hasattr(formfield, 'queryset'):\n+            formfield.queryset = formfield.queryset.distinct()\n+        return formfield\n \n     def related_query_name(self):\n         \"\"\"\n",
+    "duration": 13.141299486160278,
+    "total_cost": 0.085955
+  }
+}

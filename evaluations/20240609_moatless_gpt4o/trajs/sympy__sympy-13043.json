@@ -1,0 +1,175 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "decompose() function in intpoly returns a list of arbitrary order\nThe decompose() function, with separate=True, returns `list(poly_dict.values())`, which is ordered arbitrarily.  \r\n\r\nWhat is this used for? It should be sorted somehow, or returning a set (in which case, why not just use the returned dictionary and have the caller take the values). This is causing test failures for me after some changes to the core. \r\n\r\nCC @ArifAhmed1995 @certik \n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "decompose",
+            "file_pattern": "**/intpoly/**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/integrals/intpoly.py",
+                "spans": [
+                  {
+                    "span_id": "decompose",
+                    "tokens": 712
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/polys/polyclasses.py",
+                "spans": [
+                  {
+                    "span_id": "DMP.decompose",
+                    "tokens": 595
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/polys/polytools.py",
+                "spans": [
+                  {
+                    "span_id": "Poly.decompose",
+                    "tokens": 497
+                  },
+                  {
+                    "span_id": "decompose",
+                    "tokens": 497
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/polys/rings.py",
+                "spans": [
+                  {
+                    "span_id": "PolyElement.decompose",
+                    "tokens": 416
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/physics/quantum/gate.py",
+                "spans": [
+                  {
+                    "span_id": "CGate.decompose",
+                    "tokens": 348
+                  },
+                  {
+                    "span_id": "SwapGate.decompose",
+                    "tokens": 348
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/physics/quantum/qft.py",
+                "spans": [
+                  {
+                    "span_id": "QFT.decompose",
+                    "tokens": 292
+                  },
+                  {
+                    "span_id": "IQFT.decompose",
+                    "tokens": 292
+                  }
+                ]
+              }
+            ],
+            "message": "Found 6 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.005385000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The decompose function in the intpoly module returns a list of polynomial terms in arbitrary order when the 'separate' flag is set to True. This unordered list is causing test failures. The relevant code is found in the decompose function in the intpoly module.",
+            "files_with_spans": [
+              {
+                "file_path": "sympy/integrals/intpoly.py",
+                "span_ids": [
+                  "decompose"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.013615000000000002
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Sort the list of polynomial terms by their degrees before returning them in the decompose function when separate=True.",
+            "file_path": "sympy/integrals/intpoly.py",
+            "span_id": "decompose"
+          },
+          "output": {
+            "response": "def decompose(expr, separate=False):\n    \"\"\"Decomposes an input polynomial into homogeneous ones of\n    smaller or equal degree.\n    Returns a dictionary with keys as the degree of the smaller\n    constituting polynomials. Values are the constituting polynomials.\n    Parameters\n    ==========\n    expr : Polynomial(SymPy expression)\n\n    Optional Parameters :\n\n    separate : If True then simply return a list of the constituent monomials\n               If not then break up the polynomial into constituent homogeneous\n               polynomials.\n    Examples\n    ========\n    >>> from sympy.abc import x, y\n    >>> from sympy.integrals.intpoly import decompose\n    >>> decompose(x**2 + x*y + x + y + x**3*y**2 + y**5)\n    {1: x + y, 2: x**2 + x*y, 5: x**3*y**2 + y**5}\n    >>> decompose(x**2 + x*y + x + y + x**3*y**2 + y**5, True)\n    [x, y, x**2, y**5, x*y, x**3*y**2]\n    \"\"\"\n    expr = S(expr)\n    poly_dict = {}\n\n    if isinstance(expr, Expr) and not expr.is_number:\n        if expr.is_Symbol:\n            poly_dict[1] = expr\n        elif expr.is_Add:\n            symbols = expr.atoms(Symbol)\n            degrees = [(sum(degree_list(monom, *symbols)), monom)\n                       for monom in expr.args]\n            if separate:\n                return [monom[1] for monom in degrees]\n            else:\n                for monom in degrees:\n                    degree, term = monom\n                    if poly_dict.get(degree):\n                        poly_dict[degree] += term\n                    else:\n                        poly_dict[degree] = term\n        elif expr.is_Pow:\n            _, degree = expr.args\n            poly_dict[degree] = expr\n        else:  # Now expr can only be of `Mul` type\n            degree = 0\n            for term in expr.args:\n                term_type = len(term.args)\n                if term_type == 0 and term.is_Symbol:\n                    degree += 1\n                elif term_type == 2:\n                    degree += term.args[1]\n            poly_dict[degree] = expr\n    else:\n        poly_dict[0] = expr\n\n    if separate:\n        return list(poly_dict.values())\n    return poly_dict"
+          }
+        }
+      ],
+      "completion_cost": 0.00903
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "sympy/integrals/intpoly.py",
+            "span_id": "decompose",
+            "start_line": 538,
+            "end_line": 597,
+            "replacement_code": "\ndef decompose(expr, separate=False):\n    \"\"\"Decomposes an input polynomial into homogeneous ones of\n    smaller or equal degree.\n    Returns a dictionary with keys as the degree of the smaller\n    constituting polynomials. Values are the constituting polynomials.\n    Parameters\n    ==========\n    expr : Polynomial(SymPy expression)\n\n    Optional Parameters :\n\n    separate : If True then simply return a list of the constituent monomials\n               If not then break up the polynomial into constituent homogeneous\n               polynomials.\n    Examples\n    ========\n    >>> from sympy.abc import x, y\n    >>> from sympy.integrals.intpoly import decompose\n    >>> decompose(x**2 + x*y + x + y + x**3*y**2 + y**5)\n    {1: x + y, 2: x**2 + x*y, 5: x**3*y**2 + y**5}\n    >>> decompose(x**2 + x*y + x + y + x**3*y**2 + y**5, True)\n    [x, y, x**2, y**5, x*y, x**3*y**2]\n    \"\"\"\n    expr = S(expr)\n    poly_dict = {}\n\n    if isinstance(expr, Expr) and not expr.is_number:\n        if expr.is_Symbol:\n            poly_dict[1] = expr\n        elif expr.is_Add:\n            symbols = expr.atoms(Symbol)\n            degrees = [(sum(degree_list(monom, *symbols)), monom)\n                       for monom in expr.args]\n            if separate:\n                return [monom[1] for monom in sorted(degrees)]\n            else:\n                for monom in degrees:\n                    degree, term = monom\n                    if poly_dict.get(degree):\n                        poly_dict[degree] += term\n                    else:\n                        poly_dict[degree] = term\n        elif expr.is_Pow:\n            _, degree = expr.args\n            poly_dict[degree] = expr\n        else:  # Now expr can only be of `Mul` type\n            degree = 0\n            for term in expr.args:\n                term_type = len(term.args)\n                if term_type == 0 and term.is_Symbol:\n                    degree += 1\n                elif term_type == 2:\n                    degree += term.args[1]\n            poly_dict[degree] = expr\n    else:\n        poly_dict[0] = expr\n\n    if separate:\n        return list(poly_dict.values())\n    return poly_dict\n"
+          },
+          "output": {
+            "diff": "--- sympy/integrals/intpoly.py\n+++ sympy/integrals/intpoly.py\n@@ -569,7 +569,7 @@\n             degrees = [(sum(degree_list(monom, *symbols)), monom)\n                        for monom in expr.args]\n             if separate:\n-                return [monom[1] for monom in degrees]\n+                return [monom[1] for monom in sorted(degrees)]\n             else:\n                 for monom in degrees:\n                     degree, term = monom\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.02331
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The decompose function now returns a sorted list of polynomial terms by their degrees when separate=True, resolving the issue of arbitrary order."
+          }
+        }
+      ],
+      "completion_cost": 0.009795
+    }
+  ],
+  "output": {
+    "message": "The decompose function now returns a sorted list of polynomial terms by their degrees when separate=True, resolving the issue of arbitrary order."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "sympy__sympy-13043",
+    "trace_id": "coder_sympy__sympy-13043_20240609-164118",
+    "submission": "diff --git a/sympy/integrals/intpoly.py b/sympy/integrals/intpoly.py\nindex fc72bd206f..2146146874 100644\n--- a/sympy/integrals/intpoly.py\n+++ b/sympy/integrals/intpoly.py\n@@ -569,7 +569,7 @@ def decompose(expr, separate=False):\n             degrees = [(sum(degree_list(monom, *symbols)), monom)\n                        for monom in expr.args]\n             if separate:\n-                return [monom[1] for monom in degrees]\n+                return [monom[1] for monom in sorted(degrees)]\n             else:\n                 for monom in degrees:\n                     degree, term = monom\n",
+    "duration": 21.94144034385681,
+    "total_cost": 0.061135
+  }
+}

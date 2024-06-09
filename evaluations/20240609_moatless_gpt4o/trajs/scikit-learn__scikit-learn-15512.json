@@ -1,0 +1,137 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Return values of non converged affinity propagation clustering\nThe affinity propagation Documentation states: \r\n\"When the algorithm does not converge, it returns an empty array as cluster_center_indices and -1 as label for each training sample.\"\r\n\r\nExample:\r\n```python\r\nfrom sklearn.cluster import AffinityPropagation\r\nimport pandas as pd\r\n\r\ndata = pd.DataFrame([[1,0,0,0,0,0],[0,1,1,1,0,0],[0,0,1,0,0,1]])\r\naf = AffinityPropagation(affinity='euclidean', verbose=True, copy=False, max_iter=2).fit(data)\r\n\r\nprint(af.cluster_centers_indices_)\r\nprint(af.labels_)\r\n\r\n```\r\nI would expect that the clustering here (which does not converge) prints first an empty List and then [-1,-1,-1], however, I get [2] as cluster center and [0,0,0] as cluster labels. \r\nThe only way I currently know if the clustering fails is if I use the verbose option, however that is very unhandy. A hacky solution is to check if max_iter == n_iter_ but it could have converged exactly 15 iterations before max_iter (although unlikely).\r\nI am not sure if this is intended behavior and the documentation is wrong?\r\n\r\nFor my use-case within a bigger script, I would prefer to get back -1 values or have a property to check if it has converged, as otherwise, a user might not be aware that the clustering never converged.\r\n\r\n\r\n#### Versions\r\nSystem:\r\n    python: 3.6.7 | packaged by conda-forge | (default, Nov 21 2018, 02:32:25)  [GCC 4.8.2 20140120 (Red Hat 4.8.2-15)]\r\nexecutable: /home/jenniferh/Programs/anaconda3/envs/TF_RDKit_1_19/bin/python\r\n   machine: Linux-4.15.0-52-generic-x86_64-with-debian-stretch-sid\r\nBLAS:\r\n    macros: SCIPY_MKL_H=None, HAVE_CBLAS=None\r\n  lib_dirs: /home/jenniferh/Programs/anaconda3/envs/TF_RDKit_1_19/lib\r\ncblas_libs: mkl_rt, pthread\r\nPython deps:\r\n    pip: 18.1\r\n   setuptools: 40.6.3\r\n   sklearn: 0.20.3\r\n   numpy: 1.15.4\r\n   scipy: 1.2.0\r\n   Cython: 0.29.2\r\n   pandas: 0.23.4\r\n\r\n\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "class_name": "AffinityPropagation"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sklearn/cluster/_affinity_propagation.py",
+                "spans": [
+                  {
+                    "span_id": "AffinityPropagation",
+                    "tokens": 800
+                  },
+                  {
+                    "span_id": "AffinityPropagation._pairwise",
+                    "tokens": 800
+                  },
+                  {
+                    "span_id": "AffinityPropagation.fit",
+                    "tokens": 800
+                  },
+                  {
+                    "span_id": "AffinityPropagation.predict",
+                    "tokens": 800
+                  },
+                  {
+                    "span_id": "AffinityPropagation.fit_predict",
+                    "tokens": 800
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.0075650000000000005
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The code spans include the AffinityPropagation class and its methods, which are responsible for the clustering behavior and the return values when the algorithm does not converge.",
+            "files_with_spans": [
+              {
+                "file_path": "sklearn/cluster/_affinity_propagation.py",
+                "span_ids": [
+                  "AffinityPropagation",
+                  "AffinityPropagation._pairwise",
+                  "AffinityPropagation.fit",
+                  "AffinityPropagation.predict",
+                  "AffinityPropagation.fit_predict"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.01165
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Add a check in the fit method of the AffinityPropagation class to set cluster_centers_indices_ to an empty array and labels_ to -1 for each sample if the algorithm does not converge.",
+            "file_path": "sklearn/cluster/_affinity_propagation.py",
+            "span_id": "AffinityPropagation.fit"
+          },
+          "output": {
+            "response": "    def fit(self, X, y=None):\n        \"\"\"Fit the clustering from features, or affinity matrix.\n\n        Parameters\n        ----------\n        X : array-like or sparse matrix, shape (n_samples, n_features), or \\\n            array-like, shape (n_samples, n_samples)\n            Training instances to cluster, or similarities / affinities between\n            instances if ``affinity='precomputed'``. If a sparse feature matrix\n            is provided, it will be converted into a sparse ``csr_matrix``.\n\n        y : Ignored\n            Not used, present here for API consistency by convention.\n\n        Returns\n        -------\n        self\n\n        \"\"\"\n        if self.affinity == \"precomputed\":\n            accept_sparse = False\n        else:\n            accept_sparse = 'csr'\n        X = check_array(X, accept_sparse=accept_sparse)\n        if self.affinity == \"precomputed\":\n            self.affinity_matrix_ = X\n        elif self.affinity == \"euclidean\":\n            self.affinity_matrix_ = -euclidean_distances(X, squared=True)\n        else:\n            raise ValueError(\"Affinity must be 'precomputed' or \"\n                             \"'euclidean'. Got %s instead\"\n                             % str(self.affinity))\n\n        self.cluster_centers_indices_, self.labels_, self.n_iter_ = \\\n            affinity_propagation(\n                self.affinity_matrix_, self.preference, max_iter=self.max_iter,\n                convergence_iter=self.convergence_iter, damping=self.damping,\n                copy=self.copy, verbose=self.verbose, return_n_iter=True)\n\n        if self.affinity != \"precomputed\":\n            self.cluster_centers_ = X[self.cluster_centers_indices_].copy()\n\n        return self"
+          }
+        }
+      ],
+      "completion_cost": 0.008825
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "sklearn/cluster/_affinity_propagation.py",
+            "span_id": "AffinityPropagation.fit",
+            "start_line": 352,
+            "end_line": 394,
+            "replacement_code": "\n    def fit(self, X, y=None):\n        \"\"\"Fit the clustering from features, or affinity matrix.\n\n        Parameters\n        ----------\n        X : array-like or sparse matrix, shape (n_samples, n_features), or \\\n            array-like, shape (n_samples, n_samples)\n            Training instances to cluster, or similarities / affinities between\n            instances if ``affinity='precomputed'``. If a sparse feature matrix\n            is provided, it will be converted into a sparse ``csr_matrix``.\n\n        y : Ignored\n            Not used, present here for API consistency by convention.\n\n        Returns\n        -------\n        self\n\n        \"\"\"\n        if self.affinity == \"precomputed\":\n            accept_sparse = False\n        else:\n            accept_sparse = 'csr'\n        X = check_array(X, accept_sparse=accept_sparse)\n        if self.affinity == \"precomputed\":\n            self.affinity_matrix_ = X\n        elif self.affinity == \"euclidean\":\n            self.affinity_matrix_ = -euclidean_distances(X, squared=True)\n        else:\n            raise ValueError(\"Affinity must be 'precomputed' or \"\n                             \"'euclidean'. Got %s instead\"\n                             % str(self.affinity))\n\n        self.cluster_centers_indices_, self.labels_, self.n_iter_ = \\\n            affinity_propagation(\n                self.affinity_matrix_, self.preference, max_iter=self.max_iter,\n                convergence_iter=self.convergence_iter, damping=self.damping,\n                copy=self.copy, verbose=self.verbose, return_n_iter=True)\n\n        if self.n_iter_ == self.max_iter:\n            self.cluster_centers_indices_ = np.array([])\n            self.labels_ = np.array([-1] * X.shape[0])\n\n        if self.affinity != \"precomputed\" and self.cluster_centers_indices_.size > 0:\n            self.cluster_centers_ = X[self.cluster_centers_indices_].copy()\n\n        return self\n"
+          },
+          "output": {
+            "diff": "--- sklearn/cluster/_affinity_propagation.py\n+++ sklearn/cluster/_affinity_propagation.py\n@@ -388,7 +388,11 @@\n                 convergence_iter=self.convergence_iter, damping=self.damping,\n                 copy=self.copy, verbose=self.verbose, return_n_iter=True)\n \n-        if self.affinity != \"precomputed\":\n+        if self.n_iter_ == self.max_iter:\n+            self.cluster_centers_indices_ = np.array([])\n+            self.labels_ = np.array([-1] * X.shape[0])\n+\n+        if self.affinity != \"precomputed\" and self.cluster_centers_indices_.size > 0:\n             self.cluster_centers_ = X[self.cluster_centers_indices_].copy()\n \n         return self\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.02176
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue has been resolved by adding a check in the fit method of the AffinityPropagation class to set cluster_centers_indices_ to an empty array and labels_ to -1 for each sample if the algorithm does not converge."
+          }
+        }
+      ],
+      "completion_cost": 0.01011
+    }
+  ],
+  "output": {
+    "message": "The issue has been resolved by adding a check in the fit method of the AffinityPropagation class to set cluster_centers_indices_ to an empty array and labels_ to -1 for each sample if the algorithm does not converge."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "scikit-learn__scikit-learn-15512",
+    "trace_id": "coder_scikit-learn__scikit-learn-15512_20240609-163434",
+    "submission": "diff --git a/sklearn/cluster/_affinity_propagation.py b/sklearn/cluster/_affinity_propagation.py\nindex 4806afee9..d95666f62 100644\n--- a/sklearn/cluster/_affinity_propagation.py\n+++ b/sklearn/cluster/_affinity_propagation.py\n@@ -388,7 +388,11 @@ class AffinityPropagation(ClusterMixin, BaseEstimator):\n                 convergence_iter=self.convergence_iter, damping=self.damping,\n                 copy=self.copy, verbose=self.verbose, return_n_iter=True)\n \n-        if self.affinity != \"precomputed\":\n+        if self.n_iter_ == self.max_iter:\n+            self.cluster_centers_indices_ = np.array([])\n+            self.labels_ = np.array([-1] * X.shape[0])\n+\n+        if self.affinity != \"precomputed\" and self.cluster_centers_indices_.size > 0:\n             self.cluster_centers_ = X[self.cluster_centers_indices_].copy()\n \n         return self\n",
+    "duration": 10.472702503204346,
+    "total_cost": 0.059910000000000005
+  }
+}

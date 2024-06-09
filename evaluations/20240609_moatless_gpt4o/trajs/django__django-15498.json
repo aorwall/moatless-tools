@@ -1,0 +1,254 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Fix handling empty string for If-Modified-Since header\nDescription\n\t\nEmpty string used to be ignored for If-Modified-Since header, but now raises exception since d6aff369ad3.\nFix handling empty string for If-Modified-Since header\nDescription\n\t\nEmpty string used to be ignored for If-Modified-Since header, but now raises exception since d6aff369ad3.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "handling empty string for If-Modified-Since header",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/views/static.py",
+                "spans": [
+                  {
+                    "span_id": "was_modified_since",
+                    "tokens": 413
+                  }
+                ]
+              },
+              {
+                "file_path": "django/utils/cache.py",
+                "spans": [
+                  {
+                    "span_id": "_if_none_match_passes",
+                    "tokens": 346
+                  },
+                  {
+                    "span_id": "_if_unmodified_since_passes",
+                    "tokens": 346
+                  },
+                  {
+                    "span_id": "get_conditional_response",
+                    "tokens": 243
+                  },
+                  {
+                    "span_id": "add_never_cache_headers",
+                    "tokens": 204
+                  },
+                  {
+                    "span_id": "_if_modified_since_passes",
+                    "tokens": 204
+                  },
+                  {
+                    "span_id": "patch_response_headers",
+                    "tokens": 204
+                  },
+                  {
+                    "span_id": "get_max_age",
+                    "tokens": 172
+                  },
+                  {
+                    "span_id": "_precondition_failed",
+                    "tokens": 172
+                  },
+                  {
+                    "span_id": "set_response_etag",
+                    "tokens": 172
+                  },
+                  {
+                    "span_id": "_if_match_passes",
+                    "tokens": 122
+                  },
+                  {
+                    "span_id": "_not_modified",
+                    "tokens": 88
+                  }
+                ]
+              },
+              {
+                "file_path": "django/utils/http.py",
+                "spans": [
+                  {
+                    "span_id": "parse_etags",
+                    "tokens": 290
+                  },
+                  {
+                    "span_id": "impl",
+                    "tokens": 64
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 64
+                  },
+                  {
+                    "span_id": "http_date",
+                    "tokens": 55
+                  },
+                  {
+                    "span_id": "base36_to_int",
+                    "tokens": 47
+                  },
+                  {
+                    "span_id": "parse_http_date_safe",
+                    "tokens": 47
+                  }
+                ]
+              },
+              {
+                "file_path": "django/views/decorators/http.py",
+                "spans": [
+                  {
+                    "span_id": "condition",
+                    "tokens": 145
+                  },
+                  {
+                    "span_id": "last_modified",
+                    "tokens": 145
+                  },
+                  {
+                    "span_id": "etag",
+                    "tokens": 145
+                  }
+                ]
+              },
+              {
+                "file_path": "django/middleware/http.py",
+                "spans": [
+                  {
+                    "span_id": "ConditionalGetMiddleware.process_response",
+                    "tokens": 75
+                  },
+                  {
+                    "span_id": "ConditionalGetMiddleware.needs_etag",
+                    "tokens": 75
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 75
+                  },
+                  {
+                    "span_id": "ConditionalGetMiddleware",
+                    "tokens": 75
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.00534
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The identified code spans are related to handling the If-Modified-Since header and its parsing, which is relevant to fixing the issue of handling empty strings for this header.",
+            "files_with_spans": [
+              {
+                "file_path": "django/views/static.py",
+                "span_ids": [
+                  "was_modified_since"
+                ]
+              },
+              {
+                "file_path": "django/utils/cache.py",
+                "span_ids": [
+                  "_not_modified",
+                  "get_conditional_response",
+                  "_if_modified_since_passes"
+                ]
+              },
+              {
+                "file_path": "django/utils/http.py",
+                "span_ids": [
+                  "parse_http_date_safe"
+                ]
+              },
+              {
+                "file_path": "django/middleware/http.py",
+                "span_ids": [
+                  "ConditionalGetMiddleware.process_response"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.01693
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Update the was_modified_since function to handle empty string for If-Modified-Since header by treating it as None.",
+            "file_path": "django/views/static.py",
+            "span_id": "was_modified_since"
+          },
+          "output": {
+            "response": "def was_modified_since(header=None, mtime=0, size=0):\n    \"\"\"\n    Was something modified since the user last downloaded it?\n\n    header\n      This is the value of the If-Modified-Since header.  If this is None,\n      I'll just return True.\n\n    mtime\n      This is the modification time of the item we're talking about.\n\n    size\n      This is the size of the item we're talking about.\n    \"\"\"\n    try:\n        if header is None:\n            raise ValueError\n        matches = re.match(r\"^([^;]+)(; length=([0-9]+))?$\", header, re.IGNORECASE)\n        header_mtime = parse_http_date(matches[1])\n        header_len = matches[3]\n        if header_len and int(header_len) != size:\n            raise ValueError\n        if int(mtime) > header_mtime:\n            raise ValueError\n    except (AttributeError, ValueError, OverflowError):\n        return True\n    return False"
+          }
+        }
+      ],
+      "completion_cost": 0.01084
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/views/static.py",
+            "span_id": "was_modified_since",
+            "start_line": 114,
+            "end_line": 140,
+            "replacement_code": "\ndef was_modified_since(header=None, mtime=0, size=0):\n    \"\"\"\n    Was something modified since the user last downloaded it?\n\n    header\n      This is the value of the If-Modified-Since header.  If this is None,\n      I'll just return True.\n\n    mtime\n      This is the modification time of the item we're talking about.\n\n    size\n      This is the size of the item we're talking about.\n    \"\"\"\n    try:\n        if header is None or header == \"\":\n            raise ValueError\n        matches = re.match(r\"^([^;]+)(; length=([0-9]+))?$\", header, re.IGNORECASE)\n        header_mtime = parse_http_date(matches[1])\n        header_len = matches[3]\n        if header_len and int(header_len) != size:\n            raise ValueError\n        if int(mtime) > header_mtime:\n            raise ValueError\n    except (AttributeError, ValueError, OverflowError):\n        return True\n    return False\n"
+          },
+          "output": {
+            "diff": "--- django/views/static.py\n+++ django/views/static.py\n@@ -126,7 +126,7 @@\n       This is the size of the item we're talking about.\n     \"\"\"\n     try:\n-        if header is None:\n+        if header is None or header == \"\":\n             raise ValueError\n         matches = re.match(r\"^([^;]+)(; length=([0-9]+))?$\", header, re.IGNORECASE)\n         header_mtime = parse_http_date(matches[1])\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.01727
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue with handling empty string for If-Modified-Since header has been resolved by updating the was_modified_since function."
+          }
+        }
+      ],
+      "completion_cost": 0.011515000000000001
+    }
+  ],
+  "output": {
+    "message": "The issue with handling empty string for If-Modified-Since header has been resolved by updating the was_modified_since function."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-15498",
+    "trace_id": "coder_django__django-15498_20240609-124544",
+    "submission": "diff --git a/django/views/static.py b/django/views/static.py\nindex 1c558a53ff..1d56fe210d 100644\n--- a/django/views/static.py\n+++ b/django/views/static.py\n@@ -126,7 +126,7 @@ def was_modified_since(header=None, mtime=0, size=0):\n       This is the size of the item we're talking about.\n     \"\"\"\n     try:\n-        if header is None:\n+        if header is None or header == \"\":\n             raise ValueError\n         matches = re.match(r\"^([^;]+)(; length=([0-9]+))?$\", header, re.IGNORECASE)\n         header_mtime = parse_http_date(matches[1])\n",
+    "duration": 13.791379451751709,
+    "total_cost": 0.061895000000000006
+  }
+}
