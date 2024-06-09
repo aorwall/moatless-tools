@@ -1,0 +1,140 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Refactor AutocompleteJsonView to support extra fields in autocomplete response\nDescription\n\t \n\t\t(last modified by mrts)\n\t \nAdding data attributes to items in ordinary non-autocomplete foreign key fields that use forms.widgets.Select-based widgets is relatively easy. This enables powerful and dynamic admin site customizations where fields from related models are updated immediately when users change the selected item.\nHowever, adding new attributes to autocomplete field results currently requires extending contrib.admin.views.autocomplete.AutocompleteJsonView and fully overriding the AutocompleteJsonView.get() method. Here's an example:\nclass MyModelAdmin(admin.ModelAdmin):\n\tdef get_urls(self):\n\t\treturn [\n\t\t\tpath('autocomplete/', CustomAutocompleteJsonView.as_view(admin_site=self.admin_site))\n\t\t\tif url.pattern.match('autocomplete/')\n\t\t\telse url for url in super().get_urls()\n\t\t]\nclass CustomAutocompleteJsonView(AutocompleteJsonView):\n\tdef get(self, request, *args, **kwargs):\n\t\tself.term, self.model_admin, self.source_field, to_field_name = self.process_request(request)\n\t\tif not self.has_perm(request):\n\t\t\traise PermissionDenied\n\t\tself.object_list = self.get_queryset()\n\t\tcontext = self.get_context_data()\n\t\treturn JsonResponse({\n\t\t\t'results': [\n\t\t\t\t{'id': str(getattr(obj, to_field_name)), 'text': str(obj), 'notes': obj.notes} # <-- customization here\n\t\t\t\tfor obj in context['object_list']\n\t\t\t],\n\t\t\t'pagination': {'more': context['page_obj'].has_next()},\n\t\t})\nThe problem with this is that as AutocompleteJsonView.get() keeps evolving, there's quite a lot of maintenance overhead required to catch up.\nThe solutions is simple, side-effect- and risk-free: adding a result customization extension point to get() by moving the lines that construct the results inside JsonResponse constructor to a separate method. So instead of\n\t\treturn JsonResponse({\n\t\t\t'results': [\n\t\t\t\t{'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n\t\t\t\tfor obj in context['object_list']\n\t\t\t],\n\t\t\t'pagination': {'more': context['page_obj'].has_next()},\n\t\t})\nthere would be\n\t\treturn JsonResponse({\n\t\t\t'results': [\n\t\t\t\tself.serialize_result(obj, to_field_name) for obj in context['object_list']\n\t\t\t],\n\t\t\t'pagination': {'more': context['page_obj'].has_next()},\n\t\t})\nwhere serialize_result() contains the original object to dictionary conversion code that would be now easy to override:\ndef serialize_result(self, obj, to_field_name):\n\treturn {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\nThe example CustomAutocompleteJsonView from above would now become succinct and maintainable:\nclass CustomAutocompleteJsonView(AutocompleteJsonView):\n\tdef serialize_result(self, obj, to_field_name):\n\t\treturn super.serialize_result(obj, to_field_name) | {'notes': obj.notes}\nWhat do you think, is this acceptable? I'm more than happy to provide the patch.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "class_name": "AutocompleteJsonView"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/contrib/admin/views/autocomplete.py",
+                "spans": [
+                  {
+                    "span_id": "AutocompleteJsonView",
+                    "tokens": 666
+                  },
+                  {
+                    "span_id": "AutocompleteJsonView.get",
+                    "tokens": 666
+                  },
+                  {
+                    "span_id": "AutocompleteJsonView.get_paginator",
+                    "tokens": 666
+                  },
+                  {
+                    "span_id": "AutocompleteJsonView.get_queryset",
+                    "tokens": 666
+                  },
+                  {
+                    "span_id": "AutocompleteJsonView.process_request",
+                    "tokens": 666
+                  },
+                  {
+                    "span_id": "AutocompleteJsonView.has_perm",
+                    "tokens": 666
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.007855000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The code spans include the AutocompleteJsonView class and its get method, which need to be refactored to support extra fields in the autocomplete response.",
+            "files_with_spans": [
+              {
+                "file_path": "django/contrib/admin/views/autocomplete.py",
+                "span_ids": [
+                  "AutocompleteJsonView",
+                  "AutocompleteJsonView.get"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.012110000000000001
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Refactor the get method in AutocompleteJsonView to use a new serialize_result method for constructing the results. This will allow easier customization of the autocomplete response.",
+            "file_path": "django/contrib/admin/views/autocomplete.py",
+            "span_id": "AutocompleteJsonView.get"
+          },
+          "output": {
+            "response": "    def get(self, request, *args, **kwargs):\n        \"\"\"\n        Return a JsonResponse with search results of the form:\n        {\n            results: [{id: \"123\" text: \"foo\"}],\n            pagination: {more: true}\n        }\n        \"\"\"\n        self.term, self.model_admin, self.source_field, to_field_name = self.process_request(request)\n\n        if not self.has_perm(request):\n            raise PermissionDenied\n\n        self.object_list = self.get_queryset()\n        context = self.get_context_data()\n        return JsonResponse({\n            'results': [\n                {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n                for obj in context['object_list']\n            ],\n            'pagination': {'more': context['page_obj'].has_next()},\n        })"
+          }
+        }
+      ],
+      "completion_cost": 0.006915
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/contrib/admin/views/autocomplete.py",
+            "span_id": "AutocompleteJsonView.get",
+            "start_line": 12,
+            "end_line": 33,
+            "replacement_code": "\n    def get(self, request, *args, **kwargs):\n        \"\"\"\n        Return a JsonResponse with search results of the form:\n        {\n            results: [{id: \"123\" text: \"foo\"}],\n            pagination: {more: true}\n        }\n        \"\"\"\n        self.term, self.model_admin, self.source_field, to_field_name = self.process_request(request)\n\n        if not self.has_perm(request):\n            raise PermissionDenied\n\n        self.object_list = self.get_queryset()\n        context = self.get_context_data()\n        return JsonResponse({\n            'results': [\n                self.serialize_result(obj, to_field_name) for obj in context['object_list']\n            ],\n            'pagination': {'more': context['page_obj'].has_next()},\n        })\n\n    def serialize_result(self, obj, to_field_name):\n        return {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n"
+          },
+          "output": {
+            "diff": "--- django/contrib/admin/views/autocomplete.py\n+++ django/contrib/admin/views/autocomplete.py\n@@ -26,11 +26,13 @@\n         context = self.get_context_data()\n         return JsonResponse({\n             'results': [\n-                {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n-                for obj in context['object_list']\n+                self.serialize_result(obj, to_field_name) for obj in context['object_list']\n             ],\n             'pagination': {'more': context['page_obj'].has_next()},\n         })\n+\n+    def serialize_result(self, obj, to_field_name):\n+        return {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n \n     def get_paginator(self, *args, **kwargs):\n         \"\"\"Use the ModelAdmin's paginator.\"\"\"\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": [
+              "AutocompleteJsonView.serialize_result"
+            ]
+          }
+        }
+      ],
+      "completion_cost": 0.010415
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The AutocompleteJsonView.get method has been refactored to use a new serialize_result method for constructing the results, allowing easier customization of the autocomplete response."
+          }
+        }
+      ],
+      "completion_cost": 0.00807
+    }
+  ],
+  "output": {
+    "message": "The AutocompleteJsonView.get method has been refactored to use a new serialize_result method for constructing the results, allowing easier customization of the autocomplete response."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-14752",
+    "trace_id": "coder_django__django-14752_20240609-115612",
+    "submission": "diff --git a/django/contrib/admin/views/autocomplete.py b/django/contrib/admin/views/autocomplete.py\nindex 3903e4c98c..593bb371dd 100644\n--- a/django/contrib/admin/views/autocomplete.py\n+++ b/django/contrib/admin/views/autocomplete.py\n@@ -26,12 +26,14 @@ class AutocompleteJsonView(BaseListView):\n         context = self.get_context_data()\n         return JsonResponse({\n             'results': [\n-                {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n-                for obj in context['object_list']\n+                self.serialize_result(obj, to_field_name) for obj in context['object_list']\n             ],\n             'pagination': {'more': context['page_obj'].has_next()},\n         })\n \n+    def serialize_result(self, obj, to_field_name):\n+        return {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}\n+\n     def get_paginator(self, *args, **kwargs):\n         \"\"\"Use the ModelAdmin's paginator.\"\"\"\n         return self.model_admin.get_paginator(self.request, *args, **kwargs)\n",
+    "duration": 8.320245265960693,
+    "total_cost": 0.04536500000000001
+  }
+}

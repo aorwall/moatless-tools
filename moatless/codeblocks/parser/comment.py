@@ -68,11 +68,11 @@ comment_symbols = {
     "vhdl": "--",
     "vue": "<!-- ",  # TODO ... -->
     "yaml": "#",
-    "zig": "//"
+    "zig": "//",
 }
 
 
 def get_comment_symbol(language):
     if language:
         return comment_symbols.get(language.lower(), None)
-    return "//"
+    return "#"

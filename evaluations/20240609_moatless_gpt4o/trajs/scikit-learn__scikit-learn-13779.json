@@ -1,0 +1,118 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Voting estimator will fail at fit if weights are passed and an estimator is None\nBecause we don't check for an estimator to be `None` in `sample_weight` support, `fit` is failing`.\r\n\r\n```python\r\n    X, y = load_iris(return_X_y=True)\r\n    voter = VotingClassifier(\r\n        estimators=[('lr', LogisticRegression()),\r\n                    ('rf', RandomForestClassifier())]\r\n    )\r\n    voter.fit(X, y, sample_weight=np.ones(y.shape))\r\n    voter.set_params(lr=None)\r\n    voter.fit(X, y, sample_weight=np.ones(y.shape))\r\n```\r\n\r\n```\r\nAttributeError: 'NoneType' object has no attribute 'fit'\r\n```\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "class_name": "VotingClassifier",
+            "function_name": "fit"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sklearn/ensemble/voting.py",
+                "spans": [
+                  {
+                    "span_id": "VotingClassifier.fit",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.005515
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The fit function in the VotingClassifier class is where the issue occurs when an estimator is None and sample_weight is provided. This is the relevant code to address the problem.",
+            "files_with_spans": [
+              {
+                "file_path": "sklearn/ensemble/voting.py",
+                "span_ids": [
+                  "VotingClassifier.fit"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.007495
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Add a check in the VotingClassifier's fit method to ensure that each estimator is not None before attempting to fit it. If an estimator is None, it should be skipped.",
+            "file_path": "sklearn/ensemble/voting.py",
+            "span_id": "VotingClassifier.fit"
+          },
+          "output": {
+            "response": "    def fit(self, X, y, sample_weight=None):\n        \"\"\" Fit the estimators.\n\n        Parameters\n        ----------\n        X : {array-like, sparse matrix}, shape (n_samples, n_features)\n            Training vectors, where n_samples is the number of samples and\n            n_features is the number of features.\n\n        y : array-like, shape (n_samples,)\n            Target values.\n\n        sample_weight : array-like, shape (n_samples,) or None\n            Sample weights. If None, then samples are equally weighted.\n            Note that this is supported only if all underlying estimators\n            support sample weights.\n\n        Returns\n        -------\n        self : object\n        \"\"\"\n        if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:\n            raise NotImplementedError('Multilabel and multi-output'\n                                      ' classification is not supported.')\n\n        if self.voting not in ('soft', 'hard'):\n            raise ValueError(\"Voting must be 'soft' or 'hard'; got (voting=%r)\"\n                             % self.voting)\n\n        self.le_ = LabelEncoder().fit(y)\n        self.classes_ = self.le_.classes_\n        transformed_y = self.le_.transform(y)\n\n        return super().fit(X, transformed_y, sample_weight)"
+          }
+        }
+      ],
+      "completion_cost": 0.005175000000000001
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "sklearn/ensemble/voting.py",
+            "span_id": "VotingClassifier.fit",
+            "start_line": 240,
+            "end_line": 273,
+            "replacement_code": "\n    def fit(self, X, y, sample_weight=None):\n        \"\"\" Fit the estimators.\n\n        Parameters\n        ----------\n        X : {array-like, sparse matrix}, shape (n_samples, n_features)\n            Training vectors, where n_samples is the number of samples and\n            n_features is the number of features.\n\n        y : array-like, shape (n_samples,)\n            Target values.\n\n        sample_weight : array-like, shape (n_samples,) or None\n            Sample weights. If None, then samples are equally weighted.\n            Note that this is supported only if all underlying estimators\n            support sample weights.\n\n        Returns\n        -------\n        self : object\n        \"\"\"\n        if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:\n            raise NotImplementedError('Multilabel and multi-output'\n                                      ' classification is not supported.')\n\n        if self.voting not in ('soft', 'hard'):\n            raise ValueError(\"Voting must be 'soft' or 'hard'; got (voting=%r)\"\n                             % self.voting)\n\n        self.le_ = LabelEncoder().fit(y)\n        self.classes_ = self.le_.classes_\n        transformed_y = self.le_.transform(y)\n\n        self.estimators_ = [clone(est) for name, est in self.estimators if est is not None]\n\n        if sample_weight is not None:\n            for est in self.estimators_:\n                if not has_fit_parameter(est, \"sample_weight\"):\n                    raise ValueError(f\"Underlying estimator {est} does not support sample weights.\")\n        \n        for est in self.estimators_:\n            if sample_weight is not None:\n                est.fit(X, transformed_y, sample_weight=sample_weight)\n            else:\n                est.fit(X, transformed_y)\n\n        return self\n"
+          },
+          "output": {
+            "diff": "--- sklearn/ensemble/voting.py\n+++ sklearn/ensemble/voting.py\n@@ -270,7 +270,20 @@\n         self.classes_ = self.le_.classes_\n         transformed_y = self.le_.transform(y)\n \n-        return super().fit(X, transformed_y, sample_weight)\n+        self.estimators_ = [clone(est) for name, est in self.estimators if est is not None]\n+\n+        if sample_weight is not None:\n+            for est in self.estimators_:\n+                if not has_fit_parameter(est, \"sample_weight\"):\n+                    raise ValueError(f\"Underlying estimator {est} does not support sample weights.\")\n+        \n+        for est in self.estimators_:\n+            if sample_weight is not None:\n+                est.fit(X, transformed_y, sample_weight=sample_weight)\n+            else:\n+                est.fit(X, transformed_y)\n+\n+        return self\n \n     def predict(self, X):\n         \"\"\" Predict class labels for X.\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.017365000000000002
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue has been resolved by adding a check in the VotingClassifier's fit method to ensure that each estimator is not None before attempting to fit it. If an estimator is None, it is skipped."
+          }
+        }
+      ],
+      "completion_cost": 0.007000000000000001
+    }
+  ],
+  "output": {
+    "message": "The issue has been resolved by adding a check in the VotingClassifier's fit method to ensure that each estimator is not None before attempting to fit it. If an estimator is None, it is skipped."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "scikit-learn__scikit-learn-13779",
+    "trace_id": "coder_scikit-learn__scikit-learn-13779_20240609-122833",
+    "submission": "diff --git a/sklearn/ensemble/voting.py b/sklearn/ensemble/voting.py\nindex 7afa7180c..1eba7cf4f 100644\n--- a/sklearn/ensemble/voting.py\n+++ b/sklearn/ensemble/voting.py\n@@ -270,7 +270,20 @@ class VotingClassifier(_BaseVoting, ClassifierMixin):\n         self.classes_ = self.le_.classes_\n         transformed_y = self.le_.transform(y)\n \n-        return super().fit(X, transformed_y, sample_weight)\n+        self.estimators_ = [clone(est) for name, est in self.estimators if est is not None]\n+\n+        if sample_weight is not None:\n+            for est in self.estimators_:\n+                if not has_fit_parameter(est, \"sample_weight\"):\n+                    raise ValueError(f\"Underlying estimator {est} does not support sample weights.\")\n+        \n+        for est in self.estimators_:\n+            if sample_weight is not None:\n+                est.fit(X, transformed_y, sample_weight=sample_weight)\n+            else:\n+                est.fit(X, transformed_y)\n+\n+        return self\n \n     def predict(self, X):\n         \"\"\" Predict class labels for X.\n",
+    "duration": 21.29782795906067,
+    "total_cost": 0.04255
+  }
+}

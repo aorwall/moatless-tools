@@ -1,0 +1,136 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Incorrect removal of order_by clause created as multiline RawSQL\nDescription\n\t\nHi.\nThe SQLCompiler is ripping off one of my \"order by\" clause, because he \"thinks\" the clause was already \"seen\" (in SQLCompiler.get_order_by()). I'm using expressions written as multiline RawSQLs, which are similar but not the same. \nThe bug is located in SQLCompiler.get_order_by(), somewhere around line computing part of SQL query without ordering:\nwithout_ordering = self.ordering_parts.search(sql).group(1)\nThe sql variable contains multiline sql. As a result, the self.ordering_parts regular expression is returning just a line containing ASC or DESC words. This line is added to seen set, and because my raw queries have identical last lines, only the first clasue is returing from SQLCompiler.get_order_by().\nAs a quick/temporal fix I can suggest making sql variable clean of newline characters, like this:\nsql_oneline = ' '.join(sql.split('\\n'))\nwithout_ordering = self.ordering_parts.search(sql_oneline).group(1)\nNote: beware of unicode (Py2.x u'') and EOL dragons (\\r).\nExample of my query:\n\treturn MyModel.objects.all().order_by(\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then 2 else 1 end''', []).desc(),\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime)\n\t\t\t\t else null end''', []).asc(),\n\t\tRawSQL('''\n\t\t\tcase when status not in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime, created_at)\n\t\t\t\t else null end''', []).desc())\nThe ordering_parts.search is returing accordingly:\n'\t\t\t\t then 2 else 1 end)'\n'\t\t\t\t else null end'\n'\t\t\t\t else null end'\nSecond RawSQL with a\t\t\t\t else null end part is removed from query.\nThe fun thing is that the issue can be solved by workaround by adding a space or any other char to the last line. \nSo in case of RawSQL I can just say, that current implementation of avoiding duplicates in order by clause works only for special/rare cases (or does not work in all cases). \nThe bug filed here is about wrong identification of duplicates (because it compares only last line of SQL passed to order by clause).\nHope my notes will help you fixing the issue. Sorry for my english.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "class_name": "SQLCompiler",
+            "function_name": "get_order_by"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/db/models/sql/compiler.py",
+                "spans": [
+                  {
+                    "span_id": "SQLCompiler.get_order_by",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.00737
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The issue is related to the SQLCompiler class, specifically the get_order_by function. The provided code snippet includes the get_order_by function, which contains the logic for handling the ordering parts and the seen set, which is where the bug is occurring.",
+            "files_with_spans": [
+              {
+                "file_path": "django/db/models/sql/compiler.py",
+                "span_ids": [
+                  "SQLCompiler",
+                  "SQLCompiler.get_order_by"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.01276
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Modify the SQLCompiler.get_order_by method to handle multiline RawSQL expressions correctly by removing newline characters from the SQL string before processing it.",
+            "file_path": "django/db/models/sql/compiler.py",
+            "span_id": "SQLCompiler.get_order_by"
+          },
+          "output": {
+            "response": null
+          }
+        }
+      ],
+      "completion_cost": 0.010955000000000001
+    },
+    {
+      "name": "CodeLoop_Clarification",
+      "actions": [
+        {
+          "name": "specify_lines",
+          "input": {
+            "thoughts": "The code that needs to be updated is around the line where `without_ordering` is computed. We need to modify the `sql` variable to remove newline characters before this line.",
+            "start_line": 356,
+            "end_line": 357
+          },
+          "output": {
+            "response": "            # Don't add the same column twice, but the order direction is\n            # not taken into account so we strip it. When this entire method\n            # is refactored into expressions, then we can check each part as we\n            # generate it.\n            without_ordering = self.ordering_parts.search(sql).group(1)\n            params_hash = make_hashable(params)\n            if (without_ordering, params_hash) in seen:\n                continue\n            seen.add((without_ordering, params_hash))\n            result.append((resolved, (sql, params, is_ref)))"
+          }
+        }
+      ],
+      "completion_cost": 0.011275
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/db/models/sql/compiler.py",
+            "span_id": "SQLCompiler.get_order_by",
+            "start_line": 352,
+            "end_line": 361,
+            "replacement_code": "\n            # Don't add the same column twice, but the order direction is\n            # not taken into account so we strip it. When this entire method\n            # is refactored into expressions, then we can check each part as we\n            # generate it.\n            sql_oneline = ' '.join(sql.split('\\n'))\n            without_ordering = self.ordering_parts.search(sql_oneline).group(1)\n            params_hash = make_hashable(params)\n            if (without_ordering, params_hash) in seen:\n                continue\n            seen.add((without_ordering, params_hash))\n            result.append((resolved, (sql, params, is_ref)))\n"
+          },
+          "output": {
+            "diff": "--- django/db/models/sql/compiler.py\n+++ django/db/models/sql/compiler.py\n@@ -353,7 +353,8 @@\n             # not taken into account so we strip it. When this entire method\n             # is refactored into expressions, then we can check each part as we\n             # generate it.\n-            without_ordering = self.ordering_parts.search(sql).group(1)\n+            sql_oneline = ' '.join(sql.split('\\n'))\n+            without_ordering = self.ordering_parts.search(sql_oneline).group(1)\n             params_hash = make_hashable(params)\n             if (without_ordering, params_hash) in seen:\n                 continue\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.014220000000000002
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue with the incorrect removal of the order_by clause in multiline RawSQL expressions has been resolved by modifying the SQLCompiler.get_order_by method to handle multiline SQL strings correctly."
+          }
+        }
+      ],
+      "completion_cost": 0.0119
+    }
+  ],
+  "output": {
+    "message": "The issue with the incorrect removal of the order_by clause in multiline RawSQL expressions has been resolved by modifying the SQLCompiler.get_order_by method to handle multiline SQL strings correctly."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-11001",
+    "trace_id": "coder_django__django-11001_20240609-154029",
+    "submission": "diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py\nindex 7649c39262..687b773587 100644\n--- a/django/db/models/sql/compiler.py\n+++ b/django/db/models/sql/compiler.py\n@@ -353,7 +353,8 @@ class SQLCompiler:\n             # not taken into account so we strip it. When this entire method\n             # is refactored into expressions, then we can check each part as we\n             # generate it.\n-            without_ordering = self.ordering_parts.search(sql).group(1)\n+            sql_oneline = ' '.join(sql.split('\\n'))\n+            without_ordering = self.ordering_parts.search(sql_oneline).group(1)\n             params_hash = make_hashable(params)\n             if (without_ordering, params_hash) in seen:\n                 continue\n",
+    "duration": 10.502103805541992,
+    "total_cost": 0.06848000000000001
+  }
+}

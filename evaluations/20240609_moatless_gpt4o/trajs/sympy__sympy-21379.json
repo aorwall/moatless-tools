@@ -1,0 +1,1014 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Unexpected `PolynomialError` when using simple `subs()` for particular expressions\nI am seeing weird behavior with `subs` for particular expressions with hyperbolic sinusoids with piecewise arguments. When applying `subs`, I obtain an unexpected `PolynomialError`. For context, I was umbrella-applying a casting from int to float of all int atoms for a bunch of random expressions before using a tensorflow lambdify to avoid potential tensorflow type errors. You can pretend the expression below has a `+ 1` at the end, but below is the MWE that I could produce.\r\n\r\nSee the expression below, and the conditions in which the exception arises.\r\n\r\nSympy version: 1.8.dev\r\n\r\n```python\r\nfrom sympy import *\r\nfrom sympy.core.cache import clear_cache\r\n\r\nx, y, z = symbols('x y z')\r\n\r\nclear_cache()\r\nexpr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))\r\n# This works fine\r\nexpr.subs({1: 1.0})\r\n\r\nclear_cache()\r\nx, y, z = symbols('x y z', real=True)\r\nexpr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))\r\n# This fails with \"PolynomialError: Piecewise generators do not make sense\"\r\nexpr.subs({1: 1.0})  # error\r\n# Now run it again (isympy...) w/o clearing cache and everything works as expected without error\r\nexpr.subs({1: 1.0})\r\n```\r\n\r\nI am not really sure where the issue is, but I think it has something to do with the order of assumptions in this specific type of expression. Here is what I found-\r\n\r\n- The error only (AFAIK) happens with `cosh` or `tanh` in place of `sinh`, otherwise it succeeds\r\n- The error goes away if removing the division by `z`\r\n- The error goes away if removing `exp` (but stays for most unary functions, `sin`, `log`, etc.)\r\n- The error only happens with real symbols for `x` and `y` (`z` does not have to be real)\r\n\r\nNot too sure how to debug this one.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "PolynomialError when using subs with hyperbolic sinusoids and piecewise arguments",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "SubstForHyperbolic",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "PowerOfInertTrigSumQ",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "DeactivateTrig",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "InertTrigFreeQ",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "DeactivateTrigAux",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "FractionalPowerOfLinear",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "PiecewiseLinearQ",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "InertTrigQ",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "SubstForFractionalPowerOfLinear",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "InverseFunctionOfLinear",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "FixInertTrigFunction",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "LCM",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "InertReciprocalQ",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "SubstForTrig",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "FunctionOfHyperbolicQ",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "SmartNumerator",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "SmartDenominator",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "ActivateTrig",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "TrigExpand",
+                    "tokens": 90
+                  },
+                  {
+                    "span_id": "ExpandTrig",
+                    "tokens": 90
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/holonomic/holonomic.py",
+                "spans": [
+                  {
+                    "span_id": "expr_to_holonomic",
+                    "tokens": 176
+                  },
+                  {
+                    "span_id": "HolonomicFunction.to_hyper",
+                    "tokens": 106
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/simplify/hyperexpand.py",
+                "spans": [
+                  {
+                    "span_id": "imports",
+                    "tokens": 148
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/integrals/heurisch.py",
+                "spans": [
+                  {
+                    "span_id": "imports",
+                    "tokens": 125
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/solvers/solvers.py",
+                "spans": [
+                  {
+                    "span_id": "_solve",
+                    "tokens": 77
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.007345000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs with hyperbolic sinusoids and piecewise arguments",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "SubstForHyperbolic",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "PowerOfInertTrigSumQ",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "DeactivateTrig",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "InertTrigFreeQ",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "DeactivateTrigAux",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "FractionalPowerOfLinear",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "PiecewiseLinearQ",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "InertTrigQ",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "SubstForFractionalPowerOfLinear",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "InverseFunctionOfLinear",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "FixInertTrigFunction",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "LCM",
+                    "tokens": 192
+                  },
+                  {
+                    "span_id": "InertReciprocalQ",
+                    "tokens": 192
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/special/hyper.py",
+                "spans": [
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big_minus",
+                    "tokens": 162
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small",
+                    "tokens": 162
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small_minus",
+                    "tokens": 162
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big",
+                    "tokens": 162
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin",
+                    "tokens": 162
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/elementary/hyperbolic.py",
+                "spans": [
+                  {
+                    "span_id": "sinh.eval",
+                    "tokens": 136
+                  },
+                  {
+                    "span_id": "sinh._eval_expand_trig",
+                    "tokens": 115
+                  },
+                  {
+                    "span_id": "sinh._eval_is_zero",
+                    "tokens": 83
+                  },
+                  {
+                    "span_id": "sinh._eval_is_positive",
+                    "tokens": 83
+                  },
+                  {
+                    "span_id": "sinh._eval_rewrite_as_cosh",
+                    "tokens": 83
+                  },
+                  {
+                    "span_id": "sinh._eval_is_negative",
+                    "tokens": 83
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/integrals/trigonometry.py",
+                "spans": [
+                  {
+                    "span_id": "trigintegrate",
+                    "tokens": 98
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.021655
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs with piecewise arguments",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/printing/pycode.py",
+                "spans": [
+                  {
+                    "span_id": "AbstractPythonCodePrinter._print_Piecewise",
+                    "tokens": 428
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/core/function.py",
+                "spans": [
+                  {
+                    "span_id": "Subs.__new__",
+                    "tokens": 358
+                  },
+                  {
+                    "span_id": "Subs.__new__.CustomStrPrinter",
+                    "tokens": 358
+                  },
+                  {
+                    "span_id": "Subs.__new__.CustomStrPrinter._print_Dummy",
+                    "tokens": 358
+                  },
+                  {
+                    "span_id": "Subs._eval_subs",
+                    "tokens": 178
+                  },
+                  {
+                    "span_id": "Subs._eval_nseries",
+                    "tokens": 126
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "_ExpandIntegrand",
+                    "tokens": 300
+                  },
+                  {
+                    "span_id": "impl:20",
+                    "tokens": 56
+                  },
+                  {
+                    "span_id": "_RemoveContentAux",
+                    "tokens": 56
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/printing/lambdarepr.py",
+                "spans": [
+                  {
+                    "span_id": "NumExprPrinter._print_Piecewise",
+                    "tokens": 252
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/elementary/piecewise.py",
+                "spans": [
+                  {
+                    "span_id": "Piecewise._eval_power",
+                    "tokens": 211
+                  },
+                  {
+                    "span_id": "Piecewise._eval_subs",
+                    "tokens": 211
+                  },
+                  {
+                    "span_id": "Piecewise._eval_nseries",
+                    "tokens": 211
+                  },
+                  {
+                    "span_id": "piecewise_simplify_arguments",
+                    "tokens": 91
+                  },
+                  {
+                    "span_id": "piecewise_fold",
+                    "tokens": 66
+                  },
+                  {
+                    "span_id": "Piecewise.eval",
+                    "tokens": 49
+                  },
+                  {
+                    "span_id": "Piecewise._eval_interval",
+                    "tokens": 37
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/core/evalf.py",
+                "spans": [
+                  {
+                    "span_id": "evalf_piecewise",
+                    "tokens": 150
+                  },
+                  {
+                    "span_id": "evalf_bernoulli",
+                    "tokens": 150
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/printing/numpy.py",
+                "spans": [
+                  {
+                    "span_id": "NumPyPrinter._print_Piecewise",
+                    "tokens": 107
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/parsing/autolev/_listener_autolev_antlr.py",
+                "spans": [
+                  {
+                    "span_id": "if_AutolevListener_.MyListener:2",
+                    "tokens": 77
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/elementary/benchmarks/bench_exp.py",
+                "spans": [
+                  {
+                    "span_id": "impl",
+                    "tokens": 42
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 42
+                  },
+                  {
+                    "span_id": "timeit_exp_subs",
+                    "tokens": 42
+                  }
+                ]
+              },
+              {
+                "file_path": "examples/beginner/substitution.py",
+                "spans": [
+                  {
+                    "span_id": "main",
+                    "tokens": 28
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.026575
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "PolynomialError",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/polys/polyerrors.py",
+                "spans": [
+                  {
+                    "span_id": "DomainError",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "CoercionFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "OperationNotSupported",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "HeuristicGCDFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "NotAlgebraic",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "ComputationFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "UnivariatePolynomialError",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "PolynomialError",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "EvaluationFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "IsomorphismFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "HomomorphismFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "NotInvertible",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "NotReversible",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "ModularGCDFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "ExtraneousFactors",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "UnificationFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "RefinementFailed",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "MultivariatePolynomialError",
+                    "tokens": 210
+                  },
+                  {
+                    "span_id": "GeneratorsError",
+                    "tokens": 210
+                  }
+                ]
+              }
+            ],
+            "message": "Found 19 code spans with code that matches the exact query `PolynomialError`."
+          }
+        }
+      ],
+      "completion_cost": 0.042045000000000006
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/parsing/latex/_parse_latex_antlr.py",
+                "spans": [
+                  {
+                    "span_id": "do_subs",
+                    "tokens": 1878
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/printing/latex.py",
+                "spans": [
+                  {
+                    "span_id": "LatexPrinter._print_Subs",
+                    "tokens": 1567
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/solvers/solveset.py",
+                "spans": [
+                  {
+                    "span_id": "substitution",
+                    "tokens": 311
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/testing/runtests.py",
+                "spans": [
+                  {
+                    "span_id": "test",
+                    "tokens": 131
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/strategies/tools.py",
+                "spans": [
+                  {
+                    "span_id": "subs",
+                    "tokens": 111
+                  }
+                ]
+              }
+            ],
+            "message": "Found 6 code spans with code that matches the exact query `subs`."
+          }
+        }
+      ],
+      "completion_cost": 0.04485000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs with hyperbolic sinusoids",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/functions/special/hyper.py",
+                "spans": [
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big_minus",
+                    "tokens": 280
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small",
+                    "tokens": 280
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small_minus",
+                    "tokens": 280
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big",
+                    "tokens": 280
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin",
+                    "tokens": 280
+                  },
+                  {
+                    "span_id": "HyperRep_asin1._expr_small_minus",
+                    "tokens": 140
+                  },
+                  {
+                    "span_id": "HyperRep_asin1._expr_big_minus",
+                    "tokens": 140
+                  },
+                  {
+                    "span_id": "HyperRep_asin1._expr_big",
+                    "tokens": 140
+                  },
+                  {
+                    "span_id": "HyperRep_asin1._expr_small",
+                    "tokens": 140
+                  },
+                  {
+                    "span_id": "HyperRep_asin1",
+                    "tokens": 140
+                  },
+                  {
+                    "span_id": "HyperRep_asin2._expr_big",
+                    "tokens": 118
+                  },
+                  {
+                    "span_id": "HyperRep_asin2._expr_small_minus",
+                    "tokens": 118
+                  },
+                  {
+                    "span_id": "HyperRep_asin2",
+                    "tokens": 118
+                  },
+                  {
+                    "span_id": "HyperRep_asin2._expr_big_minus",
+                    "tokens": 118
+                  },
+                  {
+                    "span_id": "HyperRep_asin2._expr_small",
+                    "tokens": 118
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/simplify/hyperexpand.py",
+                "spans": [
+                  {
+                    "span_id": "add_meijerg_formulae",
+                    "tokens": 235
+                  },
+                  {
+                    "span_id": "add_formulae",
+                    "tokens": 197
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/elementary/hyperbolic.py",
+                "spans": [
+                  {
+                    "span_id": "sinh._eval_expand_trig",
+                    "tokens": 166
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "SubstForHyperbolic",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "PowerOfInertTrigSumQ",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "DeactivateTrig",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "InertTrigFreeQ",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "DeactivateTrigAux",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "FractionalPowerOfLinear",
+                    "tokens": 100
+                  },
+                  {
+                    "span_id": "PiecewiseLinearQ",
+                    "tokens": 100
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.049530000000000005
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs with hyperbolic sinusoids and piecewise",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "SubstForHyperbolic",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "PowerOfInertTrigSumQ",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "DeactivateTrig",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "InertTrigFreeQ",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "DeactivateTrigAux",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "FractionalPowerOfLinear",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "PiecewiseLinearQ",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "InertTrigQ",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "SubstForFractionalPowerOfLinear",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "InverseFunctionOfLinear",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "FixInertTrigFunction",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "LCM",
+                    "tokens": 223
+                  },
+                  {
+                    "span_id": "InertReciprocalQ",
+                    "tokens": 223
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/special/hyper.py",
+                "spans": [
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big_minus",
+                    "tokens": 187
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small",
+                    "tokens": 187
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small_minus",
+                    "tokens": 187
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big",
+                    "tokens": 187
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin",
+                    "tokens": 187
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/integrals/trigonometry.py",
+                "spans": [
+                  {
+                    "span_id": "trigintegrate",
+                    "tokens": 158
+                  }
+                ]
+              }
+            ],
+            "message": "Found 19 code spans."
+          }
+        }
+      ],
+      "completion_cost": 0.05364
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "subs with hyperbolic sinusoids and piecewise arguments PolynomialError",
+            "file_pattern": "**/*.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sympy/integrals/rubi/utility_function.py",
+                "spans": [
+                  {
+                    "span_id": "SubstForHyperbolic",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "PowerOfInertTrigSumQ",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "DeactivateTrig",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "InertTrigFreeQ",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "DeactivateTrigAux",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "FractionalPowerOfLinear",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "PiecewiseLinearQ",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "InertTrigQ",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "SubstForFractionalPowerOfLinear",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "InverseFunctionOfLinear",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "FixInertTrigFunction",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "LCM",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "InertReciprocalQ",
+                    "tokens": 201
+                  },
+                  {
+                    "span_id": "SubstForTrig",
+                    "tokens": 63
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/elementary/hyperbolic.py",
+                "spans": [
+                  {
+                    "span_id": "sinh._eval_expand_trig",
+                    "tokens": 169
+                  },
+                  {
+                    "span_id": "sinh.eval",
+                    "tokens": 102
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/functions/special/hyper.py",
+                "spans": [
+                  {
+                    "span_id": "HyperRep._eval_rewrite_as_nonrepsmall",
+                    "tokens": 142
+                  },
+                  {
+                    "span_id": "HyperRep._eval_rewrite_as_nonrep",
+                    "tokens": 142
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big_minus",
+                    "tokens": 120
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small",
+                    "tokens": 120
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_small_minus",
+                    "tokens": 120
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin._expr_big",
+                    "tokens": 120
+                  },
+                  {
+                    "span_id": "HyperRep_sinasin",
+                    "tokens": 120
+                  }
+                ]
+              },
+              {
+                "file_path": "sympy/simplify/hyperexpand.py",
+                "spans": [
+                  {
+                    "span_id": "add_meijerg_formulae",
+                    "tokens": 86
+                  },
+                  {
+                    "span_id": "imports",
+                    "tokens": 74
+                  }
+                ]
+              }
+            ],
+            "message": "Found 25 code spans."
+          }
+        }
+      ],
+      "error": "Total cost 0.301245 exceeded max allowed cost 0.25.",
+      "completion_cost": 0.05560500000000001
+    }
+  ],
+  "output": null,
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "sympy__sympy-21379",
+    "trace_id": "coder_sympy__sympy-21379_20240609-175519",
+    "error": "Traceback (most recent call last):\n  File \"/tmp/ipykernel_993779/746761247.py\", line 70, in run_test\n    search_response = search_loop.execute()\n                      ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/albert/repos/albert/moatless/moatless/loop.py\", line 70, in execute\n    response = self._run_loop()\n               ^^^^^^^^^^^^^^^^\n  File \"/home/albert/repos/albert/moatless/moatless/loop.py\", line 93, in _run_loop\n    raise Exception(\nException: The search was aborted because the cost exceeded the limit.\n",
+    "duration": 24.220178604125977,
+    "total_cost": 0.301245
+  }
+}

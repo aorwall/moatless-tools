@@ -1,0 +1,123 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Incorrect caching of skipif/xfail string condition evaluation\nVersion: pytest 5.4.3, current master\r\n\r\npytest caches the evaluation of the string in e.g. `@pytest.mark.skipif(\"sys.platform == 'win32'\")`. The caching key is only the string itself (see `cached_eval` in `_pytest/mark/evaluate.py`). However, the evaluation also depends on the item's globals, so the caching can lead to incorrect results. Example:\r\n\r\n```py\r\n# test_module_1.py\r\nimport pytest\r\n\r\nskip = True\r\n\r\n@pytest.mark.skipif(\"skip\")\r\ndef test_should_skip():\r\n    assert False\r\n```\r\n\r\n```py\r\n# test_module_2.py\r\nimport pytest\r\n\r\nskip = False\r\n\r\n@pytest.mark.skipif(\"skip\")\r\ndef test_should_not_skip():\r\n    assert False\r\n```\r\n\r\nRunning `pytest test_module_1.py test_module_2.py`.\r\n\r\nExpected: `test_should_skip` is skipped, `test_should_not_skip` is not skipped.\r\n\r\nActual: both are skipped.\r\n\r\n---\r\n\r\nI think the most appropriate fix is to simply remove the caching, which I don't think is necessary really, and inline `cached_eval` into `MarkEvaluator._istrue`.\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "query": "cached_eval",
+            "file_pattern": "_pytest/mark/evaluate.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "src/_pytest/mark/evaluate.py",
+                "spans": [
+                  {
+                    "span_id": "cached_eval",
+                    "tokens": 2180
+                  },
+                  {
+                    "span_id": "MarkEvaluator._istrue",
+                    "tokens": 1819
+                  }
+                ]
+              }
+            ],
+            "message": "Found 2 code spans with code that matches the exact query `cached_eval`."
+          }
+        }
+      ],
+      "completion_cost": 0.006110000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The cached_eval function and its usage in the MarkEvaluator._istrue method are responsible for the incorrect caching of skipif/xfail string condition evaluation. Removing the caching and inlining cached_eval into MarkEvaluator._istrue should resolve the issue.",
+            "files_with_spans": [
+              {
+                "file_path": "src/_pytest/mark/evaluate.py",
+                "span_ids": [
+                  "cached_eval",
+                  "MarkEvaluator._istrue"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.00953
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Remove the caching mechanism by inlining the cached_eval function into the MarkEvaluator._istrue method. This will ensure that the evaluation of the skipif/xfail string condition depends on the item's globals and not on a cached result.",
+            "file_path": "src/_pytest/mark/evaluate.py",
+            "span_id": "MarkEvaluator._istrue"
+          },
+          "output": {
+            "response": "    def _istrue(self) -> bool:\n        if hasattr(self, \"result\"):\n            result = getattr(self, \"result\")  # type: bool\n            return result\n        self._marks = self._get_marks()\n\n        if self._marks:\n            self.result = False\n            for mark in self._marks:\n                self._mark = mark\n                if \"condition\" not in mark.kwargs:\n                    args = mark.args\n                else:\n                    args = (mark.kwargs[\"condition\"],)\n\n                for expr in args:\n                    self.expr = expr\n                    if isinstance(expr, str):\n                        d = self._getglobals()\n                        result = cached_eval(self.item.config, expr, d)\n                    else:\n                        if \"reason\" not in mark.kwargs:\n                            # XXX better be checked at collection time\n                            msg = (\n                                \"you need to specify reason=STRING \"\n                                \"when using booleans as conditions.\"\n                            )\n                            fail(msg)\n                        result = bool(expr)\n                    if result:\n                        self.result = True\n                        self.reason = mark.kwargs.get(\"reason\", None)\n                        self.expr = expr\n                        return self.result\n\n                if not args:\n                    self.result = True\n                    self.reason = mark.kwargs.get(\"reason\", None)\n                    return self.result\n        return False"
+          }
+        }
+      ],
+      "completion_cost": 0.0069500000000000004
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "src/_pytest/mark/evaluate.py",
+            "span_id": "MarkEvaluator._istrue",
+            "start_line": 82,
+            "end_line": 121,
+            "replacement_code": "\n    def _istrue(self) -> bool:\n        if hasattr(self, \"result\"):\n            result = getattr(self, \"result\")  # type: bool\n            return result\n        self._marks = self._get_marks()\n\n        if self._marks:\n            self.result = False\n            for mark in self._marks:\n                self._mark = mark\n                if \"condition\" not in mark.kwargs:\n                    args = mark.args\n                else:\n                    args = (mark.kwargs[\"condition\"],)\n\n                for expr in args:\n                    self.expr = expr\n                    if isinstance(expr, str):\n                        d = self._getglobals()\n                        import _pytest._code\n                        exprcode = _pytest._code.compile(expr, mode=\"eval\")\n                        result = eval(exprcode, d)\n                    else:\n                        if \"reason\" not in mark.kwargs:\n                            msg = (\n                                \"you need to specify reason=STRING \"\n                                \"when using booleans as conditions.\"\n                            )\n                            fail(msg)\n                        result = bool(expr)\n                    if result:\n                        self.result = True\n                        self.reason = mark.kwargs.get(\"reason\", None)\n                        self.expr = expr\n                        return self.result\n\n                if not args:\n                    self.result = True\n                    self.reason = mark.kwargs.get(\"reason\", None)\n                    return self.result\n        return False\n"
+          },
+          "output": {
+            "diff": "--- src/_pytest/mark/evaluate.py\n+++ src/_pytest/mark/evaluate.py\n@@ -98,10 +98,11 @@\n                     self.expr = expr\n                     if isinstance(expr, str):\n                         d = self._getglobals()\n-                        result = cached_eval(self.item.config, expr, d)\n+                        import _pytest._code\n+                        exprcode = _pytest._code.compile(expr, mode=\"eval\")\n+                        result = eval(exprcode, d)\n                     else:\n                         if \"reason\" not in mark.kwargs:\n-                            # XXX better be checked at collection time\n                             msg = (\n                                 \"you need to specify reason=STRING \"\n                                 \"when using booleans as conditions.\"\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.012045
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The caching mechanism for evaluating skipif/xfail string conditions has been removed by inlining the cached_eval function into the MarkEvaluator._istrue method. This ensures that the evaluation depends on the item's globals and not on a cached result, resolving the issue."
+          }
+        }
+      ],
+      "completion_cost": 0.00799
+    }
+  ],
+  "output": {
+    "message": "The caching mechanism for evaluating skipif/xfail string conditions has been removed by inlining the cached_eval function into the MarkEvaluator._istrue method. This ensures that the evaluation depends on the item's globals and not on a cached result, resolving the issue."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "pytest-dev__pytest-7373",
+    "trace_id": "coder_pytest-dev__pytest-7373_20240609-120053",
+    "submission": "diff --git a/src/_pytest/mark/evaluate.py b/src/_pytest/mark/evaluate.py\nindex 759191668..588249968 100644\n--- a/src/_pytest/mark/evaluate.py\n+++ b/src/_pytest/mark/evaluate.py\n@@ -98,10 +98,11 @@ class MarkEvaluator:\n                     self.expr = expr\n                     if isinstance(expr, str):\n                         d = self._getglobals()\n-                        result = cached_eval(self.item.config, expr, d)\n+                        import _pytest._code\n+                        exprcode = _pytest._code.compile(expr, mode=\"eval\")\n+                        result = eval(exprcode, d)\n                     else:\n                         if \"reason\" not in mark.kwargs:\n-                            # XXX better be checked at collection time\n                             msg = (\n                                 \"you need to specify reason=STRING \"\n                                 \"when using booleans as conditions.\"\n",
+    "duration": 10.43569302558899,
+    "total_cost": 0.042624999999999996
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "Add an encoder parameter to django.utils.html.json_script().\nDescription\n\t\nI have a use case where I want to customize the JSON encoding of some values to output to the template layer. It looks like django.utils.html.json_script is a good utility for that, however the JSON encoder is hardcoded to DjangoJSONEncoder. I think it would be nice to be able to pass a custom encoder class.\nBy the way, django.utils.html.json_script is not documented (only its template filter counterpart is), would it be a good thing to add to the docs?\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "json_script",
+            "file_pattern": "**/django/utils/html.py"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "django/utils/html.py",
+                "spans": [
+                  {
+                    "span_id": "json_script",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.005435000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The json_script function in django/utils/html.py is where the JSON encoding is hardcoded to DjangoJSONEncoder. This is the relevant code to modify to add an encoder parameter.",
+            "files_with_spans": [
+              {
+                "file_path": "django/utils/html.py",
+                "span_ids": [
+                  "json_script"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.0069700000000000005
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Add an encoder parameter to the json_script function to allow custom JSON encoders.",
+            "file_path": "django/utils/html.py",
+            "span_id": "json_script"
+          },
+          "output": {
+            "response": "def json_script(value, element_id=None):\n    \"\"\"\n    Escape all the HTML/XML special characters with their unicode escapes, so\n    value is safe to be output anywhere except for inside a tag attribute. Wrap\n    the escaped JSON in a script tag.\n    \"\"\"\n    from django.core.serializers.json import DjangoJSONEncoder\n\n    json_str = json.dumps(value, cls=DjangoJSONEncoder).translate(_json_script_escapes)\n    if element_id:\n        template = '<script id=\"{}\" type=\"application/json\">{}</script>'\n        args = (element_id, mark_safe(json_str))\n    else:\n        template = '<script type=\"application/json\">{}</script>'\n        args = (mark_safe(json_str),)\n    return format_html(template, *args)"
+          }
+        }
+      ],
+      "completion_cost": 0.004705
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "django/utils/html.py",
+            "span_id": "json_script",
+            "start_line": 62,
+            "end_line": 77,
+            "replacement_code": "\ndef json_script(value, element_id=None, encoder=DjangoJSONEncoder):\n    \"\"\"\n    Escape all the HTML/XML special characters with their unicode escapes, so\n    value is safe to be output anywhere except for inside a tag attribute. Wrap\n    the escaped JSON in a script tag.\n    \"\"\"\n    json_str = json.dumps(value, cls=encoder).translate(_json_script_escapes)\n    if element_id:\n        template = '<script id=\"{}\" type=\"application/json\">{}</script>'\n        args = (element_id, mark_safe(json_str))\n    else:\n        template = '<script type=\"application/json\">{}</script>'\n        args = (mark_safe(json_str),)\n    return format_html(template, *args)\n"
+          },
+          "output": {
+            "diff": "--- django/utils/html.py\n+++ django/utils/html.py\n@@ -59,15 +59,13 @@\n }\n \n \n-def json_script(value, element_id=None):\n+def json_script(value, element_id=None, encoder=DjangoJSONEncoder):\n     \"\"\"\n     Escape all the HTML/XML special characters with their unicode escapes, so\n     value is safe to be output anywhere except for inside a tag attribute. Wrap\n     the escaped JSON in a script tag.\n     \"\"\"\n-    from django.core.serializers.json import DjangoJSONEncoder\n-\n-    json_str = json.dumps(value, cls=DjangoJSONEncoder).translate(_json_script_escapes)\n+    json_str = json.dumps(value, cls=encoder).translate(_json_script_escapes)\n     if element_id:\n         template = '<script id=\"{}\" type=\"application/json\">{}</script>'\n         args = (element_id, mark_safe(json_str))\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.008085000000000002
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The encoder parameter has been successfully added to the json_script function, allowing for custom JSON encoders."
+          }
+        }
+      ],
+      "completion_cost": 0.005805000000000001
+    }
+  ],
+  "output": {
+    "message": "The encoder parameter has been successfully added to the json_script function, allowing for custom JSON encoders."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "django__django-15789",
+    "trace_id": "coder_django__django-15789_20240609-115637",
+    "submission": "diff --git a/django/utils/html.py b/django/utils/html.py\nindex d0bc97be80..04cc460ac3 100644\n--- a/django/utils/html.py\n+++ b/django/utils/html.py\n@@ -59,15 +59,13 @@ _json_script_escapes = {\n }\n \n \n-def json_script(value, element_id=None):\n+def json_script(value, element_id=None, encoder=DjangoJSONEncoder):\n     \"\"\"\n     Escape all the HTML/XML special characters with their unicode escapes, so\n     value is safe to be output anywhere except for inside a tag attribute. Wrap\n     the escaped JSON in a script tag.\n     \"\"\"\n-    from django.core.serializers.json import DjangoJSONEncoder\n-\n-    json_str = json.dumps(value, cls=DjangoJSONEncoder).translate(_json_script_escapes)\n+    json_str = json.dumps(value, cls=encoder).translate(_json_script_escapes)\n     if element_id:\n         template = '<script id=\"{}\" type=\"application/json\">{}</script>'\n         args = (element_id, mark_safe(json_str))\n",
+    "duration": 6.3613667488098145,
+    "total_cost": 0.031000000000000003
+  }
+}

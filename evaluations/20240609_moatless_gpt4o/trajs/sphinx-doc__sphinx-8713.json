@@ -1,0 +1,144 @@
+{
+  "name": "moatless",
+  "input": {
+    "problem_statement": "napoleon_use_param should also affect \"other parameters\" section\nSubject: napoleon_use_param should also affect \"other parameters\" section\r\n\r\n### Problem\r\nCurrently, napoleon always renders the Other parameters section as if napoleon_use_param was False, see source\r\n```\r\n    def _parse_other_parameters_section(self, section):\r\n        # type: (unicode) -> List[unicode]\r\n        return self._format_fields(_('Other Parameters'), self._consume_fields())\r\n\r\n    def _parse_parameters_section(self, section):\r\n        # type: (unicode) -> List[unicode]\r\n        fields = self._consume_fields()\r\n        if self._config.napoleon_use_param:\r\n            return self._format_docutils_params(fields)\r\n        else:\r\n            return self._format_fields(_('Parameters'), fields)\r\n```\r\nwhereas it would make sense that this section should follow the same formatting rules as the Parameters section.\r\n\r\n#### Procedure to reproduce the problem\r\n```\r\nIn [5]: print(str(sphinx.ext.napoleon.NumpyDocstring(\"\"\"\\ \r\n   ...: Parameters \r\n   ...: ---------- \r\n   ...: x : int \r\n   ...:  \r\n   ...: Other parameters \r\n   ...: ---------------- \r\n   ...: y: float \r\n   ...: \"\"\")))                                                                                                                                                                                      \r\n:param x:\r\n:type x: int\r\n\r\n:Other Parameters: **y** (*float*)\r\n```\r\n\r\nNote the difference in rendering.\r\n\r\n#### Error logs / results\r\nSee above.\r\n\r\n#### Expected results\r\n```\r\n:param x:\r\n:type x: int\r\n\r\n:Other Parameters:  // Or some other kind of heading.\r\n:param: y\r\n:type y: float\r\n```\r\n\r\nAlternatively another separate config value could be introduced, but that seems a bit overkill.\r\n\r\n### Reproducible project / your project\r\nN/A\r\n\r\n### Environment info\r\n- OS: Linux\r\n- Python version: 3.7\r\n- Sphinx version: 1.8.1\r\n\n"
+  },
+  "steps": [
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "_parse_other_parameters_section"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sphinx/ext/napoleon/docstring.py",
+                "spans": [
+                  {
+                    "span_id": "GoogleDocstring._parse_other_parameters_section",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.0067150000000000005
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "search",
+          "input": {
+            "function_name": "_parse_parameters_section"
+          },
+          "output": {
+            "file_context": [
+              {
+                "file_path": "sphinx/ext/napoleon/docstring.py",
+                "spans": [
+                  {
+                    "span_id": "GoogleDocstring._parse_parameters_section",
+                    "tokens": 4000
+                  }
+                ]
+              }
+            ],
+            "message": "Found 1 hits."
+          }
+        }
+      ],
+      "completion_cost": 0.007325000000000001
+    },
+    {
+      "name": "SearchLoop_Searching",
+      "actions": [
+        {
+          "name": "identify",
+          "input": {
+            "reasoning": "The functions _parse_other_parameters_section and _parse_parameters_section are responsible for rendering the 'Other Parameters' and 'Parameters' sections, respectively. Modifying these functions will allow napoleon_use_param to affect the 'Other Parameters' section.",
+            "files_with_spans": [
+              {
+                "file_path": "sphinx/ext/napoleon/docstring.py",
+                "span_ids": [
+                  "GoogleDocstring._parse_other_parameters_section",
+                  "GoogleDocstring._parse_parameters_section"
+                ]
+              }
+            ]
+          },
+          "output": {}
+        }
+      ],
+      "completion_cost": 0.00948
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "request_for_change",
+          "input": {
+            "description": "Update the _parse_other_parameters_section method to check the napoleon_use_param configuration and format the 'Other Parameters' section accordingly.",
+            "file_path": "sphinx/ext/napoleon/docstring.py",
+            "span_id": "GoogleDocstring._parse_other_parameters_section"
+          },
+          "output": {
+            "response": "    def _parse_other_parameters_section(self, section: str) -> List[str]:\n        return self._format_fields(_('Other Parameters'), self._consume_fields())"
+          }
+        }
+      ],
+      "completion_cost": 0.009995
+    },
+    {
+      "name": "CodeLoop_CodeChange",
+      "actions": [
+        {
+          "name": "search_replace",
+          "input": {
+            "file_path": "sphinx/ext/napoleon/docstring.py",
+            "span_id": "GoogleDocstring._parse_other_parameters_section",
+            "start_line": 684,
+            "end_line": 685,
+            "replacement_code": "\n    def _parse_other_parameters_section(self, section: str) -> List[str]:\n        fields = self._consume_fields()\n        if self._config.napoleon_use_param:\n            return self._format_docutils_params(fields)\n        else:\n            return self._format_fields(_('Other Parameters'), fields)\n"
+          },
+          "output": {
+            "diff": "--- sphinx/ext/napoleon/docstring.py\n+++ sphinx/ext/napoleon/docstring.py\n@@ -682,7 +682,11 @@\n         return self._parse_generic_section(_('Notes'), use_admonition)\n \n     def _parse_other_parameters_section(self, section: str) -> List[str]:\n-        return self._format_fields(_('Other Parameters'), self._consume_fields())\n+        fields = self._consume_fields()\n+        if self._config.napoleon_use_param:\n+            return self._format_docutils_params(fields)\n+        else:\n+            return self._format_fields(_('Other Parameters'), fields)\n \n     def _parse_parameters_section(self, section: str) -> List[str]:\n         if self._config.napoleon_use_param:\n",
+            "updated": true,
+            "error": null,
+            "new_span_ids": []
+          }
+        }
+      ],
+      "completion_cost": 0.013645000000000001
+    },
+    {
+      "name": "CodeLoop_Pending",
+      "actions": [
+        {
+          "name": "finish",
+          "input": {
+            "reason": "The issue has been resolved by updating the _parse_other_parameters_section method to respect the napoleon_use_param configuration, ensuring consistent formatting with the Parameters section."
+          }
+        }
+      ],
+      "completion_cost": 0.011045000000000001
+    }
+  ],
+  "output": {
+    "message": "The issue has been resolved by updating the _parse_other_parameters_section method to respect the napoleon_use_param configuration, ensuring consistent formatting with the Parameters section."
+  },
+  "info": {
+    "evaluation_name": "20240609_moatless_gpt4o_2",
+    "instance_id": "sphinx-doc__sphinx-8713",
+    "trace_id": "coder_sphinx-doc__sphinx-8713_20240609-122918",
+    "submission": "diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py\nindex 755088ca5..cc7486d19 100644\n--- a/sphinx/ext/napoleon/docstring.py\n+++ b/sphinx/ext/napoleon/docstring.py\n@@ -682,7 +682,11 @@ class GoogleDocstring:\n         return self._parse_generic_section(_('Notes'), use_admonition)\n \n     def _parse_other_parameters_section(self, section: str) -> List[str]:\n-        return self._format_fields(_('Other Parameters'), self._consume_fields())\n+        fields = self._consume_fields()\n+        if self._config.napoleon_use_param:\n+            return self._format_docutils_params(fields)\n+        else:\n+            return self._format_fields(_('Other Parameters'), fields)\n \n     def _parse_parameters_section(self, section: str) -> List[str]:\n         if self._config.napoleon_use_param:\n",
+    "duration": 8.182769536972046,
+    "total_cost": 0.05820500000000001
+  }
+}
