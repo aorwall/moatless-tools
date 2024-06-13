@@ -72,34 +72,43 @@ class CodeFile(BaseModel):
 
         return self.update_content(updated_content)
 
-    def update_content(
-        self, updated_content: str
-    ) -> UpdateResult:
+    def update_content(self, updated_content: str) -> UpdateResult:
         diff = do_diff(self.file_path, self.content, updated_content)
-
         if diff:
             parser = PythonParser()
             module = parser.parse(updated_content)
 
-
             # TODO: Move the prompt instructions to the loop
             error_blocks = module.find_errors()
             validation_errors = module.find_validation_errors()
-            existing_placeholders = self.module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
-            new_placeholders = module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE) if not existing_placeholders else []
+            existing_placeholders = self.module.find_blocks_with_type(
+                CodeBlockType.COMMENTED_OUT_CODE
+            )
+            new_placeholders = (
+                module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
+                if not existing_placeholders
+                else []
+            )
             if error_blocks or validation_errors or new_placeholders:
                 error_response = ""
                 if error_blocks:
                     for error_block in error_blocks:
-                        parent_block = error_block.find_type_group_in_parents(CodeBlockTypeGroup.STRUCTURE)
-                        if parent_block and not parent_block.type == CodeBlockType.MODULE:
+                        parent_block = error_block.find_type_group_in_parents(
+                            CodeBlockTypeGroup.STRUCTURE
+                        )
+                        if (
+                            parent_block
+                            and not parent_block.type == CodeBlockType.MODULE
+                        ):
                             error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
                         else:
                             error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
 
                 if new_placeholders:
                     for new_placeholder in new_placeholders:
-                        parent_block = new_placeholder.find_type_group_in_parents(CodeBlockTypeGroup.STRUCTURE)
+                        parent_block = new_placeholder.find_type_group_in_parents(
+                            CodeBlockTypeGroup.STRUCTURE
+                        )
                         if parent_block:
                             error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
                         else:
@@ -119,7 +128,9 @@ class CodeFile(BaseModel):
                     error=error_response,
                 )
 
-            new_span_ids = module.get_all_span_ids() - set(self.module.get_all_span_ids())
+            new_span_ids = module.get_all_span_ids() - set(
+                self.module.get_all_span_ids()
+            )
             self.dirty = True
             self.content = updated_content
             self.module = module
@@ -132,75 +143,6 @@ class CodeFile(BaseModel):
             )
 
         return UpdateResult(file_path=self.file_path, updated=False)
-
-    def get_line_span(
-        self, start_line: int, end_line: Optional[int] = None, max_tokens=Settings.coder.max_tokens_in_edit_prompt
-    ) -> Tuple[Optional[int], Optional[int]]:
-        """
-        Find the span that covers the lines from start_line to end_line
-        """
-
-        logger.info(
-            f"Get span to change in {self.file_path} from {start_line} to {end_line}"
-        )
-
-        start_block = self.module.find_first_by_start_line(start_line)
-        if not start_block:
-            logger.warning(
-                f"No block found in {self.file_path} that starts at line {start_line}"
-            )
-            return None, None
-
-        if start_block.type.group == CodeBlockTypeGroup.STRUCTURE and (not end_line or start_block.end_line > end_line):
-            struture_block = start_block
-        else:
-            struture_block = start_block.find_type_group_in_parents(
-                CodeBlockTypeGroup.STRUCTURE
-            )
-
-        if not struture_block:
-            logger.warning(
-                f"No parent structure found for block {start_block.path_string()}"
-            )
-            return None, None
-
-        if struture_block.sum_tokens() < max_tokens:
-            logger.info(
-                f"Return block [{struture_block.path_string()}] ({struture_block.start_line} - {struture_block.end_line}) with {struture_block.sum_tokens()} tokens that covers the provided line span ({start_line} - {end_line})"
-            )
-            return struture_block.start_line, struture_block.end_line
-
-        if not end_line:
-            end_line = start_line
-
-        original_lines = self.content.split("\n")
-        if struture_block.end_line - end_line < 5:
-            logger.info(
-                f"Set parent block [{struture_block.path_string()}] end line {struture_block.end_line} as it's {struture_block.end_line - end_line} lines from the end of the file"
-            )
-            end_line = struture_block.end_line
-        else:
-            end_line = _get_post_end_line_index(
-                end_line, struture_block.end_line, original_lines
-            )
-            logger.info(
-                f"Set end line to {end_line} from the end of the parent block"
-            )
-
-        if start_line - struture_block.start_line < 5:
-            logger.info(
-                f"Set parent block [{struture_block.path_string()}] start line {struture_block.start_line} as it's {start_line - struture_block.start_line} lines from the start of the file"
-            )
-            start_line = struture_block.start_line
-        else:
-            start_line = _get_pre_start_line(
-                start_line, struture_block.start_line, original_lines
-            )
-            logger.info(
-                f"Set start line to {start_line} from the start of the parent block"
-            )
-
-        return start_line, end_line
 
 
 _parser = PythonParser()
@@ -318,67 +260,3 @@ def do_diff(
             lineterm="\n",
         )
     )
-
-
-def _get_pre_start_line(
-    start_line: int, min_start_line: int, content_lines: List[str], max_lines: int = 4
-) -> int:
-    if start_line > len(content_lines):
-        raise ValueError(
-            f"start_line {start_line} is out of range ({len(content_lines)})."
-        )
-
-    if start_line - min_start_line < max_lines:
-        return min_start_line
-
-    start_line_index = start_line - 1
-    start_search_index = max(0, start_line_index - 1)
-    end_search_index = max(min_start_line, start_line_index - max_lines)
-
-    non_empty_indices = []
-
-    for idx in range(start_search_index, end_search_index - 1, -1):
-        if content_lines[idx].strip() != "":
-            non_empty_indices.append(idx)
-
-    # Check if any non-empty line was found within the search range
-    if non_empty_indices:
-        return non_empty_indices[-1] + 1
-
-    # If no non-empty lines were found, check the start_line itself
-    if content_lines[start_line_index].strip() != "":
-        return start_line_index + 1
-
-    # If the start_line is also empty, raise an exception
-    raise ValueError("No non-empty line found within 3 lines above the start_line.")
-
-
-def _get_post_end_line_index(
-    end_line: int, max_end_line: int, content_lines: List[str], max_lines: int = 4
-) -> int:
-    if end_line < 1 or end_line > len(content_lines):
-        raise IndexError("end_line is out of range.")
-
-    if max_end_line - end_line < max_lines:
-        return max_end_line
-
-    end_line_index = end_line - 1
-    start_search_index = min(len(content_lines) - 1, end_line_index + 1)
-    end_search_index = min(max_end_line - 1, end_line_index + max_lines)
-
-    non_empty_indices = []
-
-    for idx in range(start_search_index, end_search_index + 1):
-        if content_lines[idx].strip() != "":
-            non_empty_indices.append(idx)
-
-    # Check if any non-empty line was found within the search range
-    if non_empty_indices:
-        return non_empty_indices[-1] + 1
-
-    # If no non-empty lines were found, check the end_line itself
-    if content_lines[end_line_index].strip() != "":
-        return end_line_index + 1
-
-    # If the end_line is also empty, raise an exception
-    raise ValueError("No non-empty line found within 3 lines after the end_line.")

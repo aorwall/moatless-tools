@@ -10,7 +10,7 @@ from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, RankedFileSpan
 from moatless.index.code_index import CodeIndex
 from moatless.index.types import SearchCodeResponse
-from moatless.loop.base import BaseLoop, LoopState
+from moatless.loop.base import Loop, BaseState
 
 from moatless.loop.prompt import (
     SEARCH_SYSTEM_PROMPT,
@@ -18,13 +18,12 @@ from moatless.loop.prompt import (
     FIND_AGENT_TEST_IGNORE,
 )
 
-from moatless.loop.base import BaseLoop
+from moatless.loop.base import Loop
 from moatless.trajectory import Trajectory
 from moatless.types import (
     FileWithSpans,
     ActionRequest,
     ActionSpec,
-    RejectRequest,
     Reject,
 )
 from moatless.workspace import Workspace
@@ -143,13 +142,13 @@ class ActionCallWithContext(BaseModel):
         arbitrary_types_allowed = True
 
 
-class Searching(LoopState):
+class Searching(BaseState):
 
-    def tools(self) -> list[Type[ActionSpec]]:
+    def actions(self) -> list[Type[ActionSpec]]:
         return [SearchCodeAction, IdentifyCode, Reject]
 
 
-class SearchLoop(BaseLoop):
+class SearchLoop(Loop):
 
     def __init__(
         self,
@@ -234,7 +233,7 @@ class SearchLoop(BaseLoop):
                     if response:
                         return response
                 elif function_name == Reject.name():
-                    reject_request = RejectRequest.model_validate(arguments)
+                    reject_request = Reject.model_validate(arguments)
                     return FindCodeResponse(message=reject_request.reason)
                 elif function_name == SearchCodeAction.name():
                     ranked_spans = []

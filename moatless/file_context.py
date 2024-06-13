@@ -9,7 +9,8 @@ from moatless.codeblocks.codeblocks import (
     BlockSpan,
     CodeBlock,
     SpanMarker,
-    CodeBlockTypeGroup, SpanType,
+    CodeBlockTypeGroup,
+    SpanType,
 )
 from moatless.repository import CodeFile, FileRepository, UpdateResult
 from moatless.settings import Settings
@@ -182,8 +183,8 @@ class ContextFile(BaseModel):
                 )
             elif show_outcommented_code and not outcommented_block:
                 outcommented_block = child.create_commented_out_block(
-                        outcomment_code_comment
-                    )
+                    outcomment_code_comment
+                )
                 outcommented_block.start_line = child.start_line
 
         if (
@@ -268,7 +269,11 @@ class ContextFile(BaseModel):
     def expand_context_with_imports(self):
         init_spans = set()
         for child in self.module.children:
-            if child.type == CodeBlockType.IMPORT and child.belongs_to_span.span_type == SpanType.INITATION and child.belongs_to_span.span_id not in init_spans:
+            if (
+                child.type == CodeBlockType.IMPORT
+                and child.belongs_to_span.span_type == SpanType.INITATION
+                and child.belongs_to_span.span_id not in init_spans
+            ):
                 self.add_span(child.belongs_to_span.span_id)
 
     def expand_small_classes(self, max_tokens: int):
@@ -280,7 +285,11 @@ class ContextFile(BaseModel):
 
         if len(self.spans) == 1:
             span = self.module.find_span_by_id(self.spans[0].span_id)
-            if span and span.initiating_block.type == CodeBlockType.CLASS and span.initiating_block.sum_tokens() < max_tokens:
+            if (
+                span
+                and span.initiating_block.type == CodeBlockType.CLASS
+                and span.initiating_block.sum_tokens() < max_tokens
+            ):
                 for span_id in span.initiating_block.get_all_span_ids():
                     self.add_span(span_id)
 

@@ -252,21 +252,26 @@ def get_total_cost(trace_id):
     return trace.total_cost
 
 
-def setup_langfuse_tracing(
-    instance_id: str, session_id: str, trace_name: str = None
-) -> str:
-    date_time_str = time.strftime("%Y%m%d-%H%M%S")
-    trace_id = f"coder_{instance_id}_{date_time_str}"
+def setup_langfuse_tracing(instance_id: str, session_id: str, trace_name: str) -> str:
     set_trace_metadata(
-        {
-            "session_id": session_id,
-            "trace": trace_name,
-            "trace_id": trace_id,
-            "tags": [instance_id],
-        }
+        trace_metadata(
+            instance_id=instance_id, session_id=session_id, trace_name=trace_name
+        )
     )
 
     litellm.success_callback = ["langfuse"]
     litellm.failure_callback = ["langfuse"]
 
-    return trace_id
+    return trace_metadata["trace_id"]
+
+
+def trace_metadata(instance_id: str, session_id: str, trace_name: str):
+    date_time_str = time.strftime("%Y%m%d-%H%M%S")
+    trace_id = f"coder_{instance_id}_{date_time_str}"
+    return {
+        "session_id": session_id,
+        "name": trace_name,
+        "trace": trace_name,
+        "trace_id": trace_id,
+        "tags": [instance_id],
+    }
