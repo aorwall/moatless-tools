@@ -1,8 +1,8 @@
+import json
 from typing import List, Optional, Dict, Any, Type
 
 from pydantic import BaseModel, Field
-
-
+from pydantic.main import Model
 
 
 class FileWithSpans(BaseModel):
@@ -28,29 +28,7 @@ class ActionResponse(BaseModel):
 
 
 class ActionRequest(BaseModel):
-
-    @classmethod
-    def openai_tool_parameters(cls) -> Dict[str, Any]:
-        schema = cls.model_json_schema()
-
-        parameters = {
-            k: v for k, v in schema.items() if k not in ("title", "description")
-        }
-
-        parameters["required"] = sorted(
-            k for k, v in parameters["properties"].items() if "default" not in v
-        )
-
-        # Just set type and skip anyOf on Optionals
-        for k, v in parameters["properties"].items():
-            if "anyOf" in v:
-                any_of = v.pop("anyOf")
-                for type_ in any_of:
-                    if type_["type"] != "null":
-                        v.update(type_)
-                        break
-
-        return parameters
+    pass
 
 
 class EmptyRequest(ActionRequest):
@@ -78,6 +56,12 @@ class ActionSpec(BaseModel):
     def validate_request(cls, args: Dict[str, Any]) -> ActionRequest:
         return cls.request_class().model_validate(args, strict=True)
 
+    @classmethod
+    def create_request_from_json(cls, call_id: str, args: str) -> ActionRequest:
+        args_dict = json.loads(args)
+        args_dict["call_id"] = call_id
+        return cls.request_class().model_validate(args_dict, strict=True)
+
     # TODO: Do generic solution to get parameters from ActionRequest
     @classmethod
     def openai_tool_spec(cls) -> Dict[str, Any]:
@@ -92,40 +76,30 @@ class ActionSpec(BaseModel):
         }
 
 
-class FinishRequest(ActionRequest):
-    reason: str = Field(..., description="The reason to finishing the request.")
+class Finish(ActionRequest):
+    thoughts: str = Field(..., description="The reason to finishing the request.")
 
 
-class Finish(ActionSpec):
-
-    @classmethod
-    def name(self):
-        return "finish"
-
-    @classmethod
-    def description(self):
-        return "Finish."
-
-    @classmethod
-    def request_class(cls):
-        return FinishRequest
-
-
-class RejectRequest(ActionRequest):
+class Reject(ActionRequest):
     reason: str = Field(..., description="The reason for rejecting the request.")
 
 
-class Reject(ActionSpec):
+class Content(ActionRequest):
+    content: str
 
-    @classmethod
-    def request_class(cls):
-        return RejectRequest
 
-    @classmethod
-    def name(self):
-        return "reject"
+class Message(BaseModel):
+    role: str
+    content: Optional[str] = None
+    action: Optional[ActionRequest] = Field(default=None)
 
-    @classmethod
-    def description(cls) -> str:
-        return "Reject the request."
 
+class AssistantMessage(Message):
+    role: str = "assistant"
+    content: Optional[str] = None
+    action: Optional[ActionRequest] = Field(default=None)
+
+
+class UserMessage(Message):
+    role: str = "user"
+    content: Optional[str] = None

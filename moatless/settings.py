@@ -19,7 +19,6 @@ class _CoderSettings:
         self._max_tokens_in_edit_prompt = max_tokens_in_edit_prompt
 
 
-
 class _SearchSettings:
     _max_tokens = 8000
 

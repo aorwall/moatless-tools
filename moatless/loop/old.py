@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, BlockSpan
 from moatless.loop.prompt import CODER_SYSTEM_PROMPT, SEARCH_REPLACE_PROMPT
-from moatless.loop.base import BaseLoop, LoopState
+from moatless.loop.base import Loop, BaseState
 from moatless.settings import Settings
 from moatless.trajectory import Trajectory
 from moatless.types import (
@@ -19,8 +19,6 @@ from moatless.types import (
     FileWithSpans,
     ActionRequest,
     Reject,
-    RejectRequest,
-    FinishRequest,
 )
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
@@ -31,27 +29,6 @@ logger = logging.getLogger(__name__)
 class CodeResponse(BaseModel):
     message: str
     diff: Optional[str] = None
-
-
-class RequestForChangeRequest(ActionRequest):
-    description: str = Field(..., description="Description of the code change.")
-    file_path: str = Field(..., description="The file path of the code to be updated.")
-    span_id: str = Field(..., description="The span id of the code to be updated.")
-
-
-class RequestForChange(ActionSpec):
-
-    @classmethod
-    def request_class(cls):
-        return RequestForChangeRequest
-
-    @classmethod
-    def name(self):
-        return "request_for_change"
-
-    @classmethod
-    def description(cls) -> str:
-        return "Request for permission to change code."
 
 
 class LineNumberClarificationRequest(ActionRequest):
@@ -100,13 +77,13 @@ class Save(ActionSpec):
         return "Save changes."
 
 
-class Pending(LoopState):
+class Pending(BaseState):
 
-    def tools(self) -> list[Type[ActionSpec]]:
+    def actions(self) -> list[Type[ActionSpec]]:
         return [RequestForChange, Finish, Reject]
 
 
-class Clarification(LoopState):
+class Clarification(BaseState):
     description: str
     file_path: str
     action: Type[ActionSpec]
@@ -114,7 +91,7 @@ class Clarification(LoopState):
     start_line: Optional[int] = None
     end_line: Optional[int] = None
 
-    def tools(self) -> list[Type[ActionSpec]]:
+    def actions(self) -> list[Type[ActionSpec]]:
         return [LineNumberClarification, Reject]
 
 
@@ -185,7 +162,7 @@ class PreviousChange(BaseModel):
             ]
 
 
-class CodeChange(LoopState):
+class CodeChange(BaseState):
     description: str
     file_path: str
     span_id: str
@@ -196,14 +173,14 @@ class CodeChange(LoopState):
     diff: Optional[str] = None
     retry: int = 0
 
-    def tools(self) -> list[Type[ActionSpec]]:
+    def actions(self) -> list[Type[ActionSpec]]:
         return [Reject]
 
     def stop_words(self):
         return ["</replace>"]
 
 
-class CodeLoop(BaseLoop):
+class CodeLoop(Loop):
 
     def __init__(
         self,
@@ -403,16 +380,16 @@ class CodeLoop(BaseLoop):
             elif tool_call.function.name == Finish.name():
                 finish = FinishRequest.model_validate(arguments)
 
-                logger.info(f"Finishing with the reason: {finish.reason}")
+                logger.info(f"Finishing with the reason: {finish.thoughts}")
                 self._workspace.trajectory.save_action(
-                    name="finish", input={"reason": finish.reason}
+                    name="finish", input={"reason": finish.thoughts}
                 )
 
                 # TODO: Add diff to response and trajectory
-                self._trajectory.save_output({"message": finish.reason})
+                self._trajectory.save_output({"message": finish.thoughts})
 
                 self._workspace.save()
-                return CodeResponse(message=finish.reason)
+                return CodeResponse(message=finish.thoughts)
             else:
                 logger.warning(f"Unknown function: {tool_call.function.name}")
                 self._trajectory.save_error(

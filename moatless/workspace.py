@@ -22,21 +22,21 @@ class Workspace:
     def __init__(
         self,
         file_repo: FileRepository,
-        code_index: CodeIndex,
+        code_index: Optional[CodeIndex] = None,
         workspace_id: Optional[str] = None,
         workspace_dir: Optional[str] = None,
     ):
         self._workspace_dir = workspace_dir
         self._workspace_id = workspace_id or str(uuid.uuid4())
 
-        self._trajectory: Trajectory = None
+        self._trajectory: Trajectory = Trajectory("root")
         self._info = {}
         self._current_trajectory_step = None
 
         self.code_index = code_index
         self.file_repo = file_repo
 
-        self._file_context = None
+        self._file_context = self.create_file_context()
 
     @classmethod
     def from_dirs(
@@ -64,6 +64,10 @@ class Workspace:
             file_context.add_files_with_spans(files_with_spans)
         return file_context
 
+    @property
+    def file_context(self):
+        return self._file_context
+
     def get_file(self, file_path, refresh: bool = False):
         return self.file_repo.get_file(file_path, refresh=refresh)
 
@@ -74,7 +78,7 @@ class Workspace:
         self.file_repo.save()
 
     @property
-    def trajectory(self):
+    def trajectory(self) -> Trajectory:
         return self._trajectory
 
     def create_trajectory(self, name: str, input_data: Optional[dict[str, Any]] = None):

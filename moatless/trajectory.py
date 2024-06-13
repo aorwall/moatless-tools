@@ -1,114 +1,64 @@
 import json
 import logging
-from typing import Optional, Any
+from typing import Optional, Any, List
 
-from litellm import completion_cost
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
-from moatless.types import ActionRequest
+from moatless.types import ActionRequest, Message
 
 logger = logging.getLogger(__name__)
 
 
 class TrajectoryAction(BaseModel):
-    name: str
-    input: Optional[dict[str, Any]] = None
-    output: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-    trajectory: Optional[dict[str, Any]] = None
+    action: ActionRequest
+    completion_cost: Optional[float] = None
 
 
 class TrajectoryStep(BaseModel):
     name: Optional[str] = None
-    input: Optional[dict[str, Any]] = None
-    thought: Optional[str] = None
-    actions: list[TrajectoryAction] = []
-    output: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-    completion_cost: Optional[float] = None
+    transition_input: Optional[dict[str, Any]] = None
+    actions: List[TrajectoryAction] = []
 
 
 class Trajectory:
 
-    def __init__(
-        self,
-        name: str,
-        input_data: Optional[dict[str, Any]] = None,
-        parent: Optional["Trajectory"] = None,
-    ):
+    def __init__(self, name: str, input_data: Optional[dict[str, Any]] = None):
         self._name = name
         self._input_data = input_data
         self._output_data: Optional[dict[str, Any]] = None
         self._trajectory_steps: list[TrajectoryStep] = []
+
         self._current_trajectory_step: Optional[TrajectoryStep] = None
-        self._parent = parent
         self._info: dict[str, Any] = {}
 
         self._child_trajectorie: list[Trajectory] = []
-
-    def create_child_trajectory(
-        self, name: str, input_data: Optional[dict[str, Any]] = None
-    ):
-        child_traj = Trajectory(name, input_data=input_data, parent=self)
-        self._child_trajectorie.append(child_traj)
-        return child_traj
 
     @property
     def current_step(self):
         return self._current_trajectory_step
 
-    def new_step(
-        self,
-        name: Optional[str] = None,
-        input: Optional[dict[str, Any]] = None,
-        completion_response=None,
-    ):
-
-        cost = None
-        if completion_response:
-            try:
-                cost = completion_cost(completion_response=completion_response)
-            except Exception as e:
-                logger.info(f"Error calculating completion cost: {e}")
-
-        trajectory_step = TrajectoryStep(name=name, input=input, completion_cost=cost)
-
-        self._trajectory_steps.append(trajectory_step)
-        self._current_trajectory_step = trajectory_step
-
-    def save_thought(self, thought: str):
-        if self._current_trajectory_step:
-            self._current_trajectory_step.thought = thought
+    def get_steps(self, name: str):
+        return [step for step in self._trajectory_steps if step.name == name]
 
     def save_action(
-        self,
-        name: str,
-        input: ActionRequest | dict,
-        output: Optional[dict] = None,
-        error: Optional[str] = None,
-        trajectory: Optional["Trajectory"] = None,
+        self, action: ActionRequest, completion_cost: Optional[float] = None
     ):
-        action = TrajectoryAction(
-            name=name,
-            input=(
-                input.dict(exclude_none=True)
-                if isinstance(input, ActionRequest)
-                else input
-            ),
-            trajectory=trajectory.dict(exclude_none=True) if trajectory else None,
-            output=output,
-            error=error,
-        )
-
         if self._current_trajectory_step:
-            self._current_trajectory_step.actions.append(action)
-
-        return action
+            self._current_trajectory_step.actions.append(
+                TrajectoryAction(action=action, completion_cost=completion_cost)
+            )
 
     def save_error(self, error: str):
         if self._current_trajectory_step:
             self._current_trajectory_step.error = error
+
+    def new_transition(self, name: str, transition_input: dict):
+        if self._current_trajectory_step:
+            self._trajectory_steps.append(self._current_trajectory_step)
+
+        trajectory_step = TrajectoryStep(name=name, transition_input=transition_input)
+        self._current_trajectory_step = trajectory_step
 
     def save_output(self, output: dict):
         self._output_data = output
@@ -132,8 +82,9 @@ class Trajectory:
     def total_cost(self):
         total_cost = 0
         for step in self._trajectory_steps:
-            if step.completion_cost:
-                total_cost += step.completion_cost
+            for action in step.actions:
+                if action.completion_cost:
+                    total_cost += action.completion_cost
 
         for child_traj in self._child_trajectorie:
             total_cost += child_traj.total_cost()
