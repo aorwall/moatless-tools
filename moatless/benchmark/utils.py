@@ -5,7 +5,6 @@ import time
 import litellm
 
 from moatless.codeblocks.module import Module
-from moatless.llm.completion import set_trace_metadata
 from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
 
@@ -152,6 +151,26 @@ def get_file_spans_from_patch(
     return expected_files_with_spans
 
 
+def get_files_from_patch(patch: str) -> list[str]:
+    diff_lines = get_diff_lines(patch)
+    return [diff_line[0] for diff_line in diff_lines]
+
+
+def file_spans_to_dict(files_with_spans: list[FileWithSpans]) -> dict[str, list[str]]:
+    span_dict = {}
+    if not files_with_spans:
+        return span_dict
+
+    for file_with_spans in files_with_spans:
+        if file_with_spans.file_path not in span_dict:
+            span_dict[file_with_spans.file_path] = []
+
+        for span_id in file_with_spans.span_ids:
+            if span_id not in span_dict[file_with_spans.file_path]:
+                span_dict[file_with_spans.file_path].append(span_id)
+    return span_dict
+
+
 def get_missing_files(
     expected_files_with_spans: dict[str, list[str]],
     actual_files_with_spans: dict[str, list[str]],
@@ -250,19 +269,6 @@ def get_total_cost(trace_id):
     trace = langfuse.get_trace(trace_id)
 
     return trace.total_cost
-
-
-def setup_langfuse_tracing(instance_id: str, session_id: str, trace_name: str) -> str:
-    set_trace_metadata(
-        trace_metadata(
-            instance_id=instance_id, session_id=session_id, trace_name=trace_name
-        )
-    )
-
-    litellm.success_callback = ["langfuse"]
-    litellm.failure_callback = ["langfuse"]
-
-    return trace_metadata["trace_id"]
 
 
 def trace_metadata(instance_id: str, session_id: str, trace_name: str):

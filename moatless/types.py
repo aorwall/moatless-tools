@@ -1,8 +1,6 @@
-import json
-from typing import List, Optional, Dict, Any, Type
+from typing import List, Optional, Any
 
 from pydantic import BaseModel, Field
-from pydantic.main import Model
 
 
 class FileWithSpans(BaseModel):
@@ -23,57 +21,16 @@ class FileWithSpans(BaseModel):
             self.add_span_id(span_id)
 
 
-class ActionResponse(BaseModel):
-    message: Optional[str] = None
-
-
 class ActionRequest(BaseModel):
     pass
+
+    @property
+    def action_name(self):
+        return self.__class__.__name__
 
 
 class EmptyRequest(ActionRequest):
     pass
-
-
-class ActionSpec(BaseModel):
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    @classmethod
-    def name(cls) -> str:
-        return ""
-
-    @classmethod
-    def description(cls) -> str:
-        return ""
-
-    @classmethod
-    def request_class(cls) -> Type[ActionRequest]:
-        return EmptyRequest
-
-    @classmethod
-    def validate_request(cls, args: Dict[str, Any]) -> ActionRequest:
-        return cls.request_class().model_validate(args, strict=True)
-
-    @classmethod
-    def create_request_from_json(cls, call_id: str, args: str) -> ActionRequest:
-        args_dict = json.loads(args)
-        args_dict["call_id"] = call_id
-        return cls.request_class().model_validate(args_dict, strict=True)
-
-    # TODO: Do generic solution to get parameters from ActionRequest
-    @classmethod
-    def openai_tool_spec(cls) -> Dict[str, Any]:
-        parameters = cls.request_class().openai_tool_parameters()
-        return {
-            "type": "function",
-            "function": {
-                "name": cls.name(),
-                "description": cls.description(),
-                "parameters": parameters,
-            },
-        }
 
 
 class Finish(ActionRequest):
@@ -81,7 +38,7 @@ class Finish(ActionRequest):
 
 
 class Reject(ActionRequest):
-    reason: str = Field(..., description="The reason for rejecting the request.")
+    thoughts: str = Field(..., description="The reason for rejecting the request.")
 
 
 class Content(ActionRequest):
@@ -103,3 +60,26 @@ class AssistantMessage(Message):
 class UserMessage(Message):
     role: str = "user"
     content: Optional[str] = None
+
+
+class ActionResponse(BaseModel):
+    trigger: Optional[str] = None
+    output: Optional[dict[str, Any]] = None
+    retry_message: Optional[str] = None
+
+    @classmethod
+    def retry(cls, retry_message: str):
+        return cls(trigger="retry", retry_message=retry_message)
+
+    @classmethod
+    def transition(cls, trigger: str, output: dict[str, Any]):
+        return cls(trigger=trigger, output=output)
+
+    @classmethod
+    def no_transition(cls, output: dict[str, Any]):
+        return cls(output=output)
+
+
+class Response(BaseModel):
+    status: str
+    message: str

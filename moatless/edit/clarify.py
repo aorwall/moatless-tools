@@ -1,22 +1,18 @@
 import logging
-from typing import Type, Optional, Any, Tuple, List
+from typing import Type, Optional, Tuple, List
 
-from moatless import Settings
+from pydantic import PrivateAttr, Field, BaseModel
+
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, BlockSpan
-from moatless.loop.base import Rejected, BaseState
-from moatless.loop.edit import EditCode
-from moatless.loop.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
+from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
+from moatless.state import AgenticState, ActionResponse
 from moatless.repository import CodeFile
 from moatless.types import (
-    ActionSpec,
     FileWithSpans,
     ActionRequest,
-    Reject,
     Message,
 )
-from pydantic import PrivateAttr, Field
-
 from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger("ClarifyCodeChange")
@@ -31,25 +27,26 @@ class LineNumberClarification(ActionRequest):
     end_line: int = Field(..., description="The end line of the code to be updated.")
 
 
-class ClarifyCodeChange(BaseState):
-    description: str
+class ClarifyCodeChange(AgenticState):
+    instructions: str
     file_path: str
     span_id: str
 
     start_line: Optional[int] = None
     end_line: Optional[int] = None
 
-    _max_tokens_to_edit = PrivateAttr(default=Settings.coder.max_tokens_in_edit_prompt)
+    max_tokens_in_edit_prompt: int = Field(
+        500,
+        description="The maximum number of tokens in a span to show the edit prompt.",
+    )
 
     _file: Optional[CodeFile] = PrivateAttr(None)
     _span: Optional[BlockSpan] = PrivateAttr(None)
     _file_context_str: Optional[str] = PrivateAttr(None)
 
-    def __init__(self, description: str, file_path: str, span_id: str):
+    def __init__(self, instructions: str, file_path: str, span_id: str, **data):
         super().__init__(
-            description=description,
-            file_path=file_path,
-            span_id=span_id,
+            instructions=instructions, file_path=file_path, span_id=span_id, **data
         )
 
     def init(self):
@@ -82,30 +79,39 @@ class ClarifyCodeChange(BaseState):
             outcomment_code_comment="... other code",
         )
 
-    def handle_action(self, request: ActionRequest):
-        if isinstance(request, Reject):
-            logger.info(f"{self}: Request was rejected: {request.reason}")
-            self.transition_to(Rejected(reason=request.reason))
-        if isinstance(request, LineNumberClarification):
-            logger.info(
-                f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
+    def handle_action(self, request: LineNumberClarification) -> ActionResponse:
+        logger.info(
+            f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
+        )
+
+        retry_message = self._verify_line_numbers(request)
+        if retry_message:
+            return ActionResponse.retry(retry_message)
+
+        if request.end_line - request.start_line < 4:
+            start_line, end_line = self.get_line_span(
+                request.start_line, request.end_line, self.max_tokens_in_edit_prompt
             )
+        else:
+            start_line, end_line = request.start_line, request.end_line
 
-            response = self._verify_line_numbers(request)
-            if response:
-                return {"response": response}
+        return ActionResponse.transition(
+            trigger="edit_code",
+            output={
+                "instructions": self.instructions,
+                "file_path": self.file_path,
+                "span_id": self.span_id,
+                "start_line": start_line,
+                "end_line": end_line,
+            },
+        )
 
-            self.transition_to(
-                EditCode(
-                    description=self.description,
-                    file_path=self.file_path,
-                    span_id=self.span_id,
-                    start_line=request.start_line,
-                    end_line=request.end_line,
-                )
-            )
+    @classmethod
+    def required_fields(cls) -> set[str]:
+        return {"instructions", "file_path", "span_id"}
 
-        return None
+    def action_type(self) -> Optional[Type[BaseModel]]:
+        return LineNumberClarification
 
     @property
     def file(self) -> CodeFile:
@@ -117,7 +123,9 @@ class ClarifyCodeChange(BaseState):
         assert self._span is not None, "Span has not been set"
         return self._span
 
-    def _verify_line_numbers(self, line_numbers: LineNumberClarification):
+    def _verify_line_numbers(
+        self, line_numbers: LineNumberClarification
+    ) -> Optional[str]:
         logger.info(
             f"{self}: Verifying line numbers: {line_numbers.start_line} - {line_numbers.end_line}. "
             f"To span with line numbers: {self.span.start_line} - {self.span.end_line}"
@@ -127,10 +135,7 @@ class ClarifyCodeChange(BaseState):
             line_numbers.start_line <= self.span.start_line
             and line_numbers.end_line >= self.span.end_line
         ):
-            return (
-                f"The provided line numbers {line_numbers.start_line} - {line_numbers.end_line} covers the whole code "
-                f"span. You must specify line numbers of only lines you want to change.",
-            )
+            return f"The provided line numbers {line_numbers.start_line} - {line_numbers.end_line} covers the whole code span. You must specify line numbers of only lines you want to change."
 
         span_block = self.span.initiating_block
 
@@ -138,19 +143,20 @@ class ClarifyCodeChange(BaseState):
         if span_block.type.group == CodeBlockTypeGroup.STRUCTURE:
             last_block_content_line = span_block.children[0].start_line - 1
 
-        logger.info(
-            f"{self}: Checking if the line numbers only covers a class/function signature to"
-            f"{self.span.initiating_block.path_string()} ({span_block.start_line} - {last_block_content_line})"
-        )
-        if (
-            line_numbers.start_line == span_block.start_line
-            and last_block_content_line >= line_numbers.end_line
-            and self.span.initiating_block.sum_tokens() > self._max_tokens_to_edit
-        ):
-            clarify_msg = f"The line numbers {line_numbers.start_line} - {line_numbers.end_line} only covers to the signature of the {self.span.initiating_block.type.value}."
-            logger.info(f"{self}: {clarify_msg}. Ask for clarification.")
-            # TODO: Ask if this was intentional instead instructing the LLM
-            return f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change."
+            logger.info(
+                f"{self}: Checking if the line numbers only covers a class/function signature to "
+                f"{self.span.initiating_block.path_string()} ({span_block.start_line} - {last_block_content_line})"
+            )
+            if (
+                line_numbers.start_line == span_block.start_line
+                and last_block_content_line >= line_numbers.end_line
+                and self.span.initiating_block.sum_tokens()
+                > self.max_tokens_in_edit_prompt
+            ):
+                clarify_msg = f"The line numbers {line_numbers.start_line} - {line_numbers.end_line} only covers to the signature of the {self.span.initiating_block.type.value}."
+                logger.info(f"{self}: {clarify_msg}. Ask for clarification.")
+                # TODO: Ask if this was intentional instead instructing the LLM
+                return f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change."
 
         code_lines = self.file.content.split("\n")
         lines_to_replace = code_lines[
@@ -160,28 +166,12 @@ class ClarifyCodeChange(BaseState):
         edit_block_code = "\n".join(lines_to_replace)
 
         tokens = count_tokens(edit_block_code)
-        if tokens > self._max_tokens_to_edit:
+        if tokens > self.max_tokens_in_edit_prompt:
             clarify_msg = f"Lines {line_numbers.start_line} - {line_numbers.end_line} has {tokens} tokens, which is higher than the maximum allowed {self.max_tokens} tokens in completion"
             logger.info(f"{self} {clarify_msg}. Ask for clarification.")
             return f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change. If this is not possible you should reject the request."
 
-        # TODO: Make line expansion customizable
-        edit_block_start_line, edit_block_end_line = self.get_line_span(
-            line_numbers.start_line, line_numbers.end_line
-        )
-        logger.info(
-            f"{self} Expanded line span to {edit_block_start_line} - {edit_block_end_line}"
-        )
-
-        return self.transition_to(
-            EditCode(
-                description=self.description,
-                file_path=self.file_path,
-                span_id=self.span_id,
-                start_line=edit_block_start_line,
-                end_line=edit_block_end_line,
-            )
-        )
+        return None
 
     def system_prompt(self) -> str:
         return CLARIFY_CHANGE_SYSTEM_PROMPT
@@ -190,20 +180,19 @@ class ClarifyCodeChange(BaseState):
         messages = [
             Message(
                 role="user",
-                content=f"<instruction>\n{self.description}\n</instruction>\n<code>\n{self._file_context_str}\n</code>",
+                content=f"<instructions>\n{self.instructions}\n</instructions>\n<code>\n{self._file_context_str}\n</code>",
             )
         ]
-        messages.extend(self._messages)
-        return messages
 
-    def actions(self) -> list[Type[ActionSpec]]:
-        return [LineNumberClarification, Reject]
+        messages.extend(self.retry_messages())
+
+        return messages
 
     def get_line_span(
         self,
         start_line: int,
-        end_line: Optional[int] = None,
-        max_tokens=Settings.coder.max_tokens_in_edit_prompt,
+        end_line: int,
+        max_tokens: int,
     ) -> Tuple[Optional[int], Optional[int]]:
         """
         Find the span that covers the lines from start_line to end_line
