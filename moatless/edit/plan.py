@@ -263,7 +263,13 @@ class PlanToCode(InitialState):
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
 
         for transition in previous_transitions:
-            content += transition.state.to_message()
+
+            new_message = transition.state.to_message()
+            if new_message and not content:
+                content = new_message
+            elif new_message:
+                content += f"\n\n{new_message}"
+
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(

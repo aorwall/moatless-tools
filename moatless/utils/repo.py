@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
     repo_name = get_repo_dir_name(repo)
-    repo_url = f"git@github.com:{repo}.git"
+    repo_url = f"https://github.com/{repo}.git"
 
     path = f"{base_dir}/{repo_name}"
     if not os.path.exists(path):

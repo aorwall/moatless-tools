@@ -187,20 +187,20 @@ def generate_md_report(trajectory: dict, instance: dict):
     info = trajectory["info"]
     markdown = f"# {info['instance_id']}\n"
 
-    markdown += f"## Problem statement\n"
+    markdown += f"\n## Problem statement\n"
     markdown += f"```\n{instance['problem_statement']}\n```\n"
 
     if "error" in trajectory["info"]:
-        markdown += f"## Error\n"
+        markdown += f"\n## Error\n"
         markdown += f"```\n{trajectory['info']['error']}\n```\n"
     else:
-        markdown += f"## Prediction\n"
+        markdown += f"\n## Prediction\n"
         markdown += f"```diff\n{info['submission']}\n```\n"
 
-    markdown += f"## Golden patch\n"
+    markdown += f"\n## Golden patch\n"
     markdown += f"```diff\n{instance['golden_patch']}\n```\n"
 
-    markdown += f"## Trajectory\n"
+    markdown += f"\n## Trajectory\n"
 
     repo_dir = setup_swebench_repo(instance)
     file_repo = FileRepository(repo_dir)
@@ -223,7 +223,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                 if action.get("action", {}).get("action", {}).get("span_id"):
                     markdown += f"\n * {action['action']['action']['span_id']}"
 
-                    markdown += f"#### File context \n\n"
+                    markdown += f"\n\n#### File context \n\n"
 
                     file_context = FileContext(file_repo)
                     file_context.add_span_to_context(

@@ -47,6 +47,8 @@ Identify and extract relevant code spans based on the user's instructions.
 
 5. Respond Using the Function:
 Use the Identify function to provide your response.
+
+Think step by step and write out your thoughts in the thoughts field.
 """
 
 
@@ -131,7 +133,7 @@ class IdentifyCode(AgenticState):
         if action.complete:
             return ActionResponse.transition(
                 "finish",
-                output={"message": message},
+                output={"message": action.thoughts},
             )
         else:
             return ActionResponse.transition(

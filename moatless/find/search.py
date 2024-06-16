@@ -28,7 +28,8 @@ Read the <instructions> tag to understand the specific requirements from the use
 Examine the <file_context> tag to see which files and code spans have already been identified.
 
 3. Consider the Necessary Search Parameters:
-Determine if specific file types, directories, names or code patterns are mentioned in the instructions.
+Determine if specific file types, directories, function or class names or code patterns are mentioned in the instructions.
+If you can you should always try to specify the search parameters as accurately as possible.
 
 4. Ensure At Least One Search Parameter:
 Make sure that at least one of query, code_snippet, class_name, or function_name is provided.
@@ -38,6 +39,8 @@ Set at least one of the search paramaters `query`, `code_snippet`, `class_name` 
 
 6. Execute the Search function:
 Use the Search function with the search parameters and your thoughts on how to approach this task.
+
+Think step by step and write out your thoughts in the thoughts field.
 """
 
 
