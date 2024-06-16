@@ -28,7 +28,7 @@ class ApplyChange(BaseModel):
     span_id: str = Field(..., description="The span id of the code to be updated.")
 
     model_config = ConfigDict(
-        extra="allow",
+        extra="ignore",
     )
 
 
