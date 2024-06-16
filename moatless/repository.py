@@ -3,14 +3,13 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from pydantic import BaseModel
 
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -158,9 +157,15 @@ class FileRepository:
     def path(self):
         return self._repo_path
 
-    def get_file(self, file_path: str, refresh: bool = False):
+    def get_file(self, file_path: str, refresh: bool = False, from_origin: bool = False):
+        """
+        Get a file from the repository.
+
+        Args:
+
+        """
         file = self._files.get(file_path)
-        if not file or refresh:
+        if not file or refresh or from_origin:
             full_file_path = os.path.join(self._repo_path, file_path)
             if not os.path.exists(full_file_path):
                 logger.warning(f"File not found: {full_file_path}")
@@ -173,7 +178,8 @@ class FileRepository:
                 content = f.read()
                 module = _parser.parse(content)
                 file = CodeFile(file_path=file_path, content=content, module=module)
-                self._files[file_path] = file
+                if refresh or not from_origin:
+                    self._files[file_path] = file
 
         return file
 

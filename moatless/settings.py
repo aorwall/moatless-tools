@@ -1,35 +1,6 @@
 from dataclasses import dataclass
 
 
-class _CoderSettings:
-    _coding_model = "gpt-4o-2024-05-13"
-
-    """
-    The maximum number of tokens of code to be added to the edit prompt.
-    This a "recommendation" and can be overridden if the span specifed by start and end line is larger.
-    """
-    _max_tokens_in_edit_prompt = 750
-
-    @property
-    def max_tokens_in_edit_prompt(self) -> int:
-        return self._max_tokens_in_edit_prompt
-
-    @max_tokens_in_edit_prompt.setter
-    def max_tokens_in_edit_prompt(self, max_tokens_in_edit_prompt: int) -> None:
-        self._max_tokens_in_edit_prompt = max_tokens_in_edit_prompt
-
-
-class _SearchSettings:
-    _max_tokens = 8000
-
-    @property
-    def max_tokens(self) -> int:
-        return self._max_tokens
-
-    @max_tokens.setter
-    def max_tokens(self, max_tokens: int) -> None:
-        self._max_tokens = max_tokens
-
 
 @dataclass
 class _Settings:

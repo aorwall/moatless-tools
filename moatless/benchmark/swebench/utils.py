@@ -2,10 +2,13 @@ import os
 
 from datasets import load_dataset
 
-from moatless.benchmark.utils import get_missing_files, get_missing_spans
+from moatless.benchmark.utils import (
+    get_missing_spans,
+    file_spans_to_dict,
+    get_missing_files,
+)
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
-from moatless.types import Reject
 from moatless.utils.repo import setup_github_repo
 from moatless.workspace import Workspace
 
@@ -41,72 +44,142 @@ def get_repo_dir_name(repo: str):
     return repo.replace("/", "_")
 
 
-def to_find_result(trajectory: dict, instance: dict, workspace: Workspace) -> dict:
-    info = trajectory["info"]
+def found_in_expected_spans(instance: dict, spans: dict):
+    missing_spans = get_missing_spans(instance["expected_spans"], spans)
+    return not missing_spans
 
-    expected_file = list(instance["expected_spans"].keys())[0]
 
+def found_in_alternative_spans(instance: dict, spans: dict):
+    if "alternative_spans" not in instance:
+        return False
+    for alternative_spans in instance["alternative_spans"]:
+        missing_spans = get_missing_spans(alternative_spans["spans"], spans)
+        if not missing_spans:
+            return True
+
+    return False
+
+
+def sync_file_context_with_search_trajectory(workspace: Workspace, trajectory: dict):
+    for transition in trajectory["transitions"]:
+        for action in transition["actions"]:
+            if action["action"].get("identified_spans"):
+                for span in action["action"]["identified_spans"]:
+                    workspace.file_context.add_spans_to_context(
+                        span["file_path"], span["span_ids"]
+                    )
+
+
+def verify_search_trajectory(
+    trajectory: dict, instance: dict, workspace: Workspace
+) -> dict:
     result = {
-        "instance_id": info["instance_id"],
-        "duration": info["duration"],
-        "total_cost": info["total_cost"],
-        "status": "not_found",
-        "expected_file": expected_file,
-        "steps": len(trajectory["steps"]),
-        "context_window": 0,
-        "query": 0,
-        "code_snippet": 0,
-        "class_name": 0,
-        "function_name": 0,
+        "transitions": len(trajectory["transitions"]),
+        "identifieed": None,
+        "expected_identified": None,
+        "alt_identified": None,
+        "identified": None,
+        "file_identified": None,
+        "found_in_search": None,
+        "tokens": 0,
+        "expanded_imports": False,
+        "expanded_related": False,
+        "expanded_small_classes": False,
+        "expanded_tokens": 0,
     }
 
-    if "error" in info:
-        result["status"] = "error"
+    file_context = workspace.create_file_context()
+    search_file_context = workspace.create_file_context()
 
-    if "resolved_by" in instance:
-        result["resolved_by"] = len(instance["resolved_by"])
+    iterations = 0
+    for transition in trajectory["transitions"]:
 
-    for step in trajectory["steps"]:
-        for action in step["actions"]:
-            for field in action["input"].keys():
-                if field in result:
-                    result[field] += 1
+        if transition["name"] == "SearchCode":
+            iterations += 1
 
-            if action["name"] == Reject.name():
-                result["status"] = "rejected"
+        for action in transition["actions"]:
+            if (
+                "output" in action
+                and action.get("output")
+                and action["output"].get("ranked_spans")
+            ):
+                for ranked_span in action["output"]["ranked_spans"]:
+                    search_file_context.add_spans_to_context(
+                        ranked_span["file_path"], [ranked_span["span_id"]]
+                    )
 
-    if trajectory.get("output") and trajectory["output"].get("files"):
-        file_context = workspace.create_file_context()
+            if action["action"].get("identified_spans"):
+                for span in action["action"]["identified_spans"]:
+                    file_context.add_spans_to_context(
+                        span["file_path"], span["span_ids"]
+                    )
 
-        actual_spans = {}
-        for span in trajectory["output"]["files"]:
-            actual_spans[span["file_path"]] = span["span_ids"]
-            file_context.add_spans_to_context(span["file_path"], span["span_ids"])
-
-        result["context_window"] = file_context.context_size()
-
-        missing_files = get_missing_files(instance["expected_spans"], actual_spans)
-        if not missing_files:
-            result["status"] = "file_found"
-        else:
-            print(
-                f"{instance['instance_id']} failed. Expected {instance['expected_spans'].keys()}, but got {actual_spans.keys()}"
-            )
-
-        missing_spans = get_missing_spans(instance["expected_spans"], actual_spans)
-        if not missing_spans:
-            result["status"] = "gold_patch"
-        elif "alternative_spans" in instance:
-            for alternative_spans in instance["alternative_spans"]:
-                missing_spans = get_missing_spans(
-                    alternative_spans["spans"], actual_spans
+            if result["found_in_search"] is None and (
+                found_in_expected_spans(
+                    instance,
+                    file_spans_to_dict(search_file_context.to_files_with_spans()),
                 )
-                if not missing_spans:
-                    result["status"] = "alternative_patch"
-                    break
-    else:
-        result["status"] = "rejected"
+                or found_in_alternative_spans(
+                    instance, file_spans_to_dict(file_context.to_files_with_spans())
+                )
+            ):
+                result["found_in_search"] = iterations
 
+            if result["file_identified"] is None:
+                missing_files = get_missing_files(
+                    instance["expected_spans"],
+                    file_spans_to_dict(file_context.to_files_with_spans()),
+                )
+                if not missing_files:
+                    result["file_identified"] = iterations
+
+            if result["expected_identified"] is None and found_in_expected_spans(
+                instance, file_spans_to_dict(file_context.to_files_with_spans())
+            ):
+                result["expected_identified"] = iterations
+
+            if result["alt_identified"] is None and found_in_alternative_spans(
+                instance, file_spans_to_dict(file_context.to_files_with_spans())
+            ):
+                result["alt_identified"] = iterations
+
+    if result["expected_identified"] is not None:
+        result["identified"] = result["expected_identified"]
+
+    if result["alt_identified"] is not None and (
+        result["identified"] is None or result["alt_identified"] < result["identified"]
+    ):
+        result["identified"] = result["alt_identified"]
+
+    result["tokens"] = file_context.context_size()
+
+    file_context.expand_context_with_imports()
+    actual_span_dicts = file_spans_to_dict(file_context.to_files_with_spans())
+
+    if found_in_expected_spans(
+        instance, actual_span_dicts
+    ) or found_in_alternative_spans(instance, actual_span_dicts):
+        result["expanded_imports"] = True
+
+    file_context.expand_context_with_related_spans(max_tokens=8000)
+    if found_in_expected_spans(
+        instance, file_spans_to_dict(file_context.to_files_with_spans())
+    ) or found_in_alternative_spans(
+        instance, file_spans_to_dict(file_context.to_files_with_spans())
+    ):
+        result["expanded_related"] = True
+
+    file_context.expand_small_classes(max_tokens=500)
+    if found_in_expected_spans(
+        instance, file_spans_to_dict(file_context.to_files_with_spans())
+    ) or found_in_alternative_spans(
+        instance, file_spans_to_dict(file_context.to_files_with_spans())
+    ):
+        result["expanded_small_classes"] = True
+
+    result["expanded_tokens"] = file_context.context_size()
+
+    result["iterations"] = iterations
     return result
 
 
@@ -132,100 +205,55 @@ def generate_md_report(trajectory: dict, instance: dict):
     repo_dir = setup_swebench_repo(instance)
     file_repo = FileRepository(repo_dir)
 
-    for step in trajectory["steps"]:
-        for action in step["actions"]:
-            markdown += f"### {action['name']}\n\n"
+    for step in trajectory["transitions"]:
 
-            if action["name"] == "code_finder":
-                markdown += f"#### Instructions\n"
-                markdown += action["input"]["instructions"]
+        for i, action in enumerate(step["actions"]):
+            markdown += f"### {step['name']} ({i})\n\n"
 
-                markdown += f"#### Output\n\n"
+            if step["name"] == "PlanToCode":
+                if action.get("action").get("thoughts"):
+                    markdown += "*" + action["action"]["thoughts"] + "*"
 
-                if "message" in action["output"] and action["output"]["message"]:
-                    markdown += action["output"]["message"] + "\n\n"
+                if action.get("action", {}).get("action", {}).get("description"):
+                    markdown += f"\n\n * {action['action']['action']['description']}"
 
-                if "files" in action["output"]:
+                if action.get("action", {}).get("action", {}).get("file_path"):
+                    markdown += f"\n * {action['action']['action']['file_path']}"
+
+                if action.get("action", {}).get("action", {}).get("span_id"):
+                    markdown += f"\n * {action['action']['action']['span_id']}"
+
+                    markdown += f"#### File context \n\n"
+
                     file_context = FileContext(file_repo)
-
-                    for file in action["output"]["files"]:
-                        file_context.add_spans_to_context(
-                            file["file_path"], file["span_ids"]
-                        )
+                    file_context.add_span_to_context(
+                        action["action"]["action"]["file_path"],
+                        action["action"]["action"]["span_id"],
+                    )
 
                     markdown += file_context.create_prompt(show_outcommented_code=True)
 
-            if action["name"] == "request_for_change":
-                markdown += f"\n* Description: {action['input']['description']}\n"
-                markdown += f"* File: {action['input']['file_path']}\n"
-                markdown += f"* Span: {action['input']['span_id']}\n"
+            if step["name"] == "EditCode":
+                markdown += f"#### LLM Response\n\n"
+                markdown += f"```\n{action['action']['content']}\n```\n"
 
-                if "response" in action["output"]:
-                    markdown += f"\n* Response: {action['output']['response']}\n"
+                if action.get("output", {}).get("message"):
+                    markdown += f"#### Output\n\n"
+                    markdown += f"{action['output']['message']}\n\n"
 
-            if action["name"] == "specify_lines":
-                markdown += f"\n* Start Line: {action['input']['start_line']}\n"
-                markdown += f"\n* End Line: {action['input']['end_line']}\n"
-                if "response" in action["output"]:
-                    markdown += f"\n* Response: {action['output']['response']}\n"
+            if step["name"] == "ClarifyCodeChange":
+                if action.get("thoughts"):
+                    markdown += "*" + action["thoughts"] + "*"
 
-            if action["name"] == "search_replace":
-                markdown += f"```python\n{action['input']['replacement_code']}\n```\n"
+                if action.get("output", {}).get("start_line"):
+                    markdown += f"\n* Start Line: {action['output']['start_line']}\n"
+                    markdown += f"\n* End Line: {action['output']['end_line']}\n"
 
-                if "diff" in action["output"]:
-                    markdown += f"#### Diff\n"
-                    markdown += f"```diff\n{action['output']['diff']}\n```\n"
+            if step["name"] == "Finished":
+                markdown += f"*{action['properties']['message']}*\n"
 
-            if action["name"] == "finish":
-                markdown += action["input"]["reason"] + "\n\n"
-
-            if action["name"] == "reject":
-                markdown += action["input"]["reason"] + "\n\n"
-
-            if action["name"] == "coding_task":
-                markdown += f"#### Instructions\n"
-                markdown += action["input"]["instructions"]
-
-                markdown += f"\n\n * File: {action['input']['file_path']}"
-                markdown += f"\n * Start line {action['input']['start_line']}"
-                markdown += f"\n * End line {action['input'].get('end_line', '?')}"
-
-                if "relevant_code" in action["input"]:
-                    markdown += f"\n\n#### Relevant code\n"
-                    file_context = FileContext(file_repo)
-
-                    for file in action["input"]["relevant_code"]:
-                        file_context.add_spans_to_context(
-                            file["file_path"], file["span_ids"]
-                        )
-
-                    markdown += file_context.create_prompt(
-                        show_outcommented_code=True, exclude_comments=True
-                    )
-
-                markdown += f"\n\n#### Coder writer steps\n\n"
-
-                for i, code_step in enumerate(action["trajectory"]["steps"]):
-                    markdown += f"\n\n##### Step {i+1}\n"
-                    markdown += f"\n\n###### Search"
-                    if "search_code" in code_step["input"]:
-                        markdown += (
-                            f"\n\n```python\n{code_step['input']['search_code']}\n```\n"
-                        )
-                    else:
-                        markdown += "\n\n```python\nNone\n```\n"
-
-                if "replace" in action["trajectory"]["output"]:
-                    markdown += f"\n\n###### Replace"
-                    markdown += f"\n\n```python\n{action["trajectory"]["output"]['replace']}\n```\n"
-
-                if "message" in action["output"] and action["output"]["message"]:
-                    markdown += f"\n#### Output\n\n"
-                    markdown += action["output"]["message"] + "\n\n"
-
-                if "diff" in action["output"]:
-                    markdown += f"##### Diff\n"
-                    markdown += f"```diff\n{action['output']['diff']}\n```\n"
+            if step["name"] == "Rejected":
+                markdown += f"*{action['properties']['message']}*\n"
 
     markdown += f"## Alternative patches\n"
     for alternative in instance["resolved_by"]:

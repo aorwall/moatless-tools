@@ -13,26 +13,20 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.repository import CodeFile, FileRepository, UpdateResult
-from moatless.settings import Settings
 from moatless.types import FileWithSpans
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RankedFileSpan:
+class RankedFileSpan(BaseModel):
     file_path: str
     span_id: str
     rank: int
 
 
 class ContextSpan(BaseModel):
-    span: BlockSpan
+    span_id: str
     tokens: Optional[int] = None
-
-    @property
-    def span_id(self):
-        return self.span.span_id
 
     def dict(self, **kwargs):
         return self.model_dump(**kwargs)
@@ -236,7 +230,7 @@ class ContextFile(BaseModel):
         else:
             span = self.module.find_span_by_id(span_id)
             if span:
-                self.spans.append(ContextSpan(span=span, tokens=tokens))
+                self.spans.append(ContextSpan(span_id=span_id, tokens=tokens))
             else:
                 logger.warning(
                     f"Could not find span with id {span_id} in file {self.file_path}"
@@ -246,12 +240,23 @@ class ContextFile(BaseModel):
         self.spans = [span for span in self.spans if span.span_id != span_id]
 
     def get_spans(self) -> List[BlockSpan]:
-        return [span.span for span in self.spans]
+        block_spans = []
+        for span in self.spans:
+            block_span = self.module.find_span_by_id(span.span_id)
+            if block_span:
+                block_spans.append(block_span)
+        return block_spans
 
     def get_span(self, span_id: str) -> Optional[BlockSpan]:
         for span in self.spans:
             if span.span_id == span_id:
-                return span.span
+                block_span = self.module.find_span_by_id(span_id)
+                if block_span:
+                    return block_span
+                else:
+                    logger.warning(
+                        f"Could not find span with id {span_id} in file {self.file_path}"
+                    )
         return None
 
     def update_content_by_line_numbers(
@@ -465,7 +470,7 @@ class FileContext:
             file.expand_small_classes(max_tokens)
 
     def expand_context_with_related_spans(
-        self, max_tokens: int = Settings.max_context_tokens
+        self, max_tokens: int
     ):
         spans = 0
 

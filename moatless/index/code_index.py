@@ -177,29 +177,27 @@ class CodeIndex:
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
     ) -> SearchCodeResponse:
-        span_keywords = []
+
+        if query is None:
+            query = ""
+
         if class_name:
-            span_keywords.append(class_name)
+            query += f"\nclass {class_name}"
 
         if function_name:
-            span_keywords.append(function_name)
-
-        content_keywords = [code_snippet] if code_snippet else None
+            query += f"\ndef {function_name}"
 
         search_results = self._vector_search(
-            query or "",
-            file_pattern=file_pattern,
-            span_keywords=span_keywords,
-            content_keywords=content_keywords,
+            query, file_pattern=file_pattern, exact_content_match=code_snippet
         )
 
         files_with_spans: dict[str, SearchCodeHit] = {}
 
         span_count = 0
         spans_with_exact_query_match = 0
+        filtered_out = 0
 
         require_exact_query_match = False
-        logger.info(f"search_results {len(search_results)}.")
 
         for rank, search_hit in enumerate(search_results):
             file = self._file_repo.get_file(search_hit.file_path)
@@ -248,6 +246,14 @@ class CodeIndex:
                     ):
                         continue
 
+                    if class_name and class_name not in span.span_id:
+                        filtered_out += 1
+                        continue
+
+                    if function_name and function_name not in span.span_id:
+                        filtered_out += 1
+                        continue
+
                     files_with_spans[search_hit.file_path].add_span(
                         span_id=span.span_id, rank=rank
                     )
@@ -260,13 +266,20 @@ class CodeIndex:
             ):
                 break
 
+        if class_name or function_name:
+            logger.info(
+                f"semantic_search() Filtered out {filtered_out} spans by class name {class_name} and function name {function_name}."
+            )
+
         if require_exact_query_match:
             logger.info(
-                f"semantic_search() Found {spans_with_exact_query_match} code spans with exact match out of {span_count} spans.."
+                f"semantic_search() Found {spans_with_exact_query_match} code spans with exact match out of {span_count} spans."
             )
             message = f"Found {spans_with_exact_query_match} code spans with code that matches the exact query `{query}`."
         else:
-            logger.info(f"semantic_search() Found {span_count} code spans.")
+            logger.info(
+                f"semantic_search() Found {span_count} code spans in {len(files_with_spans.values())} files."
+            )
             message = f"Found {span_count} code spans."
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
@@ -415,17 +428,13 @@ class CodeIndex:
         exact_query_match: bool = False,
         category: str = "implementation",
         file_pattern: Optional[str] = None,
-        span_keywords: Optional[List[str]] = None,
-        content_keywords: Optional[List[str]] = None,
+        exact_content_match: Optional[str] = None,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
 
-        if span_keywords:
-            query += ", ".join(span_keywords)
-
-        if content_keywords:
-            query += ", ".join(content_keywords)
+        if exact_content_match:
+            query += "\n" + exact_content_match
 
         if not query:
             raise ValueError(
@@ -492,19 +501,8 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            span_ids = node_doc.metadata.get("span_ids", [])
-            if span_keywords:
-                if not any(
-                    any(keyword in span_id for keyword in span_keywords)
-                    for span_id in span_ids
-                ):
-                    filtered_out_snippets += 1
-                    continue
-
-            if content_keywords:
-                if not any(
-                    keyword in node_doc.get_content() for keyword in content_keywords
-                ):
+            if exact_content_match:
+                if not is_string_in(exact_content_match, node_doc.get_content()):
                     filtered_out_snippets += 1
                     continue
 
@@ -522,7 +520,7 @@ class CodeIndex:
                 distance=distance,
                 content=node_doc.get_content(),
                 tokens=node_doc.metadata["tokens"],
-                span_ids=span_ids,
+                span_ids=node_doc.metadata.get("span_ids", []),
                 start_line=node_doc.metadata.get("start_line", None),
                 end_line=node_doc.metadata.get("end_line", None),
             )
@@ -686,3 +684,10 @@ def _rerank_files(file_paths: List[str], file_pattern: str):
     )
 
     return sorted_file_paths
+
+
+def is_string_in(s1, s2):
+    s1_clean = s1.replace(" ", "").replace("\t", "").replace("\n", "")
+    s2_clean = s2.replace(" ", "").replace("\t", "").replace("\n", "")
+    found_in = s1_clean in s2_clean
+    return found_in
