@@ -16,7 +16,6 @@ class Module(CodeBlock):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     file_path: Optional[str] = None
-    type: CodeBlockType = CodeBlockType.MODULE
     content: str = None
     spans_by_id: Dict[str, BlockSpan] = {}
     language: Optional[str] = None
@@ -25,7 +24,7 @@ class Module(CodeBlock):
     _graph: DiGraph = None  # TODO: Move to central CodeGraph
 
     def __init__(self, **data):
-        super().__init__(**data)
+        super().__init__(type=CodeBlockType.MODULE, **data)
 
     def find_span_by_id(self, span_id: str) -> Optional[BlockSpan]:
         return self.spans_by_id.get(span_id)
