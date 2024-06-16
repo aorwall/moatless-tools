@@ -24,7 +24,8 @@ class Module(CodeBlock):
     _graph: DiGraph = None  # TODO: Move to central CodeGraph
 
     def __init__(self, **data):
-        super().__init__(type=CodeBlockType.MODULE, **data)
+        data.setdefault("type", CodeBlockType.MODULE)
+        super().__init__(**data)
 
     def find_span_by_id(self, span_id: str) -> Optional[BlockSpan]:
         return self.spans_by_id.get(span_id)
