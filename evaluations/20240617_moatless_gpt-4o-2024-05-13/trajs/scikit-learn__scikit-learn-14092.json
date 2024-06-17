@@ -1,0 +1,423 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "NCA fails in GridSearch due to too strict parameter checks\nNCA checks its parameters to have a specific type, which can easily fail in a GridSearch due to how param grid is made.\r\n\r\nHere is an example:\r\n```python\r\nimport numpy as np\r\n\r\nfrom sklearn.pipeline import Pipeline\r\nfrom sklearn.model_selection import GridSearchCV\r\nfrom sklearn.neighbors import NeighborhoodComponentsAnalysis\r\nfrom sklearn.neighbors import KNeighborsClassifier\r\n\r\nX = np.random.random_sample((100, 10))\r\ny = np.random.randint(2, size=100)\r\n\r\nnca = NeighborhoodComponentsAnalysis()\r\nknn = KNeighborsClassifier()\r\n\r\npipe = Pipeline([('nca', nca),\r\n                 ('knn', knn)])\r\n                \r\nparams = {'nca__tol': [0.1, 0.5, 1],\r\n          'nca__n_components': np.arange(1, 10)}\r\n          \r\ngs = GridSearchCV(estimator=pipe, param_grid=params, error_score='raise')\r\ngs.fit(X,y)\r\n```\r\n\r\nThe issue is that for `tol`: 1 is not a float, and for  `n_components`: np.int64 is not int\r\n\r\nBefore proposing a fix for this specific situation, I'd like to have your general opinion about parameter checking.  \r\nI like this idea of common parameter checking tool introduced with the NCA PR. What do you think about extending it across the code-base (or at least for new or recent estimators) ?\r\n\r\nCurrently parameter checking is not always done or often partially done, and is quite redundant. For instance, here is the input validation of lda:\r\n```python\r\ndef _check_params(self):\r\n        \"\"\"Check model parameters.\"\"\"\r\n        if self.n_components <= 0:\r\n            raise ValueError(\"Invalid 'n_components' parameter: %r\"\r\n                             % self.n_components)\r\n\r\n        if self.total_samples <= 0:\r\n            raise ValueError(\"Invalid 'total_samples' parameter: %r\"\r\n                             % self.total_samples)\r\n\r\n        if self.learning_offset < 0:\r\n            raise ValueError(\"Invalid 'learning_offset' parameter: %r\"\r\n                             % self.learning_offset)\r\n\r\n        if self.learning_method not in (\"batch\", \"online\"):\r\n            raise ValueError(\"Invalid 'learning_method' parameter: %r\"\r\n                             % self.learning_method)\r\n```\r\nmost params aren't checked and for those who are there's a lot of duplicated code.\r\n\r\nA propose to be upgrade the new tool to be able to check open/closed intervals (currently only closed) and list membership.\r\n\r\nThe api would be something like that:\r\n```\r\ncheck_param(param, name, valid_options)\r\n```\r\nwhere valid_options would be a dict of `type: constraint`. e.g for the `beta_loss` param of `NMF`, it can be either a float or a string in a list, which would give\r\n```\r\nvalid_options = {numbers.Real: None,  # None for no constraint\r\n                 str: ['frobenius', 'kullback-leibler', 'itakura-saito']}\r\n```\r\nSometimes a parameter can only be positive or within a given interval, e.g. `l1_ratio` of `LogisticRegression` must be between 0 and 1, which would give\r\n```\r\nvalid_options = {numbers.Real: Interval(0, 1, closed='both')}\r\n```\r\npositivity of e.g. `max_iter` would be `numbers.Integral: Interval(left=1)`.\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "To address the issue with parameter checking in NCA during GridSearch, I need to locate the NeighborhoodComponentsAnalysis class and its parameter validation logic. This will help in understanding how parameters are currently being checked and how to propose a more flexible solution.",
+            "class_name": "NeighborhoodComponentsAnalysis"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis.fit",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis.transform",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis._validate_params",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis._initialize",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis._callback",
+                "rank": 0
+              },
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_id": "NeighborhoodComponentsAnalysis._loss_grad_lbfgs",
+                "rank": 0
+              }
+            ],
+            "file_pattern": null,
+            "query": null,
+            "code_snippet": null,
+            "class_name": "NeighborhoodComponentsAnalysis",
+            "function_name": null
+          },
+          "completion_cost": 0.008415
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "class_name": "NeighborhoodComponentsAnalysis",
+        "ranked_spans": [
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis.fit",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis.transform",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._validate_params",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._initialize",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._callback",
+            "rank": 0
+          },
+          {
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._loss_grad_lbfgs",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The search results contain relevant code spans related to the NeighborhoodComponentsAnalysis class and its parameter validation. The _validate_params method specifically addresses the parameter checks for tol and n_components, which are mentioned in the user's instructions. These spans are relevant to the task of understanding and potentially modifying the parameter checking mechanism.",
+            "identified_spans": [
+              {
+                "file_path": "sklearn/neighbors/nca.py",
+                "span_ids": [
+                  "NeighborhoodComponentsAnalysis",
+                  "NeighborhoodComponentsAnalysis._validate_params"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "message": "The search returned 7 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * sklearn/neighbors/nca.py: NeighborhoodComponentsAnalysis, NeighborhoodComponentsAnalysis._validate_params:\n\nThe search results contain relevant code spans related to the NeighborhoodComponentsAnalysis class and its parameter validation. The _validate_params method specifically addresses the parameter checks for tol and n_components, which are mentioned in the user's instructions. These spans are relevant to the task of understanding and potentially modifying the parameter checking mechanism."
+          },
+          "completion_cost": 0.017290000000000003
+        }
+      ]
+    },
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search returned 7 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * sklearn/neighbors/nca.py: NeighborhoodComponentsAnalysis, NeighborhoodComponentsAnalysis._validate_params:\n\nThe search results contain relevant code spans related to the NeighborhoodComponentsAnalysis class and its parameter validation. The _validate_params method specifically addresses the parameter checks for tol and n_components, which are mentioned in the user's instructions. These spans are relevant to the task of understanding and potentially modifying the parameter checking mechanism.",
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "To address the issue with parameter checking in NCA during GridSearch, I need to locate the check_scalar function as it is used for parameter validation in NeighborhoodComponentsAnalysis. This will help in understanding how parameters are currently being checked and how to propose a more flexible solution.",
+            "function_name": "check_scalar"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "sklearn/utils/validation.py",
+                "span_id": "check_scalar",
+                "rank": 0
+              }
+            ],
+            "file_pattern": null,
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "check_scalar"
+          },
+          "completion_cost": 0.012720000000000002
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "function_name": "check_scalar",
+        "ranked_spans": [
+          {
+            "file_path": "sklearn/utils/validation.py",
+            "span_id": "check_scalar",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The search results contain the definition of the `check_scalar` function, which is relevant to the user's instructions. This function is used for parameter checking in the `NeighborhoodComponentsAnalysis` class, as seen in the provided file context. The identified code span matches the user's example and discussion about parameter checking.",
+            "identified_spans": [
+              {
+                "file_path": "sklearn/utils/validation.py",
+                "span_ids": [
+                  "check_scalar"
+                ]
+              }
+            ],
+            "complete": true
+          },
+          "output": {
+            "message": "The search results contain the definition of the `check_scalar` function, which is relevant to the user's instructions. This function is used for parameter checking in the `NeighborhoodComponentsAnalysis` class, as seen in the provided file context. The identified code span matches the user's example and discussion about parameter checking."
+          },
+          "completion_cost": 0.012140000000000001
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search results contain the definition of the `check_scalar` function, which is relevant to the user's instructions. This function is used for parameter checking in the `NeighborhoodComponentsAnalysis` class, as seen in the provided file context. The identified code span matches the user's example and discussion about parameter checking.",
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The user wants to modify the parameter checking in the `NeighborhoodComponentsAnalysis` class to be more flexible, allowing for types like `np.int64` to be accepted as valid integers. This can be achieved by updating the `check_scalar` function to handle such cases.",
+            "action": {
+              "instructions": "Update the `check_scalar` function to handle cases where `x` can be an instance of a type that is a subclass of `target_type`, such as `np.int64` being a subclass of `int`.",
+              "file_path": "sklearn/utils/validation.py",
+              "span_id": "check_scalar"
+            }
+          },
+          "output": {
+            "instructions": "Update the `check_scalar` function to handle cases where `x` can be an instance of a type that is a subclass of `target_type`, such as `np.int64` being a subclass of `int`.",
+            "file_path": "sklearn/utils/validation.py",
+            "span_id": "check_scalar",
+            "start_line": 944,
+            "end_line": 983
+          },
+          "completion_cost": 0.017515
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "instructions": "Update the `check_scalar` function to handle cases where `x` can be an instance of a type that is a subclass of `target_type`, such as `np.int64` being a subclass of `int`.",
+        "file_path": "sklearn/utils/validation.py",
+        "span_id": "check_scalar",
+        "start_line": 944,
+        "end_line": 983,
+        "show_initial_message": true,
+        "lint_updated_code": true
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "<replace>\ndef check_scalar(x, name, target_type, min_val=None, max_val=None):\n    \"\"\"Validate scalar parameters type and value.\n\n    Parameters\n    ----------\n    x : object\n        The scalar parameter to validate.\n\n    name : str\n        The name of the parameter to be printed in error messages.\n\n    target_type : type or tuple\n        Acceptable data types for the parameter.\n\n    min_val : float or int, optional (default=None)\n        The minimum valid value the parameter can take. If None (default) it\n        is implied that the parameter does not have a lower bound.\n\n    max_val : float or int, optional (default=None)\n        The maximum valid value the parameter can take. If None (default) it\n        is implied that the parameter does not have an upper bound.\n\n    Raises\n    -------\n    TypeError\n        If the parameter's type does not match the desired type.\n\n    ValueError\n        If the parameter's value violates the given bounds.\n    \"\"\"\n\n    if not isinstance(x, target_type) and not any(isinstance(x, t) for t in target_type.__subclasses__()):\n        raise TypeError('`{}` must be an instance of {}, not {}.'\n                        .format(name, target_type, type(x)))\n\n    if min_val is not None and x < min_val:\n        raise ValueError('`{}`= {}, must be >= {}.'.format(name, x, min_val))\n\n    if max_val is not None and x > max_val:\n        raise ValueError('`{}`= {}, must be <= {}.'.format(name, x, max_val))\n"
+          },
+          "output": {
+            "message": "Applied the change to sklearn/utils/validation.py.",
+            "diff": "--- sklearn/utils/validation.py\n+++ sklearn/utils/validation.py\n@@ -972,7 +972,7 @@\n         If the parameter's value violates the given bounds.\n     \"\"\"\n \n-    if not isinstance(x, target_type):\n+    if not isinstance(x, target_type) and not any(isinstance(x, t) for t in target_type.__subclasses__()):\n         raise TypeError('`{}` must be an instance of {}, not {}.'\n                         .format(name, target_type, type(x)))\n \n",
+            "lint_messages": [
+              {
+                "lint_id": "C0301",
+                "message": "Line too long (106/100)",
+                "line": 975
+              }
+            ]
+          },
+          "completion_cost": 0.031760000000000004
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "Applied the change to sklearn/utils/validation.py.",
+        "diff": "--- sklearn/utils/validation.py\n+++ sklearn/utils/validation.py\n@@ -972,7 +972,7 @@\n         If the parameter's value violates the given bounds.\n     \"\"\"\n \n-    if not isinstance(x, target_type):\n+    if not isinstance(x, target_type) and not any(isinstance(x, t) for t in target_type.__subclasses__()):\n         raise TypeError('`{}` must be an instance of {}, not {}.'\n                         .format(name, target_type, type(x)))\n \n",
+        "lint_messages": [
+          {
+            "lint_id": "C0301",
+            "message": "Line too long (106/100)",
+            "line": 975
+          }
+        ],
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The change has been applied to the `check_scalar` function to handle subclasses of the target type. Now, I will proceed to update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use this updated `check_scalar` function.",
+            "action": {
+              "instructions": "Update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use the updated `check_scalar` function for parameter checking.",
+              "file_path": "sklearn/neighbors/nca.py",
+              "span_id": "NeighborhoodComponentsAnalysis._validate_params"
+            }
+          },
+          "output": {
+            "instructions": "Update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use the updated `check_scalar` function for parameter checking.",
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._validate_params"
+          },
+          "completion_cost": 0.0187
+        }
+      ]
+    },
+    {
+      "name": "ClarifyCodeChange",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "instructions": "Update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use the updated `check_scalar` function for parameter checking.",
+        "file_path": "sklearn/neighbors/nca.py",
+        "span_id": "NeighborhoodComponentsAnalysis._validate_params",
+        "max_tokens_in_edit_prompt": 500
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The `_validate_params` method uses the `check_scalar` function for parameter checking on lines 302, 312, 321, 322, and 323. These lines need to be updated to use the updated `check_scalar` function.",
+            "start_line": 301,
+            "end_line": 323
+          },
+          "output": {
+            "instructions": "Update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use the updated `check_scalar` function for parameter checking.",
+            "file_path": "sklearn/neighbors/nca.py",
+            "span_id": "NeighborhoodComponentsAnalysis._validate_params",
+            "start_line": 301,
+            "end_line": 323
+          },
+          "completion_cost": 0.007500000000000001
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "instructions": "Update the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class to use the updated `check_scalar` function for parameter checking.",
+        "file_path": "sklearn/neighbors/nca.py",
+        "span_id": "NeighborhoodComponentsAnalysis._validate_params",
+        "start_line": 301,
+        "end_line": 323,
+        "show_initial_message": true,
+        "lint_updated_code": true
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "<replace>\n        if self.n_components is not None:\n            check_scalar(self.n_components, 'n_components', (int, np.integer), 1)\n\n            if self.n_components > X.shape[1]:\n                raise ValueError('The preferred dimensionality of the '\n                                 'projected space `n_components` ({}) cannot '\n                                 'be greater than the given data '\n                                 'dimensionality ({})!'\n                                 .format(self.n_components, X.shape[1]))\n\n        # If warm_start is enabled, check that the inputs are consistent\n        check_scalar(self.warm_start, 'warm_start', bool)\n        if self.warm_start and hasattr(self, 'components_'):\n            if self.components_.shape[1] != X.shape[1]:\n                raise ValueError('The new inputs dimensionality ({}) does not '\n                                 'match the input dimensionality of the '\n                                 'previously learned transformation ({}).'\n                                 .format(X.shape[1],\n                                         self.components_.shape[1]))\n\n        check_scalar(self.max_iter, 'max_iter', (int, np.integer), 1)\n        check_scalar(self.tol, 'tol', (float, np.floating), 0.)\n        check_scalar(self.verbose, 'verbose', (int, np.integer), 0)\n"
+          },
+          "output": {
+            "message": "Applied the change to sklearn/neighbors/nca.py.",
+            "diff": "--- sklearn/neighbors/nca.py\n+++ sklearn/neighbors/nca.py\n@@ -299,7 +299,7 @@\n \n         # Check the preferred dimensionality of the projected space\n         if self.n_components is not None:\n-            check_scalar(self.n_components, 'n_components', int, 1)\n+            check_scalar(self.n_components, 'n_components', (int, np.integer), 1)\n \n             if self.n_components > X.shape[1]:\n                 raise ValueError('The preferred dimensionality of the '\n@@ -318,9 +318,9 @@\n                                  .format(X.shape[1],\n                                          self.components_.shape[1]))\n \n-        check_scalar(self.max_iter, 'max_iter', int, 1)\n-        check_scalar(self.tol, 'tol', float, 0.)\n-        check_scalar(self.verbose, 'verbose', int, 0)\n+        check_scalar(self.max_iter, 'max_iter', (int, np.integer), 1)\n+        check_scalar(self.tol, 'tol', (float, np.floating), 0.)\n+        check_scalar(self.verbose, 'verbose', (int, np.integer), 0)\n \n         if self.callback is not None:\n             if not callable(self.callback):\n",
+            "lint_messages": []
+          },
+          "completion_cost": 0.030365000000000003
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "Applied the change to sklearn/neighbors/nca.py.",
+        "diff": "--- sklearn/neighbors/nca.py\n+++ sklearn/neighbors/nca.py\n@@ -299,7 +299,7 @@\n \n         # Check the preferred dimensionality of the projected space\n         if self.n_components is not None:\n-            check_scalar(self.n_components, 'n_components', int, 1)\n+            check_scalar(self.n_components, 'n_components', (int, np.integer), 1)\n \n             if self.n_components > X.shape[1]:\n                 raise ValueError('The preferred dimensionality of the '\n@@ -318,9 +318,9 @@\n                                  .format(X.shape[1],\n                                          self.components_.shape[1]))\n \n-        check_scalar(self.max_iter, 'max_iter', int, 1)\n-        check_scalar(self.tol, 'tol', float, 0.)\n-        check_scalar(self.verbose, 'verbose', int, 0)\n+        check_scalar(self.max_iter, 'max_iter', (int, np.integer), 1)\n+        check_scalar(self.tol, 'tol', (float, np.floating), 0.)\n+        check_scalar(self.verbose, 'verbose', (int, np.integer), 0)\n \n         if self.callback is not None:\n             if not callable(self.callback):\n",
+        "lint_messages": [],
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The changes have been successfully applied to both the `check_scalar` function and the `_validate_params` method in the `NeighborhoodComponentsAnalysis` class. This should address the issue with parameter checking in GridSearch. I will now finish the task.",
+            "action": {
+              "message": "The parameter checking in the `NeighborhoodComponentsAnalysis` class has been updated to handle more flexible types, such as `np.int64` for integers and `np.floating` for floats. The changes should now allow GridSearch to work without issues.",
+              "finish": true
+            }
+          },
+          "output": {
+            "message": "The parameter checking in the `NeighborhoodComponentsAnalysis` class has been updated to handle more flexible types, such as `np.int64` for integers and `np.floating` for floats. The changes should now allow GridSearch to work without issues."
+          },
+          "completion_cost": 0.02086
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "The parameter checking in the `NeighborhoodComponentsAnalysis` class has been updated to handle more flexible types, such as `np.int64` for integers and `np.floating` for floats. The changes should now allow GridSearch to work without issues.",
+        "output": {
+          "model": "gpt-4o-2024-05-13",
+          "temperature": 0.2
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240616_moatless_temp_0_2_gpt-4o-2024-05-13",
+    "instance_id": "scikit-learn__scikit-learn-14092",
+    "duration": 24.67032265663147,
+    "total_cost": 0.177265,
+    "submission": "diff --git a/sklearn/neighbors/nca.py b/sklearn/neighbors/nca.py\nindex 1d278b6e1..a4a26a568 100644\n--- a/sklearn/neighbors/nca.py\n+++ b/sklearn/neighbors/nca.py\n@@ -299,7 +299,7 @@ class NeighborhoodComponentsAnalysis(BaseEstimator, TransformerMixin):\n \n         # Check the preferred dimensionality of the projected space\n         if self.n_components is not None:\n-            check_scalar(self.n_components, 'n_components', int, 1)\n+            check_scalar(self.n_components, 'n_components', (int, np.integer), 1)\n \n             if self.n_components > X.shape[1]:\n                 raise ValueError('The preferred dimensionality of the '\n@@ -318,9 +318,9 @@ class NeighborhoodComponentsAnalysis(BaseEstimator, TransformerMixin):\n                                  .format(X.shape[1],\n                                          self.components_.shape[1]))\n \n-        check_scalar(self.max_iter, 'max_iter', int, 1)\n-        check_scalar(self.tol, 'tol', float, 0.)\n-        check_scalar(self.verbose, 'verbose', int, 0)\n+        check_scalar(self.max_iter, 'max_iter', (int, np.integer), 1)\n+        check_scalar(self.tol, 'tol', (float, np.floating), 0.)\n+        check_scalar(self.verbose, 'verbose', (int, np.integer), 0)\n \n         if self.callback is not None:\n             if not callable(self.callback):\ndiff --git a/sklearn/utils/validation.py b/sklearn/utils/validation.py\nindex 8747844e5..2dd9ae42a 100644\n--- a/sklearn/utils/validation.py\n+++ b/sklearn/utils/validation.py\n@@ -972,7 +972,7 @@ def check_scalar(x, name, target_type, min_val=None, max_val=None):\n         If the parameter's value violates the given bounds.\n     \"\"\"\n \n-    if not isinstance(x, target_type):\n+    if not isinstance(x, target_type) and not any(isinstance(x, t) for t in target_type.__subclasses__()):\n         raise TypeError('`{}` must be an instance of {}, not {}.'\n                         .format(name, target_type, type(x)))\n \n"
+  }
+}

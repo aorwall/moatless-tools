@@ -1,0 +1,201 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "Migration crashes deleting an index_together if there is a unique_together on the same fields\nDescription\n\t\nHappens with Django 1.11.10\nSteps to reproduce:\n1) Create models with 2 fields, add 2 same fields to unique_together and to index_together\n2) Delete index_together -> Fail\nIt will fail at django/db/backends/base/schema.py, line 378, in _delete_composed_index(), ValueError: Found wrong number (2) of constraints for as this one will find two constraints, the _uniq and the _idx one. No way to get out of this...\nThe worst in my case is that happened as I wanted to refactor my code to use the \"new\" (Dj 1.11) Options.indexes feature. I am actually not deleting the index, just the way it is declared in my code.\nI think there are 2 different points here:\n1) The deletion of index_together should be possible alone or made coherent (migrations side?) with unique_together\n2) Moving the declaration of an index should not result in an index re-creation\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "To address the issue of migration crashes when deleting an index_together if there is a unique_together on the same fields, I need to locate the _delete_composed_index function in the django/db/backends/base/schema.py file. This function is likely responsible for handling the deletion of composed indexes, and understanding its implementation will help identify why the error occurs and how to fix it.",
+            "file_pattern": "django/db/backends/base/schema.py",
+            "function_name": "_delete_composed_index"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "django/db/backends/base/schema.py",
+                "span_id": "BaseDatabaseSchemaEditor._delete_composed_index",
+                "rank": 0
+              }
+            ],
+            "file_pattern": "django/db/backends/base/schema.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "_delete_composed_index"
+          },
+          "completion_cost": 0.006675
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "django/db/backends/base/schema.py",
+        "function_name": "_delete_composed_index",
+        "ranked_spans": [
+          {
+            "file_path": "django/db/backends/base/schema.py",
+            "span_id": "BaseDatabaseSchemaEditor._delete_composed_index",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The relevant code span for the function _delete_composed_index has been identified in the search results. This function contains the logic that raises the ValueError when there is a mismatch in the number of constraints found, which is directly related to the issue described in the instructions.",
+            "identified_spans": [
+              {
+                "file_path": "django/db/backends/base/schema.py",
+                "span_ids": [
+                  "BaseDatabaseSchemaEditor._delete_composed_index"
+                ]
+              }
+            ],
+            "complete": true
+          },
+          "output": {
+            "message": "The relevant code span for the function _delete_composed_index has been identified in the search results. This function contains the logic that raises the ValueError when there is a mismatch in the number of constraints found, which is directly related to the issue described in the instructions."
+          },
+          "completion_cost": 0.006280000000000001
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The relevant code span for the function _delete_composed_index has been identified in the search results. This function contains the logic that raises the ValueError when there is a mismatch in the number of constraints found, which is directly related to the issue described in the instructions.",
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The user has identified an issue in the `_delete_composed_index` function where it fails if there are both `unique_together` and `index_together` constraints on the same fields. The proposed solution is to modify the function to handle this scenario gracefully.",
+            "action": {
+              "instructions": "Update the `_delete_composed_index` function to handle the case where both `unique_together` and `index_together` constraints exist on the same fields. Specifically, modify the function to allow for the deletion of the `index_together` constraint without raising a ValueError when both constraints are present.",
+              "file_path": "django/db/backends/base/schema.py",
+              "span_id": "BaseDatabaseSchemaEditor._delete_composed_index"
+            }
+          },
+          "output": {
+            "instructions": "Update the `_delete_composed_index` function to handle the case where both `unique_together` and `index_together` constraints exist on the same fields. Specifically, modify the function to allow for the deletion of the `index_together` constraint without raising a ValueError when both constraints are present.",
+            "file_path": "django/db/backends/base/schema.py",
+            "span_id": "BaseDatabaseSchemaEditor._delete_composed_index",
+            "start_line": 402,
+            "end_line": 416
+          },
+          "completion_cost": 0.010895000000000002
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "instructions": "Update the `_delete_composed_index` function to handle the case where both `unique_together` and `index_together` constraints exist on the same fields. Specifically, modify the function to allow for the deletion of the `index_together` constraint without raising a ValueError when both constraints are present.",
+        "file_path": "django/db/backends/base/schema.py",
+        "span_id": "BaseDatabaseSchemaEditor._delete_composed_index",
+        "start_line": 402,
+        "end_line": 416,
+        "show_initial_message": true,
+        "lint_updated_code": true
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "<replace>\n    def _delete_composed_index(self, model, fields, constraint_kwargs, sql):\n        meta_constraint_names = {constraint.name for constraint in model._meta.constraints}\n        meta_index_names = {constraint.name for constraint in model._meta.indexes}\n        columns = [model._meta.get_field(field).column for field in fields]\n        constraint_names = self._constraint_names(\n            model, columns, exclude=meta_constraint_names | meta_index_names,\n            **constraint_kwargs\n        )\n        if len(constraint_names) > 2:\n            raise ValueError(\"Found wrong number (%s) of constraints for %s(%s)\" % (\n                len(constraint_names),\n                model._meta.db_table,\n                \", \".join(columns),\n            ))\n        for constraint_name in constraint_names:\n            if constraint_name.endswith('_idx'):\n                self.execute(self._delete_constraint_sql(sql, model, constraint_name))\n                return\n        raise ValueError(\"No index constraint found for %s(%s)\" % (\n            model._meta.db_table,\n            \", \".join(columns),\n        ))\n"
+          },
+          "output": {
+            "message": "Applied the change to django/db/backends/base/schema.py.",
+            "diff": "--- django/db/backends/base/schema.py\n+++ django/db/backends/base/schema.py\n@@ -407,13 +407,20 @@\n             model, columns, exclude=meta_constraint_names | meta_index_names,\n             **constraint_kwargs\n         )\n-        if len(constraint_names) != 1:\n+        if len(constraint_names) > 2:\n             raise ValueError(\"Found wrong number (%s) of constraints for %s(%s)\" % (\n                 len(constraint_names),\n                 model._meta.db_table,\n                 \", \".join(columns),\n             ))\n-        self.execute(self._delete_constraint_sql(sql, model, constraint_names[0]))\n+        for constraint_name in constraint_names:\n+            if constraint_name.endswith('_idx'):\n+                self.execute(self._delete_constraint_sql(sql, model, constraint_name))\n+                return\n+        raise ValueError(\"No index constraint found for %s(%s)\" % (\n+            model._meta.db_table,\n+            \", \".join(columns),\n+        ))\n \n     def alter_db_table(self, model, old_db_table, new_db_table):\n         \"\"\"Rename the table a model points to.\"\"\"\n",
+            "lint_messages": [
+              {
+                "lint_id": "C0302",
+                "message": "Too many lines in module (1207/1000)",
+                "line": 1
+              }
+            ]
+          },
+          "completion_cost": 0.013055
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "Applied the change to django/db/backends/base/schema.py.",
+        "diff": "--- django/db/backends/base/schema.py\n+++ django/db/backends/base/schema.py\n@@ -407,13 +407,20 @@\n             model, columns, exclude=meta_constraint_names | meta_index_names,\n             **constraint_kwargs\n         )\n-        if len(constraint_names) != 1:\n+        if len(constraint_names) > 2:\n             raise ValueError(\"Found wrong number (%s) of constraints for %s(%s)\" % (\n                 len(constraint_names),\n                 model._meta.db_table,\n                 \", \".join(columns),\n             ))\n-        self.execute(self._delete_constraint_sql(sql, model, constraint_names[0]))\n+        for constraint_name in constraint_names:\n+            if constraint_name.endswith('_idx'):\n+                self.execute(self._delete_constraint_sql(sql, model, constraint_name))\n+                return\n+        raise ValueError(\"No index constraint found for %s(%s)\" % (\n+            model._meta.db_table,\n+            \", \".join(columns),\n+        ))\n \n     def alter_db_table(self, model, old_db_table, new_db_table):\n         \"\"\"Rename the table a model points to.\"\"\"\n",
+        "lint_messages": [
+          {
+            "lint_id": "C0302",
+            "message": "Too many lines in module (1207/1000)",
+            "line": 1
+          }
+        ],
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The change has been successfully applied to handle the case where both `unique_together` and `index_together` constraints exist on the same fields. The function now checks for constraints ending with '_idx' and deletes them appropriately.",
+            "action": {
+              "message": "The issue with deleting an index when both `unique_together` and `index_together` constraints exist on the same fields has been resolved. The `_delete_composed_index` function has been updated to handle this scenario gracefully."
+            }
+          },
+          "output": {
+            "message": "The issue with deleting an index when both `unique_together` and `index_together` constraints exist on the same fields has been resolved. The `_delete_composed_index` function has been updated to handle this scenario gracefully."
+          },
+          "completion_cost": 0.012545000000000002
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "The issue with deleting an index when both `unique_together` and `index_together` constraints exist on the same fields has been resolved. The `_delete_composed_index` function has been updated to handle this scenario gracefully.",
+        "output": {
+          "model": "gpt-4o-2024-05-13",
+          "temperature": 0.2
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240616_moatless_temp_0_2_gpt-4o-2024-05-13",
+    "instance_id": "django__django-12708",
+    "duration": 11.413604021072388,
+    "total_cost": 0.04945000000000001,
+    "submission": "diff --git a/django/db/backends/base/schema.py b/django/db/backends/base/schema.py\nindex 61f88401ab..6c73a80fd7 100644\n--- a/django/db/backends/base/schema.py\n+++ b/django/db/backends/base/schema.py\n@@ -407,13 +407,20 @@ class BaseDatabaseSchemaEditor:\n             model, columns, exclude=meta_constraint_names | meta_index_names,\n             **constraint_kwargs\n         )\n-        if len(constraint_names) != 1:\n+        if len(constraint_names) > 2:\n             raise ValueError(\"Found wrong number (%s) of constraints for %s(%s)\" % (\n                 len(constraint_names),\n                 model._meta.db_table,\n                 \", \".join(columns),\n             ))\n-        self.execute(self._delete_constraint_sql(sql, model, constraint_names[0]))\n+        for constraint_name in constraint_names:\n+            if constraint_name.endswith('_idx'):\n+                self.execute(self._delete_constraint_sql(sql, model, constraint_name))\n+                return\n+        raise ValueError(\"No index constraint found for %s(%s)\" % (\n+            model._meta.db_table,\n+            \", \".join(columns),\n+        ))\n \n     def alter_db_table(self, model, old_db_table, new_db_table):\n         \"\"\"Rename the table a model points to.\"\"\"\n"
+  }
+}

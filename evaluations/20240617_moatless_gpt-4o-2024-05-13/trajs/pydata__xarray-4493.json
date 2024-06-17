@@ -1,0 +1,501 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "DataSet.update causes chunked dask DataArray to evalute its values eagerly \n**What happened**:\r\nUsed `DataSet.update` to update a chunked dask DataArray, but the DataArray is no longer chunked after the update.\r\n\r\n**What you expected to happen**:\r\nThe chunked DataArray should still be chunked after the update\r\n\r\n**Minimal Complete Verifiable Example**:\r\n\r\n```python\r\nfoo = xr.DataArray(np.random.randn(3, 3), dims=(\"x\", \"y\")).chunk()  # foo is chunked\r\nds = xr.Dataset({\"foo\": foo, \"bar\": (\"x\", [1, 2, 3])})  # foo is still chunked here\r\nds  # you can verify that foo is chunked\r\n```\r\n```python\r\nupdate_dict = {\"foo\": ((\"x\", \"y\"), ds.foo[1:, :]), \"bar\": (\"x\", ds.bar[1:])}\r\nupdate_dict[\"foo\"][1]  # foo is still chunked\r\n```\r\n```python\r\nds.update(update_dict)\r\nds  # now foo is no longer chunked\r\n```\r\n\r\n**Environment**:\r\n\r\n<details><summary>Output of <tt>xr.show_versions()</tt></summary>\r\n\r\n```\r\ncommit: None\r\npython: 3.8.3 (default, Jul  2 2020, 11:26:31) \r\n[Clang 10.0.0 ]\r\npython-bits: 64\r\nOS: Darwin\r\nOS-release: 19.6.0\r\nmachine: x86_64\r\nprocessor: i386\r\nbyteorder: little\r\nLC_ALL: None\r\nLANG: en_US.UTF-8\r\nLOCALE: en_US.UTF-8\r\nlibhdf5: 1.10.6\r\nlibnetcdf: None\r\n\r\nxarray: 0.16.0\r\npandas: 1.0.5\r\nnumpy: 1.18.5\r\nscipy: 1.5.0\r\nnetCDF4: None\r\npydap: None\r\nh5netcdf: None\r\nh5py: 2.10.0\r\nNio: None\r\nzarr: None\r\ncftime: None\r\nnc_time_axis: None\r\nPseudoNetCDF: None\r\nrasterio: None\r\ncfgrib: None\r\niris: None\r\nbottleneck: None\r\ndask: 2.20.0\r\ndistributed: 2.20.0\r\nmatplotlib: 3.2.2\r\ncartopy: None\r\nseaborn: None\r\nnumbagg: None\r\npint: None\r\nsetuptools: 49.2.0.post20200714\r\npip: 20.1.1\r\nconda: None\r\npytest: 5.4.3\r\nIPython: 7.16.1\r\nsphinx: None\r\n```\r\n\r\n</details>\nDataset constructor with DataArray triggers computation\nIs it intentional that creating a Dataset with a DataArray and dimension names for a single variable causes computation of that variable?  In other words, why does ```xr.Dataset(dict(a=('d0', xr.DataArray(da.random.random(10)))))``` cause the dask array to compute?\r\n\r\nA longer example:\r\n\r\n```python\r\nimport dask.array as da\r\nimport xarray as xr\r\nx = da.random.randint(1, 10, size=(100, 25))\r\nds = xr.Dataset(dict(a=xr.DataArray(x, dims=('x', 'y'))))\r\ntype(ds.a.data)\r\ndask.array.core.Array\r\n\r\n# Recreate the dataset with the same array, but also redefine the dimensions\r\nds2 = xr.Dataset(dict(a=(('x', 'y'), ds.a))\r\ntype(ds2.a.data)\r\nnumpy.ndarray\r\n```\r\n\r\n\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The issue is related to the DataSet.update method in xarray. We need to locate the implementation of the update method within the xarray library to understand why it causes chunked dask DataArray to evaluate its values eagerly.",
+            "file_pattern": "**/xarray/**/*.py",
+            "function_name": "update"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "xarray/core/coordinates.py",
+                "span_id": "Coordinates.update",
+                "rank": 0
+              },
+              {
+                "file_path": "xarray/core/dataset.py",
+                "span_id": "Dataset.update",
+                "rank": 1
+              },
+              {
+                "file_path": "xarray/core/utils.py",
+                "span_id": "OrderedSet.update",
+                "rank": 2
+              }
+            ],
+            "file_pattern": "**/xarray/**/*.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "update"
+          },
+          "completion_cost": 0.008905000000000001
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "**/xarray/**/*.py",
+        "function_name": "update",
+        "ranked_spans": [
+          {
+            "file_path": "xarray/core/coordinates.py",
+            "span_id": "Coordinates.update",
+            "rank": 0
+          },
+          {
+            "file_path": "xarray/core/dataset.py",
+            "span_id": "Dataset.update",
+            "rank": 1
+          },
+          {
+            "file_path": "xarray/core/utils.py",
+            "span_id": "OrderedSet.update",
+            "rank": 2
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The relevant code is in the `xarray/core/dataset.py` file, specifically in the `Dataset.update` method. This method calls `dataset_update_method` and then `_replace`. The other update methods in `Coordinates` and `OrderedSet` are not relevant to the user's issue.",
+            "identified_spans": [
+              {
+                "file_path": "xarray/core/dataset.py",
+                "span_ids": [
+                  "Dataset.update"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "message": "The search returned 3 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/dataset.py: Dataset.update:\n\nThe relevant code is in the `xarray/core/dataset.py` file, specifically in the `Dataset.update` method. This method calls `dataset_update_method` and then `_replace`. The other update methods in `Coordinates` and `OrderedSet` are not relevant to the user's issue."
+          },
+          "completion_cost": 0.009385000000000001
+        }
+      ]
+    },
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search returned 3 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/dataset.py: Dataset.update:\n\nThe relevant code is in the `xarray/core/dataset.py` file, specifically in the `Dataset.update` method. This method calls `dataset_update_method` and then `_replace`. The other update methods in `Coordinates` and `OrderedSet` are not relevant to the user's issue.",
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The update method in the Dataset class calls a function named dataset_update_method. To understand the behavior of the update method, we need to locate the dataset_update_method function within the xarray library.",
+            "file_pattern": "**/xarray/**/*.py",
+            "function_name": "dataset_update_method"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_id": "dataset_update_method",
+                "rank": 0
+              }
+            ],
+            "file_pattern": "**/xarray/**/*.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "dataset_update_method"
+          },
+          "completion_cost": 0.00966
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "**/xarray/**/*.py",
+        "function_name": "dataset_update_method",
+        "ranked_spans": [
+          {
+            "file_path": "xarray/core/merge.py",
+            "span_id": "dataset_update_method",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The function `dataset_update_method` in `xarray/core/merge.py` is relevant to the user's issue. This function is called within `Dataset.update`, which is the method causing the chunked DataArray to evaluate its values eagerly. The identified span contains the full implementation of `dataset_update_method`, which is crucial for understanding and potentially fixing the issue.",
+            "identified_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_ids": [
+                  "dataset_update_method"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: dataset_update_method:\n\nThe function `dataset_update_method` in `xarray/core/merge.py` is relevant to the user's issue. This function is called within `Dataset.update`, which is the method causing the chunked DataArray to evaluate its values eagerly. The identified span contains the full implementation of `dataset_update_method`, which is crucial for understanding and potentially fixing the issue."
+          },
+          "completion_cost": 0.00952
+        }
+      ]
+    },
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: dataset_update_method:\n\nThe function `dataset_update_method` in `xarray/core/merge.py` is relevant to the user's issue. This function is called within `Dataset.update`, which is the method causing the chunked DataArray to evaluate its values eagerly. The identified span contains the full implementation of `dataset_update_method`, which is crucial for understanding and potentially fixing the issue.",
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The dataset_update_method function calls another function named merge_core. To fully understand the behavior of the update method, we need to locate the merge_core function within the xarray library.",
+            "file_pattern": "**/xarray/**/*.py",
+            "function_name": "merge_core"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_id": "merge_core",
+                "rank": 0
+              }
+            ],
+            "file_pattern": "**/xarray/**/*.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "merge_core"
+          },
+          "completion_cost": 0.011395
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "**/xarray/**/*.py",
+        "function_name": "merge_core",
+        "ranked_spans": [
+          {
+            "file_path": "xarray/core/merge.py",
+            "span_id": "merge_core",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The search results contain the definition of the `merge_core` function, which is relevant to the user's issue with `DataSet.update` causing chunked dask DataArray to evaluate its values eagerly. This function is part of the call chain that leads to the problem described by the user.",
+            "identified_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_ids": [
+                  "merge_core"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: merge_core:\n\nThe search results contain the definition of the `merge_core` function, which is relevant to the user's issue with `DataSet.update` causing chunked dask DataArray to evaluate its values eagerly. This function is part of the call chain that leads to the problem described by the user."
+          },
+          "completion_cost": 0.01144
+        }
+      ]
+    },
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: merge_core:\n\nThe search results contain the definition of the `merge_core` function, which is relevant to the user's issue with `DataSet.update` causing chunked dask DataArray to evaluate its values eagerly. This function is part of the call chain that leads to the problem described by the user.",
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The merge_core function calls several other functions such as coerce_pandas_values, deep_align, collect_variables_and_indexes, and merge_collected. To fully understand the behavior of the update method, we need to locate these functions within the xarray library.",
+            "file_pattern": "**/xarray/**/*.py",
+            "function_name": "coerce_pandas_values"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_id": "coerce_pandas_values",
+                "rank": 0
+              }
+            ],
+            "file_pattern": "**/xarray/**/*.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "coerce_pandas_values"
+          },
+          "completion_cost": 0.014615000000000001
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "**/xarray/**/*.py",
+        "function_name": "coerce_pandas_values",
+        "ranked_spans": [
+          {
+            "file_path": "xarray/core/merge.py",
+            "span_id": "coerce_pandas_values",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The function `coerce_pandas_values` is relevant to the user's issue. It is used in the `merge_core` function, which is called by `dataset_update_method`, which in turn is called by `Dataset.update`. This chain of function calls is directly related to the user's problem of chunked DataArray being evaluated eagerly.",
+            "identified_spans": [
+              {
+                "file_path": "xarray/core/merge.py",
+                "span_ids": [
+                  "coerce_pandas_values"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: coerce_pandas_values:\n\nThe function `coerce_pandas_values` is relevant to the user's issue. It is used in the `merge_core` function, which is called by `dataset_update_method`, which in turn is called by `Dataset.update`. This chain of function calls is directly related to the user's problem of chunked DataArray being evaluated eagerly."
+          },
+          "completion_cost": 0.012375000000000002
+        }
+      ]
+    },
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The search returned 1 code spans. \n\nIdentified the following code spans in the search result to be relevant:\n * xarray/core/merge.py: coerce_pandas_values:\n\nThe function `coerce_pandas_values` is relevant to the user's issue. It is used in the `merge_core` function, which is called by `dataset_update_method`, which in turn is called by `Dataset.update`. This chain of function calls is directly related to the user's problem of chunked DataArray being evaluated eagerly.",
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The merge_core function calls several other functions such as deep_align, collect_variables_and_indexes, and merge_collected. To fully understand the behavior of the update method, we need to locate these functions within the xarray library.",
+            "file_pattern": "**/xarray/**/*.py",
+            "function_name": "deep_align"
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "xarray/core/alignment.py",
+                "span_id": "deep_align",
+                "rank": 0
+              }
+            ],
+            "file_pattern": "**/xarray/**/*.py",
+            "query": null,
+            "code_snippet": null,
+            "class_name": null,
+            "function_name": "deep_align"
+          },
+          "completion_cost": 0.016075
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "file_pattern": "**/xarray/**/*.py",
+        "function_name": "deep_align",
+        "ranked_spans": [
+          {
+            "file_path": "xarray/core/alignment.py",
+            "span_id": "deep_align",
+            "rank": 0
+          }
+        ]
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The function deep_align in xarray/core/alignment.py is relevant to the user's issue. It is used in the merge_core function, which is called by dataset_update_method. This method is directly related to the user's problem with DataSet.update causing chunked dask DataArray to evaluate its values eagerly. The identified code spans should help in understanding and potentially resolving the issue.",
+            "identified_spans": [
+              {
+                "file_path": "xarray/core/alignment.py",
+                "span_ids": [
+                  "deep_align"
+                ]
+              }
+            ],
+            "complete": true
+          },
+          "output": {
+            "message": "The function deep_align in xarray/core/alignment.py is relevant to the user's issue. It is used in the merge_core function, which is called by dataset_update_method. This method is directly related to the user's problem with DataSet.update causing chunked dask DataArray to evaluate its values eagerly. The identified code spans should help in understanding and potentially resolving the issue."
+          },
+          "completion_cost": 0.01494
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "The function deep_align in xarray/core/alignment.py is relevant to the user's issue. It is used in the merge_core function, which is called by dataset_update_method. This method is directly related to the user's problem with DataSet.update causing chunked dask DataArray to evaluate its values eagerly. The identified code spans should help in understanding and potentially resolving the issue.",
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The user's issue is that the `DataSet.update` method causes chunked dask DataArray to evaluate its values eagerly. The `dataset_update_method` function in `xarray/core/merge.py` is directly related to this problem. To address this, we need to ensure that the chunked dask DataArray remains chunked after the update. We will modify the `dataset_update_method` to handle this correctly.",
+            "action": {
+              "instructions": "Update the `dataset_update_method` function to ensure that chunked dask DataArray remains chunked after the update.",
+              "file_path": "xarray/core/merge.py",
+              "span_id": "dataset_update_method"
+            }
+          },
+          "output": {
+            "instructions": "Update the `dataset_update_method` function to ensure that chunked dask DataArray remains chunked after the update.",
+            "file_path": "xarray/core/merge.py",
+            "span_id": "dataset_update_method",
+            "start_line": 908,
+            "end_line": 940
+          },
+          "completion_cost": 0.019670000000000003
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "instructions": "Update the `dataset_update_method` function to ensure that chunked dask DataArray remains chunked after the update.",
+        "file_path": "xarray/core/merge.py",
+        "span_id": "dataset_update_method",
+        "start_line": 908,
+        "end_line": 940,
+        "show_initial_message": true,
+        "lint_updated_code": true
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "<replace>\ndef dataset_update_method(\n    dataset: \"Dataset\", other: \"CoercibleMapping\"\n) -> _MergeResult:\n    \"\"\"Guts of the Dataset.update method.\n\n    This drops a duplicated coordinates from `other` if `other` is not an\n    `xarray.Dataset`, e.g., if it's a dict with DataArray values (GH2068,\n    GH2180).\n    \"\"\"\n    from .dataarray import DataArray\n    from .dataset import Dataset\n\n    if not isinstance(other, Dataset):\n        other = dict(other)\n        for key, value in other.items():\n            if isinstance(value, DataArray):\n                # drop conflicting coordinates\n                coord_names = [\n                    c\n                    for c in value.coords\n                    if c not in value.dims and c in dataset.coords\n                ]\n                if coord_names:\n                    other[key] = value.drop_vars(coord_names)\n\n    # Ensure chunked DataArray remains chunked after update\n    for key, value in other.items():\n        if isinstance(value, DataArray) and hasattr(value.data, 'chunks'):\n            other[key] = value.chunk(value.data.chunks)\n\n    # use ds.coords and not ds.indexes, else str coords are cast to object\n    indexes = {key: dataset.coords[key] for key in dataset.indexes.keys()}\n    return merge_core(\n        [dataset, other],\n        priority_arg=1,\n        indexes=indexes,\n        combine_attrs=\"override\",\n    )\n"
+          },
+          "output": {
+            "message": "Applied the change to xarray/core/merge.py.",
+            "diff": "--- xarray/core/merge.py\n+++ xarray/core/merge.py\n@@ -930,6 +930,11 @@\n                 if coord_names:\n                     other[key] = value.drop_vars(coord_names)\n \n+    # Ensure chunked DataArray remains chunked after update\n+    for key, value in other.items():\n+        if isinstance(value, DataArray) and hasattr(value.data, 'chunks'):\n+            other[key] = value.chunk(value.data.chunks)\n+\n     # use ds.coords and not ds.indexes, else str coords are cast to object\n     indexes = {key: dataset.coords[key] for key in dataset.indexes.keys()}\n     return merge_core(\n",
+            "lint_messages": []
+          },
+          "completion_cost": 0.025835
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "gpt-4o-2024-05-13",
+        "temperature": 0.2,
+        "max_tokens": 1000,
+        "message": "Applied the change to xarray/core/merge.py.",
+        "diff": "--- xarray/core/merge.py\n+++ xarray/core/merge.py\n@@ -930,6 +930,11 @@\n                 if coord_names:\n                     other[key] = value.drop_vars(coord_names)\n \n+    # Ensure chunked DataArray remains chunked after update\n+    for key, value in other.items():\n+        if isinstance(value, DataArray) and hasattr(value.data, 'chunks'):\n+            other[key] = value.chunk(value.data.chunks)\n+\n     # use ds.coords and not ds.indexes, else str coords are cast to object\n     indexes = {key: dataset.coords[key] for key in dataset.indexes.keys()}\n     return merge_core(\n",
+        "lint_messages": [],
+        "max_tokens_in_edit_prompt": 500,
+        "expand_context_with_related_spans": true
+      },
+      "actions": [
+        {
+          "action": {
+            "thoughts": "The change has been applied to ensure that chunked dask DataArray remains chunked after the update. Now, we need to finish the task as the required modification is complete.",
+            "action": {
+              "message": "The `dataset_update_method` function has been updated to ensure that chunked dask DataArray remains chunked after the update. The task is now complete."
+            }
+          },
+          "output": {
+            "message": "The `dataset_update_method` function has been updated to ensure that chunked dask DataArray remains chunked after the update. The task is now complete."
+          },
+          "completion_cost": 0.020550000000000002
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "The `dataset_update_method` function has been updated to ensure that chunked dask DataArray remains chunked after the update. The task is now complete.",
+        "output": {
+          "model": "gpt-4o-2024-05-13",
+          "temperature": 0.2
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240616_moatless_temp_0_2_gpt-4o-2024-05-13",
+    "instance_id": "pydata__xarray-4493",
+    "duration": 24.891865968704224,
+    "total_cost": 0.184365,
+    "submission": "diff --git a/xarray/core/merge.py b/xarray/core/merge.py\nindex d29a9e1f..450548d9 100644\n--- a/xarray/core/merge.py\n+++ b/xarray/core/merge.py\n@@ -930,6 +930,11 @@ def dataset_update_method(\n                 if coord_names:\n                     other[key] = value.drop_vars(coord_names)\n \n+    # Ensure chunked DataArray remains chunked after update\n+    for key, value in other.items():\n+        if isinstance(value, DataArray) and hasattr(value.data, 'chunks'):\n+            other[key] = value.chunk(value.data.chunks)\n+\n     # use ds.coords and not ds.indexes, else str coords are cast to object\n     indexes = {key: dataset.coords[key] for key in dataset.indexes.keys()}\n     return merge_core(\n"
+  }
+}
