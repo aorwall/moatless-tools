@@ -10,10 +10,14 @@ Running the SWE Bench Lite dataset with 300 instances costs approx 30 dollars.
 
 ## Try it out
 I have focused on testing my ideas, and the project is currently a bit messy. My plan is to organize it in the coming
-period. However, feel free to clone the repo and try running any of these notebooks.
+period. However, feel free to clone the repo and try running this notebook:
 
 1. [Run Moatless Tools on any repository](notebooks/00_index_and_run.ipynb)
-2. [Run the full SWE-bench Lite evaluation](notebooks/01_run_swebench_evaluation.ipynb)
+
+### Google Colab
+You can also run the notebooks in Google Colab:
+
+1. [Run the full SWE-bench Lite evaluation](https://colab.research.google.com/drive/15RpSjdprf9lcaP0oqKsuYfZl1c3kVB_t?usp=sharing)
 
 ## How it works
 The solution is based on two loops (or agents if you will): one for searching code and one for modifying code. These

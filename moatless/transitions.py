@@ -43,9 +43,9 @@ def code_transitions(global_params: Optional[dict] = None, state_params: Optiona
     )
 
 
-def search_transitions(global_params: dict, state_params: Optional[dict] = None) -> Transitions:
+def search_transitions(global_params: Optional[dict] = None, state_params: Optional[dict] = None) -> Transitions:
     return Transitions(
-        global_params=global_params,
+        global_params=global_params or {},
         state_params=state_params or {},
         initial_state=SearchCode,
         transitions=[
