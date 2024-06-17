@@ -70,6 +70,9 @@ class Trajectory:
             transition for transition in self._transitions if transition.name == name
         ]
 
+    def transition_count(self, state: AgenticState):
+        return len(self.get_transitions(state.name))
+
     def save_action(
         self,
         action: ActionRequest,

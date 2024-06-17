@@ -25,6 +25,9 @@ class AgenticState(ABC, BaseModel):
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
     )
+    max_iterations: int = Field(
+        6, description="The maximum number of transitions to this state."
+    )
 
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)
 

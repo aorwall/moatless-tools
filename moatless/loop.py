@@ -217,7 +217,10 @@ class AgenticLoop:
 
         self._transition_count += 1
         if self._transition_count > self._max_transitions:
-            raise RuntimeError("Maximum number of transitions exceeded.")
+            new_state = Rejected(message="Max transitions exceeded.")
+
+        if self.trajectory.transition_count(new_state) > new_state.max_iterations:
+            new_state = Rejected(message=f"Max iterations exceeded for state {new_state.name}.")
 
         self.trajectory.new_transition(new_state)
 

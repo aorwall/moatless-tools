@@ -110,6 +110,7 @@ class PlanToCode(InitialState):
         message: Optional[str] = None,
         diff: Optional[str] = None,
         lint_messages: Optional[List[LintMessage]] = None,
+        max_iterations: int = 5,
         **data,
     ):
         super().__init__(
@@ -117,6 +118,7 @@ class PlanToCode(InitialState):
             diff=diff,
             lint_messages=lint_messages,
             include_message_history=True,
+            max_iterations=max_iterations,
             **data,
         )
 

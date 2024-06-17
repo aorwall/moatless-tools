@@ -113,12 +113,14 @@ class EditCode(AgenticState):
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
         show_initial_message: bool = True,
+        max_iterations: int = 4,
         lint_updated_code: bool = True,
         **data,
     ):
         super().__init__(
             include_message_history=True,
             show_initial_message=show_initial_message,
+            max_iterations=max_iterations,
             lint_updated_code=lint_updated_code,
             instructions=instructions,
             file_path=file_path,
