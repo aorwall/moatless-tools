@@ -27,10 +27,13 @@ class Workspace:
     def from_dirs(
         cls,
         repo_dir: str,
-        index_dir: str,
+        index_dir: Optional[str] = None,
     ):
         file_repo = FileRepository(repo_dir)
-        code_index = CodeIndex.from_persist_dir(index_dir, file_repo=file_repo)
+        if index_dir:
+            code_index = CodeIndex.from_persist_dir(index_dir, file_repo=file_repo)
+        else:
+            code_index = None
         workspace = cls(
             file_repo=file_repo,
             code_index=code_index,

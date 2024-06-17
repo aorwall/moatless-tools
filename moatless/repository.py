@@ -26,16 +26,19 @@ class UpdateResult:
 class CodeFile(BaseModel):
     file_path: str
     content: str
-    module: Module
+    module: Optional[Module] = None
 
     dirty: bool = False
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
         with open(os.path.join(repo_path, file_path), "r") as f:
-            content = f.read()
-            parser = PythonParser()
-            module = parser.parse(content)
+            if supports_codeblocks(file_path):
+                content = f.read()
+                parser = PythonParser()
+                module = parser.parse(content)
+            else:
+                module = None
             return cls(file_path=file_path, content=content, module=module)
 
     @classmethod
@@ -43,6 +46,10 @@ class CodeFile(BaseModel):
         parser = PythonParser()
         module = parser.parse(content)
         return cls(file_path=file_path, content=content, module=module)
+
+    @property
+    def supports_codeblocks(self):
+        return self.module is not None
 
     def update_content_by_line_numbers(
         self, start_line_index: int, end_line_index: int, replacement_content: str
@@ -74,65 +81,71 @@ class CodeFile(BaseModel):
     def update_content(self, updated_content: str) -> UpdateResult:
         diff = do_diff(self.file_path, self.content, updated_content)
         if diff:
-            parser = PythonParser()
-            module = parser.parse(updated_content)
 
-            # TODO: Move the prompt instructions to the loop
-            error_blocks = module.find_errors()
-            validation_errors = module.find_validation_errors()
-            existing_placeholders = self.module.find_blocks_with_type(
-                CodeBlockType.COMMENTED_OUT_CODE
-            )
-            new_placeholders = (
-                module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
-                if not existing_placeholders
-                else []
-            )
-            if error_blocks or validation_errors or new_placeholders:
-                error_response = ""
-                if error_blocks:
-                    for error_block in error_blocks:
-                        parent_block = error_block.find_type_group_in_parents(
-                            CodeBlockTypeGroup.STRUCTURE
-                        )
-                        if (
-                            parent_block
-                            and not parent_block.type == CodeBlockType.MODULE
-                        ):
-                            error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
-                        else:
-                            error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
+            if supports_codeblocks(self.file_path):
+                parser = PythonParser()
+                module = parser.parse(updated_content)
 
-                if new_placeholders:
-                    for new_placeholder in new_placeholders:
-                        parent_block = new_placeholder.find_type_group_in_parents(
-                            CodeBlockTypeGroup.STRUCTURE
-                        )
-                        if parent_block:
-                            error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
-                        else:
-                            error_response += f"There is a placeholder indicating out commented code : \n```{new_placeholder.to_string()}\n```. Do the full implementation or reject the request.\n"
+                # TODO: Move the prompt instructions to the loop
+                error_blocks = module.find_errors()
+                validation_errors = module.find_validation_errors()
+                existing_placeholders = self.module.find_blocks_with_type(
+                    CodeBlockType.COMMENTED_OUT_CODE
+                )
+                new_placeholders = (
+                    module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
+                    if not existing_placeholders
+                    else []
+                )
+                if error_blocks or validation_errors or new_placeholders:
+                    error_response = ""
+                    if error_blocks:
+                        for error_block in error_blocks:
+                            parent_block = error_block.find_type_group_in_parents(
+                                CodeBlockTypeGroup.STRUCTURE
+                            )
+                            if (
+                                parent_block
+                                and not parent_block.type == CodeBlockType.MODULE
+                            ):
+                                error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
+                            else:
+                                error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
 
-                for validation_error in validation_errors:
-                    error_response += f"{validation_error}\n"
+                    if new_placeholders:
+                        for new_placeholder in new_placeholders:
+                            parent_block = new_placeholder.find_type_group_in_parents(
+                                CodeBlockTypeGroup.STRUCTURE
+                            )
+                            if parent_block:
+                                error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
+                            else:
+                                error_response += f"There is a placeholder indicating out commented code : \n```{new_placeholder.to_string()}\n```. Do the full implementation or reject the request.\n"
 
-                logger.warning(
-                    f"Errors in updated file {self.file_path}:\n{error_response}"
+                    for validation_error in validation_errors:
+                        error_response += f"{validation_error}\n"
+
+                    logger.warning(
+                        f"Errors in updated file {self.file_path}:\n{error_response}"
+                    )
+
+                    return UpdateResult(
+                        file_path=self.file_path,
+                        updated=False,
+                        diff=diff,
+                        error=error_response,
+                    )
+
+                new_span_ids = module.get_all_span_ids() - set(
+                    self.module.get_all_span_ids()
                 )
 
-                return UpdateResult(
-                    file_path=self.file_path,
-                    updated=False,
-                    diff=diff,
-                    error=error_response,
-                )
+                self.module = module
+            else:
+                new_span_ids = []
 
-            new_span_ids = module.get_all_span_ids() - set(
-                self.module.get_all_span_ids()
-            )
             self.dirty = True
             self.content = updated_content
-            self.module = module
 
             return UpdateResult(
                 file_path=self.file_path,
@@ -175,12 +188,15 @@ class FileRepository:
                 return None
 
             with open(full_file_path, "r") as f:
-                content = f.read()
-                module = _parser.parse(content)
-                file = CodeFile(file_path=file_path, content=content, module=module)
-                if refresh or not from_origin:
-                    self._files[file_path] = file
+                if supports_codeblocks(file_path):
+                    content = f.read()
+                    module = _parser.parse(content)
+                    file = CodeFile(file_path=file_path, content=content, module=module)
+                else:
+                    file = CodeFile(file_path=file_path, content= f.read())
 
+            if refresh or not from_origin:
+                self._files[file_path] = file
         return file
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
@@ -266,3 +282,6 @@ def do_diff(
             lineterm="\n",
         )
     )
+
+def supports_codeblocks(path: str):
+    return path.endswith(".py")

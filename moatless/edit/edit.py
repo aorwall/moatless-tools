@@ -93,11 +93,13 @@ class CodeChange(ActionRequest):
 class EditCode(AgenticState):
     instructions: str
     file_path: str
-    span_id: str
+    span_id: Optional[str] = None
     start_line: int
     end_line: int
 
+    allow_files_not_in_context: bool = False
     show_initial_message: bool = True
+    show_file_context: bool = True
     lint_updated_code: bool = False
 
     _file: Optional[CodeFile] = PrivateAttr(default=None)
@@ -109,11 +111,12 @@ class EditCode(AgenticState):
         self,
         instructions: str,
         file_path: str,
-        span_id: str,
+        span_id: Optional[str] = None,
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
         show_initial_message: bool = True,
         max_iterations: int = 4,
+        show_file_context: bool = True,
         lint_updated_code: bool = True,
         **data,
     ):
@@ -121,6 +124,7 @@ class EditCode(AgenticState):
             include_message_history=True,
             show_initial_message=show_initial_message,
             max_iterations=max_iterations,
+            show_file_context=show_file_context,
             lint_updated_code=lint_updated_code,
             instructions=instructions,
             file_path=file_path,
@@ -132,6 +136,9 @@ class EditCode(AgenticState):
 
     def init(self):
         self._file = self.file_context.get_file(self.file_path)
+        if not self._file:
+            raise ValueError(f"File not found: {self.file_path}")
+
         code_lines = self._file.content.split("\n")
         lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
         self._code_to_replace = "\n".join(lines_to_replace)
@@ -183,11 +190,12 @@ class EditCode(AgenticState):
                     self.file_path, from_origin=True
                 )
 
-                lint_messages = lint_updated_code(
-                    language=self._file.module.language,
-                    original_content=original_file.content,
-                    updated_content=self._file.content,
-                )
+                if original_file.supports_codeblocks:
+                    lint_messages = lint_updated_code(
+                        language=self._file.module.language,
+                        original_content=original_file.content,
+                        updated_content=self._file.content,
+                    )
 
             return ActionResponse.transition(
                 "finish",
@@ -246,20 +254,23 @@ class EditCode(AgenticState):
         return system_prompt
 
     def messages(self) -> list[Message]:
-        file_context_str = self.file_context.create_prompt(
-            show_line_numbers=False,
-            show_span_ids=False,
-            exclude_comments=False,
-            show_outcommented_code=True,
-            outcomment_code_comment="... other code",
-        )
 
         content = ""
         if self.show_initial_message:
             content = f"<main_objective>\n{self.loop.trajectory.initial_message}\n</main_objective>\n\n"
 
         content += f"<instructions>\n{self.instructions}\n</instructions>\n"
-        content += f"<file_context>\n{file_context_str}\n</file_context>\n"
+
+        if self.show_file_context:
+            file_context_str = self.file_context.create_prompt(
+                show_line_numbers=False,
+                show_span_ids=False,
+                exclude_comments=False,
+                show_outcommented_code=True,
+                outcomment_code_comment="... other code",
+            )
+            content += f"<file_context>\n{file_context_str}\n</file_context>\n"
+
         content += f"<search>\n{self._code_to_replace}\n</search>"
 
         messages = [UserMessage(content=content)]

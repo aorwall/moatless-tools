@@ -1,11 +1,12 @@
 import logging
 from typing import Type, Optional, Union, List
 
-from pydantic import Field, PrivateAttr, BaseModel, ConfigDict
+from pydantic import Field, BaseModel, ConfigDict
 
 from moatless.codeblocks import CodeBlockType
+from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
 from moatless.edit.prompt import CODER_SYSTEM_PROMPT
-from moatless.state import InitialState
+from moatless.state import AgenticState
 from moatless.types import (
     ActionRequest,
     ActionResponse,
@@ -76,7 +77,7 @@ class TakeAction(ActionRequest):
     )
 
 
-class PlanToCode(InitialState):
+class PlanToCode(AgenticState):
 
     message: Optional[str] = Field(
         None,
@@ -172,8 +173,8 @@ class PlanToCode(InitialState):
                 f"You can only request changes to files that are in file context:\n{files_str}"
             )
 
-        span = context_file.get_span(rfc.span_id)
-        if not span:
+        block_span = context_file.get_block_span(rfc.span_id)
+        if not block_span and context_file.file.supports_codeblocks:
             spans = self.file_context.get_spans(rfc.file_path)
             span_ids = [span.span_id for span in spans]
 
@@ -187,9 +188,9 @@ class PlanToCode(InitialState):
                 logger.info(
                     f"{self}: Use span {rfc.span_id} as it's a parent span of a span in the context."
                 )
-                span = span_not_in_context
+                block_span = span_not_in_context
 
-            if not span:
+            if not block_span:
                 span_str = ", ".join(span_ids)
                 logger.warning(
                     f"{self}: Span not found: {rfc.span_id}. Available spans: {span_str}"
@@ -199,15 +200,36 @@ class PlanToCode(InitialState):
                 )
 
         # If span is for a class block, consider the whole class
-        if span.initiating_block.type == CodeBlockType.CLASS:
-            tokens = span.initiating_block.sum_tokens()
-            end_line = span.initiating_block.end_line
-            logger.info(
-                f"{self}: Span {rfc.span_id} is a class block. Consider the whole class ({span.initiating_block.start_line} - {end_line}) with {tokens} tokens."
-            )
+        if block_span:
+            start_line = block_span.start_line
+            if block_span.initiating_block.type == CodeBlockType.CLASS:
+                tokens = block_span.initiating_block.sum_tokens()
+                end_line = block_span.initiating_block.end_line
+                logger.info(
+                    f"{self}: Span {rfc.span_id} is a class block. Consider the whole class ({block_span.initiating_block.start_line} - {end_line}) with {tokens} tokens."
+                )
+            else:
+                tokens = block_span.tokens
+                end_line = block_span.end_line
+
         else:
-            tokens = span.tokens
-            end_line = span.end_line
+            span = context_file.get_span(rfc.span_id)
+            if not span:
+                spans = self.file_context.get_spans(rfc.file_path)
+                span_ids = [span.span_id for span in spans]
+                span_str = ", ".join(span_ids)
+                return ActionResponse.retry(
+                    f"Span not found: {rfc.span_id}. Available spans: {span_str}"
+                )
+
+            content_lines = context_file.file.content.split("\n")
+            start_line = _get_pre_start_line(span.start_line, 1, content_lines)
+            end_line = _get_post_end_line_index(
+                span.end_line, len(content_lines), content_lines
+            )
+
+            # TODO: Support token count in files without codeblock support
+            tokens = 0
 
         if tokens > self.max_tokens_in_edit_prompt:
             logger.info(
@@ -229,7 +251,7 @@ class PlanToCode(InitialState):
                 "instructions": rfc.instructions,
                 "file_path": rfc.file_path,
                 "span_id": rfc.span_id,
-                "start_line": span.start_line,
+                "start_line": start_line,
                 "end_line": end_line,
             },
         )
@@ -260,7 +282,7 @@ class PlanToCode(InitialState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        content = self.loop.trajectory.initial_message
+        content = self.loop.trajectory.initial_message or ""
 
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
 

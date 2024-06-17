@@ -41,6 +41,123 @@ def maybe_clone(repo_url, repo_dir):
             raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
 
 
+def pull_latest(repo_dir):
+    subprocess.run(
+        ["git", "pull"],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def clean_and_reset_state(repo_dir):
+    subprocess.run(
+        ["git", "clean", "-fd"],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "reset", "--hard"],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def create_branch(repo_dir, branch_name):
+
+    try:
+        subprocess.run(
+            ["git", "branch", branch_name],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(e.stderr)
+        raise e
+
+
+def create_and_checkout_branch(repo_dir, branch_name):
+    try:
+        branches = subprocess.run(
+            ["git", "branch"],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.split("\n")
+        branches = [branch.strip() for branch in branches]
+        if branch_name in branches:
+            subprocess.run(
+                ["git", "checkout", branch_name],
+                cwd=repo_dir,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        else:
+            output = subprocess.run(
+                ["git", "checkout", "-b", branch_name],
+                cwd=repo_dir,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+    except subprocess.CalledProcessError as e:
+        print(e.stderr)
+        raise e
+
+
+def commit_changes(repo_dir, commit_message):
+    subprocess.run(
+        ["git", "commit", "-m", commit_message],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def checkout_branch(repo_dir, branch_name):
+    subprocess.run(
+        ["git", "checkout", branch_name],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def push_branch(repo_dir, branch_name):
+    subprocess.run(
+        ["git", "push", "origin", branch_name],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def get_diff(repo_dir):
+    output = subprocess.run(
+        ["git", "diff"], cwd=repo_dir, check=True, text=True, capture_output=True
+    )
+
+    return output.stdout
+
+
+def stage_all_files(repo_dir):
+    subprocess.run(
+        ["git", "add", "."], cwd=repo_dir, check=True, text=True, capture_output=True
+    )
+
+
 def checkout_commit(repo_dir, commit_hash):
     subprocess.run(
         ["git", "reset", "--hard", commit_hash],
@@ -49,3 +166,16 @@ def checkout_commit(repo_dir, commit_hash):
         text=True,
         capture_output=True,
     )
+
+
+def setup_repo(repo_url, repo_dir, branch_name="master"):
+    maybe_clone(repo_url, repo_dir)
+    clean_and_reset_state(repo_dir)
+    checkout_branch(repo_dir, branch_name)
+    pull_latest(repo_dir)
+
+
+def clean_and_reset_repo(repo_dir, branch_name="master"):
+    clean_and_reset_state(repo_dir)
+    checkout_branch(repo_dir, branch_name)
+    pull_latest(repo_dir)

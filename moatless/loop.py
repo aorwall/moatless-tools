@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from moatless import Workspace
 from moatless.state import (
     AgenticState,
-    InitialState,
     NoopState,
     Finished,
     Rejected,
@@ -38,7 +37,7 @@ class Transitions:
 
     def __init__(
         self,
-        initial_state: Type[InitialState],
+        initial_state: Type[AgenticState],
         transitions: List[Transition],
         global_params: Optional[dict[str, Any]] = None,
         state_params: Optional[dict[Type[AgenticState], dict[str, Any]]] = None,
@@ -63,7 +62,7 @@ class Transitions:
     ) -> List[Transition]:
         return self._source_trigger_index.get((source, trigger), [])
 
-    def initial_state(self, **data) -> InitialState:
+    def initial_state(self, **data) -> AgenticState:
         return self._initial_state(**self._global_params, **data)
 
     def next_state(
@@ -126,7 +125,7 @@ class AgenticLoop:
 
         self._metadata = metadata
 
-    def run(self, message: str) -> Response:
+    def run(self, message: Optional[str] = None, input_data: Optional[dict[str, Any]] = None) -> Response:
         """
         Run the loop and handle exceptions and cost checking.
         """
@@ -138,7 +137,7 @@ class AgenticLoop:
             "AgenticLoop", initial_message=message, persist_path=self._trajectory_path
         )
 
-        self.transition_to(self._transitions.initial_state())
+        self.transition_to(self._transitions.initial_state(**input_data or {}))
 
         while self.is_running():
             try:
@@ -220,7 +219,7 @@ class AgenticLoop:
             new_state = Rejected(message="Max transitions exceeded.")
 
         if self.trajectory.transition_count(new_state) > new_state.max_iterations:
-            new_state = Rejected(message=f"Max iterations exceeded for state {new_state.name}.")
+            new_state = Rejected(message=f"Max transitions exceeded for state {new_state.name}.")
 
         self.trajectory.new_transition(new_state)
 
@@ -316,25 +315,26 @@ class AgenticLoop:
             logger.info(f"{self.state}: Retry requested. {response.retry_message}")
             return
 
-        if response.trigger == "rejected":
-            self._rejections += 1
-            next_state = Rejected(message=f"Got {self._rejections} rejections, aborting.")
-        else:
-            self._rejections = 0
-            try:
-                next_state = self._transitions.next_state(
-                    source=self.state,
-                    trigger=response.trigger,
-                    data=response.output,
-                )
-            except Exception as e:
-                logger.error(f"Failed to initiate next state with trigger {response.trigger} and output {response.output}")
-                raise
+        try:
+            next_state = self._transitions.next_state(
+                source=self.state,
+                trigger=response.trigger,
+                data=response.output,
+            )
+        except Exception as e:
+            logger.error(f"Failed to initiate next state with trigger {response.trigger} and output {response.output}")
+            raise
 
         if not next_state:
             raise ValueError(
                 f"No transition found for {self.state} with trigger {response.trigger}"
             )
+
+        if response.trigger == "rejected" and next_state.__class__ != Rejected:
+            self._rejections += 1
+            next_state = Rejected(message=f"Got {self._rejections} rejections, aborting.")
+        else:
+            self._rejections = 0
 
         logger.info(f"{self.state}: Transitioning to {next_state.name}")
         self.transition_to(next_state)

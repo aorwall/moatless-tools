@@ -173,6 +173,7 @@ class CodeIndex:
         class_name: Optional[str] = None,
         function_name: Optional[str] = None,
         file_pattern: Optional[str] = None,
+        category: str = "implementation",
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
@@ -186,6 +187,25 @@ class CodeIndex:
 
         if function_name:
             query += f"\ndef {function_name}"
+
+        message = ""
+        if file_pattern:
+            if category != "test":
+                exclude_files = self._file_repo.matching_files("**/test*/**")
+            else:
+                exclude_files = []
+
+            matching_files = self._file_repo.matching_files(file_pattern)
+            matching_files = [file for file in matching_files if file not in exclude_files]
+
+            if not matching_files:
+                logger.info(
+                    f"semantic_search() No files found for file pattern {file_pattern}. Will search all files..."
+                )
+                message += f"No files found for file pattern {file_pattern}. Will search all files.\n"
+                file_pattern = None
+
+                query += f" file: {file_pattern}"
 
         search_results = self._vector_search(
             query, file_pattern=file_pattern, exact_content_match=code_snippet

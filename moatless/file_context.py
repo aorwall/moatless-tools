@@ -26,6 +26,8 @@ class RankedFileSpan(BaseModel):
 
 class ContextSpan(BaseModel):
     span_id: str
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
     tokens: Optional[int] = None
 
     def dict(self, **kwargs):
@@ -72,18 +74,22 @@ class ContextFile(BaseModel):
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
     ):
-        if self.span_ids is not None and len(self.span_ids) == 0:
-            logger.warning(f"No span ids provided for {self.file_path}, return empty")
-            return ""
 
-        code = self._to_prompt(
-            code_block=self.module,
-            show_span_id=show_span_ids,
-            show_line_numbers=show_line_numbers,
-            outcomment_code_comment=outcomment_code_comment,
-            show_outcommented_code=show_outcommented_code,
-            exclude_comments=exclude_comments,
-        )
+        if self.file.supports_codeblocks:
+            if self.span_ids is not None and len(self.span_ids) == 0:
+                logger.warning(f"No span ids provided for {self.file_path}, return empty")
+                return ""
+
+            code = self._to_prompt(
+                code_block=self.module,
+                show_span_id=show_span_ids,
+                show_line_numbers=show_line_numbers,
+                outcomment_code_comment=outcomment_code_comment,
+                show_outcommented_code=show_outcommented_code,
+                exclude_comments=exclude_comments,
+            )
+        else:
+            code = self._to_prompt_with_line_spans(show_span_id=show_span_ids)
 
         return f"{self.file_path}\n```\n{code}\n```\n"
 
@@ -96,6 +102,38 @@ class ContextFile(BaseModel):
                 return span
 
         return None
+
+    def _within_span(self, line_no: int) -> Optional[ContextSpan]:
+        for span in self.spans:
+            if span.start_line and span.end_line and span.start_line <= line_no <= span.end_line:
+                return span
+        return None
+
+    def _to_prompt_with_line_spans(self,
+                                   show_span_id: bool = False) -> str:
+        content_lines = self.content.split("\n")
+
+        if not self.span_ids:
+            return self.content
+
+        prompt_content = ""
+        outcommented = True
+        for i, line in enumerate(content_lines):
+            line_no = i + 1
+
+            span = self._within_span(line_no)
+            if span:
+                if outcommented and show_span_id:
+                    prompt_content += f"<span id={span.span_id}>\n"
+
+                prompt_content += line + "\n"
+                outcommented = False
+            elif not outcommented:
+                prompt_content += "... other code\n"
+                outcommented = True
+
+        return prompt_content
+
 
     def _to_prompt(
         self,
@@ -198,15 +236,18 @@ class ContextFile(BaseModel):
         return contents
 
     def context_size(self):
-        if self.span_ids is None:
-            return self.module.sum_tokens()
+        if self.file.supports_codeblocks:
+            if self.span_ids is None:
+                return self.module.sum_tokens()
+            else:
+                tokens = 0
+                for span_id in self.span_ids:
+                    span = self.module.find_span_by_id(span_id)
+                    if span:
+                        tokens += span.tokens
+                return tokens
         else:
-            tokens = 0
-            for span_id in self.span_ids:
-                span = self.module.find_span_by_id(span_id)
-                if span:
-                    tokens += span.tokens
-            return tokens
+            return 0 # TODO: Support context size...
 
     def add_spans(
         self,
@@ -236,18 +277,33 @@ class ContextFile(BaseModel):
                     f"Could not find span with id {span_id} in file {self.file_path}"
                 )
 
+    def add_line_span(self, start_line: int, end_line: int):
+        span_id = f"{start_line}_{end_line}"
+
+        lines = self.content.split("\n")
+        end_line = min(end_line, len(lines))
+
+        self.spans.append(
+            ContextSpan(span_id=span_id, start_line=start_line, end_line=end_line)
+        )
+
     def remove_span(self, span_id: str):
         self.spans = [span for span in self.spans if span.span_id != span_id]
 
     def get_spans(self) -> List[BlockSpan]:
         block_spans = []
         for span in self.spans:
+            if not self.file.supports_codeblocks:
+                continue
+
             block_span = self.module.find_span_by_id(span.span_id)
             if block_span:
                 block_spans.append(block_span)
         return block_spans
 
-    def get_span(self, span_id: str) -> Optional[BlockSpan]:
+    def get_block_span(self, span_id: str) -> Optional[BlockSpan]:
+        if not self.file.supports_codeblocks:
+            return None
         for span in self.spans:
             if span.span_id == span_id:
                 block_span = self.module.find_span_by_id(span_id)
@@ -257,6 +313,12 @@ class ContextFile(BaseModel):
                     logger.warning(
                         f"Could not find span with id {span_id} in file {self.file_path}"
                     )
+        return None
+
+    def get_span(self, span_id: str) -> Optional[ContextSpan]:
+        for span in self.spans:
+            if span.span_id == span_id:
+                return span
         return None
 
     def update_content_by_line_numbers(
@@ -273,6 +335,9 @@ class ContextFile(BaseModel):
 
     def expand_context_with_imports(self):
         init_spans = set()
+        if not self.file.supports_codeblocks:
+            return
+
         for child in self.module.children:
             if (
                 child.type == CodeBlockType.IMPORT
@@ -287,6 +352,8 @@ class ContextFile(BaseModel):
 
         TODO: This a temporary solution, should be handled by asking the LLM to specify spans in the Identify step.
         """
+        if not self.file.supports_codeblocks:
+            return
 
         if len(self.spans) == 1:
             span = self.module.find_span_by_id(self.spans[0].span_id)
@@ -329,6 +396,12 @@ class FileContext:
                 file_with_spans.file_path, set(file_with_spans.span_ids)
             )
 
+    def add_file(self, file_path: str):
+        if file_path not in self._file_context:
+            self._file_context[file_path] = ContextFile(
+                file=self._repo.get_file(file_path), spans=[]
+            )
+
     def remove_file(self, file_path: str):
         if file_path in self._file_context:
             if file_path in self._file_context:
@@ -341,8 +414,15 @@ class FileContext:
     def files(self):
         return list(self._file_context.values())
 
-    def get_file(self, file_path: str) -> Optional[ContextFile]:
-        return self._file_context.get(file_path)
+    def get_file(self, file_path: str, add_if_not_found: bool = False) -> Optional[ContextFile]:
+        context_file = self._file_context.get(file_path)
+        if not context_file and add_if_not_found:
+            file = self._repo.get_file(file_path)
+            if file:
+                context_file = ContextFile(file=file, spans=[])
+                self._file_context[file_path] = context_file
+
+        return context_file
 
     def add_spans_to_context(
         self,
@@ -362,6 +442,15 @@ class FileContext:
         context_file = self.get_context_file(file_path)
         if context_file:
             context_file.add_span(span_id, tokens)
+
+    def add_line_span_to_context(
+        self, file_path: str, start_line: int, end_line: int
+    ):
+        context_file = self.get_context_file(file_path)
+        if context_file:
+            context_file.add_line_span(start_line, end_line)
+        else:
+            logger.warning(f"Could not find file {file_path} in the repository")
 
     def remove_span_from_context(
         self, file_path: str, span_id: str, remove_file: bool = False
@@ -388,7 +477,7 @@ class FileContext:
     def get_span(self, file_path: str, span_id: str) -> Optional[BlockSpan]:
         context_file = self.get_context_file(file_path)
         if context_file:
-            return context_file.get_span(span_id)
+            return context_file.get_block_span(span_id)
         return None
 
     def has_span(self, file_path: str, span_id: str):
@@ -479,6 +568,9 @@ class FileContext:
             return spans
 
         for file in self._file_context.values():
+            if not file.file.supports_codeblocks:
+                continue
+
             if not file.span_ids:
                 continue
             current_span_ids = list(file.span_ids)

@@ -42,6 +42,18 @@ def code_transitions(global_params: Optional[dict] = None, state_params: Optiona
         transitions=CODE_TRANSITIONS,
     )
 
+def edit_code_transitions(global_params: Optional[dict] = None, state_params: Optional[dict] = None) -> Transitions:
+    return Transitions(
+        global_params=global_params or {},
+        state_params=state_params or {},
+        initial_state=EditCode,
+        transitions=[
+            Transition(source=EditCode, dest=Finished, trigger="finish"),
+            Transition(source=EditCode, dest=Rejected, trigger="reject")
+        ]
+    )
+
+
 
 def search_transitions(global_params: Optional[dict] = None, state_params: Optional[dict] = None) -> Transitions:
     return Transitions(

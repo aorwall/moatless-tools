@@ -5,7 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from moatless.file_context import FileContext, RankedFileSpan
-from moatless.state import InitialState, ActionResponse
+from moatless.state import ActionResponse, AgenticState
 from moatless.types import (
     ActionRequest,
     Message,
@@ -196,7 +196,7 @@ class ActionCallWithContext(BaseModel):
         arbitrary_types_allowed = True
 
 
-class SearchCode(InitialState):
+class SearchCode(AgenticState):
 
     message: Optional[str] = Field(
         None,

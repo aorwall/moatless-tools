@@ -59,7 +59,6 @@ class AgenticState(ABC, BaseModel):
     def workspace(self) -> Workspace:
         return self.loop.workspace
 
-
     @property
     def file_repo(self) -> FileRepository:
         return self.workspace.file_repo
@@ -114,31 +113,6 @@ class AgenticState(ABC, BaseModel):
 
     def stop_words(self) -> Optional[List[str]]:
         return None
-
-
-class InitialState(AgenticState):
-
-    def __init__(self, **data):
-        super().__init__(**data)
-
-    def message_history(self) -> list[Message]:
-        """
-        Get previous interactions with the same state.
-        """
-
-        messages: list[Message] = []
-
-        previous_steps = self.trajectory.get_transitions(str(self))
-
-        for step in previous_steps:
-            messages.append(UserMessage(content=step.properties["message"]))
-            messages.append(
-                AssistantMessage(
-                    action=step.actions[-1].action,
-                )
-            )
-
-        return messages
 
 
 class NoopState(AgenticState):
