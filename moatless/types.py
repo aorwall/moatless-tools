@@ -72,7 +72,8 @@ class ActionResponse(BaseModel):
         return cls(trigger="retry", retry_message=retry_message)
 
     @classmethod
-    def transition(cls, trigger: str, output: dict[str, Any]):
+    def transition(cls, trigger: str, output: Optional[dict[str, Any]] = None):
+        output = output or {}
         return cls(trigger=trigger, output=output)
 
     @classmethod

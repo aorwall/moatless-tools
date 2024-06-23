@@ -1,0 +1,1218 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "CalibratedClassifierCV doesn't work with `set_config(transform_output=\"pandas\")`\n### Describe the bug\r\n\r\nCalibratedClassifierCV with isotonic regression doesn't work when we previously set `set_config(transform_output=\"pandas\")`.\r\nThe IsotonicRegression seems to return a dataframe, which is a problem for `_CalibratedClassifier`  in `predict_proba` where it tries to put the dataframe in a numpy array row `proba[:, class_idx] = calibrator.predict(this_pred)`.\r\n\r\n### Steps/Code to Reproduce\r\n\r\n```python\r\nimport numpy as np\r\nfrom sklearn import set_config\r\nfrom sklearn.calibration import CalibratedClassifierCV\r\nfrom sklearn.linear_model import SGDClassifier\r\n\r\nset_config(transform_output=\"pandas\")\r\nmodel = CalibratedClassifierCV(SGDClassifier(), method='isotonic')\r\nmodel.fit(np.arange(90).reshape(30, -1), np.arange(30) % 2)\r\nmodel.predict(np.arange(90).reshape(30, -1))\r\n```\r\n\r\n### Expected Results\r\n\r\nIt should not crash.\r\n\r\n### Actual Results\r\n\r\n```\r\n../core/model_trainer.py:306: in train_model\r\n    cv_predictions = cross_val_predict(pipeline,\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/model_selection/_validation.py:968: in cross_val_predict\r\n    predictions = parallel(\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:1085: in __call__\r\n    if self.dispatch_one_batch(iterator):\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:901: in dispatch_one_batch\r\n    self._dispatch(tasks)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:819: in _dispatch\r\n    job = self._backend.apply_async(batch, callback=cb)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/_parallel_backends.py:208: in apply_async\r\n    result = ImmediateResult(func)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/_parallel_backends.py:597: in __init__\r\n    self.results = batch()\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:288: in __call__\r\n    return [func(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/joblib/parallel.py:288: in <listcomp>\r\n    return [func(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/utils/fixes.py:117: in __call__\r\n    return self.function(*args, **kwargs)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/model_selection/_validation.py:1052: in _fit_and_predict\r\n    predictions = func(X_test)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/pipeline.py:548: in predict_proba\r\n    return self.steps[-1][1].predict_proba(Xt, **predict_proba_params)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/calibration.py:477: in predict_proba\r\n    proba = calibrated_classifier.predict_proba(X)\r\n../../../../.anaconda3/envs/strategy-training/lib/python3.9/site-packages/sklearn/calibration.py:764: in predict_proba\r\n    proba[:, class_idx] = calibrator.predict(this_pred)\r\nE   ValueError: could not broadcast input array from shape (20,1) into shape (20,)\r\n```\r\n\r\n### Versions\r\n\r\n```shell\r\nSystem:\r\n    python: 3.9.15 (main, Nov 24 2022, 14:31:59)  [GCC 11.2.0]\r\nexecutable: /home/philippe/.anaconda3/envs/strategy-training/bin/python\r\n   machine: Linux-5.15.0-57-generic-x86_64-with-glibc2.31\r\n\r\nPython dependencies:\r\n      sklearn: 1.2.0\r\n          pip: 22.2.2\r\n   setuptools: 62.3.2\r\n        numpy: 1.23.5\r\n        scipy: 1.9.3\r\n       Cython: None\r\n       pandas: 1.4.1\r\n   matplotlib: 3.6.3\r\n       joblib: 1.2.0\r\nthreadpoolctl: 3.1.0\r\n\r\nBuilt with OpenMP: True\r\n\r\nthreadpoolctl info:\r\n       user_api: openmp\r\n   internal_api: openmp\r\n         prefix: libgomp\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/scikit_learn.libs/libgomp-a34b3233.so.1.0.0\r\n        version: None\r\n    num_threads: 12\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/numpy.libs/libopenblas64_p-r0-742d56dc.3.20.so\r\n        version: 0.3.20\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n\r\n       user_api: blas\r\n   internal_api: openblas\r\n         prefix: libopenblas\r\n       filepath: /home/philippe/.anaconda3/envs/strategy-training/lib/python3.9/site-packages/scipy.libs/libopenblasp-r0-41284840.3.18.so\r\n        version: 0.3.18\r\nthreading_layer: pthreads\r\n   architecture: Haswell\r\n    num_threads: 12\r\n```\r\n\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_search_results": 75,
+        "max_retries_with_any_file_context": 3,
+        "provide_initial_context": true,
+        "initial_context_tokens": 6000,
+        "initial_search_results": 100,
+        "initial_context_spans_per_file": 5,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To address the issue with CalibratedClassifierCV not working with `set_config(transform_output=\"pandas\")`, we need to focus on the following areas:\n\n1. The CalibratedClassifierCV class implementation\n2. The _CalibratedClassifier class implementation (which is used internally by CalibratedClassifierCV)\n3. The set_config function that sets the transform_output parameter\n4. The IsotonicRegression class, which seems to be returning a DataFrame instead of a numpy array\n\nLet's start by searching for the CalibratedClassifierCV and _CalibratedClassifier classes, as they are directly mentioned in the error description.",
+            "search_requests": [
+              {
+                "file_pattern": "**/*.py",
+                "query": "CalibratedClassifierCV and _CalibratedClassifier classes implementation",
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "**/*.py",
+                "query": "set_config function implementation with transform_output parameter",
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "**/*.py",
+                "query": "IsotonicRegression class implementation",
+                "class_names": [],
+                "function_names": []
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV",
+                "rank": 0,
+                "tokens": 2041
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.fit",
+                "rank": 1,
+                "tokens": 1186
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "docstring",
+                "rank": 2,
+                "tokens": 322
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.__init__",
+                "rank": 2,
+                "tokens": 70
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.predict_proba",
+                "rank": 2,
+                "tokens": 166
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.predict",
+                "rank": 2,
+                "tokens": 117
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV._more_tags",
+                "rank": 2,
+                "tokens": 74
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "_CalibratedClassifier",
+                "rank": 5,
+                "tokens": 181
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "_CalibratedClassifier.predict_proba",
+                "rank": 7,
+                "tokens": 407
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "_fit_calibrator",
+                "rank": 8,
+                "tokens": 357
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibrationDisplay.from_estimator",
+                "rank": 10,
+                "tokens": 856
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "_fit_classifier_calibrator_pair",
+                "rank": 11,
+                "tokens": 491
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "calibration_curve",
+                "rank": 13,
+                "tokens": 1228
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "NaivelyCalibratedLinearSVC.fit",
+                "rank": 12,
+                "tokens": 39
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "NaivelyCalibratedLinearSVC",
+                "rank": 12,
+                "tokens": 38
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "NaivelyCalibratedLinearSVC.predict_proba",
+                "rank": 12,
+                "tokens": 103
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "imports:8",
+                "rank": 12,
+                "tokens": 499
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "impl:61",
+                "rank": 15,
+                "tokens": 632
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "impl:96",
+                "rank": 15,
+                "tokens": 397
+              },
+              {
+                "file_path": "examples/calibration/plot_calibration_curve.py",
+                "span_id": "imports:5",
+                "rank": 17,
+                "tokens": 644
+              },
+              {
+                "file_path": "sklearn/linear_model/_logistic.py",
+                "span_id": "LogisticRegressionCV",
+                "rank": 14,
+                "tokens": 3261
+              },
+              {
+                "file_path": "sklearn/linear_model/_logistic.py",
+                "span_id": "LogisticRegressionCV.fit",
+                "rank": 18,
+                "tokens": 2775
+              },
+              {
+                "file_path": "examples/calibration/plot_compare_calibration.py",
+                "span_id": "NaivelyCalibratedLinearSVC.fit",
+                "rank": 16,
+                "tokens": 39
+              },
+              {
+                "file_path": "examples/calibration/plot_compare_calibration.py",
+                "span_id": "NaivelyCalibratedLinearSVC",
+                "rank": 16,
+                "tokens": 35
+              },
+              {
+                "file_path": "examples/calibration/plot_compare_calibration.py",
+                "span_id": "NaivelyCalibratedLinearSVC.predict_proba",
+                "rank": 16,
+                "tokens": 102
+              },
+              {
+                "file_path": "sklearn/linear_model/_ridge.py",
+                "span_id": "RidgeClassifierCV",
+                "rank": 20,
+                "tokens": 1096
+              },
+              {
+                "file_path": "sklearn/_config.py",
+                "span_id": "set_config",
+                "rank": 0,
+                "tokens": 900
+              },
+              {
+                "file_path": "sklearn/_config.py",
+                "span_id": "config_context",
+                "rank": 15,
+                "tokens": 1009
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_SetOutputMixin.set_output",
+                "rank": 1,
+                "tokens": 175
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_SetOutputMixin",
+                "rank": 8,
+                "tokens": 85
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_SetOutputMixin.__init_subclass__",
+                "rank": 8,
+                "tokens": 228
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_safe_set_output",
+                "rank": 11,
+                "tokens": 237
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_auto_wrap_is_configured",
+                "rank": 14,
+                "tokens": 101
+              },
+              {
+                "file_path": "sklearn/utils/_set_output.py",
+                "span_id": "_get_output_config",
+                "rank": 16,
+                "tokens": 215
+              },
+              {
+                "file_path": "examples/miscellaneous/plot_set_output.py",
+                "span_id": "docstring:16",
+                "rank": 2,
+                "tokens": 501
+              },
+              {
+                "file_path": "examples/miscellaneous/plot_set_output.py",
+                "span_id": "impl:51",
+                "rank": 2,
+                "tokens": 40
+              },
+              {
+                "file_path": "examples/miscellaneous/plot_set_output.py",
+                "span_id": "docstring",
+                "rank": 6,
+                "tokens": 500
+              },
+              {
+                "file_path": "sklearn/compose/_column_transformer.py",
+                "span_id": "ColumnTransformer.set_output",
+                "rank": 4,
+                "tokens": 202
+              },
+              {
+                "file_path": "sklearn/utils/estimator_checks.py",
+                "span_id": "_output_from_fit_transform",
+                "rank": 5,
+                "tokens": 289
+              },
+              {
+                "file_path": "sklearn/utils/estimator_checks.py",
+                "span_id": "check_set_output_transform",
+                "rank": 7,
+                "tokens": 301
+              },
+              {
+                "file_path": "sklearn/utils/estimator_checks.py",
+                "span_id": "check_set_output_transform_pandas",
+                "rank": 13,
+                "tokens": 321
+              },
+              {
+                "file_path": "sklearn/utils/estimator_checks.py",
+                "span_id": "check_global_ouptut_transform_pandas",
+                "rank": 18,
+                "tokens": 334
+              },
+              {
+                "file_path": "sklearn/pipeline.py",
+                "span_id": "FeatureUnion.set_output",
+                "rank": 9,
+                "tokens": 155
+              },
+              {
+                "file_path": "sklearn/pipeline.py",
+                "span_id": "FeatureUnion",
+                "rank": 9,
+                "tokens": 765
+              },
+              {
+                "file_path": "sklearn/pipeline.py",
+                "span_id": "Pipeline.set_output",
+                "rank": 10,
+                "tokens": 145
+              },
+              {
+                "file_path": "sklearn/pipeline.py",
+                "span_id": "Pipeline",
+                "rank": 10,
+                "tokens": 846
+              },
+              {
+                "file_path": "sklearn/preprocessing/_function_transformer.py",
+                "span_id": "FunctionTransformer._more_tags",
+                "rank": 12,
+                "tokens": 21
+              },
+              {
+                "file_path": "sklearn/preprocessing/_function_transformer.py",
+                "span_id": "FunctionTransformer.set_output",
+                "rank": 12,
+                "tokens": 189
+              },
+              {
+                "file_path": "sklearn/preprocessing/_function_transformer.py",
+                "span_id": "FunctionTransformer._transform",
+                "rank": 12,
+                "tokens": 36
+              },
+              {
+                "file_path": "sklearn/preprocessing/_function_transformer.py",
+                "span_id": "FunctionTransformer.__sklearn_is_fitted__",
+                "rank": 12,
+                "tokens": 24
+              },
+              {
+                "file_path": "sklearn/preprocessing/_function_transformer.py",
+                "span_id": "FunctionTransformer._check_input",
+                "rank": 19,
+                "tokens": 101
+              },
+              {
+                "file_path": "sklearn/base.py",
+                "span_id": "TransformerMixin",
+                "rank": 17,
+                "tokens": 115
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression._check_input_data_shape",
+                "rank": 0,
+                "tokens": 71
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression._build_f",
+                "rank": 0,
+                "tokens": 88
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression",
+                "rank": 0,
+                "tokens": 825
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "docstring",
+                "rank": 1,
+                "tokens": 171
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "isotonic_regression",
+                "rank": 3,
+                "tokens": 449
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.predict",
+                "rank": 4,
+                "tokens": 137
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.fit",
+                "rank": 5,
+                "tokens": 366
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.transform",
+                "rank": 7,
+                "tokens": 211
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.__setstate__",
+                "rank": 8,
+                "tokens": 73
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression._more_tags",
+                "rank": 8,
+                "tokens": 16
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.__getstate__",
+                "rank": 8,
+                "tokens": 39
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression._build_y",
+                "rank": 9,
+                "tokens": 425
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_id": "IsotonicRegression.get_feature_names_out",
+                "rank": 10,
+                "tokens": 113
+              },
+              {
+                "file_path": "examples/miscellaneous/plot_isotonic_regression.py",
+                "span_id": "docstring",
+                "rank": 6,
+                "tokens": 482
+              },
+              {
+                "file_path": "examples/miscellaneous/plot_isotonic_regression.py",
+                "span_id": "impl:27",
+                "rank": 6,
+                "tokens": 188
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "bench_isotonic_regression",
+                "rank": 11,
+                "tokens": 62
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "impl",
+                "rank": 11,
+                "tokens": 44
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "docstring",
+                "rank": 11,
+                "tokens": 117
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "generate_pathological_dataset",
+                "rank": 11,
+                "tokens": 54
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "generate_logistic_dataset",
+                "rank": 11,
+                "tokens": 29
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "generate_perturbed_logarithm_dataset",
+                "rank": 11,
+                "tokens": 39
+              },
+              {
+                "file_path": "benchmarks/bench_isotonic.py",
+                "span_id": "impl:3",
+                "rank": 11,
+                "tokens": 347
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV",
+                "rank": 12,
+                "tokens": 2041
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "docstring",
+                "rank": 12,
+                "tokens": 322
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.__init__",
+                "rank": 12,
+                "tokens": 70
+              },
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_id": "CalibratedClassifierCV.fit",
+                "rank": 12,
+                "tokens": 1186
+              }
+            ],
+            "search_requests": [
+              {
+                "file_pattern": "**/*.py",
+                "query": "CalibratedClassifierCV and _CalibratedClassifier classes implementation",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "**/*.py",
+                "query": "set_config function implementation with transform_output parameter",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "**/*.py",
+                "query": "IsotonicRegression class implementation",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": []
+              }
+            ],
+            "complete": false
+          },
+          "completion_cost": 0.019347,
+          "input_tokens": 4879,
+          "output_tokens": 314
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "ranked_spans": [
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV",
+            "rank": 0,
+            "tokens": 2041
+          },
+          {
+            "file_path": "sklearn/_config.py",
+            "span_id": "set_config",
+            "rank": 0,
+            "tokens": 900
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression._check_input_data_shape",
+            "rank": 0,
+            "tokens": 71
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression._build_f",
+            "rank": 0,
+            "tokens": 88
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression",
+            "rank": 0,
+            "tokens": 825
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.fit",
+            "rank": 1,
+            "tokens": 1186
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_SetOutputMixin.set_output",
+            "rank": 1,
+            "tokens": 175
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "docstring",
+            "rank": 1,
+            "tokens": 171
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "docstring",
+            "rank": 2,
+            "tokens": 322
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.__init__",
+            "rank": 2,
+            "tokens": 70
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.predict_proba",
+            "rank": 2,
+            "tokens": 166
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.predict",
+            "rank": 2,
+            "tokens": 117
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV._more_tags",
+            "rank": 2,
+            "tokens": 74
+          },
+          {
+            "file_path": "examples/miscellaneous/plot_set_output.py",
+            "span_id": "docstring:16",
+            "rank": 2,
+            "tokens": 501
+          },
+          {
+            "file_path": "examples/miscellaneous/plot_set_output.py",
+            "span_id": "impl:51",
+            "rank": 2,
+            "tokens": 40
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "isotonic_regression",
+            "rank": 3,
+            "tokens": 449
+          },
+          {
+            "file_path": "sklearn/compose/_column_transformer.py",
+            "span_id": "ColumnTransformer.set_output",
+            "rank": 4,
+            "tokens": 202
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.predict",
+            "rank": 4,
+            "tokens": 137
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_CalibratedClassifier",
+            "rank": 5,
+            "tokens": 181
+          },
+          {
+            "file_path": "sklearn/utils/estimator_checks.py",
+            "span_id": "_output_from_fit_transform",
+            "rank": 5,
+            "tokens": 289
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.fit",
+            "rank": 5,
+            "tokens": 366
+          },
+          {
+            "file_path": "examples/miscellaneous/plot_set_output.py",
+            "span_id": "docstring",
+            "rank": 6,
+            "tokens": 500
+          },
+          {
+            "file_path": "examples/miscellaneous/plot_isotonic_regression.py",
+            "span_id": "docstring",
+            "rank": 6,
+            "tokens": 482
+          },
+          {
+            "file_path": "examples/miscellaneous/plot_isotonic_regression.py",
+            "span_id": "impl:27",
+            "rank": 6,
+            "tokens": 188
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_CalibratedClassifier.predict_proba",
+            "rank": 7,
+            "tokens": 407
+          },
+          {
+            "file_path": "sklearn/utils/estimator_checks.py",
+            "span_id": "check_set_output_transform",
+            "rank": 7,
+            "tokens": 301
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.transform",
+            "rank": 7,
+            "tokens": 211
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_fit_calibrator",
+            "rank": 8,
+            "tokens": 357
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_SetOutputMixin",
+            "rank": 8,
+            "tokens": 85
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_SetOutputMixin.__init_subclass__",
+            "rank": 8,
+            "tokens": 228
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.__setstate__",
+            "rank": 8,
+            "tokens": 73
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression._more_tags",
+            "rank": 8,
+            "tokens": 16
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.__getstate__",
+            "rank": 8,
+            "tokens": 39
+          },
+          {
+            "file_path": "sklearn/pipeline.py",
+            "span_id": "FeatureUnion.set_output",
+            "rank": 9,
+            "tokens": 155
+          },
+          {
+            "file_path": "sklearn/pipeline.py",
+            "span_id": "FeatureUnion",
+            "rank": 9,
+            "tokens": 765
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression._build_y",
+            "rank": 9,
+            "tokens": 425
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibrationDisplay.from_estimator",
+            "rank": 10,
+            "tokens": 856
+          },
+          {
+            "file_path": "sklearn/pipeline.py",
+            "span_id": "Pipeline.set_output",
+            "rank": 10,
+            "tokens": 145
+          },
+          {
+            "file_path": "sklearn/pipeline.py",
+            "span_id": "Pipeline",
+            "rank": 10,
+            "tokens": 846
+          },
+          {
+            "file_path": "sklearn/isotonic.py",
+            "span_id": "IsotonicRegression.get_feature_names_out",
+            "rank": 10,
+            "tokens": 113
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_fit_classifier_calibrator_pair",
+            "rank": 11,
+            "tokens": 491
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_safe_set_output",
+            "rank": 11,
+            "tokens": 237
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "bench_isotonic_regression",
+            "rank": 11,
+            "tokens": 62
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "impl",
+            "rank": 11,
+            "tokens": 44
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "docstring",
+            "rank": 11,
+            "tokens": 117
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "generate_pathological_dataset",
+            "rank": 11,
+            "tokens": 54
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "generate_logistic_dataset",
+            "rank": 11,
+            "tokens": 29
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "generate_perturbed_logarithm_dataset",
+            "rank": 11,
+            "tokens": 39
+          },
+          {
+            "file_path": "benchmarks/bench_isotonic.py",
+            "span_id": "impl:3",
+            "rank": 11,
+            "tokens": 347
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "NaivelyCalibratedLinearSVC.fit",
+            "rank": 12,
+            "tokens": 39
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "NaivelyCalibratedLinearSVC",
+            "rank": 12,
+            "tokens": 38
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "NaivelyCalibratedLinearSVC.predict_proba",
+            "rank": 12,
+            "tokens": 103
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "imports:8",
+            "rank": 12,
+            "tokens": 499
+          },
+          {
+            "file_path": "sklearn/preprocessing/_function_transformer.py",
+            "span_id": "FunctionTransformer._more_tags",
+            "rank": 12,
+            "tokens": 21
+          },
+          {
+            "file_path": "sklearn/preprocessing/_function_transformer.py",
+            "span_id": "FunctionTransformer.set_output",
+            "rank": 12,
+            "tokens": 189
+          },
+          {
+            "file_path": "sklearn/preprocessing/_function_transformer.py",
+            "span_id": "FunctionTransformer._transform",
+            "rank": 12,
+            "tokens": 36
+          },
+          {
+            "file_path": "sklearn/preprocessing/_function_transformer.py",
+            "span_id": "FunctionTransformer.__sklearn_is_fitted__",
+            "rank": 12,
+            "tokens": 24
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV",
+            "rank": 12,
+            "tokens": 2041
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "docstring",
+            "rank": 12,
+            "tokens": 322
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.__init__",
+            "rank": 12,
+            "tokens": 70
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "CalibratedClassifierCV.fit",
+            "rank": 12,
+            "tokens": 1186
+          },
+          {
+            "file_path": "sklearn/calibration.py",
+            "span_id": "calibration_curve",
+            "rank": 13,
+            "tokens": 1228
+          },
+          {
+            "file_path": "sklearn/utils/estimator_checks.py",
+            "span_id": "check_set_output_transform_pandas",
+            "rank": 13,
+            "tokens": 321
+          },
+          {
+            "file_path": "sklearn/linear_model/_logistic.py",
+            "span_id": "LogisticRegressionCV",
+            "rank": 14,
+            "tokens": 3261
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_auto_wrap_is_configured",
+            "rank": 14,
+            "tokens": 101
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "impl:61",
+            "rank": 15,
+            "tokens": 632
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "impl:96",
+            "rank": 15,
+            "tokens": 397
+          },
+          {
+            "file_path": "sklearn/_config.py",
+            "span_id": "config_context",
+            "rank": 15,
+            "tokens": 1009
+          },
+          {
+            "file_path": "examples/calibration/plot_compare_calibration.py",
+            "span_id": "NaivelyCalibratedLinearSVC.fit",
+            "rank": 16,
+            "tokens": 39
+          },
+          {
+            "file_path": "examples/calibration/plot_compare_calibration.py",
+            "span_id": "NaivelyCalibratedLinearSVC",
+            "rank": 16,
+            "tokens": 35
+          },
+          {
+            "file_path": "examples/calibration/plot_compare_calibration.py",
+            "span_id": "NaivelyCalibratedLinearSVC.predict_proba",
+            "rank": 16,
+            "tokens": 102
+          },
+          {
+            "file_path": "sklearn/utils/_set_output.py",
+            "span_id": "_get_output_config",
+            "rank": 16,
+            "tokens": 215
+          },
+          {
+            "file_path": "examples/calibration/plot_calibration_curve.py",
+            "span_id": "imports:5",
+            "rank": 17,
+            "tokens": 644
+          },
+          {
+            "file_path": "sklearn/base.py",
+            "span_id": "TransformerMixin",
+            "rank": 17,
+            "tokens": 115
+          },
+          {
+            "file_path": "sklearn/linear_model/_logistic.py",
+            "span_id": "LogisticRegressionCV.fit",
+            "rank": 18,
+            "tokens": 2775
+          },
+          {
+            "file_path": "sklearn/utils/estimator_checks.py",
+            "span_id": "check_global_ouptut_transform_pandas",
+            "rank": 18,
+            "tokens": 334
+          },
+          {
+            "file_path": "sklearn/preprocessing/_function_transformer.py",
+            "span_id": "FunctionTransformer._check_input",
+            "rank": 19,
+            "tokens": 101
+          },
+          {
+            "file_path": "sklearn/linear_model/_ridge.py",
+            "span_id": "RidgeClassifierCV",
+            "rank": 20,
+            "tokens": 1096
+          }
+        ],
+        "expand_context": true,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To identify the relevant code for the reported issue, I'll focus on the CalibratedClassifierCV class and its related components, as well as the IsotonicRegression class, which is mentioned in the error message.\n\n1. The issue occurs when using CalibratedClassifierCV with isotonic regression and set_config(transform_output=\"pandas\").\n\n2. The relevant classes and methods are:\n   - CalibratedClassifierCV in sklearn/calibration.py\n   - IsotonicRegression in sklearn/isotonic.py\n   - set_config in sklearn/_config.py\n\n3. The error occurs in the predict_proba method of _CalibratedClassifier, which is called by CalibratedClassifierCV.\n\n4. The problem seems to be that IsotonicRegression is returning a DataFrame when transform_output is set to \"pandas\", but _CalibratedClassifier expects a numpy array.\n\n5. The relevant code spans are:\n\n   In sklearn/calibration.py:\n   - CalibratedClassifierCV class definition\n   - _CalibratedClassifier class definition, especially the predict_proba method\n\n   In sklearn/isotonic.py:\n   - IsotonicRegression class definition, especially the transform method\n\n   In sklearn/_config.py:\n   - set_config function definition\n\nBased on this analysis, I'll identify the relevant code spans.",
+            "identified_spans": [
+              {
+                "file_path": "sklearn/calibration.py",
+                "span_ids": [
+                  "CalibratedClassifierCV",
+                  "_CalibratedClassifier",
+                  "_CalibratedClassifier.predict_proba"
+                ]
+              },
+              {
+                "file_path": "sklearn/isotonic.py",
+                "span_ids": [
+                  "IsotonicRegression",
+                  "IsotonicRegression.transform"
+                ]
+              },
+              {
+                "file_path": "sklearn/_config.py",
+                "span_ids": [
+                  "set_config"
+                ]
+              }
+            ]
+          },
+          "output": {},
+          "completion_cost": 0.051579,
+          "input_tokens": 14688,
+          "output_tokens": 501
+        }
+      ]
+    },
+    {
+      "name": "DecideRelevance",
+      "state": {
+        "include_message_history": false,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "expand_context": true,
+        "finish_after_relevant_count": 1,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "After analyzing the provided file context, I believe we have all the relevant code to understand and address the reported issue. Here's why:\n\n1. We have the implementation of CalibratedClassifierCV and _CalibratedClassifier in sklearn/calibration.py. This is where the core of the issue lies, as mentioned in the bug report.\n\n2. The IsotonicRegression class is present in sklearn/isotonic.py, which is relevant because the issue occurs when using the 'isotonic' method for calibration.\n\n3. The set_config function is defined in sklearn/_config.py, which is responsible for setting the transform_output parameter to \"pandas\".\n\nThe key parts of the code that are relevant to this issue are:\n\n1. In _CalibratedClassifier.predict_proba method:\n   ```python\n   proba[:, class_idx] = calibrator.predict(this_pred)\n   ```\n   This line is trying to assign the output of calibrator.predict() (which is now a DataFrame due to the pandas output setting) to a numpy array slice, causing the error.\n\n2. In IsotonicRegression.transform method:\n   ```python\n   res = self.f_(T)\n   res = res.astype(T.dtype)\n   ```\n   This is where the transformation happens, and it's likely that this method is now returning a DataFrame instead of a numpy array when transform_output is set to \"pandas\".\n\n3. In set_config function:\n   ```python\n   if transform_output is not None:\n       local_config[\"transform_output\"] = transform_output\n   ```\n   This is where the transform_output setting is applied.\n\nWith this information, we can conclude that the issue is caused by the interaction between the pandas output setting and the numpy array operations in _CalibratedClassifier. The fix would involve modifying the _CalibratedClassifier to handle DataFrame outputs from the calibrator.predict() method.\n\nGiven that we have identified the relevant code and understand the cause of the issue, I believe we have all the necessary information to address the problem.",
+            "relevant": true,
+            "complete": true
+          },
+          "output": {},
+          "completion_cost": 0.023948999999999998,
+          "input_tokens": 5303,
+          "output_tokens": 536
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "The issue occurs when `calibrator.predict` returns a DataFrame instead of a numpy array. We need to add a check to convert the result to a numpy array if it's a DataFrame. This change will ensure compatibility with the `set_config(transform_output=\"pandas\")` setting.",
+            "action": "modify",
+            "instructions": "Update the `predict_proba` method to handle the case when `calibrator.predict` returns a DataFrame. We'll add a check to convert the result to a numpy array if it's a DataFrame.",
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_CalibratedClassifier.predict_proba"
+          },
+          "output": {
+            "instructions": "Update the `predict_proba` method to handle the case when `calibrator.predict` returns a DataFrame. We'll add a check to convert the result to a numpy array if it's a DataFrame.",
+            "file_path": "sklearn/calibration.py",
+            "span_id": "_CalibratedClassifier.predict_proba",
+            "start_line": 732,
+            "end_line": 781
+          },
+          "completion_cost": 0.019818,
+          "input_tokens": 5496,
+          "output_tokens": 222
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "instructions": "Update the `predict_proba` method to handle the case when `calibrator.predict` returns a DataFrame. We'll add a check to convert the result to a numpy array if it's a DataFrame.",
+        "file_path": "sklearn/calibration.py",
+        "span_id": "_CalibratedClassifier.predict_proba",
+        "start_line": 732,
+        "end_line": 781,
+        "show_initial_message": true,
+        "show_file_context": false,
+        "verify": true,
+        "chain_of_thought": false,
+        "max_prompt_file_tokens": 8000
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "\n    def predict_proba(self, X):\n        \"\"\"Calculate calibrated probabilities.\n\n        Calculates classification calibrated probabilities\n        for each class, in a one-vs-all manner, for `X`.\n\n        Parameters\n        ----------\n        X : ndarray of shape (n_samples, n_features)\n            The sample data.\n\n        Returns\n        -------\n        proba : array, shape (n_samples, n_classes)\n            The predicted probabilities. Can be exact zeros.\n        \"\"\"\n        n_classes = len(self.classes)\n        pred_method, method_name = _get_prediction_method(self.estimator)\n        predictions = _compute_predictions(pred_method, method_name, X, n_classes)\n\n        label_encoder = LabelEncoder().fit(self.classes)\n        pos_class_indices = label_encoder.transform(self.estimator.classes_)\n\n        proba = np.zeros((_num_samples(X), n_classes))\n        for class_idx, this_pred, calibrator in zip(\n            pos_class_indices, predictions.T, self.calibrators\n        ):\n            if n_classes == 2:\n                # When binary, `predictions` consists only of predictions for\n                # clf.classes_[1] but `pos_class_indices` = 0\n                class_idx += 1\n            calibrated_pred = calibrator.predict(this_pred)\n            if hasattr(calibrated_pred, 'to_numpy'):\n                calibrated_pred = calibrated_pred.to_numpy()\n            proba[:, class_idx] = calibrated_pred.ravel()\n\n        # Normalize the probabilities\n        if n_classes == 2:\n            proba[:, 0] = 1.0 - proba[:, 1]\n        else:\n            denominator = np.sum(proba, axis=1)[:, np.newaxis]\n            # In the edge case where for each class calibrator returns a null\n            # probability for a given sample, use the uniform distribution\n            # instead.\n            uniform_proba = np.full_like(proba, 1 / n_classes)\n            proba = np.divide(\n                proba, denominator, out=uniform_proba, where=denominator != 0\n            )\n\n        # Deal with cases where the predicted probability minimally exceeds 1.0\n        proba[(1.0 < proba) & (proba <= 1.0 + 1e-5)] = 1.0\n\n        return proba\n"
+          },
+          "output": {
+            "message": "Applied the change to sklearn/calibration.py.",
+            "diff": "--- sklearn/calibration.py\n+++ sklearn/calibration.py\n@@ -760,7 +760,10 @@\n                 # When binary, `predictions` consists only of predictions for\n                 # clf.classes_[1] but `pos_class_indices` = 0\n                 class_idx += 1\n-            proba[:, class_idx] = calibrator.predict(this_pred)\n+            calibrated_pred = calibrator.predict(this_pred)\n+            if hasattr(calibrated_pred, 'to_numpy'):\n+                calibrated_pred = calibrated_pred.to_numpy()\n+            proba[:, class_idx] = calibrated_pred.ravel()\n \n         # Normalize the probabilities\n         if n_classes == 2:\n",
+            "verification_errors": []
+          },
+          "completion_cost": 0.020756999999999998,
+          "input_tokens": 3864,
+          "output_tokens": 611
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "openrouter/anthropic/claude-3.5-sonnet",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "message": "Applied the change to sklearn/calibration.py.",
+        "diff": "--- sklearn/calibration.py\n+++ sklearn/calibration.py\n@@ -760,7 +760,10 @@\n                 # When binary, `predictions` consists only of predictions for\n                 # clf.classes_[1] but `pos_class_indices` = 0\n                 class_idx += 1\n-            proba[:, class_idx] = calibrator.predict(this_pred)\n+            calibrated_pred = calibrator.predict(this_pred)\n+            if hasattr(calibrated_pred, 'to_numpy'):\n+                calibrated_pred = calibrated_pred.to_numpy()\n+            proba[:, class_idx] = calibrated_pred.ravel()\n \n         # Normalize the probabilities\n         if n_classes == 2:\n",
+        "verification_errors": [],
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "The change has been applied successfully. The `predict_proba` method in `_CalibratedClassifier` now checks if the result of `calibrator.predict` has a `to_numpy` method (which is the case for pandas DataFrames) and converts it to a numpy array if necessary. This should resolve the issue when using `set_config(transform_output=\"pandas\")`. Let's finish the task as the fix has been implemented.",
+            "action": "finish",
+            "finish": "The issue has been resolved by updating the `predict_proba` method in the `_CalibratedClassifier` class. The change ensures that the result of `calibrator.predict` is converted to a numpy array if it's a DataFrame, which addresses the compatibility problem with `set_config(transform_output=\"pandas\")`. This fix should allow CalibratedClassifierCV to work correctly with the pandas output configuration."
+          },
+          "output": {
+            "message": "The issue has been resolved by updating the `predict_proba` method in the `_CalibratedClassifier` class. The change ensures that the result of `calibrator.predict` is converted to a numpy array if it's a DataFrame, which addresses the compatibility problem with `set_config(transform_output=\"pandas\")`. This fix should allow CalibratedClassifierCV to work correctly with the pandas output configuration."
+          },
+          "completion_cost": 0.021819,
+          "input_tokens": 6008,
+          "output_tokens": 253
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "The issue has been resolved by updating the `predict_proba` method in the `_CalibratedClassifier` class. The change ensures that the result of `calibrator.predict` is converted to a numpy array if it's a DataFrame, which addresses the compatibility problem with `set_config(transform_output=\"pandas\")`. This fix should allow CalibratedClassifierCV to work correctly with the pandas output configuration.",
+        "output": {
+          "model": "openrouter/anthropic/claude-3.5-sonnet",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "max_prompt_file_tokens": 12000
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240623_moatless_claude-3.5-sonnet",
+    "instance_id": "scikit-learn__scikit-learn-25500",
+    "status": "finished",
+    "duration": 66.8210780620575,
+    "total_cost": 0.15726900000000002,
+    "submission": "diff --git a/sklearn/calibration.py b/sklearn/calibration.py\nindex 2c4a33616..6abfd422b 100644\n--- a/sklearn/calibration.py\n+++ b/sklearn/calibration.py\n@@ -760,7 +760,10 @@ class _CalibratedClassifier:\n                 # When binary, `predictions` consists only of predictions for\n                 # clf.classes_[1] but `pos_class_indices` = 0\n                 class_idx += 1\n-            proba[:, class_idx] = calibrator.predict(this_pred)\n+            calibrated_pred = calibrator.predict(this_pred)\n+            if hasattr(calibrated_pred, 'to_numpy'):\n+                calibrated_pred = calibrated_pred.to_numpy()\n+            proba[:, class_idx] = calibrated_pred.ravel()\n \n         # Normalize the probabilities\n         if n_classes == 2:\n"
+  }
+}

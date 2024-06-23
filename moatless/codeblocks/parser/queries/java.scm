@@ -58,4 +58,7 @@
 (line_comment) @root @definition.comment
 (block_comment) @root @definition.comment
 
-(import_declaration) @root @definition.import
+(import_declaration
+  (scoped_identifier) @reference.identifier @identifier
+) @root @definition.import @reference.imports
+

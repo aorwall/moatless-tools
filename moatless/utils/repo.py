@@ -116,7 +116,7 @@ def create_and_checkout_branch(repo_dir, branch_name):
 
 def commit_changes(repo_dir, commit_message):
     subprocess.run(
-        ["git", "commit", "-m", commit_message],
+        ["git", "commit", "-m", commit_message, "--no-verify"],
         cwd=repo_dir,
         check=True,
         text=True,
@@ -136,7 +136,7 @@ def checkout_branch(repo_dir, branch_name):
 
 def push_branch(repo_dir, branch_name):
     subprocess.run(
-        ["git", "push", "origin", branch_name],
+        ["git", "push", "origin", branch_name, "--no-verify"],
         cwd=repo_dir,
         check=True,
         text=True,
@@ -159,13 +159,17 @@ def stage_all_files(repo_dir):
 
 
 def checkout_commit(repo_dir, commit_hash):
-    subprocess.run(
-        ["git", "reset", "--hard", commit_hash],
-        cwd=repo_dir,
-        check=True,
-        text=True,
-        capture_output=True,
-    )
+    try:
+        output = subprocess.run(
+            ["git", "reset", "--hard", commit_hash],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(e.stderr)
+        raise e
 
 
 def setup_repo(repo_url, repo_dir, branch_name="master"):

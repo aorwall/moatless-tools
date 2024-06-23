@@ -1,17 +1,24 @@
 # Moatless Tools
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
-I use the SWE-bench benchmark as a way to verify these ideas. Currently, Moatless Tools has a solution rate of 24%, with each benchmark instance costing an average of $0.13 to solve with GPT-4o. Running the SWE Bench Lite dataset with 300 instances costs approx 40 dollars.
+## SWE-Bench
+I use the SWE-bench benchmark as a way to verify my ideas. 
+
+### GPT-4o
+Moatless Tools 0.0.1 has a solve rate of 24%, with each benchmark instance costing an average of $0.13 to solve with GPT-4o. Running the SWE Bench Lite dataset with 300 instances costs approx 40 dollars. 
+
+[Try it out in Google Colab](https://colab.research.google.com/drive/15RpSjdprf9lcaP0oqKsuYfZl1c3kVB_t?usp=sharing)
+
+### Claude 3.5 Sonnet
+With version 0.0.2 I get 26.7% solve rate with Claude 3.5 Sonnet, with a bit higher cost of $0.15 per instance. 
+
+[Try the Claude 3.5 evaluation set up on Google Colab](https://colab.research.google.com/drive/1pKecc3pumsrOGzTOOCEqjRKzeCWLWQpj?usp=sharing)
 
 ## Try it out
 I have focused on testing my ideas, and the project is currently a bit messy. My plan is to organize it in the coming period. However, feel free to clone the repo and try running this notebook:
 
 1. [Run Moatless Tools on any repository](notebooks/00_index_and_run.ipynb)
 
-### Google Colab
-You can also run the notebooks in Google Colab:
-
-1. [Run the full SWE-bench Lite evaluation](https://colab.research.google.com/drive/15RpSjdprf9lcaP0oqKsuYfZl1c3kVB_t?usp=sharing)
 
 ## How it works
 The solution is based on an agentic loop that functions as a finite state machine, transitioning between states. Each state can have its own prompts and response handling.
