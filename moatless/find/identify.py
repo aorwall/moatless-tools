@@ -4,8 +4,7 @@ from typing import List, Optional, Type
 
 from pydantic import BaseModel, Field
 
-from moatless.codeblocks import CodeBlockType
-from moatless.file_context import FileContext, RankedFileSpan
+from moatless.file_context import RankedFileSpan
 from moatless.state import AgenticState
 from moatless.types import (
     FileWithSpans,
@@ -19,54 +18,49 @@ logger = logging.getLogger(__name__)
 
 
 IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with finding relevant code in an existing 
-codebase based on user instructions. Your task is to identify the relevant code spans in the provided search 
+codebase based on a reported issue. Your task is to identify the relevant code spans in the provided search 
 results and decide whether the search task is complete.
 
 # Input Structure:
 
-* <instructions>: Contains the user's instructions for identifying relevant code.
+* <issue>: Contains the reported issue.
 * <file_context>: Contains the context of already identified files and code spans.
-* <search_query>: Contains the search query used to obtain new results.
 * <search_results>: Contains the new search results with code divided into "code spans".
 
 # Your Task:
 
 1. Analyze User Instructions:
-Carefully read the user's instructions within the <instructions> tag.
+Carefully read the reported issue within the <issue> tag.
 
 2. Review Current Context:
 Examine the current file context provided in the <file_context> tag to understand already identified relevant files.
 
 3. Process New Search Results:
-Analyze the new search results within the <search_results> tag.
-Identify and extract relevant code spans based on the user's instructions.
+3.1. Thoroughly analyze each code span in the <search_results> tag.
+3.2. Match the code spans with the key elements, functions, variables, or patterns identified in the reported issue.
+3.3. Evaluate the relevance of each code span based on how well it aligns with the reported issue and current file context.
+3.4. If the issue suggests new functions or classes, identify the existing code that might be relevant to be able to implement the new functionality.
+3.5. Review entire sections of code, not just isolated spans, to ensure you have a complete understanding before making a decision. It's crucial to see all code in a section to accurately determine relevance and completeness.
+3.6. Verify if there are references to other parts of the codebase that might be relevant but not found in the search results. 
+3.7. Identify and extract relevant code spans based on the reported issue. 
 
-4. Make a Decision:
-* If you believe all relevant files are identified, mark the task as complete.
-* If you believe more relevant files can be identified, mark the task as not complete to continue the search.
-
-5. Respond Using the Function:
+4. Respond Using the Function:
 Use the Identify function to provide your response.
 
-Think step by step and write out your thoughts in the thoughts field.
+Think step by step and write out your thoughts in the scratch_pad field.
 """
 
 
 class Identify(ActionRequest):
-    """Identify if the provided search result is relevant to the users instructions."""
+    """Identify if the provided search result is relevant to the reported issue."""
 
-    thoughts: str = Field(
-        description="Your thoughts on if the spans where relevant or not and if you found all relevant spans and can finish.."
+    scratch_pad: str = Field(
+        description="Your thoughts on how to identify the relevant code and why."
     )
 
     identified_spans: Optional[List[FileWithSpans]] = Field(
         default=None,
-        description="Files and code spans in the search results identified as relevant to the users instructions.",
-    )
-
-    complete: bool = Field(
-        default=False,
-        description="Set to true if all the relevant code spans have been identified.",
+        description="Files and code spans in the search results identified as relevant to the reported issue.",
     )
 
 
@@ -77,16 +71,22 @@ class IdentifyCode(AgenticState):
     code_snippet: Optional[str]
     class_name: Optional[str]
     function_name: Optional[str]
+
     ranked_spans: Optional[List[RankedFileSpan]]
+
+    expand_context: bool
+    max_prompt_file_tokens: int = 4000
 
     def __init__(
         self,
-        file_pattern: str,
-        query: str,
-        code_snippet: str,
-        class_name: str,
-        function_name: str,
         ranked_spans: List[RankedFileSpan],
+        file_pattern: Optional[str] = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
+        class_name: Optional[str] = None,
+        function_name: Optional[str] = None,
+        expand_context: bool = True,
+        max_prompt_file_tokens: int = 4000,
         **data,
     ):
         super().__init__(
@@ -97,6 +97,8 @@ class IdentifyCode(AgenticState):
             function_name=function_name,
             ranked_spans=ranked_spans,
             include_message_history=False,
+            expand_context=expand_context,
+            max_prompt_file_tokens=max_prompt_file_tokens,
             **data,
         )
 
@@ -108,38 +110,33 @@ class IdentifyCode(AgenticState):
             logger.info(
                 f"Identified {span_count} spans in {len(action.identified_spans)} files. Current file context size is {self.file_context.context_size()} tokens."
             )
+
+            return ActionResponse.transition("finish")
         else:
             logger.info("No spans identified.")
 
-        if not self.ranked_spans:
-            message = "The search did not return any code spans."
-        else:
-            message = f"The search returned {len(self.ranked_spans)} code spans. "
+        message = "I searched using the following parameters:\n"
 
-        if action.identified_spans:
-            message += "\n\nIdentified the following code spans in the search result to be relevant:"
-            for file in action.identified_spans:
-                span_str = ", ".join(file.span_ids)
-                message += f"\n * {file.file_path}: {(span_str)}:"
+        if self.file_pattern:
+            message += f"\n* **File Pattern:** `{self.file_pattern}`"
+        if self.query:
+            message += f"\n* **Query:** `{self.query}`"
+        if self.code_snippet:
+            message += f"\n* **Code Snippet:** `{self.code_snippet}`"
+        if self.class_name:
+            message += f"\n* **Class Name:** `{self.class_name}`"
+        if self.function_name:
+            message += f"\n* **Function Name:** `{self.function_name}`"
 
-        else:
-            message += (
-                "\n\nNo code spans in the search result was identified as relevant."
-            )
+        message = f"The search returned {len(self.ranked_spans)} results. But unfortunately, I didn’t find any of the search results relevant to the query."
 
         message += "\n\n"
-        message += action.thoughts
+        message += action.scratch_pad
 
-        if action.complete:
-            return ActionResponse.transition(
-                "finish",
-                output={"message": action.thoughts},
-            )
-        else:
-            return ActionResponse.transition(
-                "search",
-                output={"message": message},
-            )
+        return ActionResponse.transition(
+            "search",
+            output={"message": message},
+        )
 
     def action_type(self) -> Optional[Type[BaseModel]]:
         return Identify
@@ -150,20 +147,20 @@ class IdentifyCode(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        search_query = ""
-        if self.query:
-            search_query = f"Query: {self.query}\n"
-        if self.code_snippet:
-            search_query = f"Exact code match: {self.code_snippet}\n"
-        if self.class_name:
-            search_query = f"Class name: {self.class_name}\n"
-        if self.function_name:
-            search_query = f"Function name: {self.function_name}\n"
-
-        file_context = self.create_file_context()
+        file_context = self.create_file_context(max_tokens=self.max_prompt_file_tokens)
         file_context.add_ranked_spans(self.ranked_spans)
 
         if file_context.files:
+            file_context.expand_context_with_init_spans()
+
+            if self.expand_context:
+                file_context.expand_context_with_related_spans(
+                    max_tokens=self.max_prompt_file_tokens, set_tokens=True
+                )
+                file_context.expand_small_classes(
+                    max_tokens=self.max_prompt_file_tokens
+                )
+
             search_result_str = file_context.create_prompt(
                 show_span_ids=True,
                 show_line_numbers=False,
@@ -185,17 +182,13 @@ class IdentifyCode(AgenticState):
         else:
             file_context_str = "No relevant code identified yet."
 
-        content = f"""<instructions>
+        content = f"""<issue>
 {self.loop.trajectory.initial_message}
-</instructions>
+</issue>
 
 <file_context>
 {file_context_str}
 </file_context>
-
-<search_query>
-{search_query}
-</search_query>
 
 <search_results>
 {search_result_str}
@@ -204,48 +197,6 @@ class IdentifyCode(AgenticState):
 
         messages.append(UserMessage(content=content))
         return messages
-
-    def _expand_context_with_related_spans(self, file_context: FileContext):
-        spans = 0
-
-        # Add related spans if context allows it
-        if file_context.context_size() > self._max_context_size:
-            return spans
-
-        for file in file_context.files:
-            if not file.spans:
-                continue
-
-            related_span_ids = []
-            for span_id in file.span_ids:
-                span = file.module.find_span_by_id(span_id)
-
-                if span.initiating_block.type == CodeBlockType.CLASS:
-                    child_span_ids = span.initiating_block.get_all_span_ids()
-                    for child_span_id in child_span_ids:
-                        if self._span_is_in_context(file.file_path, child_span_id):
-                            related_span_ids.append(child_span_id)
-
-                related_span_ids.extend(file.module.find_related_span_ids(span_id))
-
-                for related_span_id in related_span_ids:
-                    if related_span_id in file.span_ids:
-                        continue
-
-                    related_span = file.module.find_span_by_id(related_span_id)
-                    if (
-                        related_span.tokens + file_context.context_size()
-                        > self._max_context_size
-                    ):
-                        return spans
-
-                    spans += 1
-                    file.add_span(related_span_id)
-
-        if spans > 0:
-            logger.info(
-                f"find_code: Expanded context with {spans} spans to {file_context.context_size()} tokens."
-            )
 
 
 def is_test_pattern(file_pattern: str):

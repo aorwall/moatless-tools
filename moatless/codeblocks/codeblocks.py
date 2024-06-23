@@ -816,6 +816,15 @@ class CodeBlock(BaseModel):
 
         return None
 
+    def structure_block(self):
+        if self.type.group == CodeBlockTypeGroup.STRUCTURE:
+            return self
+
+        if self.parent:
+            return self.parent.structure_block()
+
+        return None
+
     def find_type_group_in_parents(
         self, block_type_group: CodeBlockTypeGroup
     ) -> Optional["CodeBlock"]:

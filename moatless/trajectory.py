@@ -16,6 +16,8 @@ class TrajectoryAction(BaseModel):
     retry_message: Optional[str] = None
     output: Optional[dict[str, Any]] = None
     completion_cost: Optional[float] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     def model_dump(self, **kwargs):
         dict = super().model_dump(**kwargs)
@@ -66,11 +68,16 @@ class Trajectory:
         return self._initial_message
 
     def get_transitions(self, name: str):
+        logger.info(
+            f"Getting transitions for {name} from {len(self._transitions)} transitions."
+        )
         return [
             transition for transition in self._transitions if transition.name == name
         ]
 
-    def transition_count(self, state: AgenticState):
+    def transition_count(self, state: Optional[AgenticState] = None):
+        if not state:
+            return len(self._transitions)
         return len(self.get_transitions(state.name))
 
     def save_action(
@@ -79,6 +86,8 @@ class Trajectory:
         output: Optional[dict[str, Any]] = None,
         retry_message: Optional[str] = None,
         completion_cost: Optional[float] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
     ):
         if self._current_transition:
             self._current_transition.actions.append(
@@ -87,6 +96,8 @@ class Trajectory:
                     output=output,
                     retry_message=retry_message,
                     completion_cost=completion_cost,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                 )
             )
             logger.info(

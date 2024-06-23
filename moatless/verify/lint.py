@@ -1,15 +1,14 @@
+import logging
 import tempfile
 
-from pydantic import BaseModel
+from astroid import MANAGER
 from pylint.lint import Run
-from pylint.message import Message, MessageDefinition
+from pylint.message import Message
 from pylint.testutils import MinimalTestReporter
 
+from moatless.verify.types import VerificationError
 
-class LintMessage(BaseModel):
-    lint_id: str
-    message: str
-    line: int
+logger = logging.getLogger(__name__)
 
 
 def _run_pylint(content: str) -> list[Message]:
@@ -22,12 +21,34 @@ def _run_pylint(content: str) -> list[Message]:
     return results.linter.reporter.messages
 
 
-def lint_updated_code(
-    original_content: str, updated_content: str, language: str = "python"
-) -> list[LintMessage]:
-    if language != "python":
-        raise ValueError("Only python language is supported for linting")
+def run_pylint(repo_path: str, file_path: str) -> list[VerificationError]:
+    try:
+        MANAGER.astroid_cache.clear()
+        results = Run(
+            [f"{repo_path}/{file_path}"], exit=False, reporter=MinimalTestReporter()
+        )
 
+        for msg in results.linter.reporter.messages:
+            logger.debug(f"Message: {msg.msg_id} {msg.msg} {msg.line}")
+
+        return [
+            VerificationError(
+                code=msg.msg_id,
+                file_path=file_path.replace(f"{repo_path}/", ""),
+                message=msg.msg,
+                line=msg.line,
+            )
+            for msg in results.linter.reporter.messages
+            if msg.msg_id[0] in ["E", "F"]
+        ]
+    except Exception as e:
+        logger.exception(f"Error running pylint")
+        return []
+
+
+def lint_updated_code(
+    file_path: str, original_content: str, updated_content: str
+) -> list[VerificationError]:
     try:
         original_messages = _run_pylint(original_content)
         updated_messages = _run_pylint(updated_content)
@@ -38,7 +59,9 @@ def lint_updated_code(
         added_messages_set = updated_message_set - original_message_set
 
         added_messages = [
-            LintMessage(lint_id=msg.msg_id, message=msg.msg, line=msg.line)
+            VerificationError(
+                code=msg.msg_id, file_path=file_path, message=msg.msg, line=msg.line
+            )
             for msg in updated_messages
             if (msg.msg_id, msg.msg) in added_messages_set
         ]

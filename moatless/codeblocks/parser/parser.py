@@ -596,6 +596,8 @@ class CodeParser:
                     relationship_type = RelationshipType.CALLS
                 elif reference[1] == "reference.type":
                     relationship_type = RelationshipType.IS_A
+                elif reference[1] == "reference.imports":
+                    relationship_type = RelationshipType.IMPORTS
                 else:
                     relationship_type = RelationshipType.USES
 
@@ -718,7 +720,7 @@ class CodeParser:
             span_id = self._create_span_id(block, label="docstring")
 
         # Set initation phase when block is a class or constructor, and until first function:
-        elif block.type == CodeBlockType.CLASS or (
+        elif block.type in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR] or (
             current_span
             and current_span.block_type
             in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR]
@@ -761,10 +763,10 @@ class CodeParser:
                     parent_block_path=block.parent.full_path(),
                 )
 
-        # create a new span on new functions and classes in classes or modules.
+        # create a new span on new structures in classes or modules but not functions
         # * if the parent block doesn't have a span
         if (
-            block.type in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
+            block.type.group in [CodeBlockTypeGroup.STRUCTURE]
             and block.parent.type in [CodeBlockType.MODULE, CodeBlockType.CLASS]
             and current_span.parent_block_path == block.parent.full_path()
         ):
@@ -798,15 +800,15 @@ class CodeParser:
             )
 
         # Create new span if span type has changed
-        if span_type != current_span.span_type:
-            return BlockSpan(
-                span_id=span_id,
-                span_type=span_type,
-                start_line=block.start_line,
-                end_line=block.start_line,
-                initiating_block=current_span.initiating_block,
-                parent_block_path=current_span.parent_block_path,
-            )
+        # if span_type != current_span.span_type:
+        #    return BlockSpan(
+        #        span_id=span_id,
+        #        span_type=span_type,
+        #        start_line=block.start_line,
+        #        end_line=block.start_line,
+        #        initiating_block=current_span.initiating_block,
+        #        parent_block_path=current_span.parent_block_path,
+        #    )
 
         # Create new span if the current is too large and the parent block is a structure block
         split_on_block_type = [CodeBlockType.MODULE]  # Only split on Module level

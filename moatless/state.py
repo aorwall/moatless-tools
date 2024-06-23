@@ -10,8 +10,6 @@ from moatless.types import (
     ActionResponse,
     FileWithSpans,
     Message,
-    AssistantMessage,
-    UserMessage,
 )
 
 
@@ -25,8 +23,8 @@ class AgenticState(ABC, BaseModel):
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
     )
-    max_iterations: int = Field(
-        6, description="The maximum number of transitions to this state."
+    max_iterations: Optional[int] = Field(
+        None, description="The maximum number of transitions to this state."
     )
 
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)
@@ -67,8 +65,10 @@ class AgenticState(ABC, BaseModel):
     def file_context(self) -> FileContext:
         return self.workspace.file_context
 
-    def create_file_context(self, files: List[FileWithSpans] = []) -> FileContext:
-        return self.workspace.create_file_context(files)
+    def create_file_context(
+        self, files: List[FileWithSpans] = [], **kwargs
+    ) -> FileContext:
+        return self.workspace.create_file_context(files, **kwargs)
 
     def init(self):
         """Initialization logic for the state."""
@@ -90,7 +90,7 @@ class AgenticState(ABC, BaseModel):
 
     def retries(self) -> int:
         retries = 0
-        for action in reversed(self.trajectory.current_step.actions):
+        for action in reversed(self.loop.trajectory.current_step.actions):
             if action.retry_message:
                 retries += 1
             else:
@@ -125,11 +125,11 @@ class NoopState(AgenticState):
 
 
 class Finished(NoopState):
-    message: str
+    message: Optional[str]
 
     output: Optional[dict[str, Any]] = None
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: Optional[str] = None, **kwargs):
         super().__init__(message=message)
         self.output = kwargs
 
@@ -137,7 +137,7 @@ class Finished(NoopState):
 class Rejected(NoopState):
     message: str
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, **kwargs):
         super().__init__(message=message)
 
 

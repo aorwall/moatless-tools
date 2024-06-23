@@ -25,6 +25,7 @@ class SpanHit(BaseModel):
         default=0,
         description="The rank of relevance of the span in the file. 0 is highest.",
     )
+    tokens: int = Field(default=0, description="The number of tokens in the span.")
 
 
 class SearchCodeHit(BaseModel):
@@ -36,9 +37,13 @@ class SearchCodeHit(BaseModel):
         description="The spans of the relevant code in the file",
     )
 
-    def add_span(self, span_id: str, rank: int = 0):
+    @property
+    def span_ids(self):
+        return [span.span_id for span in self.spans]
+
+    def add_span(self, span_id: str, rank: int = 0, tokens: int = 0):
         if span_id not in [span.span_id for span in self.spans]:
-            self.spans.append(SpanHit(span_id=span_id, rank=rank))
+            self.spans.append(SpanHit(span_id=span_id, rank=rank, tokens=tokens))
 
     def contains_span(self, span_id: str) -> bool:
         return span_id in [span.span_id for span in self.spans]

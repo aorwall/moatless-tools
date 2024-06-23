@@ -1,3 +1,4 @@
+import logging
 import os
 
 from datasets import load_dataset
@@ -45,6 +46,11 @@ def get_repo_dir_name(repo: str):
 
 
 def found_in_expected_spans(instance: dict, spans: dict):
+    for file_path, span_ids in instance["expected_spans"].items():
+        if not span_ids:
+            logging.warning(
+                f"{instance['instance_id']} Expected spans for {file_path} is empty"
+            )
     missing_spans = get_missing_spans(instance["expected_spans"], spans)
     return not missing_spans
 
@@ -53,6 +59,12 @@ def found_in_alternative_spans(instance: dict, spans: dict):
     if "alternative_spans" not in instance:
         return False
     for alternative_spans in instance["alternative_spans"]:
+        for file_path, span_ids in alternative_spans["spans"].items():
+            if not span_ids:
+                logging.warning(
+                    f"{instance['instance_id']} Alternative spans for {file_path} is empty"
+                )
+
         missing_spans = get_missing_spans(alternative_spans["spans"], spans)
         if not missing_spans:
             return True
@@ -153,7 +165,7 @@ def verify_search_trajectory(
 
     result["tokens"] = file_context.context_size()
 
-    file_context.expand_context_with_imports()
+    file_context.expand_context_with_init_spans()
     actual_span_dicts = file_spans_to_dict(file_context.to_files_with_spans())
 
     if found_in_expected_spans(

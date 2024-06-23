@@ -6,8 +6,8 @@ from pydantic import PrivateAttr, Field, BaseModel
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, BlockSpan
 from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
-from moatless.state import AgenticState, ActionResponse
 from moatless.repository import CodeFile
+from moatless.state import AgenticState, ActionResponse
 from moatless.types import (
     FileWithSpans,
     ActionRequest,
@@ -19,12 +19,15 @@ logger = logging.getLogger("ClarifyCodeChange")
 
 
 class LineNumberClarification(ActionRequest):
-    thoughts: str = Field(..., description="Thoughts on which lines to select")
+    scratch_pad: str = Field(..., description="Thoughts on which lines to select")
     start_line: int = Field(
         ..., description="The start line of the code to be updated."
     )
 
     end_line: int = Field(..., description="The end line of the code to be updated.")
+    reject: Optional[bool] = Field(
+        None, description="Whether the request should be rejected."
+    )
 
 
 class ClarifyCodeChange(AgenticState):
@@ -84,6 +87,11 @@ class ClarifyCodeChange(AgenticState):
             f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
         )
 
+        if request.reject:
+            return ActionResponse.transition(
+                trigger="reject", output={"message": request.scratch_pad}
+            )
+
         retry_message = self._verify_line_numbers(request)
         if retry_message:
             return ActionResponse.retry(retry_message)
@@ -94,6 +102,9 @@ class ClarifyCodeChange(AgenticState):
             )
         else:
             start_line, end_line = request.start_line, request.end_line
+
+        if request.scratch_pad:
+            self.instructions += "\n\n" + request.scratch_pad
 
         return ActionResponse.transition(
             trigger="edit_code",
@@ -167,7 +178,7 @@ class ClarifyCodeChange(AgenticState):
 
         tokens = count_tokens(edit_block_code)
         if tokens > self.max_tokens_in_edit_prompt:
-            clarify_msg = f"Lines {line_numbers.start_line} - {line_numbers.end_line} has {tokens} tokens, which is higher than the maximum allowed {self.max_tokens} tokens in completion"
+            clarify_msg = f"Lines {line_numbers.start_line} - {line_numbers.end_line} has {tokens} tokens, which is higher than the maximum allowed {self.max_tokens_in_edit_prompt} tokens in completion"
             logger.info(f"{self} {clarify_msg}. Ask for clarification.")
             return f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change. If this is not possible you should reject the request."
 
