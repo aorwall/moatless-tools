@@ -1,0 +1,539 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "In v5.3, NDDataRef mask propagation fails when one of the operand does not have a mask\n### Description\n\nThis applies to v5.3. \r\n\r\nIt looks like when one of the operand does not have a mask, the mask propagation when doing arithmetic, in particular with `handle_mask=np.bitwise_or` fails.  This is not a problem in v5.2.\r\n\r\nI don't know enough about how all that works, but it seems from the error that the operand without a mask is set as a mask of None's and then the bitwise_or tries to operate on an integer and a None and fails.\n\n### Expected behavior\n\nWhen one of the operand does not have mask, the mask that exists should just be copied over to the output.  Or whatever was done in that situation in v5.2 where there's no problem.\n\n### How to Reproduce\n\nThis is with v5.3.   With v5.2, there are no errors.\r\n\r\n```\r\n>>> import numpy as np\r\n>>> from astropy.nddata import NDDataRef\r\n\r\n>>> array = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])\r\n>>> mask = np.array([[0, 1, 64], [8, 0, 1], [2, 1, 0]])\r\n\r\n>>> nref_nomask = NDDataRef(array)\r\n>>> nref_mask = NDDataRef(array, mask=mask)\r\n\r\n# multiply no mask by constant (no mask * no mask)\r\n>>> nref_nomask.multiply(1., handle_mask=np.bitwise_or).mask   # returns nothing, no mask,  OK\r\n\r\n# multiply no mask by itself (no mask * no mask)\r\n>>> nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask # return nothing, no mask, OK\r\n\r\n# multiply mask by constant (mask * no mask)\r\n>>> nref_mask.multiply(1., handle_mask=np.bitwise_or).mask\r\n...\r\nTypeError: unsupported operand type(s) for |: 'int' and 'NoneType'\r\n\r\n# multiply mask by itself (mask * mask)\r\n>>> nref_mask.multiply(nref_mask, handle_mask=np.bitwise_or).mask\r\narray([[ 0,  1, 64],\r\n       [ 8,  0,  1],\r\n       [ 2,  1,  0]])\r\n\r\n# multiply mask by no mask (mask * no mask)\r\n>>> nref_mask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask\r\n...\r\nTypeError: unsupported operand type(s) for |: 'int' and 'NoneType'\r\n```\r\n\n\n### Versions\n\n>>> import sys; print(\"Python\", sys.version)\r\nPython 3.10.11 | packaged by conda-forge | (main, May 10 2023, 19:07:22) [Clang 14.0.6 ]\r\n>>> import astropy; print(\"astropy\", astropy.__version__)\r\nastropy 5.3\r\n>>> import numpy; print(\"Numpy\", numpy.__version__)\r\nNumpy 1.24.3\r\n>>> import erfa; print(\"pyerfa\", erfa.__version__)\r\npyerfa 2.0.0.3\r\n>>> import scipy; print(\"Scipy\", scipy.__version__)\r\nScipy 1.10.1\r\n>>> import matplotlib; print(\"Matplotlib\", matplotlib.__version__)\r\nMatplotlib 3.7.1\r\n\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_search_results": 75,
+        "max_retries_with_any_file_context": 3,
+        "provide_initial_context": true,
+        "initial_context_tokens": 6000,
+        "initial_search_results": 100,
+        "initial_context_spans_per_file": 5,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To address the issue of NDDataRef mask propagation failing when one of the operands does not have a mask in v5.3, we need to focus on the NDDataRef class and its arithmetic operations. The problem seems to be in the mask handling during arithmetic operations, particularly when using np.bitwise_or. Let's search for relevant code:\n\n1. We should look for the NDDataRef class implementation.\n2. We need to find the arithmetic operations, especially the multiply method.\n3. We should investigate the mask handling logic during these operations.\n\nBased on the file snippets provided, it seems that the NDDataRef class is implemented in the astropy/nddata/nddata_withmixins.py file. However, it inherits from NDArithmeticMixin, which is likely where the arithmetic operations are implemented. Let's start our search with these two files.",
+            "search_requests": [
+              {
+                "file_pattern": "astropy/nddata/nddata_withmixins.py",
+                "query": "NDDataRef class implementation and arithmetic operations",
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "astropy/nddata/mixins/ndarithmetic.py",
+                "query": "NDArithmeticMixin implementation, especially the multiply method and mask handling",
+                "class_names": [],
+                "function_names": []
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "astropy/nddata/nddata_withmixins.py",
+                "span_id": "impl",
+                "rank": 0,
+                "tokens": 9
+              },
+              {
+                "file_path": "astropy/nddata/nddata_withmixins.py",
+                "span_id": "NDDataRef",
+                "rank": 0,
+                "tokens": 546
+              },
+              {
+                "file_path": "astropy/nddata/nddata_withmixins.py",
+                "span_id": "imports",
+                "rank": 0,
+                "tokens": 43
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin",
+                "rank": 0,
+                "tokens": 558
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic",
+                "rank": 1,
+                "tokens": 1499
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.min",
+                "rank": 2,
+                "tokens": 74
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.subtract",
+                "rank": 2,
+                "tokens": 58
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.sum",
+                "rank": 2,
+                "tokens": 26
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.add",
+                "rank": 2,
+                "tokens": 54
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.multiply",
+                "rank": 2,
+                "tokens": 59
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.mean",
+                "rank": 2,
+                "tokens": 26
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.divide",
+                "rank": 2,
+                "tokens": 59
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin.max",
+                "rank": 2,
+                "tokens": 74
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._prepare_then_do_arithmetic",
+                "rank": 4,
+                "tokens": 775
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "impl",
+                "rank": 5,
+                "tokens": 862
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "imports",
+                "rank": 5,
+                "tokens": 61
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic_mask",
+                "rank": 6,
+                "tokens": 317
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic_data",
+                "rank": 8,
+                "tokens": 281
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic_uncertainty",
+                "rank": 10,
+                "tokens": 659
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic_meta",
+                "rank": 11,
+                "tokens": 174
+              },
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_id": "NDArithmeticMixin._arithmetic_wcs",
+                "rank": 12,
+                "tokens": 328
+              }
+            ],
+            "search_requests": [
+              {
+                "file_pattern": "astropy/nddata/nddata_withmixins.py",
+                "query": "NDDataRef class implementation and arithmetic operations",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": []
+              },
+              {
+                "file_pattern": "astropy/nddata/mixins/ndarithmetic.py",
+                "query": "NDArithmeticMixin implementation, especially the multiply method and mask handling",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": []
+              }
+            ],
+            "complete": false
+          },
+          "completion_cost": 0.017955000000000002,
+          "input_tokens": 4265,
+          "output_tokens": 344
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "ranked_spans": [
+          {
+            "file_path": "astropy/nddata/nddata_withmixins.py",
+            "span_id": "impl",
+            "rank": 0,
+            "tokens": 9
+          },
+          {
+            "file_path": "astropy/nddata/nddata_withmixins.py",
+            "span_id": "NDDataRef",
+            "rank": 0,
+            "tokens": 546
+          },
+          {
+            "file_path": "astropy/nddata/nddata_withmixins.py",
+            "span_id": "imports",
+            "rank": 0,
+            "tokens": 43
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin",
+            "rank": 0,
+            "tokens": 558
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic",
+            "rank": 1,
+            "tokens": 1499
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.min",
+            "rank": 2,
+            "tokens": 74
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.subtract",
+            "rank": 2,
+            "tokens": 58
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.sum",
+            "rank": 2,
+            "tokens": 26
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.add",
+            "rank": 2,
+            "tokens": 54
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.multiply",
+            "rank": 2,
+            "tokens": 59
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.mean",
+            "rank": 2,
+            "tokens": 26
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.divide",
+            "rank": 2,
+            "tokens": 59
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin.max",
+            "rank": 2,
+            "tokens": 74
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._prepare_then_do_arithmetic",
+            "rank": 4,
+            "tokens": 775
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "impl",
+            "rank": 5,
+            "tokens": 862
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "imports",
+            "rank": 5,
+            "tokens": 61
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic_mask",
+            "rank": 6,
+            "tokens": 317
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic_data",
+            "rank": 8,
+            "tokens": 281
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic_uncertainty",
+            "rank": 10,
+            "tokens": 659
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic_meta",
+            "rank": 11,
+            "tokens": 174
+          },
+          {
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic_wcs",
+            "rank": 12,
+            "tokens": 328
+          }
+        ],
+        "expand_context": true,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To identify the relevant code for the reported issue, I'll analyze the search results and match them with the key elements of the problem:\n\n1. The issue is related to NDDataRef mask propagation in v5.3.\n2. The problem occurs during arithmetic operations, specifically multiplication.\n3. The error happens when one operand doesn't have a mask.\n4. The error message mentions \"unsupported operand type(s) for |: 'int' and 'NoneType'\".\n\nAnalyzing the search results:\n\n1. The NDDataRef class is defined in astropy/nddata/nddata_withmixins.py. It inherits from NDArithmeticMixin, which is likely where the arithmetic operations are implemented.\n\n2. The relevant arithmetic operations are implemented in astropy/nddata/mixins/ndarithmetic.py. This file contains the NDArithmeticMixin class with methods for arithmetic operations.\n\n3. The multiply method in NDArithmeticMixin is likely the one being called in the reported issue.\n\n4. The _arithmetic method in NDArithmeticMixin seems to be the core method handling the arithmetic operations, including mask handling.\n\n5. The error message suggests that the problem is in the mask handling, specifically in the np.logical_or operation used as the default handle_mask function.\n\nBased on this analysis, the most relevant code spans are in the NDArithmeticMixin class in the astropy/nddata/mixins/ndarithmetic.py file. Specifically, the _arithmetic method and the multiply method are the most relevant to the reported issue.",
+            "identified_spans": [
+              {
+                "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+                "span_ids": [
+                  "NDArithmeticMixin",
+                  "NDArithmeticMixin._arithmetic",
+                  "NDArithmeticMixin.multiply"
+                ]
+              }
+            ]
+          },
+          "output": {},
+          "completion_cost": 0.026976,
+          "input_tokens": 6572,
+          "output_tokens": 484
+        }
+      ]
+    },
+    {
+      "name": "DecideRelevance",
+      "state": {
+        "include_message_history": false,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "expand_context": true,
+        "finish_after_relevant_count": 1,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "After analyzing the provided file context, I believe we have found the relevant code for the reported issue. The NDArithmeticMixin class in the astropy/nddata/mixins/ndarithmetic.py file contains the implementation of arithmetic operations for NDDataRef, including the multiply method.\n\nThe _arithmetic method in this class is responsible for handling the mask propagation during arithmetic operations. The issue described in the report is likely caused by the mask handling logic in this method.\n\nSpecifically, the problem occurs when one operand has a mask and the other doesn't. The current implementation doesn't seem to handle this case correctly when using np.bitwise_or as the handle_mask function.\n\nThe relevant parts of the code are:\n\n1. The _arithmetic method, which handles the core logic for arithmetic operations.\n2. The multiply method, which calls _prepare_then_do_arithmetic with np.multiply as the operation.\n3. The mask handling logic in the _arithmetic method, particularly the section that deals with handle_mask.\n\nGiven this information, I believe we have identified the relevant code for the reported issue. The fix would likely involve modifying the mask handling logic in the _arithmetic method to correctly handle cases where one operand has a mask and the other doesn't.\n\nSince we have found the relevant code and there are no indications of other parts of the codebase that need to be examined for this issue, I'm marking this task as complete.",
+            "relevant": true,
+            "complete": true
+          },
+          "output": {},
+          "completion_cost": 0.015552,
+          "input_tokens": 3294,
+          "output_tokens": 378
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To fix the issue, we need to modify the _arithmetic method to handle the case when one operand doesn't have a mask. We'll focus on the part where the mask is being handled, specifically when handle_mask is set to np.bitwise_or. We'll add a check to see if either operand's mask is None, and use the other operand's mask if available.",
+            "action": "modify",
+            "instructions": "Modify the _arithmetic method to handle the case when one operand doesn't have a mask. When handle_mask is set to np.bitwise_or, we should check if either operand's mask is None and use the other operand's mask if available.",
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic"
+          },
+          "output": {
+            "instructions": "Modify the _arithmetic method to handle the case when one operand doesn't have a mask. When handle_mask is set to np.bitwise_or, we should check if either operand's mask is None and use the other operand's mask if available.",
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic"
+          },
+          "completion_cost": 0.013947000000000001,
+          "input_tokens": 3334,
+          "output_tokens": 263
+        }
+      ]
+    },
+    {
+      "name": "ClarifyCodeChange",
+      "state": {
+        "include_message_history": false,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "instructions": "Modify the _arithmetic method to handle the case when one operand doesn't have a mask. When handle_mask is set to np.bitwise_or, we should check if either operand's mask is None and use the other operand's mask if available.\n\nThe _arithmetic method starts at line 166 and ends at line 353. The specific part that needs to be modified is the handling of the mask, which occurs in the section starting from line 323. We need to modify this section to handle the case when one operand doesn't have a mask, specifically when handle_mask is set to np.bitwise_or. The lines to be modified are from 323 to 337.",
+        "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+        "span_id": "NDArithmeticMixin._arithmetic",
+        "max_tokens_in_edit_prompt": 500
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "The _arithmetic method starts at line 166 and ends at line 353. The specific part that needs to be modified is the handling of the mask, which occurs in the section starting from line 323. We need to modify this section to handle the case when one operand doesn't have a mask, specifically when handle_mask is set to np.bitwise_or. The lines to be modified are from 323 to 337.",
+            "start_line": 323,
+            "end_line": 337
+          },
+          "output": {
+            "instructions": "Modify the _arithmetic method to handle the case when one operand doesn't have a mask. When handle_mask is set to np.bitwise_or, we should check if either operand's mask is None and use the other operand's mask if available.\n\nThe _arithmetic method starts at line 166 and ends at line 353. The specific part that needs to be modified is the handling of the mask, which occurs in the section starting from line 323. We need to modify this section to handle the case when one operand doesn't have a mask, specifically when handle_mask is set to np.bitwise_or. The lines to be modified are from 323 to 337.",
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic",
+            "start_line": 323,
+            "end_line": 337
+          },
+          "completion_cost": 0.011163,
+          "input_tokens": 2906,
+          "output_tokens": 163
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "instructions": "Modify the _arithmetic method to handle the case when one operand doesn't have a mask. When handle_mask is set to np.bitwise_or, we should check if either operand's mask is None and use the other operand's mask if available.\n\nThe _arithmetic method starts at line 166 and ends at line 353. The specific part that needs to be modified is the handling of the mask, which occurs in the section starting from line 323. We need to modify this section to handle the case when one operand doesn't have a mask, specifically when handle_mask is set to np.bitwise_or. The lines to be modified are from 323 to 337.",
+        "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+        "span_id": "NDArithmeticMixin._arithmetic",
+        "start_line": 323,
+        "end_line": 337,
+        "show_initial_message": true,
+        "show_file_context": false,
+        "verify": true,
+        "chain_of_thought": false,
+        "max_prompt_file_tokens": 8000
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "\n        if handle_mask is None:\n            pass\n        elif hasattr(result, \"mask\"):\n            # if numpy.ma or astropy.utils.masked is being used, the constructor\n            # will pick up the mask from the masked object:\n            kwargs[\"mask\"] = None\n        elif handle_mask in [\"ff\", \"first_found\"]:\n            if self.mask is None:\n                kwargs[\"mask\"] = deepcopy(operand.mask)\n            else:\n                kwargs[\"mask\"] = deepcopy(self.mask)\n        elif handle_mask == np.bitwise_or:\n            if self.mask is None and operand is not None and operand.mask is not None:\n                kwargs[\"mask\"] = deepcopy(operand.mask)\n            elif self.mask is not None and (operand is None or operand.mask is None):\n                kwargs[\"mask\"] = deepcopy(self.mask)\n            else:\n                kwargs[\"mask\"] = self._arithmetic_mask(\n                    operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n                )\n        else:\n            kwargs[\"mask\"] = self._arithmetic_mask(\n                operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n            )\n"
+          },
+          "output": {
+            "message": "Applied the change to astropy/nddata/mixins/ndarithmetic.py.",
+            "diff": "--- astropy/nddata/mixins/ndarithmetic.py\n+++ astropy/nddata/mixins/ndarithmetic.py\n@@ -331,6 +331,15 @@\n                 kwargs[\"mask\"] = deepcopy(operand.mask)\n             else:\n                 kwargs[\"mask\"] = deepcopy(self.mask)\n+        elif handle_mask == np.bitwise_or:\n+            if self.mask is None and operand is not None and operand.mask is not None:\n+                kwargs[\"mask\"] = deepcopy(operand.mask)\n+            elif self.mask is not None and (operand is None or operand.mask is None):\n+                kwargs[\"mask\"] = deepcopy(self.mask)\n+            else:\n+                kwargs[\"mask\"] = self._arithmetic_mask(\n+                    operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n+                )\n         else:\n             kwargs[\"mask\"] = self._arithmetic_mask(\n                 operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n",
+            "errors": []
+          },
+          "completion_cost": 0.017715,
+          "input_tokens": 4385,
+          "output_tokens": 304
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "message": "Applied the change to astropy/nddata/mixins/ndarithmetic.py.",
+        "diff": "--- astropy/nddata/mixins/ndarithmetic.py\n+++ astropy/nddata/mixins/ndarithmetic.py\n@@ -331,6 +331,15 @@\n                 kwargs[\"mask\"] = deepcopy(operand.mask)\n             else:\n                 kwargs[\"mask\"] = deepcopy(self.mask)\n+        elif handle_mask == np.bitwise_or:\n+            if self.mask is None and operand is not None and operand.mask is not None:\n+                kwargs[\"mask\"] = deepcopy(operand.mask)\n+            elif self.mask is not None and (operand is None or operand.mask is None):\n+                kwargs[\"mask\"] = deepcopy(self.mask)\n+            else:\n+                kwargs[\"mask\"] = self._arithmetic_mask(\n+                    operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n+                )\n         else:\n             kwargs[\"mask\"] = self._arithmetic_mask(\n                 operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n",
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "The change has been applied successfully. The _arithmetic method now handles the case when one operand doesn't have a mask and handle_mask is set to np.bitwise_or. Let's review the changes to ensure they are correct and complete.",
+            "action": "review",
+            "instructions": "Review the changes made to the _arithmetic method to ensure they correctly handle the case when one operand doesn't have a mask and handle_mask is set to np.bitwise_or.",
+            "file_path": "astropy/nddata/mixins/ndarithmetic.py",
+            "span_id": "NDArithmeticMixin._arithmetic"
+          },
+          "output": {
+            "message": "Finish on suggested review."
+          },
+          "completion_cost": 0.01602,
+          "input_tokens": 4095,
+          "output_tokens": 249
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "Finish on suggested review.",
+        "output": {
+          "model": "claude-3-5-sonnet-20240620",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "max_prompt_file_tokens": 12000
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240623_moatless_claude-3.5-sonnet",
+    "instance_id": "astropy__astropy-14995",
+    "status": "finished",
+    "duration": 28.82295846939087,
+    "total_cost": 0.11932800000000002,
+    "submission": "diff --git a/astropy/nddata/mixins/ndarithmetic.py b/astropy/nddata/mixins/ndarithmetic.py\nindex 4153dfccb..ad51c6709 100644\n--- a/astropy/nddata/mixins/ndarithmetic.py\n+++ b/astropy/nddata/mixins/ndarithmetic.py\n@@ -331,6 +331,15 @@ class NDArithmeticMixin:\n                 kwargs[\"mask\"] = deepcopy(operand.mask)\n             else:\n                 kwargs[\"mask\"] = deepcopy(self.mask)\n+        elif handle_mask == np.bitwise_or:\n+            if self.mask is None and operand is not None and operand.mask is not None:\n+                kwargs[\"mask\"] = deepcopy(operand.mask)\n+            elif self.mask is not None and (operand is None or operand.mask is None):\n+                kwargs[\"mask\"] = deepcopy(self.mask)\n+            else:\n+                kwargs[\"mask\"] = self._arithmetic_mask(\n+                    operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n+                )\n         else:\n             kwargs[\"mask\"] = self._arithmetic_mask(\n                 operation, operand, handle_mask, axis=axis, **kwds2[\"mask\"]\n"
+  }
+}

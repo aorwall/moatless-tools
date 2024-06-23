@@ -167,8 +167,17 @@ class Evaluation:
         self,
         dataset: str = "princeton-nlp/SWE-bench_Lite",
         split="test",
+        instance_ids: Optional[list[str]] = None,
     ):
         instances = sorted_instances(dataset, split)
+
+        if instance_ids:
+            instances = [
+                instance
+                for instance in instances
+                if instance["instance_id"] in instance_ids
+            ]
+
         return self._run_evaluation(instances)
 
     def run_single_instance(
