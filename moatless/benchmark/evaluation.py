@@ -7,7 +7,7 @@ import subprocess
 import time
 import traceback
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, Tuple
 
 import instructor
 import litellm
@@ -178,7 +178,7 @@ class Evaluation:
                 if instance["instance_id"] in instance_ids
             ]
 
-        return self._run_evaluation(instances)
+        return self._run_evaluation_simple(instances)
 
     def run_single_instance(
         self,
@@ -470,7 +470,7 @@ class Evaluation:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
 
-    def to_result(self, instance: dict, trajectory: dict) -> dict:
+    def to_result(self, instance: dict, trajectory: dict) -> Tuple[list, list]:
         info = trajectory["info"]
 
         resolved = info.get("instance_id", "") in self.report["resolved"]
@@ -481,9 +481,7 @@ class Evaluation:
                 "instance_id": instance["instance_id"],
                 "duration": info.get("duration", 0),
                 "total_cost": info.get("total_cost", 0),
-                "resolved_by": (
-                    len(instance["resolved_by"]) if instance["resolved_by"] else 0
-                ),
+                "resolved_by": (len(instance.get("resolved_by", []))),
                 "status": None,
                 "transitions": len(trajectory["transitions"]),
                 "edited": False,
@@ -514,227 +512,242 @@ class Evaluation:
 
             id_iterations = 0
             search_iterations = 0
-            for transition in trajectory["transitions"]:
 
-                if transition["name"] not in result:
-                    result[transition["name"]] = 0
-                    result[f"{transition['name']}_cost"] = 0
+            if instance.get("expected_spans"):
+                for transition in trajectory["transitions"]:
 
-                result[transition["name"]] += 1
+                    if transition["name"] not in result:
+                        result[transition["name"]] = 0
+                        result[f"{transition['name']}_cost"] = 0
 
-                expected_span_str = ""
-                for file_path, span_ids in instance["expected_spans"].items():
-                    expected_span_str += f"{file_path}: {span_ids} "
+                    result[transition["name"]] += 1
 
-                transition_result = {
-                    "instance_id": instance["instance_id"],
-                    "resolved": resolved,
-                    "name": transition["name"],
-                    "cost": 0,
-                    "expected_spans": expected_span_str,
-                    "actual_spans": "",
-                }
+                    expected_span_str = ""
+                    for file_path, span_ids in instance["expected_spans"].items():
+                        expected_span_str += f"{file_path}: {span_ids} "
 
-                if not transition["actions"]:
-                    continue
+                    transition_result = {
+                        "instance_id": instance["instance_id"],
+                        "resolved": resolved,
+                        "name": transition["name"],
+                        "cost": 0,
+                        "expected_spans": expected_span_str,
+                        "actual_spans": "",
+                    }
 
-                for traj_action in transition["actions"]:
-                    result[f"{transition['name']}_cost"] += traj_action.get(
-                        "completion_cost", 0
-                    )
-                    transition_result["cost"] += traj_action.get("completion_cost", 0)
+                    if not transition["actions"]:
+                        continue
 
-                if transition["name"] == "SearchCode":
-                    search_iterations += 1
+                    for traj_action in transition["actions"]:
+                        result[f"{transition['name']}_cost"] += traj_action.get(
+                            "completion_cost", 0
+                        )
+                        transition_result["cost"] += traj_action.get(
+                            "completion_cost", 0
+                        )
 
-                    action = transition["actions"][-1]
+                    if transition["name"] == "SearchCode":
+                        search_iterations += 1
 
-                    if "search_requests" in action["action"]:
-                        for search_request in action["action"]["search_requests"]:
-                            if search_request.get("query"):
+                        action = transition["actions"][-1]
+
+                        if "search_requests" in action["action"]:
+                            for search_request in action["action"]["search_requests"]:
+                                if search_request.get("query"):
+                                    result["p_query"] += 1
+
+                                if search_request.get("file_pattern"):
+                                    result["p_file"] += 1
+
+                                if search_request.get("code_snippet"):
+                                    result["p_code"] += 1
+
+                                if search_request.get(
+                                    "class_name"
+                                ) or search_request.get("class_names"):
+                                    result["p_class"] += 1
+
+                                if search_request.get(
+                                    "function_name"
+                                ) or search_request.get("function_names"):
+                                    result["p_function"] += 1
+
+                        if "output" in action and action.get("output"):
+                            output = action["output"]
+
+                            if "query" in output:
                                 result["p_query"] += 1
 
-                            if search_request.get("file_pattern"):
+                            if "file_pattern" in output:
                                 result["p_file"] += 1
 
-                            if search_request.get("code_snippet"):
+                            if "code_snippet" in output:
                                 result["p_code"] += 1
 
-                            if search_request.get("class_name") or search_request.get(
-                                "class_names"
-                            ):
+                            if "class_name" in output or "class_names" in output:
                                 result["p_class"] += 1
 
-                            if search_request.get(
-                                "function_name"
-                            ) or search_request.get("function_names"):
+                            if "function_name" in output or "function_names" in output:
                                 result["p_function"] += 1
 
-                    if "output" in action and action.get("output"):
-                        output = action["output"]
+                            if output.get("ranked_spans"):
+                                for ranked_span in output["ranked_spans"]:
+                                    if (
+                                        ranked_span["file_path"]
+                                        not in search_results_spans
+                                    ):
+                                        search_results_spans[
+                                            ranked_span["file_path"]
+                                        ] = []
+                                    search_results_spans[
+                                        ranked_span["file_path"]
+                                    ].append(ranked_span["span_id"])
 
-                        if "query" in output:
-                            result["p_query"] += 1
+                                if not result["found_in_search"]:
+                                    if found_in_expected_spans(
+                                        instance, search_results_spans
+                                    ) or found_in_alternative_spans(
+                                        instance, search_results_spans
+                                    ):
+                                        result["found_in_search"] = search_iterations
 
-                        if "file_pattern" in output:
-                            result["p_file"] += 1
+                                if not result["file_in_search"]:
+                                    missing_files = get_missing_files(
+                                        instance["expected_spans"],
+                                        search_results_spans,
+                                    )
+                                    if not missing_files:
+                                        result["file_in_search"] = search_iterations
 
-                        if "code_snippet" in output:
-                            result["p_code"] += 1
+                    if transition["name"] == "IdentifyCode":
+                        id_iterations += 1
 
-                        if "class_name" in output or "class_names" in output:
-                            result["p_class"] += 1
+                        action = transition["actions"][-1]
+                        if action.get("action"):
+                            identified_str = ""
+                            if action["action"].get("identified_spans"):
+                                for span in action["action"]["identified_spans"]:
+                                    identified_str += (
+                                        f"{span['file_path']}: {span['span_ids']} "
+                                    )
+                                    if span["file_path"] not in identified_spans:
+                                        identified_spans[span["file_path"]] = []
 
-                        if "function_name" in output or "function_names" in output:
-                            result["p_function"] += 1
+                                    transition_result[
+                                        "actual_spans"
+                                    ] += f"{span['file_path']}: {','.join(span['span_ids'])} "
+                                    for span_id in span["span_ids"]:
+                                        identified_spans[span["file_path"]].append(
+                                            span_id
+                                        )
+                            result["identified_spans"] = identified_str
 
-                        if output.get("ranked_spans"):
-                            for ranked_span in output["ranked_spans"]:
-                                if ranked_span["file_path"] not in search_results_spans:
-                                    search_results_spans[ranked_span["file_path"]] = []
-                                search_results_spans[ranked_span["file_path"]].append(
-                                    ranked_span["span_id"]
+                        if not result["file_identified"]:
+                            missing_files = get_missing_files(
+                                instance["expected_spans"],
+                                identified_spans,
+                            )
+                            if not missing_files:
+                                result["file_identified"] = id_iterations
+
+                        if result[
+                            "expected_identified"
+                        ] is None and found_in_expected_spans(
+                            instance, identified_spans
+                        ):
+                            result["expected_identified"] = id_iterations
+
+                        if result[
+                            "alt_identified"
+                        ] is None and found_in_alternative_spans(
+                            instance, identified_spans
+                        ):
+                            result["alt_identified"] = id_iterations
+
+                        if result.get("alt_identified") or result.get(
+                            "expected_identified"
+                        ):
+                            result["identified"] = min(
+                                result.get("alt_identified") or 1000,
+                                result.get("expected_identified") or 1000,
+                            )
+
+                    if transition["name"] == "PlanToCode":
+                        action = transition["actions"][-1]["action"]
+                        if action.get("action") == "review":
+                            result["review"] = True
+
+                        if "file_path" in action:
+                            if "span_id" not in action:
+                                print(
+                                    f"Span id missing in planning action in {instance['instance_id']}"
+                                )
+                            else:
+                                file_path = action["file_path"]
+                                if file_path not in planned_spans:
+                                    planned_spans[file_path] = []
+                                planned_spans[file_path].append(action["span_id"])
+                                transition_result["actual_spans"] = (
+                                    f"{file_path}: {action['span_id']} "
                                 )
 
-                            if not result["found_in_search"]:
-                                if found_in_expected_spans(
-                                    instance, search_results_spans
-                                ) or found_in_alternative_spans(
-                                    instance, search_results_spans
-                                ):
-                                    result["found_in_search"] = search_iterations
-
-                            if not result["file_in_search"]:
-                                missing_files = get_missing_files(
-                                    instance["expected_spans"],
-                                    search_results_spans,
-                                )
-                                if not missing_files:
-                                    result["file_in_search"] = search_iterations
-
-                if transition["name"] == "IdentifyCode":
-                    id_iterations += 1
-
-                    action = transition["actions"][-1]
-                    if action.get("action"):
-                        identified_str = ""
-                        if action["action"].get("identified_spans"):
-                            for span in action["action"]["identified_spans"]:
-                                identified_str += (
-                                    f"{span['file_path']}: {span['span_ids']} "
-                                )
-                                if span["file_path"] not in identified_spans:
-                                    identified_spans[span["file_path"]] = []
-
-                                transition_result[
-                                    "actual_spans"
-                                ] += f"{span['file_path']}: {','.join(span['span_ids'])} "
-                                for span_id in span["span_ids"]:
-                                    identified_spans[span["file_path"]].append(span_id)
-                        result["identified_spans"] = identified_str
-
-                    if not result["file_identified"]:
-                        missing_files = get_missing_files(
-                            instance["expected_spans"],
-                            identified_spans,
-                        )
-                        if not missing_files:
-                            result["file_identified"] = id_iterations
-
-                    if result[
-                        "expected_identified"
-                    ] is None and found_in_expected_spans(instance, identified_spans):
-                        result["expected_identified"] = id_iterations
-
-                    if result["alt_identified"] is None and found_in_alternative_spans(
-                        instance, identified_spans
-                    ):
-                        result["alt_identified"] = id_iterations
-
-                    if result.get("alt_identified") or result.get(
-                        "expected_identified"
-                    ):
-                        result["identified"] = min(
-                            result.get("alt_identified") or 1000,
-                            result.get("expected_identified") or 1000,
-                        )
-
-                if transition["name"] == "PlanToCode":
-                    action = transition["actions"][-1]["action"]
-                    if action.get("action") == "review":
-                        result["review"] = True
-
-                    if "file_path" in action:
-                        if "span_id" not in action:
-                            print(
-                                f"Span id missing in planning action in {instance['instance_id']}"
-                            )
-                        else:
-                            file_path = action["file_path"]
-                            if file_path not in planned_spans:
-                                planned_spans[file_path] = []
-                            planned_spans[file_path].append(action["span_id"])
-                            transition_result["actual_spans"] = (
-                                f"{file_path}: {action['span_id']} "
-                            )
-
-                    if not result.get("planned") and (
-                        found_in_expected_spans(
-                            instance,
-                            planned_spans,
-                        )
-                        or found_in_alternative_spans(instance, planned_spans)
-                    ):
-                        result["planned"] = True
-
-                if transition["name"] == "EditCode":
-                    result["edit_retries"] = len(transition["actions"]) - 1
-
-                    action = transition["actions"][-1]
-                    output = action.get("output", {})
-
-                    if output:
-                        edited = output.get("diff")
-
-                        if edited:
-                            result["has_diff"] = True
-
-                        for lint in output.get("verification_errors", []):
-                            lint_codes.add(lint["code"])
-
-                        if edited and "file_path" in transition["state"]:
-                            file_path = transition["state"]["file_path"]
-                            if file_path not in edited_spans:
-                                edited_spans[file_path] = []
-                            edited_spans[file_path].append(
-                                transition["state"]["span_id"]
-                            )
-                            transition_result["actual_spans"] = (
-                                f"{file_path}: {transition['state']['span_id']} "
-                            )
-
-                        if not result.get("edited") and (
+                        if not result.get("planned") and (
                             found_in_expected_spans(
                                 instance,
-                                edited_spans,
+                                planned_spans,
                             )
-                            or found_in_alternative_spans(instance, edited_spans)
+                            or found_in_alternative_spans(instance, planned_spans)
                         ):
-                            result["edited"] = True
+                            result["planned"] = True
 
-                transitions.append(transition_result)
+                    if transition["name"] == "EditCode":
+                        result["edit_retries"] = len(transition["actions"]) - 1
 
-            if result.get("alt_identified") or result.get("expected_identified"):
-                result["identified"] = min(
-                    result.get("alt_identified") or 1000,
-                    result.get("expected_identified") or 1000,
+                        action = transition["actions"][-1]
+                        output = action.get("output", {})
+
+                        if output:
+                            edited = output.get("diff")
+
+                            if edited:
+                                result["has_diff"] = True
+
+                            for lint in output.get("verification_errors", []):
+                                lint_codes.add(lint["code"])
+
+                            if edited and "file_path" in transition["state"]:
+                                file_path = transition["state"]["file_path"]
+                                if file_path not in edited_spans:
+                                    edited_spans[file_path] = []
+                                edited_spans[file_path].append(
+                                    transition["state"]["span_id"]
+                                )
+                                transition_result["actual_spans"] = (
+                                    f"{file_path}: {transition['state']['span_id']} "
+                                )
+
+                            if not result.get("edited") and (
+                                found_in_expected_spans(
+                                    instance,
+                                    edited_spans,
+                                )
+                                or found_in_alternative_spans(instance, edited_spans)
+                            ):
+                                result["edited"] = True
+
+                    transitions.append(transition_result)
+
+                if result.get("alt_identified") or result.get("expected_identified"):
+                    result["identified"] = min(
+                        result.get("alt_identified") or 1000,
+                        result.get("expected_identified") or 1000,
+                    )
+
+                result["expected_files"] = list(instance["expected_spans"].keys())
+                result["edited_files"] = list(edited_spans.keys())
+                result["identified_spans"] = sum(
+                    [len(v) for v in identified_spans.values()]
                 )
-
-            result["expected_files"] = list(instance["expected_spans"].keys())
-            result["edited_files"] = list(edited_spans.keys())
-            result["identified_spans"] = sum(
-                [len(v) for v in identified_spans.values()]
-            )
 
             result["lints"] = ",".join(lint_codes)
 
