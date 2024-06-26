@@ -2,7 +2,7 @@
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
 ## SWE-Bench
-I use the SWE-bench benchmark as a way to verify my ideas. 
+I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas and am currently sharing the sixth place on the SWE-Bench Lite Leaderboard. 
 
 ### GPT-4o
 Moatless Tools 0.0.1 has a solve rate of 24%, with each benchmark instance costing an average of $0.13 to solve with GPT-4o. Running the SWE Bench Lite dataset with 300 instances costs approx 40 dollars. 
