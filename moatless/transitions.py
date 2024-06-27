@@ -47,7 +47,7 @@ def code_transitions(
     max_prompt_file_tokens: Optional[int] = 16000,
     max_tokens_in_edit_prompt: Optional[int] = 500,
 ) -> Transitions:
-
+    state_params = state_params or {}
     state_params.setdefault(
         PlanToCode,
         {
@@ -58,7 +58,7 @@ def code_transitions(
 
     return Transitions(
         global_params=global_params or {},
-        state_params=state_params or {},
+        state_params=state_params,
         initial_state=PlanToCode,
         transitions=CODE_TRANSITIONS,
     )
