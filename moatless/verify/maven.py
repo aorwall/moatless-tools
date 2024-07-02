@@ -2,86 +2,106 @@ import logging
 import os
 import re
 import subprocess
+from typing import Optional
 
-from moatless.verify.types import VerificationError
+from moatless.repository import CodeFile
+from moatless.types import VerificationError
+from moatless.verify.verify import Verifier
 
 logger = logging.getLogger(__name__)
 
 
-def run_maven_and_parse_errors(repo_dir: str) -> list[VerificationError]:
-    try:
-        os.environ["JAVA_HOME"] = "/home/albert/.sdkman/candidates/java/17.0.8-tem"
+class MavenVerifier(Verifier):
 
-        result = subprocess.run(
-            "./mvnw clean compile",
-            cwd=repo_dir,
-            check=False,
-            text=True,
-            shell=True,
-            capture_output=True,
-        )
+    def __init__(self, repo_dir: str, run_tests: bool = True):
+        self.repo_dir = repo_dir
+        self.run_tests = run_tests
 
-        stdout = result.stdout
-        stderr = result.stderr
+    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+        try:
+            # os.environ["JAVA_HOME"] = "/home/albert/.sdkman/candidates/java/17.0.8-tem"
 
-        combined_output = stdout + "\n" + stderr
-        return parse_compilation_errors(combined_output)
+            version = "21-tem"
 
-    except subprocess.CalledProcessError as e:
-        logger.warning("Error running Maven command:")
-        logger.warning(e.stderr)
+            sdkman_cmd = (
+                f"source $HOME/.sdkman/bin/sdkman-init.sh && sdk use java {version}"
+            )
 
+            if self.run_tests:
+                mvn_cmd = "./mvnw clean test"
+            else:
+                mvn_cmd = "./mvnw clean compile test-compile"
 
-def parse_compilation_errors(output: str) -> list[VerificationError]:
-    error_pattern = re.compile(r"\[ERROR\] (.*?):\[(\d+),(\d+)\] (.*)")
-    matches = error_pattern.findall(output)
+            logger.info(
+                f"Running Maven command: {mvn_cmd} with Java version {version} in {self.repo_dir}"
+            )
+            result = subprocess.run(
+                f"{sdkman_cmd} && {mvn_cmd}",
+                cwd=self.repo_dir,
+                check=False,
+                text=True,
+                shell=True,
+                capture_output=True,
+            )
 
-    errors = []
-    for match in matches:
-        file_path, line, column, message = match
-        error = VerificationError(
-            code="COMPILATION_ERROR",
-            file_path=file_path.strip(),
-            message=message.strip(),
-            line=int(line),
-        )
-        errors.append(error)
-    return errors
+            stdout = result.stdout
+            stderr = result.stderr
 
+            combined_output = stdout + "\n" + stderr
+            compilation_errors = self.parse_compilation_errors(combined_output)
+            if compilation_errors or not self.run_tests:
+                return compilation_errors
 
-if __name__ == "__main__":
-    repo_dir = "/home/albert/repos/p24/system-configuration/modules/system-configuration-module"
+            test_failures = self.parse_test_failures(combined_output)
+            return test_failures
 
-    content = """[INFO] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/entity/OriginEntity.java: Recompile with -Xlint:deprecation for details.
-[INFO] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/domain/impl/rule/AbstractRuleConditional.java: Some input files use unchecked or unsafe operations.
-[INFO] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/domain/impl/rule/AbstractRuleConditional.java: Recompile with -Xlint:unchecked for details.
-[INFO] -------------------------------------------------------------
-[ERROR] COMPILATION ERROR : 
-[INFO] -------------------------------------------------------------
-[ERROR] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/domain/impl/CareProviderImplBuilder.java:[37,46] invalid method reference
-  cannot find symbol
-    symbol:   method getCountryCode()
-    location: interface se.alerisx.mhp.configuration.domain.Origin
-[ERROR] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/domain/impl/SystemOriginImpl.java:[154,5] method does not override or implement a method from a supertype
-[ERROR] /home/albert/repos/p24/system-configuration/modules/system-configuration-module/core/src/main/java/se/alerisx/mhp/configuration/domain/impl/OriginImpl.java:[486,26] cannot find symbol
-  symbol:   method getCountryCode()
-  location: variable parent of type se.alerisx.mhp.configuration.domain.Origin
-[INFO] 3 errors 
-[INFO] -------------------------------------------------------------
-[INFO] ------------------------------------------------------------------------
-[INFO] Reactor Summary for system-configuration 0.0.0-SNAPSHOT:
-[INFO] 
-[INFO] system-configuration ............................... SUCCESS [  2.283 s]
-[INFO] system-configuration-core .......................... FAILURE [ 16.507 s]
-[INFO] rule-engine ........................................ SKIPPED
-[INFO] system-configuration-object-storage ................ SKIPPED
-[INFO] system-configuration-cli ........................... SKIPPED
-"""
+        except subprocess.CalledProcessError as e:
+            logger.warning("Error running Maven command:")
+            logger.warning(e.stderr)
 
-    errors = parse_errors(content)
+    def parse_compilation_errors(self, output: str) -> list[VerificationError]:
+        error_pattern = re.compile(r"\[ERROR\] (.*?):\[(\d+),(\d+)\] (.*)")
+        matches = error_pattern.findall(output)
 
-    logging.basicConfig(level=logging.INFO)
-    # errors = run_maven_and_parse_errors(repo_dir)
-    print(errors)
-    for error in errors:
-        print(error)
+        errors = []
+        for match in matches:
+            file_path, line, column, message = match
+
+            file_path = file_path.replace(f"{self.repo_dir}/", "")
+            error = VerificationError(
+                code="COMPILATION_ERROR",
+                file_path=file_path.strip(),
+                message=message.strip(),
+                line=int(line),
+            )
+            errors.append(error)
+        return errors
+
+    def find_file(self, class_name: str) -> str:
+        for root, _, files in os.walk(self.repo_dir):
+            for file in files:
+                if file == f"{class_name}.java":
+                    absolute_path = os.path.join(root, file)
+                    return os.path.relpath(absolute_path, self.repo_dir)
+        return ""
+
+    def parse_test_failures(self, output: str) -> list[VerificationError]:
+        failure_pattern = re.compile(r"\[ERROR\]   (.*?):(\d+) (.*)")
+        matches = failure_pattern.findall(output)
+
+        errors = []
+        for match in matches:
+            test_case, line, message = match
+
+            class_name = test_case.split(".")[0]
+
+            file_path = self.find_file(class_name)
+
+            error = VerificationError(
+                code="TEST_FAILURE",
+                file_path=file_path.strip(),
+                message=message.strip(),
+                line=int(line),
+            )
+            errors.append(error)
+        return errors
