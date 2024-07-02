@@ -7,7 +7,7 @@ from moatless.index import IndexSettings
 from moatless.index.code_index import CodeIndex
 from moatless.repository import FileRepository, CodeFile
 from moatless.types import FileWithSpans
-from moatless.verify.lint import run_pylint
+from moatless.verify.lint import PylintVerifier
 from moatless.verify.maven import MavenVerifier
 from moatless.types import VerificationError
 
@@ -21,7 +21,7 @@ class Workspace:
     def __init__(
         self,
         file_repo: FileRepository,
-        verification_job: Optional[str] = None,
+        verification_job: Optional[str] = "pylint",
         code_index: Optional[CodeIndex] = None,
         max_file_context_tokens: int = 4000,
     ):
@@ -30,6 +30,8 @@ class Workspace:
 
         if verification_job == "maven":
             self.verifier = MavenVerifier(self.file_repo.path)
+        elif verification_job == "pylint":
+            self.verifier = PylintVerifier(self.file_repo.path)
         else:
             self.verifier = None
 
@@ -100,11 +102,8 @@ class Workspace:
         self.file_repo.save()
 
     def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
-        if self.verifier :
+        if self.verifier:
             return self.verifier.verify(file)
-        elif file and file.file_path.endswith(".py"):
-            return run_pylint(self.file_repo.path, file.file_path)
-        elif file:
-            logger.warning(f"Verification not supported for {file.file_path}")
 
+        logger.info("No verifier configured.")
         return []

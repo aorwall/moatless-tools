@@ -1,71 +1,50 @@
 import logging
 import tempfile
+from typing import Optional
 
 from astroid import MANAGER
 from pylint.lint import Run
-from pylint.message import Message
 from pylint.testutils import MinimalTestReporter
 
-from moatless.verify.types import VerificationError
+from moatless.repository import CodeFile
+from moatless.types import VerificationError
+from moatless.verify.verify import Verifier
 
 logger = logging.getLogger(__name__)
 
 
-def _run_pylint(content: str) -> list[Message]:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as temp_file:
-        temp_file.write(content.encode())
-        temp_file.flush()
-        temp_file_path = temp_file.name
+class PylintVerifier(Verifier):
 
-    results = Run([temp_file_path], exit=False, reporter=MinimalTestReporter())
-    return results.linter.reporter.messages
+    def __init__(self, repo_dir: str, run_tests: bool = True):
+        self.repo_dir = repo_dir
+        self.run_tests = run_tests
 
+    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+        if not file:
+            logger.warning("No file to verify")
+            return []
 
-def run_pylint(repo_path: str, file_path: str) -> list[VerificationError]:
-    try:
-        MANAGER.astroid_cache.clear()
-        results = Run(
-            [f"{repo_path}/{file_path}"], exit=False, reporter=MinimalTestReporter()
-        )
-
-        for msg in results.linter.reporter.messages:
-            logger.debug(f"Message: {msg.msg_id} {msg.msg} {msg.line}")
-
-        return [
-            VerificationError(
-                code=msg.msg_id,
-                file_path=file_path.replace(f"{repo_path}/", ""),
-                message=msg.msg,
-                line=msg.line,
+        try:
+            MANAGER.astroid_cache.clear()
+            results = Run(
+                [f"{self.repo_dir}/{file.file_path}"],
+                exit=False,
+                reporter=MinimalTestReporter(),
             )
-            for msg in results.linter.reporter.messages
-            if msg.msg_id[0] in ["E", "F"]
-        ]
-    except Exception as e:
-        logger.exception(f"Error running pylint")
-        return []
 
+            for msg in results.linter.reporter.messages:
+                logger.debug(f"Message: {msg.msg_id} {msg.msg} {msg.line}")
 
-def lint_updated_code(
-    file_path: str, original_content: str, updated_content: str
-) -> list[VerificationError]:
-    try:
-        original_messages = _run_pylint(original_content)
-        updated_messages = _run_pylint(updated_content)
-
-        original_message_set = set((msg.msg_id, msg.msg) for msg in original_messages)
-        updated_message_set = set((msg.msg_id, msg.msg) for msg in updated_messages)
-
-        added_messages_set = updated_message_set - original_message_set
-
-        added_messages = [
-            VerificationError(
-                code=msg.msg_id, file_path=file_path, message=msg.msg, line=msg.line
-            )
-            for msg in updated_messages
-            if (msg.msg_id, msg.msg) in added_messages_set
-        ]
-
-        return added_messages
-    except Exception as e:
-        raise e
+            return [
+                VerificationError(
+                    code=msg.msg_id,
+                    file_path=msg.file_path.replace(f"{self.repo_dir}/", ""),
+                    message=msg.msg,
+                    line=msg.line,
+                )
+                for msg in results.linter.reporter.messages
+                if msg.msg_id[0] in ["E", "F"]
+            ]
+        except Exception as e:
+            logger.exception(f"Error running pylint")
+            return []
