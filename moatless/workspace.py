@@ -3,12 +3,13 @@ from typing import Optional
 
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.file_context import FileContext
+from moatless.index import IndexSettings
 from moatless.index.code_index import CodeIndex
 from moatless.repository import FileRepository, CodeFile
 from moatless.types import FileWithSpans
 from moatless.verify.lint import run_pylint
-from moatless.verify.maven import run_maven_and_parse_errors
-from moatless.verify.types import VerificationError
+from moatless.verify.maven import MavenVerifier
+from moatless.types import VerificationError
 
 _parser = PythonParser()
 
@@ -20,34 +21,56 @@ class Workspace:
     def __init__(
         self,
         file_repo: FileRepository,
+        verification_job: Optional[str] = None,
         code_index: Optional[CodeIndex] = None,
         max_file_context_tokens: int = 4000,
     ):
         self.code_index = code_index
         self.file_repo = file_repo
+
+        if verification_job == "maven":
+            self.verifier = MavenVerifier(self.file_repo.path)
+        else:
+            self.verifier = None
+
         self._file_context = self.create_file_context(
             max_tokens=max_file_context_tokens
         )
+
 
     @classmethod
     def from_dirs(
         cls,
         repo_dir: str,
         index_dir: Optional[str] = None,
+        index_settings: Optional[IndexSettings] = None,
         max_results: int = 25,
         max_file_context_tokens=4000,
+        **kwargs
     ):
         file_repo = FileRepository(repo_dir)
         if index_dir:
-            code_index = CodeIndex.from_persist_dir(
-                index_dir, file_repo=file_repo, max_results=max_results
-            )
+            try:
+                code_index = CodeIndex.from_persist_dir(
+                    index_dir, file_repo=file_repo, max_results=max_results
+                )
+            except FileNotFoundError:
+                logger.info("No index found. Creating a new index.")
+                code_index = CodeIndex(
+                    file_repo=file_repo,
+                    settings=index_settings,
+                    max_results=max_results
+                )
+                code_index.run_ingestion()
+                code_index.persist(index_dir)
         else:
             code_index = None
+
         workspace = cls(
             file_repo=file_repo,
             code_index=code_index,
             max_file_context_tokens=max_file_context_tokens,
+            **kwargs
         )
         return workspace
 
@@ -76,11 +99,12 @@ class Workspace:
     def save(self):
         self.file_repo.save()
 
-    def verify(self, file: CodeFile) -> list[VerificationError]:
-        if file.file_path.endswith(".java"):
-            return run_maven_and_parse_errors(self.file_repo.path)
-        elif file.file_path.endswith(".py"):
+    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+        if self.verifier :
+            return self.verifier.verify(file)
+        elif file and file.file_path.endswith(".py"):
             return run_pylint(self.file_repo.path, file.file_path)
-        else:
+        elif file:
             logger.warning(f"Verification not supported for {file.file_path}")
-            return []
+
+        return []
