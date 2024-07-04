@@ -12,7 +12,7 @@ from moatless.types import (
     AssistantMessage,
     UserMessage,
 )
-from moatless.verify.types import VerificationError
+from moatless.types import VerificationError
 
 logger = logging.getLogger(__name__)
 
