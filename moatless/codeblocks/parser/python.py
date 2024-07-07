@@ -4,16 +4,16 @@ import tree_sitter_python as tspython
 from tree_sitter import Language
 
 from moatless.codeblocks.codeblocks import (
-    CodeBlockType,
     CodeBlock,
+    CodeBlockType,
     ReferenceScope,
     RelationshipType,
     ValidationError,
 )
 from moatless.codeblocks.parser.parser import (
     CodeParser,
-    commented_out_keywords,
     NodeMatch,
+    commented_out_keywords,
 )
 
 child_block_types = ["ERROR", "block"]

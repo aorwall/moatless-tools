@@ -15,7 +15,7 @@ def find_code_snippet_in_files(repo_dir: str, code_snippet: str):
             if not file_path.endswith(".java"):
                 continue
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     for line_number, line in enumerate(f, start=1):
                         if code_snippet.lower() in line.lower():
                             relative_path = os.path.relpath(file_path, repo_dir)

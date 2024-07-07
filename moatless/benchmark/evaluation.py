@@ -7,28 +7,28 @@ import subprocess
 import time
 import traceback
 from collections import defaultdict
-from typing import Optional, Tuple
 
 import instructor
 import litellm
 import pandas as pd
 from tqdm.auto import tqdm
 
-from moatless import Workspace, FileRepository
 from moatless.benchmark.swebench import (
-    setup_swebench_repo,
-    get_repo_dir_name,
-    found_in_expected_spans,
     found_in_alternative_spans,
-    sorted_instances,
+    found_in_expected_spans,
+    get_repo_dir_name,
     load_instance,
+    setup_swebench_repo,
+    sorted_instances,
 )
 from moatless.benchmark.utils import (
-    trace_metadata,
     get_missing_files,
+    trace_metadata,
 )
 from moatless.file_context import FileContext
-from moatless.loop import Transitions, AgenticLoop
+from moatless.loop import AgenticLoop, Transitions
+from moatless.repository import FileRepository
+from moatless.workspace import Workspace
 
 logger = logging.getLogger("Evaluator")
 
@@ -75,12 +75,12 @@ class Evaluation:
         evaluations_dir: str,
         evaluation_name: str,
         transitions: Transitions,
-        instructor_mode: Optional[instructor.Mode] = None,
+        instructor_mode: instructor.Mode | None = None,
         max_cost: float = 0.5,
         max_file_context_tokens: int = 16000,
-        litellm_callback: Optional[str] = None,
-        previous_trajectory_dir: Optional[str] = None,
-        retry_state: Optional[str] = None,
+        litellm_callback: str | None = None,
+        previous_trajectory_dir: str | None = None,
+        retry_state: str | None = None,
         num_workers: int = 1,
         detailed_report: bool = False,
     ):
@@ -121,21 +121,21 @@ class Evaluation:
         # TODO: Run swe-bench-docker after the prediction is generated
         result_file = f"{self.evaluation_dir}/result.json"
         if os.path.exists(result_file):
-            with open(os.path.join(result_file), "r") as f:
+            with open(os.path.join(result_file)) as f:
                 self.report = json.load(f)
         else:
             self.report = {"resolved": []}
 
     def run_evaluation_with_moatless_dataset(
         self,
-        resolved_by: Optional[int] = None,
+        resolved_by: int | None = None,
         use_test_subset: bool = False,
-        instance_ids: Optional[list[str]] = None,
+        instance_ids: list[str] | None = None,
     ):
         file_path = os.path.join(
             os.path.dirname(__file__), "swebench_lite_all_evaluations.json"
         )
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             instances = json.load(f)
 
         instances = sorted(instances, key=lambda x: len(x["resolved_by"]), reverse=True)
@@ -167,7 +167,7 @@ class Evaluation:
         self,
         dataset: str = "princeton-nlp/SWE-bench_Lite",
         split="test",
-        instance_ids: Optional[list[str]] = None,
+        instance_ids: list[str] | None = None,
     ):
         instances = sorted_instances(dataset, split)
 
@@ -470,7 +470,7 @@ class Evaluation:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
 
-    def to_result(self, instance: dict, trajectory: dict) -> Tuple[list, list]:
+    def to_result(self, instance: dict, trajectory: dict) -> tuple[list, list]:
         info = trajectory["info"]
 
         resolved = info.get("instance_id", "") in self.report["resolved"]
@@ -774,9 +774,9 @@ class Evaluation:
 
         return result, transitions
 
-    def read_trajectory(self, path) -> Optional[dict]:
+    def read_trajectory(self, path) -> dict | None:
         if os.path.exists(path):
-            with open(path, "r") as f:
+            with open(path) as f:
                 return json.load(f)
         else:
             return None

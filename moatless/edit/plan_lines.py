@@ -1,22 +1,21 @@
 import logging
-from typing import Type, Optional, List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup
 from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
 from moatless.edit.prompt import (
+    CODER_FINAL_SYSTEM_PROMPT,
     CODER_SYSTEM_PROMPT,
     SELECT_LINES_SYSTEM_PROMPT,
-    CODER_FINAL_SYSTEM_PROMPT,
 )
 from moatless.state import AgenticState
 from moatless.types import (
     ActionRequest,
     ActionResponse,
+    AssistantMessage,
     Message,
     UserMessage,
-    AssistantMessage,
 )
 from moatless.utils.tokenizer import count_tokens
 from moatless.verify.lint import VerificationError
@@ -31,23 +30,23 @@ class ApplyChange(ActionRequest):
 
     thoughts: str = Field(..., description="Your thoughts on the code change.")
 
-    instructions: Optional[str] = Field(
+    instructions: str | None = Field(
         None, description="Instructions to do the code change."
     )
-    file_path: Optional[str] = Field(
+    file_path: str | None = Field(
         None, description="The file path of the code to be updated."
     )
-    start_line: Optional[int] = Field(
+    start_line: int | None = Field(
         None, description="The start line of the code to be updated."
     )
-    end_line: Optional[int] = Field(
+    end_line: int | None = Field(
         None, description="The end line of the code to be updated."
     )
 
-    reject: Optional[str] = Field(
+    reject: str | None = Field(
         ..., description="Reject the request and explain why."
     )
-    finish: Optional[str] = Field(
+    finish: str | None = Field(
         None, description="Finish the request and explain why"
     )
 
@@ -58,19 +57,19 @@ class ApplyChange(ActionRequest):
 
 class PlanToCodeWithLines(AgenticState):
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: Optional[str] = Field(
+    diff: str | None = Field(
         None,
         description="The diff of a previous code change.",
     )
 
     # TODO: Move to a new state handling lint problems
-    verification_errors: Optional[List[VerificationError]] = Field(
+    verification_errors: list[VerificationError] | None = Field(
         None,
         description="The verification errors from the previous code change.",
     )
@@ -87,9 +86,9 @@ class PlanToCodeWithLines(AgenticState):
 
     def __init__(
         self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        lint_messages: Optional[List[VerificationError]] = None,
+        message: str | None = None,
+        diff: str | None = None,
+        lint_messages: list[VerificationError] | None = None,
         max_iterations: int = 5,
         **data,
     ):
@@ -137,7 +136,7 @@ class PlanToCodeWithLines(AgenticState):
             "You must either provide an apply_change action or finish."
         )
 
-    def action_type(self) -> Type[ApplyChange]:
+    def action_type(self) -> type[ApplyChange]:
         return ApplyChange
 
     def _request_for_change(self, rfc: ApplyChange) -> ActionResponse:

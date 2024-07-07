@@ -68,7 +68,7 @@ def generate_report():
     )
 
     for run_name, prediction_file, result_file in runs:
-        with open(result_file, "r") as file:
+        with open(result_file) as file:
             final_report = json.load(file)
 
         resolved_tasks = final_report["resolved"]

@@ -1,16 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Optional, List, Type, Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from moatless import Workspace, FileRepository
 from moatless.file_context import FileContext
+from moatless.repository import FileRepository
 from moatless.types import (
     ActionRequest,
     ActionResponse,
     FileWithSpans,
     Message,
 )
+from moatless.workspace import Workspace
 
 
 class AgenticState(ABC, BaseModel):
@@ -23,7 +24,7 @@ class AgenticState(ABC, BaseModel):
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
     )
-    max_iterations: Optional[int] = Field(
+    max_iterations: int | None = Field(
         None, description="The maximum number of transitions to this state."
     )
 
@@ -66,7 +67,7 @@ class AgenticState(ABC, BaseModel):
         return self.workspace.file_context
 
     def create_file_context(
-        self, files: List[FileWithSpans] = [], **kwargs
+        self, files: list[FileWithSpans] = [], **kwargs
     ) -> FileContext:
         return self.workspace.create_file_context(files, **kwargs)
 
@@ -104,14 +105,14 @@ class AgenticState(ABC, BaseModel):
     def system_prompt(self) -> str:
         return ""
 
-    def action_type(self) -> Optional[Type[ActionRequest]]:
+    def action_type(self) -> type[ActionRequest] | None:
         """
         The type of the action to expect in the completion response.
         If not set a content string is expected.
         """
         raise NotImplementedError
 
-    def stop_words(self) -> Optional[List[str]]:
+    def stop_words(self) -> list[str] | None:
         return None
 
 
@@ -125,11 +126,11 @@ class NoopState(AgenticState):
 
 
 class Finished(NoopState):
-    message: Optional[str]
+    message: str | None
 
-    output: Optional[dict[str, Any]] = None
+    output: dict[str, Any] | None = None
 
-    def __init__(self, message: Optional[str] = None, **kwargs):
+    def __init__(self, message: str | None = None, **kwargs):
         super().__init__(message=message)
         self.output = kwargs
 

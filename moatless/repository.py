@@ -3,12 +3,11 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from pydantic import BaseModel
 
 from moatless.codeblocks import get_parser_by_path
-from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
+from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
 
@@ -19,21 +18,21 @@ logger = logging.getLogger(__name__)
 class UpdateResult:
     file_path: str
     updated: bool
-    diff: Optional[str] = None
-    error: Optional[str] = None
-    new_span_ids: Optional[set[str]] = None
+    diff: str | None = None
+    error: str | None = None
+    new_span_ids: set[str] | None = None
 
 
 class CodeFile(BaseModel):
     file_path: str
     content: str
-    module: Optional[Module] = None
+    module: Module | None = None
 
     dirty: bool = False
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
-        with open(os.path.join(repo_path, file_path), "r") as f:
+        with open(os.path.join(repo_path, file_path)) as f:
             parser = get_parser_by_path(file_path)
             if parser:
                 content = f.read()
@@ -116,7 +115,7 @@ class CodeFile(BaseModel):
                             )
                             if (
                                 parent_block
-                                and not parent_block.type == CodeBlockType.MODULE
+                                and parent_block.type != CodeBlockType.MODULE
                             ):
                                 error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
                             else:
@@ -199,7 +198,7 @@ class FileRepository:
                 logger.warning(f"{full_file_path} is not a file")
                 return None
 
-            with open(full_file_path, "r") as f:
+            with open(full_file_path) as f:
                 parser = get_parser_by_path(file_path)
                 if parser:
                     content = f.read()
@@ -212,7 +211,7 @@ class FileRepository:
                 self._files[file_path] = file
         return file
 
-    def save_file(self, file_path: str, updated_content: Optional[str] = None):
+    def save_file(self, file_path: str, updated_content: str | None = None):
         file = self._files.get(file_path)
         full_file_path = os.path.join(self._repo_path, file_path)
         with open(full_file_path, "w") as f:
@@ -282,7 +281,7 @@ def remove_duplicate_lines(replacement_lines, original_lines):
 
 def do_diff(
     file_path: str, original_content: str, updated_content: str
-) -> Optional[str]:
+) -> str | None:
     return "".join(
         difflib.unified_diff(
             original_content.strip().splitlines(True),

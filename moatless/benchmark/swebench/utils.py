@@ -4,9 +4,9 @@ import os
 from datasets import load_dataset
 
 from moatless.benchmark.utils import (
-    get_missing_spans,
     file_spans_to_dict,
     get_missing_files,
+    get_missing_spans,
 )
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository

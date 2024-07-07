@@ -1,20 +1,21 @@
 import re
 import time
-from typing import Sequence, List, Optional, Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from llama_index.core.bridge.pydantic import Field
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSplitter
 from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode
-from llama_index.core.utils import get_tqdm_iterable, get_tokenizer
+from llama_index.core.utils import get_tokenizer, get_tqdm_iterable
 
-from moatless.codeblocks.codeblocks import PathTree, CodeBlock, CodeBlockType
+from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, PathTree
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.index.code_node import CodeNode
 from moatless.index.settings import CommentStrategy
 
-CodeBlockChunk = List[CodeBlock]
+CodeBlockChunk = list[CodeBlock]
 
 
 def count_chunk_tokens(chunk: CodeBlockChunk) -> int:
@@ -47,7 +48,7 @@ class EpicSplitter(NodeParser):
         default=True, description="Whether or not to include non code files."
     )
 
-    non_code_file_extensions: List[str] = Field(
+    non_code_file_extensions: list[str] = Field(
         default=["md", "txt"],
         description="File extensions to consider as non code files.",
     )
@@ -74,7 +75,7 @@ class EpicSplitter(NodeParser):
 
     repo_path: str = Field(default=None, description="Path to the repository.")
 
-    index_callback: Optional[Callable] = Field(
+    index_callback: Callable | None = Field(
         default=None, description="Callback to call when indexing a code block."
     )
 
@@ -89,15 +90,15 @@ class EpicSplitter(NodeParser):
         max_chunks: int = 100,
         include_metadata: bool = True,
         include_prev_next_rel: bool = True,
-        text_splitter: Optional[TextSplitter] = None,
-        index_callback: Optional[Callable[[CodeBlock], None]] = None,
-        repo_path: Optional[str] = None,
+        text_splitter: TextSplitter | None = None,
+        index_callback: Callable[[CodeBlock], None] | None = None,
+        repo_path: str | None = None,
         comment_strategy: CommentStrategy = CommentStrategy.ASSOCIATE,
         # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
-        tokenizer: Optional[Callable] = None,
-        non_code_file_extensions: Optional[List[str]] = ["md", "txt"],
-        callback_manager: Optional[CallbackManager] = None,
+        tokenizer: Callable | None = None,
+        non_code_file_extensions: list[str] | None = ["md", "txt"],
+        callback_manager: CallbackManager | None = None,
     ) -> None:
         callback_manager = callback_manager or CallbackManager([])
 
@@ -130,10 +131,10 @@ class EpicSplitter(NodeParser):
         nodes: Sequence[BaseNode],
         show_progress: bool = False,
         **kwargs: Any,
-    ) -> List[BaseNode]:
+    ) -> list[BaseNode]:
         nodes_with_progress = get_tqdm_iterable(nodes, show_progress, "Parsing nodes")
 
-        all_nodes: List[BaseNode] = []
+        all_nodes: list[BaseNode] = []
 
         for node in nodes_with_progress:
             file_path = node.metadata.get("file_path")
@@ -184,8 +185,8 @@ class EpicSplitter(NodeParser):
         return all_nodes
 
     def _chunk_contents(
-        self, codeblock: Optional[CodeBlock] = None, file_path: Optional[str] = None
-    ) -> List[CodeBlockChunk]:
+        self, codeblock: CodeBlock | None = None, file_path: str | None = None
+    ) -> list[CodeBlockChunk]:
         tokens = codeblock.sum_tokens()
         if tokens == 0:
             logger.debug(f"Skipping file {file_path} because it has no tokens.")
@@ -219,9 +220,9 @@ class EpicSplitter(NodeParser):
         return self._chunk_block(codeblock, file_path)
 
     def _chunk_block(
-        self, codeblock: CodeBlock, file_path: Optional[str] = None
+        self, codeblock: CodeBlock, file_path: str | None = None
     ) -> list[CodeBlockChunk]:
-        chunks: List[CodeBlockChunk] = []
+        chunks: list[CodeBlockChunk] = []
         current_chunk = []
         comment_chunk = []
 
@@ -315,7 +316,7 @@ class EpicSplitter(NodeParser):
 
         return self._merge_chunks(chunks)
 
-    def _merge_chunks(self, chunks: List[CodeBlockChunk]) -> List[CodeBlockChunk]:
+    def _merge_chunks(self, chunks: list[CodeBlockChunk]) -> list[CodeBlockChunk]:
         while True:
             merged_chunks = []
             should_continue = False
@@ -382,7 +383,7 @@ class EpicSplitter(NodeParser):
 
         return chunks
 
-    def _create_path_tree(cls, blocks: List[CodeBlock]) -> PathTree:
+    def _create_path_tree(cls, blocks: list[CodeBlock]) -> PathTree:
         path_tree = PathTree()
         for block in blocks:
             path_tree.add_to_tree(block.full_path())
@@ -449,7 +450,7 @@ class EpicSplitter(NodeParser):
 
         return contents
 
-    def _contains_block_paths(self, codeblock: CodeBlock, block_paths: List[List[str]]):
+    def _contains_block_paths(self, codeblock: CodeBlock, block_paths: list[list[str]]):
         return [
             block_path
             for block_path in block_paths
@@ -457,8 +458,8 @@ class EpicSplitter(NodeParser):
         ]
 
     def _create_node(
-        self, content: str, node: BaseNode, chunk: Optional[CodeBlockChunk] = None
-    ) -> Optional[TextNode]:
+        self, content: str, node: BaseNode, chunk: CodeBlockChunk | None = None
+    ) -> TextNode | None:
         metadata = {}
         metadata.update(node.metadata)
 

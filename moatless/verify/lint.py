@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from astroid import MANAGER
 from pylint.lint import Run
@@ -18,7 +17,7 @@ class PylintVerifier(Verifier):
         self.repo_dir = repo_dir
         self.run_tests = run_tests
 
-    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+    def verify(self, file: CodeFile | None = None) -> list[VerificationError]:
         if not file:
             logger.warning("No file to verify")
             return []

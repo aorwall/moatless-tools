@@ -48,6 +48,6 @@ class IndexSettings(BaseModel):
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str):
-        with open(os.path.join(persist_dir, "settings.json"), "r") as f:
+        with open(os.path.join(persist_dir, "settings.json")) as f:
             data = json.load(f)
         return cls(**data)

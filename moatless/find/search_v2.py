@@ -1,6 +1,5 @@
 import fnmatch
 import logging
-from typing import Optional, Type, List
 
 import instructor
 from pydantic import BaseModel, Field
@@ -10,9 +9,9 @@ from moatless.index.types import SearchCodeHit
 from moatless.state import ActionResponse, AgenticState
 from moatless.types import (
     ActionRequest,
+    AssistantMessage,
     Message,
     UserMessage,
-    AssistantMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,17 +230,17 @@ IGNORE_TEST_PROMPT = (
 
 
 class SearchRequest(BaseModel):
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         default=None,
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    query: Optional[str] = Field(
+    query: str | None = Field(
         default=None,
         description="A semantic similarity search query. Use natural language to describe what you are looking for.",
     )
 
-    code_snippet: Optional[str] = Field(
+    code_snippet: str | None = Field(
         default=None,
         description="Specific code snippet to that should be exactly matched.",
     )
@@ -272,12 +271,12 @@ class Search(ActionRequest):
         description="Scratch pad for the search. Use this to write down your thoughts on how to approach the search."
     )
 
-    search_requests: List[SearchRequest] = Field(
+    search_requests: list[SearchRequest] = Field(
         default=[],
         description="List of search requests.",
     )
 
-    complete: Optional[bool] = Field(
+    complete: bool | None = Field(
         default=False, description="Set to true when the search is complete."
     )
 
@@ -287,7 +286,7 @@ class Search(ActionRequest):
 
 class SearchCode(AgenticState):
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Message to the search",
     )
@@ -311,7 +310,7 @@ class SearchCode(AgenticState):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         max_search_results: int = 25,
         max_retries_with_any_file_context: int = 3,
         provide_initial_context: bool = True,
@@ -356,7 +355,7 @@ class SearchCode(AgenticState):
                     return self._retry("It's not possible to search for test files.")
 
         message = ""
-        search_result: List[SearchCodeHit] = []
+        search_result: list[SearchCodeHit] = []
         for search_request in action.search_requests:
             search_response = self.workspace.code_index.search(
                 file_pattern=search_request.file_pattern,
@@ -408,7 +407,7 @@ class SearchCode(AgenticState):
         else:
             return ActionResponse.retry(message)
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return Search
 
     def system_prompt(self) -> str:

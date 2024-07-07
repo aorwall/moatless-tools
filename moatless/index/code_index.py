@@ -5,20 +5,19 @@ import mimetypes
 import os
 import shutil
 import tempfile
-from typing import List, Dict, Optional
 
 import requests
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.base.embeddings.base import BaseEmbedding
-from llama_index.core.ingestion import IngestionPipeline, DocstoreStrategy
+from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
 from llama_index.core.storage import docstore
 from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
 from llama_index.core.vector_stores.types import (
     BasePydanticVectorStore,
-    VectorStoreQuery,
-    MetadataFilters,
-    MetadataFilter,
     FilterCondition,
+    MetadataFilter,
+    MetadataFilters,
+    VectorStoreQuery,
 )
 from rapidfuzz import fuzz
 
@@ -29,8 +28,8 @@ from moatless.index.settings import IndexSettings
 from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
-    SearchCodeResponse,
     SearchCodeHit,
+    SearchCodeResponse,
 )
 from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
@@ -56,12 +55,12 @@ class CodeIndex:
     def __init__(
         self,
         file_repo: FileRepository,
-        vector_store: Optional[BasePydanticVectorStore] = None,
-        docstore: Optional[DocumentStore] = None,
-        embed_model: Optional[BaseEmbedding] = None,
-        blocks_by_class_name: Optional[dict] = None,
-        blocks_by_function_name: Optional[dict] = None,
-        settings: Optional[IndexSettings] = None,
+        vector_store: BasePydanticVectorStore | None = None,
+        docstore: DocumentStore | None = None,
+        embed_model: BaseEmbedding | None = None,
+        blocks_by_class_name: dict | None = None,
+        blocks_by_function_name: dict | None = None,
+        settings: IndexSettings | None = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
@@ -89,14 +88,14 @@ class CodeIndex:
         settings = IndexSettings.from_persist_dir(persist_dir)
 
         if os.path.exists(os.path.join(persist_dir, "blocks_by_class_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "r") as f:
+            with open(os.path.join(persist_dir, "blocks_by_class_name.json")) as f:
                 blocks_by_class_name = json.load(f)
         else:
             blocks_by_class_name = {}
 
         if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
             with open(
-                os.path.join(persist_dir, "blocks_by_function_name.json"), "r"
+                os.path.join(persist_dir, "blocks_by_function_name.json")
             ) as f:
                 blocks_by_function_name = json.load(f)
         else:
@@ -154,11 +153,11 @@ class CodeIndex:
 
     def search(
         self,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_names: List[str] = None,
-        function_names: List[str] = None,
-        file_pattern: Optional[str] = None,
+        query: str | None = None,
+        code_snippet: str | None = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
         max_results: int = 25,
     ) -> SearchCodeResponse:
 
@@ -204,16 +203,16 @@ class CodeIndex:
 
     def semantic_search(
         self,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_names: List[str] = None,
-        function_names: List[str] = None,
-        file_pattern: Optional[str] = None,
+        query: str | None = None,
+        code_snippet: str | None = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
         category: str = "implementation",
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
-        max_spans_per_file: Optional[int] = None,
+        max_spans_per_file: int | None = None,
         exact_match_if_possible: bool = False,
     ) -> SearchCodeResponse:
 
@@ -366,9 +365,9 @@ class CodeIndex:
 
     def find_by_name(
         self,
-        class_names: List[str] = None,
-        function_names: List[str] = None,
-        file_pattern: Optional[str] = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
         include_functions_in_class: bool = True,
         category: str = "implementation",
     ) -> SearchCodeResponse:
@@ -538,8 +537,8 @@ class CodeIndex:
         query: str = "",
         exact_query_match: bool = False,
         category: str = "implementation",
-        file_pattern: Optional[str] = None,
-        exact_content_match: Optional[str] = None,
+        file_pattern: str | None = None,
+        exact_content_match: str | None = None,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -596,7 +595,7 @@ class CodeIndex:
 
         search_results = []
 
-        for node_id, distance in zip(result.ids, result.similarities):
+        for node_id, distance in zip(result.ids, result.similarities, strict=False):
             node_doc = self._docstore.get_document(node_id, raise_error=False)
             if not node_doc:
                 ignored_removed_snippets += 1
@@ -653,15 +652,15 @@ class CodeIndex:
 
     def run_ingestion(
         self,
-        repo_path: Optional[str] = None,
-        input_files: Optional[list[str]] = None,
-        num_workers: Optional[int] = None,
+        repo_path: str | None = None,
+        input_files: list[str] | None = None,
+        num_workers: int | None = None,
     ):
 
         repo_path = repo_path or self._file_repo.path
 
         # Only extract file name and type to not trigger unnecessary embedding jobs
-        def file_metadata_func(file_path: str) -> Dict:
+        def file_metadata_func(file_path: str) -> dict:
             file_path = file_path.replace(repo_path, "")
             if file_path.startswith("/"):
                 file_path = file_path[1:]
@@ -775,7 +774,7 @@ class CodeIndex:
             f.write(json.dumps(self._blocks_by_function_name, indent=2))
 
 
-def _rerank_files(file_paths: List[str], file_pattern: str):
+def _rerank_files(file_paths: list[str], file_pattern: str):
     if len(file_paths) < 2:
         return file_paths
 

@@ -173,7 +173,7 @@ def get_missing_files(
     actual_files_with_spans: dict[str, list[str]],
 ) -> list[str]:
     misses = list(expected_files_with_spans.keys())
-    for actual_file in actual_files_with_spans.keys():
+    for actual_file in actual_files_with_spans:
         if actual_file in misses:
             misses.remove(actual_file)
     return misses

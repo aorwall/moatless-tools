@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import subprocess
-from typing import Optional
 
 from moatless.repository import CodeFile
 from moatless.types import VerificationError
@@ -17,7 +16,7 @@ class MavenVerifier(Verifier):
         self.repo_dir = repo_dir
         self.run_tests = run_tests
 
-    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+    def verify(self, file: CodeFile | None = None) -> list[VerificationError]:
         try:
             # os.environ["JAVA_HOME"] = "/home/albert/.sdkman/candidates/java/17.0.8-tem"
 

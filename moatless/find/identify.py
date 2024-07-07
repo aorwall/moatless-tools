@@ -1,15 +1,14 @@
 import fnmatch
 import logging
-from typing import List, Optional, Type
 
 from pydantic import BaseModel, Field
 
 from moatless.file_context import RankedFileSpan
 from moatless.state import AgenticState
 from moatless.types import (
-    FileWithSpans,
     ActionRequest,
     ActionResponse,
+    FileWithSpans,
     Message,
     UserMessage,
 )
@@ -58,7 +57,7 @@ class Identify(ActionRequest):
         description="Your thoughts on how to identify the relevant code and why."
     )
 
-    identified_spans: Optional[List[FileWithSpans]] = Field(
+    identified_spans: list[FileWithSpans] | None = Field(
         default=None,
         description="Files and code spans in the search results identified as relevant to the reported issue.",
     )
@@ -66,25 +65,25 @@ class Identify(ActionRequest):
 
 class IdentifyCode(AgenticState):
 
-    file_pattern: Optional[str]
-    query: Optional[str]
-    code_snippet: Optional[str]
-    class_name: Optional[str]
-    function_name: Optional[str]
+    file_pattern: str | None
+    query: str | None
+    code_snippet: str | None
+    class_name: str | None
+    function_name: str | None
 
-    ranked_spans: Optional[List[RankedFileSpan]]
+    ranked_spans: list[RankedFileSpan] | None
 
     expand_context: bool
     max_prompt_file_tokens: int = 4000
 
     def __init__(
         self,
-        ranked_spans: List[RankedFileSpan],
-        file_pattern: Optional[str] = None,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_name: Optional[str] = None,
-        function_name: Optional[str] = None,
+        ranked_spans: list[RankedFileSpan],
+        file_pattern: str | None = None,
+        query: str | None = None,
+        code_snippet: str | None = None,
+        class_name: str | None = None,
+        function_name: str | None = None,
         expand_context: bool = True,
         max_prompt_file_tokens: int = 4000,
         **data,
@@ -138,7 +137,7 @@ class IdentifyCode(AgenticState):
             output={"message": message},
         )
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return Identify
 
     def system_prompt(self) -> str:
