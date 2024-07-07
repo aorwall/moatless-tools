@@ -285,8 +285,8 @@ class EditCode(AgenticState):
         else:
             logger.info(f"No changes found in {self.file_path}.")
             response_message = (
-                f"The code in the replace tag is the same as in the search. Use the reject function if you "
-                f"can't do any changes and want to reject the instructions."
+                "The code in the replace tag is the same as in the search. Use the reject function if you "
+                "can't do any changes and want to reject the instructions."
             )
 
             self._retry += 1

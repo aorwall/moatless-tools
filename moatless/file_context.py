@@ -176,8 +176,7 @@ class ContextFile(BaseModel):
                     # Count all tokens in child block if it's not a structure (function or class) or a 'compound' (like an 'if' or 'for' clause)
                     if (
                         child.type.group == CodeBlockTypeGroup.IMPLEMENTATION
-                        and not child.type
-                        in [CodeBlockType.COMPOUND, CodeBlockType.DEPENDENT_CLAUSE]
+                        and child.type not in [CodeBlockType.COMPOUND, CodeBlockType.DEPENDENT_CLAUSE]
                     ):
                         child_tokens = child.sum_tokens()
                     else:

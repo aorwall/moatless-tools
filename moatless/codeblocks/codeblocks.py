@@ -779,11 +779,11 @@ class CodeBlock(BaseModel):
                 CodeBlockType.SPACE,
             ]
         ):
-            contents += f"\n.    " if show_line_numbers else "\n"
+            contents += "\n.    " if show_line_numbers else "\n"
             contents += child.create_commented_out_block(
                 outcomment_code_comment
             ).to_string()
-            contents += f"\n"
+            contents += "\n"
 
         return contents
 

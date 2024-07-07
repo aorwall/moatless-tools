@@ -1,5 +1,4 @@
 import logging
-import tempfile
 from typing import Optional
 
 from astroid import MANAGER
@@ -45,6 +44,6 @@ class PylintVerifier(Verifier):
                 for msg in results.linter.reporter.messages
                 if msg.msg_id[0] in ["E", "F"]
             ]
-        except Exception as e:
-            logger.exception(f"Error running pylint")
+        except Exception:
+            logger.exception("Error running pylint")
             return []

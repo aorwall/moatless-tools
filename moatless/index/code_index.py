@@ -607,7 +607,7 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            if include_files and not node_doc.metadata["file_path"] in include_files:
+            if include_files and node_doc.metadata["file_path"] not in include_files:
                 filtered_out_snippets += 1
                 continue
 

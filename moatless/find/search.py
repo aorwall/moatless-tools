@@ -425,7 +425,7 @@ class SearchCode(AgenticState):
             and self.file_context.files
         ):
             logger.info(
-                f"Exceeded max retries, will finish as there are identified files in the file context. Transitioning to finish."
+                "Exceeded max retries, will finish as there are identified files in the file context. Transitioning to finish."
             )
             return ActionResponse.transition("finish")
         else:

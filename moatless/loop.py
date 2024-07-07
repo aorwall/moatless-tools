@@ -395,7 +395,7 @@ class AgenticLoop:
                 trigger=response.trigger,
                 data=response.output,
             )
-        except Exception as e:
+        except Exception:
             logger.error(
                 f"Failed to initiate next state with trigger {response.trigger} and output {response.output}"
             )
@@ -462,7 +462,7 @@ class AgenticLoop:
                     input_tokens,
                     output_tokens,
                 )
-            except Exception as e:
+            except Exception:
                 logger.error(
                     f"Failed to parse {action} to {self.state.action_type().__name__} in state {self.state.name}"
                 )

@@ -246,7 +246,7 @@ class Evaluation:
         try:
             response = loop.run(problem_statement)
             info["status"] = response.status
-        except Exception as e:
+        except Exception:
             info["error"] = traceback.format_exc()
             info["status"] = "error"
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
@@ -284,7 +284,7 @@ class Evaluation:
                 "w",
             ) as file:
                 file.write(md_report)
-        except Exception as e:
+        except Exception:
             logging.exception(
                 f"Error in generating report for {instance['instance_id']} "
             )
@@ -316,7 +316,7 @@ class Evaluation:
                     "w",
                 ) as file:
                     file.write(md_report)
-            except Exception as e:
+            except Exception:
                 logging.exception(
                     f"Error in generating report for {instance['instance_id']} "
                 )
@@ -368,9 +368,9 @@ class Evaluation:
                         print("Error in processing repo group")
                         error += 1
                         continue
-                except Exception as e:
+                except Exception:
                     error += 1
-                    logger.exception(f"Error in processing repo group")
+                    logger.exception("Error in processing repo group")
                     continue
 
                 results.extend(group_results)
@@ -802,20 +802,20 @@ def generate_md_report(trajectory: dict, instance: dict):
     info = trajectory["info"]
     markdown = f"# {instance['instance_id']}\n"
 
-    markdown += f"\n## Problem statement\n"
+    markdown += "\n## Problem statement\n"
     markdown += f"```\n{instance['problem_statement']}\n```\n"
 
     if "error" in trajectory["info"]:
-        markdown += f"\n## Error\n"
+        markdown += "\n## Error\n"
         markdown += f"```\n{trajectory['info']['error']}\n```\n"
     else:
-        markdown += f"\n## Prediction\n"
+        markdown += "\n## Prediction\n"
         markdown += f"```diff\n{info['submission']}\n```\n"
 
-    markdown += f"\n## Golden patch\n"
+    markdown += "\n## Golden patch\n"
     markdown += f"```diff\n{instance['golden_patch']}\n```\n"
 
-    markdown += f"\n## Trajectory\n"
+    markdown += "\n## Trajectory\n"
 
     repo_dir = setup_swebench_repo(instance)
     file_repo = FileRepository(repo_dir)
@@ -843,7 +843,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                     markdown += f"\n * {action['span_id']}"
 
                 if action.get("file_path") and action.get("span_id"):
-                    markdown += f"\n\n#### File context \n\n"
+                    markdown += "\n\n#### File context \n\n"
                     try:
                         file_context = FileContext(file_repo)
                         file_context.add_span_to_context(
@@ -857,21 +857,21 @@ def generate_md_report(trajectory: dict, instance: dict):
                         print(e)
 
             if step["name"] == "EditCode":
-                markdown += f"#### LLM Response\n\n"
+                markdown += "#### LLM Response\n\n"
                 markdown += f"```\n{action.get('content', '')}\n```\n"
 
                 output = traj_action.get("output")
                 if output:
                     if output.get("diff"):
-                        markdown += f"#### Diff\n\n"
+                        markdown += "#### Diff\n\n"
                         markdown += f"```diff\n{output['diff']}\n```\n"
 
                     if output.get("errors"):
-                        markdown += f"#### Errors\n\n"
+                        markdown += "#### Errors\n\n"
                         markdown += f"{output['errors']}\n\n"
 
                     if output.get("message"):
-                        markdown += f"#### Message\n\n"
+                        markdown += "#### Message\n\n"
                         markdown += f"{output['message']}\n\n"
 
             if step["name"] == "ClarifyCodeChange":
@@ -888,7 +888,7 @@ def generate_md_report(trajectory: dict, instance: dict):
             if step["name"] == "Rejected":
                 markdown += f"*{action['properties']['message']}*\n"
 
-    markdown += f"## Alternative patches\n"
+    markdown += "## Alternative patches\n"
     for alternative in instance["resolved_by"]:
         markdown += f"### {alternative['name']}\n"
         markdown += f"```diff\n{alternative['patch']}\n```\n"

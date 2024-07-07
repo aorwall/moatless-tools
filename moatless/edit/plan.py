@@ -142,7 +142,7 @@ class PlanToCode(AgenticState):
     def handle_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
             if self.diff and self.finish_on_review:
-                logger.info(f"Review suggested after diff, will finish")
+                logger.info("Review suggested after diff, will finish")
                 return ActionResponse.transition(
                     trigger="finish", output={"message": "Finish on suggested review."}
                 )
