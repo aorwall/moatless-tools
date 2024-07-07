@@ -80,13 +80,13 @@ class Module(CodeBlock):
             span_id = span_ids_to_check.pop(0)
             related_spans = self.find_related_spans(span_id)
 
-            print(f"Related spans: {len(related_spans)} for {span_id}")
+            logger.info(f"Related spans: {len(related_spans)} for {span_id}")
 
             # TODO: Go through priotiized related spans to make sure that the most relevant are added first
             # TODO: Verify span token size
             for span in related_spans:
                 if span.tokens + tokens > max_tokens:
-                    print(
+                    logger.info(
                         f"Max tokens reached: {span.tokens} + {tokens} > {max_tokens}"
                     )
                     return True
@@ -98,7 +98,7 @@ class Module(CodeBlock):
                     checked_span_ids.add(span.span_id)
                     span_ids_to_check.append(span.span_id)
 
-        print(f"Max tokens reached {tokens} < {max_tokens}")
+        logger.info(f"Max tokens reached {tokens} < {max_tokens}")
 
         return True
 

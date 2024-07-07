@@ -1,5 +1,4 @@
 import concurrent.futures
-import datetime
 import json
 import logging
 import os
@@ -7,6 +6,7 @@ import subprocess
 import time
 import traceback
 from collections import defaultdict
+from datetime import datetime, timezone
 
 import instructor
 import litellm
@@ -295,7 +295,7 @@ class Evaluation:
         results = []
         transition_results = []
         for i, instance in enumerate(instances):
-            print(
+            logger.info(
                 f"Processing {instance['instance_id']} ({i+1}/{len(instances)} in {repo})"
             )
 
@@ -365,7 +365,7 @@ class Evaluation:
                 try:
                     group_results, group_transition_results = future.result()
                     if not group_results:
-                        print("Error in processing repo group")
+                        logger.warning("Error in processing repo group")
                         error += 1
                         continue
                 except Exception:
@@ -390,11 +390,11 @@ class Evaluation:
                 total_identified = df["identified"].sum()
                 total_processed = len(df)
 
-                print(f"Average duration: {avg_duration:.2f} seconds")
-                print(f"Average cost: ${avg_cost:.4f}")
-                print(f"Total identified: {total_identified}")
-                print(f"Total processed: {total_processed}")
-                print(f"Error count: {error}")
+                logger.info(f"Average duration: {avg_duration:.2f} seconds")
+                logger.info(f"Average cost: ${avg_cost:.4f}")
+                logger.info(f"Total identified: {total_identified}")
+                logger.info(f"Total processed: {total_processed}")
+                logger.info(f"Error count: {error}")
 
                 if transition_results:
                     df_search = pd.DataFrame(transition_results)
@@ -603,13 +603,14 @@ class Evaluation:
                                         ranked_span["file_path"]
                                     ].append(ranked_span["span_id"])
 
-                                if not result["found_in_search"]:
-                                    if found_in_expected_spans(
+                                if not result["found_in_search"] and (
+                                    found_in_expected_spans(
                                         instance, search_results_spans
                                     ) or found_in_alternative_spans(
                                         instance, search_results_spans
-                                    ):
-                                        result["found_in_search"] = search_iterations
+                                    )
+                                ):
+                                    result["found_in_search"] = search_iterations
 
                                 if not result["file_in_search"]:
                                     missing_files = get_missing_files(
@@ -679,7 +680,7 @@ class Evaluation:
 
                         if "file_path" in action:
                             if "span_id" not in action:
-                                print(
+                                logger.warning(
                                     f"Span id missing in planning action in {instance['instance_id']}"
                                 )
                             else:
@@ -793,7 +794,7 @@ def create_evaluation_name(
     name: str,
     model: str,
 ):
-    date_str = datetime.datetime.now().strftime("%Y%m%d")
+    date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
     model_name = model.split("/")[-1]
     return f"{date_str}_{name}_{model_name}"
 
@@ -854,7 +855,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                             show_outcommented_code=True
                         )
                     except Exception as e:
-                        print(e)
+                        logger.error(e)
 
             if step["name"] == "EditCode":
                 markdown += "#### LLM Response\n\n"

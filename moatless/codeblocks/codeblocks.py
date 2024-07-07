@@ -207,6 +207,7 @@ class Relationship(BaseModel):
         default=[], description="The path to the referenced code block."
     )
 
+    @classmethod
     @root_validator(pre=True)
     def validate_path(cls, values):
         external_path = values.get("external_path")
@@ -225,10 +226,7 @@ class Relationship(BaseModel):
         return self.external_path + self.path
 
     def __str__(self):
-        if self.identifier:
-            start_node = self.identifier
-        else:
-            start_node = ""
+        start_node = self.identifier if self.identifier else ""
 
         end_node = ""
         if self.external_path:
@@ -325,6 +323,7 @@ class CodeBlock(BaseModel):
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
 
+    @classmethod
     @validator("type", pre=True, always=True)
     def validate_type(cls, v):
         if v is None:
@@ -453,8 +452,10 @@ class CodeBlock(BaseModel):
         return blocks
 
     def get_children(
-        self, exclude_blocks: list[CodeBlockType] = []
+        self, exclude_blocks: list[CodeBlockType] = None
     ) -> list["CodeBlock"]:
+        if exclude_blocks is None:
+            exclude_blocks = []
         return [child for child in self.children if child.type not in exclude_blocks]
 
     def show_related_spans(
@@ -494,7 +495,7 @@ class CodeBlock(BaseModel):
         else:
             contents += self.pre_code + self.content
 
-        for i, child in enumerate(self.children):
+        for _i, child in enumerate(self.children):
             contents += child._to_string()
 
         return contents
@@ -566,7 +567,7 @@ class CodeBlock(BaseModel):
         highlighted = False
 
         child_tree = ""
-        for i, child in enumerate(self.children):
+        for _i, child in enumerate(self.children):
 
             if child.belongs_to_span and (
                 not current_span
@@ -712,7 +713,7 @@ class CodeBlock(BaseModel):
         contents = ""
 
         has_outcommented_code = False
-        for i, child in enumerate(self.children):
+        for _i, child in enumerate(self.children):
             show_child = True
 
             if exclude_block_types and child.type in exclude_block_types:
@@ -853,15 +854,14 @@ class CodeBlock(BaseModel):
             if child.start_line > end_line:
                 return spans
 
-            if child.belongs_to_span and child.belongs_to_span.span_id not in spans:
-                if (
-                    not child.children
-                    or child.start_line >= start_line
-                    and child.end_line <= end_line
-                    or child.start_line == start_line
-                    or child.end_line == end_line
-                ):
-                    spans.append(child.belongs_to_span)
+            if child.belongs_to_span and child.belongs_to_span.span_id not in spans and (
+                not child.children
+                or child.start_line >= start_line
+                and child.end_line <= end_line
+                or child.start_line == start_line
+                or child.end_line == end_line
+            ):
+                spans.append(child.belongs_to_span)
 
             child_spans = child.find_spans_by_line_numbers(start_line, end_line)
             for span in child_spans:
@@ -888,13 +888,13 @@ class CodeBlock(BaseModel):
         return path
 
     @property
-    def module(self) -> "Module":
+    def module(self) -> "Module":  # noqa: F821
         if self.parent:
             return self.parent.root()
         return self
 
     @deprecated("Use module()")
-    def root(self) -> "Module":
+    def root(self) -> "Module":  # noqa: F821
         return self.module
 
     def get_blocks(
@@ -940,8 +940,10 @@ class CodeBlock(BaseModel):
         return None
 
     def get_all_relationships(
-        self, exclude_types: list[CodeBlockType] = []
+        self, exclude_types: list[CodeBlockType] = None
     ) -> list[Relationship]:
+        if exclude_types is None:
+            exclude_types = []
         references = []
         references.extend(self.relationships)
         for childblock in self.children:
@@ -955,10 +957,7 @@ class CodeBlock(BaseModel):
     def is_complete(self):
         if self.type == CodeBlockType.COMMENTED_OUT_CODE:
             return False
-        for child in self.children:
-            if not child.is_complete():
-                return False
-        return True
+        return all(child.is_complete() for child in self.children)
 
     def find_errors(self) -> list["CodeBlock"]:
         errors = []
@@ -1313,8 +1312,4 @@ class CodeBlock(BaseModel):
         if span_id and not self.has_span(span_id):
             return False
 
-        for child in self.children:
-            if child.has_content(query, span_id):
-                return True
-
-        return False
+        return any(child.has_content(query, span_id) for child in self.children)

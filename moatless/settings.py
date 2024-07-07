@@ -4,8 +4,8 @@ from dataclasses import dataclass
 @dataclass
 class _Settings:
 
-    _coder: _CoderSettings = _CoderSettings()
-    _search: _SearchSettings = _SearchSettings()
+    # _coder: _CoderSettings = _CoderSettings()
+    # _search: _SearchSettings = _SearchSettings()
 
     _agent_model: str = "gpt-4o-2024-05-13"
     _embed_model: str = "text-embedding-3-small"
@@ -16,9 +16,9 @@ class _Settings:
     # TODO: Remove _one_file_mode
     _one_file_mode = True
 
-    @property
-    def coder(self) -> _CoderSettings:
-        return self._coder
+    # @property
+    # def coder(self) -> _CoderSettings:
+    #     return self._coder
 
     @property
     def agent_model(self) -> str:

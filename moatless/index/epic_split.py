@@ -97,9 +97,11 @@ class EpicSplitter(NodeParser):
         # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
         tokenizer: Callable | None = None,
-        non_code_file_extensions: list[str] | None = ["md", "txt"],
+        non_code_file_extensions: list[str] | None = None,
         callback_manager: CallbackManager | None = None,
     ) -> None:
+        if non_code_file_extensions is None:
+            non_code_file_extensions = ["md", "txt"]
         callback_manager = callback_manager or CallbackManager([])
 
         # self._fallback_code_splitter = fallback_code_splitter
@@ -383,7 +385,7 @@ class EpicSplitter(NodeParser):
 
         return chunks
 
-    def _create_path_tree(cls, blocks: list[CodeBlock]) -> PathTree:
+    def _create_path_tree(self, blocks: list[CodeBlock]) -> PathTree:
         path_tree = PathTree()
         for block in blocks:
             path_tree.add_to_tree(block.full_path())
@@ -411,21 +413,20 @@ class EpicSplitter(NodeParser):
             contents += codeblock.pre_code + codeblock.content
 
         has_outcommented_code = False
-        for i, child in enumerate(codeblock.children):
+        for _i, child in enumerate(codeblock.children):
             child_tree = path_tree.child_tree(child.identifier)
             if child_tree and child_tree.show:
                 if has_outcommented_code and child.type not in [
                     CodeBlockType.COMMENT,
                     CodeBlockType.COMMENTED_OUT_CODE,
+                ] and codeblock.type not in [
+                    CodeBlockType.CLASS,
+                    CodeBlockType.MODULE,
+                    CodeBlockType.TEST_SUITE,
                 ]:
-                    if codeblock.type not in [
-                        CodeBlockType.CLASS,
-                        CodeBlockType.MODULE,
-                        CodeBlockType.TEST_SUITE,
-                    ]:
-                        contents += child.create_commented_out_block(
-                            "... other code"
-                        ).to_string()
+                    contents += child.create_commented_out_block(
+                        "... other code"
+                    ).to_string()
                 contents += self._to_context_string(
                     codeblock=child, path_tree=child_tree
                 )

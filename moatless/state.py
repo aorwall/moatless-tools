@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -12,6 +13,8 @@ from moatless.types import (
     Message,
 )
 from moatless.workspace import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class AgenticState(ABC, BaseModel):
@@ -28,7 +31,7 @@ class AgenticState(ABC, BaseModel):
         None, description="The maximum number of transitions to this state."
     )
 
-    _loop: Optional["AgenticLoop"] = PrivateAttr(None)
+    _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -38,7 +41,7 @@ class AgenticState(ABC, BaseModel):
     def handle_action(self, action: ActionRequest) -> ActionResponse:
         raise NotImplementedError
 
-    def _set_loop(self, loop: "AgenticLoop"):
+    def _set_loop(self, loop: "AgenticLoop"):  # noqa: F821
         self._loop = loop
         self.init()
 
@@ -50,7 +53,7 @@ class AgenticState(ABC, BaseModel):
         return self.__class__.__name__
 
     @property
-    def loop(self) -> "AgenticLoop":
+    def loop(self) -> "AgenticLoop":  # noqa: F821
         assert self._loop is not None, "Loop has not been set"
         return self._loop
 
@@ -67,8 +70,10 @@ class AgenticState(ABC, BaseModel):
         return self.workspace.file_context
 
     def create_file_context(
-        self, files: list[FileWithSpans] = [], **kwargs
+        self, files: list[FileWithSpans] = None, **kwargs
     ) -> FileContext:
+        if files is None:
+            files = []
         return self.workspace.create_file_context(files, **kwargs)
 
     def init(self):
@@ -80,7 +85,7 @@ class AgenticState(ABC, BaseModel):
 
     def finish(self, message: str):
         # TODO!!
-        print(message)
+        logger.info(message)
 
     def messages(self) -> list[Message]:
         return []

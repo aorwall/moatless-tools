@@ -15,8 +15,8 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
             )
             try:
                 import voyageai
-            except ImportError:
-                raise ImportError(voyageai_import_err)
+            except ImportError as e:
+                raise ImportError(voyageai_import_err) from e
 
             _voyageai = voyageai.Client()
 
@@ -28,8 +28,8 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
         )
         try:
             import tiktoken
-        except ImportError:
-            raise ImportError(tiktoken_import_err)
+        except ImportError as e:
+            raise ImportError(tiktoken_import_err) from e
 
         # set tokenizer cache temporarily
         should_revert = False

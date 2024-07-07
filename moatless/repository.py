@@ -246,7 +246,7 @@ class FileRepository:
         return found_files
 
     def has_matching_files(self, file_pattern: str):
-        for matched_file in glob.iglob(
+        for _matched_file in glob.iglob(
             file_pattern, root_dir=self._repo_path, recursive=True
         ):
             return True

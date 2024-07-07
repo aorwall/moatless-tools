@@ -209,8 +209,4 @@ def is_test_pattern(file_pattern: str):
 
     test_patterns = ["test_*.py"]
 
-    for pattern in test_patterns:
-        if fnmatch.filter([file_pattern], pattern):
-            return True
-
-    return False
+    return any(fnmatch.filter([file_pattern], pattern) for pattern in test_patterns)

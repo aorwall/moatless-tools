@@ -351,10 +351,7 @@ class CodeParser:
                 next_parent_node = self.get_parent_next(
                     next_node, node_match.check_child or node
                 )
-                if next_parent_node == next_node:
-                    next_node = None
-                else:
-                    next_node = next_parent_node
+                next_node = None if next_parent_node == next_node else next_parent_node
 
         self.debug_log(f"end   [{level}]: {code_block.content}")
 

@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 def default_vector_store(settings: IndexSettings):
     try:
         import faiss
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "faiss needs to be installed to set up a default index for CodeIndex. Run 'pip install faiss-cpu'"
-        )
+        ) from e
 
     faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(settings.dimensions))
     return SimpleFaissVectorStore(faiss_index)
@@ -614,10 +614,9 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            if exact_content_match:
-                if not is_string_in(exact_content_match, node_doc.get_content()):
-                    filtered_out_snippets += 1
-                    continue
+            if exact_content_match and not is_string_in(exact_content_match, node_doc.get_content()):
+                filtered_out_snippets += 1
+                continue
 
             if node_doc.metadata["file_path"] not in sum_tokens_per_file:
                 sum_tokens_per_file[node_doc.metadata["file_path"]] = 0

@@ -82,8 +82,8 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         """
         try:
             import faiss
-        except ImportError:
-            raise ImportError(import_err_msg)
+        except ImportError as e:
+            raise ImportError(import_err_msg) from e
 
         self._d = d
         self._faiss_index = cast(faiss.Index, faiss_index)
@@ -112,7 +112,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             return []
 
         vector_id = (
-            max([int(k) for k in self._data.vector_id_to_text_id.keys()])
+            max([int(k) for k in self._data.vector_id_to_text_id])
             if self._data.vector_id_to_text_id
             else 0
         )

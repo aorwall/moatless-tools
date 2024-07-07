@@ -146,17 +146,19 @@ class ContextFile(BaseModel):
     def _to_prompt(
         self,
         code_block: CodeBlock,
-        current_span: CurrentPromptSpan = CurrentPromptSpan(),
+        current_span: CurrentPromptSpan | None = None,
         show_outcommented_code: bool = True,
         outcomment_code_comment: str = "...",
         show_span_id: bool = False,
         show_line_numbers: bool = False,
         exclude_comments: bool = False,
     ):
+        if current_span is None:
+            current_span = CurrentPromptSpan()
         contents = ""
 
         outcommented_block = None
-        for i, child in enumerate(code_block.children):
+        for _i, child in enumerate(code_block.children):
             if exclude_comments and child.type.group == CodeBlockTypeGroup.COMMENT:
                 continue
 
@@ -443,8 +445,7 @@ class FileContext:
 
     def remove_file(self, file_path: str):
         if file_path in self._file_context:
-            if file_path in self._file_context:
-                del self._file_context[file_path]
+            del self._file_context[file_path]
 
     def exists(self, file_path: str):
         return file_path in self._file_context
@@ -546,14 +547,12 @@ class FileContext:
 
         ranked_spans.sort(key=lambda x: x.rank)
 
-        num_spans = len(ranked_spans)
         base_tokens_needed = sum(min(span.tokens, min_tokens) for span in ranked_spans)
 
         # Filter out the lowest ranking spans if necessary
         while base_tokens_needed > self._max_tokens and ranked_spans:
             removed_span = ranked_spans.pop()
             base_tokens_needed -= min(removed_span.tokens, min_tokens)
-            num_spans = len(ranked_spans)
 
         if not ranked_spans:
             raise ValueError(
@@ -583,8 +582,7 @@ class FileContext:
             rank_groups[span.rank].append((span, tokens))
 
         final_tokens_distribution = []
-        for rank, group in rank_groups.items():
-            total_tokens_for_rank = sum(tokens for _, tokens in group)
+        for _rank, group in rank_groups.items():
             for span, tokens in group:
                 adjusted_tokens = min(span.tokens, tokens)
                 final_tokens_distribution.append((span, adjusted_tokens))
