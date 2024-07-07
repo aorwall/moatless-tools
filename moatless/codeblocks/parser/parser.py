@@ -68,7 +68,6 @@ def find_nested_type(node: Node, type: str, levels: int = -1):
 
 
 class CodeParser:
-
     def __init__(
         self,
         language: Language,
@@ -699,7 +698,6 @@ class CodeParser:
     def _create_new_span(
         self, current_span: BlockSpan | None, block: CodeBlock
     ) -> BlockSpan | None:
-
         # Set documentation phase on comments in the start of structure blocks if more than min_tokens_for_docs_span
         # TODO: This is isn't valid in other languages, try to set block type to docstring?
         block_types_with_document_span = [

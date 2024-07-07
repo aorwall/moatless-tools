@@ -39,7 +39,6 @@ SPLIT_BLOCK_TYPES = [
 
 
 class EpicSplitter(NodeParser):
-
     text_splitter: TextSplitter = Field(
         description="Text splitter to use for splitting non code documents into nodes."
     )
@@ -298,7 +297,6 @@ class EpicSplitter(NodeParser):
                 and new_token_count < self.max_chunk_size
                 or new_token_count < self.chunk_size
             ):
-
                 current_chunk.extend(comment_chunk)
                 current_chunk.append(child)
             else:
@@ -328,7 +326,6 @@ class EpicSplitter(NodeParser):
                     count_chunk_tokens(chunk) < self.min_chunk_size
                     or len(chunks) > self.max_chunks
                 ):
-
                     if i == 0 and len(chunks) > 1:
                         if (
                             count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk)
@@ -416,14 +413,20 @@ class EpicSplitter(NodeParser):
         for _i, child in enumerate(codeblock.children):
             child_tree = path_tree.child_tree(child.identifier)
             if child_tree and child_tree.show:
-                if has_outcommented_code and child.type not in [
-                    CodeBlockType.COMMENT,
-                    CodeBlockType.COMMENTED_OUT_CODE,
-                ] and codeblock.type not in [
-                    CodeBlockType.CLASS,
-                    CodeBlockType.MODULE,
-                    CodeBlockType.TEST_SUITE,
-                ]:
+                if (
+                    has_outcommented_code
+                    and child.type
+                    not in [
+                        CodeBlockType.COMMENT,
+                        CodeBlockType.COMMENTED_OUT_CODE,
+                    ]
+                    and codeblock.type
+                    not in [
+                        CodeBlockType.CLASS,
+                        CodeBlockType.MODULE,
+                        CodeBlockType.TEST_SUITE,
+                    ]
+                ):
                     contents += child.create_commented_out_block(
                         "... other code"
                     ).to_string()

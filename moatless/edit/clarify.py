@@ -133,9 +133,7 @@ class ClarifyCodeChange(AgenticState):
         assert self._span is not None, "Span has not been set"
         return self._span
 
-    def _verify_line_numbers(
-        self, line_numbers: LineNumberClarification
-    ) -> str | None:
+    def _verify_line_numbers(self, line_numbers: LineNumberClarification) -> str | None:
         logger.info(
             f"{self}: Verifying line numbers: {line_numbers.start_line} - {line_numbers.end_line}. "
             f"To span with line numbers: {self.span.start_line} - {self.span.end_line}"

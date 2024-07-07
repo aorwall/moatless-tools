@@ -5,7 +5,6 @@ from moatless.codeblocks.parser.parser import CodeParser
 
 
 class JavaParser(CodeParser):
-
     def __init__(self, **kwargs):
         super().__init__(Language(java.language()), **kwargs)
         self.queries = []

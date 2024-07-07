@@ -279,7 +279,6 @@ class ActionCallWithContext(BaseModel):
 
 
 class SearchCode(AgenticState):
-
     message: str | None = Field(
         None,
         description="Message to the search",

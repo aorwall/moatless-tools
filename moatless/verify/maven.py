@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class MavenVerifier(Verifier):
-
     def __init__(self, repo_dir: str, run_tests: bool = True):
         self.repo_dir = repo_dir
         self.run_tests = run_tests

@@ -47,7 +47,6 @@ class Module(CodeBlock):
         show_related: bool = False,
         max_tokens: int = 2000,
     ) -> bool:
-
         for span in self.spans_by_id.values():
             span.visible = False
 

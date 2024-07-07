@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 
 class CommentStrategy(Enum):
-
     # Keep comments
     INCLUDE = "include"
 

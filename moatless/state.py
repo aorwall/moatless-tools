@@ -122,7 +122,6 @@ class AgenticState(ABC, BaseModel):
 
 
 class NoopState(AgenticState):
-
     def __init__(self, **data):
         super().__init__(**data)
 
@@ -148,6 +147,5 @@ class Rejected(NoopState):
 
 
 class Pending(NoopState):
-
     def __init__(self, **data):
         super().__init__(**data)

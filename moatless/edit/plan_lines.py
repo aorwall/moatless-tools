@@ -43,12 +43,8 @@ class ApplyChange(ActionRequest):
         None, description="The end line of the code to be updated."
     )
 
-    reject: str | None = Field(
-        ..., description="Reject the request and explain why."
-    )
-    finish: str | None = Field(
-        None, description="Finish the request and explain why"
-    )
+    reject: str | None = Field(..., description="Reject the request and explain why.")
+    finish: str | None = Field(None, description="Finish the request and explain why")
 
     model_config = ConfigDict(
         extra="allow",
@@ -56,7 +52,6 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCodeWithLines(AgenticState):
-
     message: str | None = Field(
         None,
         description="Message to the coder",
@@ -264,7 +259,6 @@ class PlanToCodeWithLines(AgenticState):
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
 
         for transition in previous_transitions:
-
             new_message = transition.state.to_message()
             if new_message and not content:
                 content = new_message

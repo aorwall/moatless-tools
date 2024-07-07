@@ -64,7 +64,6 @@ class Identify(ActionRequest):
 
 
 class IdentifyCode(AgenticState):
-
     file_pattern: str | None
     query: str | None
     code_snippet: str | None

@@ -44,12 +44,8 @@ class ApplyChange(ActionRequest):
         None, description="The span id of the code to be updated."
     )
 
-    reject: str | None = Field(
-        None, description="Reject the request and explain why."
-    )
-    finish: str | None = Field(
-        None, description="Finish the request and explain why"
-    )
+    reject: str | None = Field(None, description="Reject the request and explain why.")
+    finish: str | None = Field(None, description="Finish the request and explain why")
 
     model_config = ConfigDict(
         extra="allow",
@@ -57,7 +53,6 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCode(AgenticState):
-
     message: str | None = Field(
         None,
         description="Message to the coder",

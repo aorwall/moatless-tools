@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 @dataclass
 class _Settings:
-
     # _coder: _CoderSettings = _CoderSettings()
     # _search: _SearchSettings = _SearchSettings()
 

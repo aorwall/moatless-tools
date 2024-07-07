@@ -95,13 +95,6 @@ class VerificationError(BaseModel):
 
 
 class CodeChange(BaseModel):
-    instructions: str = Field(
-        ..., description="Instructions to do the code change."
-    )
-    file_path: str = Field(
-        ...,  description="The file path of the code to be updated."
-    )
-    span_id: str = Field(
-        ..., description="The span id of the code to be updated."
-    )
-
+    instructions: str = Field(..., description="Instructions to do the code change.")
+    file_path: str = Field(..., description="The file path of the code to be updated.")
+    span_id: str = Field(..., description="The span id of the code to be updated.")

@@ -30,7 +30,6 @@ class CodeBlockTypeGroup(str, Enum):
 
 
 class CodeBlockType(Enum):
-
     MODULE = (
         "Module",
         CodeBlockTypeGroup.STRUCTURE,
@@ -558,7 +557,6 @@ class CodeBlock(BaseModel):
         include_references: bool = False,
         include_merge_history: bool = False,
     ):
-
         if not include_merge_history and self.type == CodeBlockType.BLOCK_DELIMITER:
             return ""
 
@@ -568,7 +566,6 @@ class CodeBlock(BaseModel):
 
         child_tree = ""
         for _i, child in enumerate(self.children):
-
             if child.belongs_to_span and (
                 not current_span
                 or current_span.span_id != child.belongs_to_span.span_id
@@ -854,12 +851,16 @@ class CodeBlock(BaseModel):
             if child.start_line > end_line:
                 return spans
 
-            if child.belongs_to_span and child.belongs_to_span.span_id not in spans and (
-                not child.children
-                or child.start_line >= start_line
-                and child.end_line <= end_line
-                or child.start_line == start_line
-                or child.end_line == end_line
+            if (
+                child.belongs_to_span
+                and child.belongs_to_span.span_id not in spans
+                and (
+                    not child.children
+                    or child.start_line >= start_line
+                    and child.end_line <= end_line
+                    or child.start_line == start_line
+                    or child.end_line == end_line
+                )
             ):
                 spans.append(child.belongs_to_span)
 

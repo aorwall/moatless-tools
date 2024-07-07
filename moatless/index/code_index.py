@@ -51,7 +51,6 @@ def default_vector_store(settings: IndexSettings):
 
 
 class CodeIndex:
-
     def __init__(
         self,
         file_repo: FileRepository,
@@ -94,9 +93,7 @@ class CodeIndex:
             blocks_by_class_name = {}
 
         if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
-            with open(
-                os.path.join(persist_dir, "blocks_by_function_name.json")
-            ) as f:
+            with open(os.path.join(persist_dir, "blocks_by_function_name.json")) as f:
                 blocks_by_function_name = json.load(f)
         else:
             blocks_by_function_name = {}
@@ -160,7 +157,6 @@ class CodeIndex:
         file_pattern: str | None = None,
         max_results: int = 25,
     ) -> SearchCodeResponse:
-
         if class_names or function_names:
             result = self.find_by_name(
                 class_names=class_names,
@@ -215,7 +211,6 @@ class CodeIndex:
         max_spans_per_file: int | None = None,
         exact_match_if_possible: bool = False,
     ) -> SearchCodeResponse:
-
         if query is None:
             query = ""
 
@@ -371,7 +366,6 @@ class CodeIndex:
         include_functions_in_class: bool = True,
         category: str = "implementation",
     ) -> SearchCodeResponse:
-
         if not class_names and not function_names:
             raise ValueError(
                 "At least one of class_name or function_name must be provided."
@@ -614,7 +608,9 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            if exact_content_match and not is_string_in(exact_content_match, node_doc.get_content()):
+            if exact_content_match and not is_string_in(
+                exact_content_match, node_doc.get_content()
+            ):
                 filtered_out_snippets += 1
                 continue
 
@@ -655,7 +651,6 @@ class CodeIndex:
         input_files: list[str] | None = None,
         num_workers: int | None = None,
     ):
-
         repo_path = repo_path or self._file_repo.path
 
         # Only extract file name and type to not trigger unnecessary embedding jobs

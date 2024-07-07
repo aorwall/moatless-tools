@@ -105,7 +105,6 @@ def verify_search_trajectory(
 
     iterations = 0
     for transition in trajectory["transitions"]:
-
         if transition["name"] == "SearchCode":
             iterations += 1
 
@@ -218,7 +217,6 @@ def generate_md_report(trajectory: dict, instance: dict):
     file_repo = FileRepository(repo_dir)
 
     for step in trajectory["transitions"]:
-
         for i, action in enumerate(step["actions"]):
             markdown += f"### {step['name']} ({i})\n\n"
 

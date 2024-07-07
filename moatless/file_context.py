@@ -177,7 +177,8 @@ class ContextFile(BaseModel):
                     # Count all tokens in child block if it's not a structure (function or class) or a 'compound' (like an 'if' or 'for' clause)
                     if (
                         child.type.group == CodeBlockTypeGroup.IMPLEMENTATION
-                        and child.type not in [CodeBlockType.COMPOUND, CodeBlockType.DEPENDENT_CLAUSE]
+                        and child.type
+                        not in [CodeBlockType.COMPOUND, CodeBlockType.DEPENDENT_CLAUSE]
                     ):
                         child_tokens = child.sum_tokens()
                     else:
@@ -395,7 +396,6 @@ class ContextFile(BaseModel):
 
 
 class FileContext:
-
     def __init__(self, repo: FileRepository, max_tokens: int = 4000):
         self._repo = repo
         self._file_context: dict[str, ContextFile] = {}

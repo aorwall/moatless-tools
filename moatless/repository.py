@@ -170,7 +170,6 @@ class CodeFile(BaseModel):
 
 
 class FileRepository:
-
     def __init__(self, repo_path: str):
         self._repo_path = repo_path
         self._files: dict[str, CodeFile] = {}
@@ -279,9 +278,7 @@ def remove_duplicate_lines(replacement_lines, original_lines):
     return replacement_lines
 
 
-def do_diff(
-    file_path: str, original_content: str, updated_content: str
-) -> str | None:
+def do_diff(file_path: str, original_content: str, updated_content: str) -> str | None:
     return "".join(
         difflib.unified_diff(
             original_content.strip().splitlines(True),

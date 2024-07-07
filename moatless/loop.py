@@ -42,7 +42,6 @@ class Transition(BaseModel):
 
 
 class Transitions:
-
     def __init__(
         self,
         initial_state: type[AgenticState],
@@ -102,7 +101,6 @@ class Transitions:
 
 
 class AgenticLoop:
-
     def __init__(
         self,
         transitions: Transitions,

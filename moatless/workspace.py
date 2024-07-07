@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class Workspace:
-
     def __init__(
         self,
         file_repo: FileRepository,
@@ -37,7 +36,6 @@ class Workspace:
             max_tokens=max_file_context_tokens
         )
 
-
     @classmethod
     def from_dirs(
         cls,
@@ -46,7 +44,7 @@ class Workspace:
         index_settings: IndexSettings | None = None,
         max_results: int = 25,
         max_file_context_tokens=4000,
-        **kwargs
+        **kwargs,
     ):
         file_repo = FileRepository(repo_dir)
         if index_dir:
@@ -59,7 +57,7 @@ class Workspace:
                 code_index = CodeIndex(
                     file_repo=file_repo,
                     settings=index_settings,
-                    max_results=max_results
+                    max_results=max_results,
                 )
                 code_index.run_ingestion()
                 code_index.persist(index_dir)
@@ -70,7 +68,7 @@ class Workspace:
             file_repo=file_repo,
             code_index=code_index,
             max_file_context_tokens=max_file_context_tokens,
-            **kwargs
+            **kwargs,
         )
         return workspace
 

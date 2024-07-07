@@ -67,7 +67,6 @@ TEST_SUBSET = [
 
 
 class Evaluation:
-
     def __init__(
         self,
         index_store_dir: str,
@@ -515,7 +514,6 @@ class Evaluation:
 
             if instance.get("expected_spans"):
                 for transition in trajectory["transitions"]:
-
                     if transition["name"] not in result:
                         result[transition["name"]] = 0
                         result[f"{transition['name']}_cost"] = 0
@@ -606,7 +604,8 @@ class Evaluation:
                                 if not result["found_in_search"] and (
                                     found_in_expected_spans(
                                         instance, search_results_spans
-                                    ) or found_in_alternative_spans(
+                                    )
+                                    or found_in_alternative_spans(
                                         instance, search_results_spans
                                     )
                                 ):
@@ -634,9 +633,9 @@ class Evaluation:
                                     if span["file_path"] not in identified_spans:
                                         identified_spans[span["file_path"]] = []
 
-                                    transition_result[
-                                        "actual_spans"
-                                    ] += f"{span['file_path']}: {','.join(span['span_ids'])} "
+                                    transition_result["actual_spans"] += (
+                                        f"{span['file_path']}: {','.join(span['span_ids'])} "
+                                    )
                                     for span_id in span["span_ids"]:
                                         identified_spans[span["file_path"]].append(
                                             span_id
@@ -822,7 +821,6 @@ def generate_md_report(trajectory: dict, instance: dict):
     file_repo = FileRepository(repo_dir)
 
     for j, step in enumerate(trajectory["transitions"]):
-
         for i, traj_action in enumerate(step["actions"]):
             markdown += f"### {j+1} {step['name']} ({i+1})\n\n"
 

@@ -69,7 +69,6 @@ def clean_and_reset_state(repo_dir):
 
 
 def create_branch(repo_dir, branch_name):
-
     try:
         subprocess.run(
             ["git", "branch", branch_name],

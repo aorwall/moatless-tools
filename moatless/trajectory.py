@@ -43,7 +43,6 @@ class TrajectoryTransition(BaseModel):
 
 
 class Trajectory:
-
     def __init__(
         self,
         name: str,
