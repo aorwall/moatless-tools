@@ -3,53 +3,56 @@ import logging
 import random
 import string
 import traceback
-from typing import Optional, Type, Any, List, Tuple, Callable
+from collections.abc import Callable
+from typing import Any
 
 import instructor
 import litellm
 from anthropic import Anthropic
-from litellm import token_counter, completion_cost, cost_per_token
+from litellm import completion_cost, cost_per_token, token_counter
 from pydantic import BaseModel, Field
 
-from moatless import Workspace
 from moatless.state import (
     AgenticState,
-    NoopState,
     Finished,
-    Rejected,
+    NoopState,
     Pending,
+    Rejected,
 )
-from moatless.types import Response, Message, AssistantMessage, UserMessage
 from moatless.trajectory import Trajectory
 from moatless.types import (
     ActionRequest,
+    AssistantMessage,
     Content,
+    Message,
+    Response,
+    UserMessage,
 )
+from moatless.workspace import Workspace
 
 logger = logging.getLogger("Loop")
 
 
 class Transition(BaseModel):
     trigger: str
-    source: Type[AgenticState]
-    dest: Type[AgenticState]
+    source: type[AgenticState]
+    dest: type[AgenticState]
     required_fields: set[str] = Field(default_factory=set)
     excluded_fields: set[str] = Field(default_factory=set)
 
 
 class Transitions:
-
     def __init__(
         self,
-        initial_state: Type[AgenticState],
-        transitions: List[Transition],
-        global_params: Optional[dict[str, Any]] = None,
-        state_params: Optional[dict[Type[AgenticState], dict[str, Any]]] = None,
+        initial_state: type[AgenticState],
+        transitions: list[Transition],
+        global_params: dict[str, Any] | None = None,
+        state_params: dict[type[AgenticState], dict[str, Any]] | None = None,
     ):
         self._initial_state = initial_state
         self._global_params = global_params or {}
         self._state_params = state_params or {}
-        self._source_trigger_index: dict[tuple[Type[AgenticState], str], list] = {}
+        self._source_trigger_index: dict[tuple[type[AgenticState], str], list] = {}
 
         for transition in transitions:
             if (
@@ -62,8 +65,8 @@ class Transitions:
             )
 
     def find_transition_by_source_and_trigger(
-        self, source: Type[AgenticState], trigger: str
-    ) -> List[Transition]:
+        self, source: type[AgenticState], trigger: str
+    ) -> list[Transition]:
         return self._source_trigger_index.get((source, trigger), [])
 
     def initial_state(self, **data) -> AgenticState:
@@ -75,7 +78,7 @@ class Transitions:
 
     def next_state(
         self, source: AgenticState, trigger: str, data: dict[str, Any]
-    ) -> Optional[AgenticState]:
+    ) -> AgenticState | None:
         transitions = self.find_transition_by_source_and_trigger(
             source.__class__, trigger
         )
@@ -98,23 +101,22 @@ class Transitions:
 
 
 class AgenticLoop:
-
     def __init__(
         self,
         transitions: Transitions,
         workspace: Workspace,
-        mocked_actions: Optional[List[dict]] = None,
-        reset_mocks_at_state: Optional[str] = None,
-        verify_state_func: Optional[Callable] = None,
+        mocked_actions: list[dict] | None = None,
+        reset_mocks_at_state: str | None = None,
+        verify_state_func: Callable | None = None,
         max_cost: float = 0.25,
         max_transitions: int = 25,
-        max_message_tokens: Optional[int] = None,
+        max_message_tokens: int | None = None,
         max_retries: int = 2,
         max_rejections: int = 2,
-        instructor_mode: Optional[instructor.Mode] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        trajectory_path: Optional[str] = None,
-        prompt_log_dir: Optional[str] = None,
+        instructor_mode: instructor.Mode | None = None,
+        metadata: dict[str, Any] | None = None,
+        trajectory_path: str | None = None,
+        prompt_log_dir: str | None = None,
     ):
         """
         Initialize the Loop instance.
@@ -149,7 +151,7 @@ class AgenticLoop:
         self._metadata = metadata
 
     def run(
-        self, message: Optional[str] = None, input_data: Optional[dict[str, Any]] = None
+        self, message: str | None = None, input_data: dict[str, Any] | None = None
     ) -> Response:
         """
         Run the loop and handle exceptions and cost checking.
@@ -212,7 +214,7 @@ class AgenticLoop:
 
         return retries
 
-    def retry_messages(self, state: AgenticState) -> List[Message]:
+    def retry_messages(self, state: AgenticState) -> list[Message]:
         messages: list[Message] = []
 
         if self.trajectory.current_step.name != state.name:
@@ -395,7 +397,7 @@ class AgenticLoop:
                 trigger=response.trigger,
                 data=response.output,
             )
-        except Exception as e:
+        except Exception:
             logger.error(
                 f"Failed to initiate next state with trigger {response.trigger} and output {response.output}"
             )
@@ -433,7 +435,7 @@ class AgenticLoop:
 
         return instructor.Mode.JSON
 
-    def _next_mock_action(self) -> Optional[ActionRequest]:
+    def _next_mock_action(self) -> ActionRequest | None:
         if not self._mocked_actions:
             return None, None, None, None
 
@@ -462,7 +464,7 @@ class AgenticLoop:
                     input_tokens,
                     output_tokens,
                 )
-            except Exception as e:
+            except Exception:
                 logger.error(
                     f"Failed to parse {action} to {self.state.action_type().__name__} in state {self.state.name}"
                 )
@@ -483,7 +485,7 @@ class AgenticLoop:
 
     def _next_action(
         self,
-    ) -> Tuple[ActionRequest, Optional[float], Optional[int], Optional[int]]:
+    ) -> tuple[ActionRequest, float | None, int | None, int | None]:
         messages = self._to_completion_messages()
         logger.info(f"{self.state} Create completion with {len(messages)} messages")
 
@@ -601,8 +603,8 @@ class AgenticLoop:
     def _log_prompt(
         self,
         messages: list[dict],
-        completion: Optional[Any] = None,
-        error: Optional[str] = None,
+        completion: Any | None = None,
+        error: str | None = None,
     ):
         if not self._prompt_log_dir:
             return

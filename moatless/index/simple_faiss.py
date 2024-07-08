@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, cast, Set
+from typing import Any, cast
 
 import faiss
 import fsspec
@@ -16,10 +16,10 @@ from llama_index.core.schema import BaseNode
 from llama_index.core.vector_stores.simple import _build_metadata_filter_fn
 from llama_index.core.vector_stores.types import (
     DEFAULT_PERSIST_DIR,
+    BasePydanticVectorStore,
     VectorStoreQuery,
     VectorStoreQueryMode,
     VectorStoreQueryResult,
-    BasePydanticVectorStore,
 )
 from llama_index.core.vector_stores.utils import node_to_metadata_dict
 
@@ -39,9 +39,9 @@ DEFAULT_VECTOR_STORE = "default"
 
 @dataclass
 class SimpleVectorStoreData(DataClassJsonMixin):
-    text_id_to_ref_doc_id: Dict[str, str] = field(default_factory=dict)
-    vector_id_to_text_id: Dict[int, str] = field(default_factory=dict)
-    metadata_dict: Dict[str, Any] = field(default_factory=dict)
+    text_id_to_ref_doc_id: dict[str, str] = field(default_factory=dict)
+    vector_id_to_text_id: dict[int, str] = field(default_factory=dict)
+    metadata_dict: dict[str, Any] = field(default_factory=dict)
 
 
 class SimpleFaissVectorStore(BasePydanticVectorStore):
@@ -60,8 +60,8 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
     _faiss_index: Any = PrivateAttr()
     _d: int = PrivateAttr()
 
-    _vector_ids_to_delete: List[int] = PrivateAttr(default_factory=list)
-    _text_ids_to_delete: Set[str] = PrivateAttr(default_factory=set)
+    _vector_ids_to_delete: list[int] = PrivateAttr(default_factory=list)
+    _text_ids_to_delete: set[str] = PrivateAttr(default_factory=set)
 
     stores_text: bool = False
 
@@ -69,8 +69,8 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         self,
         faiss_index: Any,
         d: int = 1536,
-        data: Optional[SimpleVectorStoreData] = None,
-        fs: Optional[fsspec.AbstractFileSystem] = None,
+        data: SimpleVectorStoreData | None = None,
+        fs: fsspec.AbstractFileSystem | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize params."""
@@ -82,8 +82,8 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         """
         try:
             import faiss
-        except ImportError:
-            raise ImportError(import_err_msg)
+        except ImportError as e:
+            raise ImportError(import_err_msg) from e
 
         self._d = d
         self._faiss_index = cast(faiss.Index, faiss_index)
@@ -103,16 +103,16 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
 
     def add(
         self,
-        nodes: List[BaseNode],
+        nodes: list[BaseNode],
         **add_kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add nodes to index."""
 
         if not nodes:
             return []
 
         vector_id = (
-            max([int(k) for k in self._data.vector_id_to_text_id.keys()])
+            max([int(k) for k in self._data.vector_id_to_text_id])
             if self._data.vector_id_to_text_id
             else 0
         )
@@ -175,7 +175,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             lambda node_id: self._data.metadata_dict[node_id], query.filters
         )
 
-        query_embedding = cast(List[float], query.query_embedding)
+        query_embedding = cast(list[float], query.query_embedding)
         query_embedding_np = np.array(query_embedding, dtype="float32")[np.newaxis, :]
         dists, indices = self._faiss_index.search(
             query_embedding_np, query.similarity_top_k
@@ -192,7 +192,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
 
         filtered_dists = []
         filtered_node_ids = []
-        for dist, idx in zip(dists, node_idxs):
+        for dist, idx in zip(dists, node_idxs, strict=False):
             if idx < 0:
                 break
 
@@ -219,7 +219,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
     def persist(
         self,
         persist_dir: str = DEFAULT_PERSIST_DIR,
-        fs: Optional[fsspec.AbstractFileSystem] = None,
+        fs: fsspec.AbstractFileSystem | None = None,
     ) -> None:
         """Persist the SimpleVectorStore to a directory."""
         fs = fs or self._fs
@@ -259,7 +259,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
 
     @classmethod
     def from_persist_dir(
-        cls, persist_dir: str, fs: Optional[fsspec.AbstractFileSystem] = None
+        cls, persist_dir: str, fs: fsspec.AbstractFileSystem | None = None
     ) -> "SimpleFaissVectorStore":
         """Create a SimpleKVStore from a persist directory."""
 

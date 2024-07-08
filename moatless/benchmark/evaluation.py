@@ -1,5 +1,4 @@
 import concurrent.futures
-import datetime
 import json
 import logging
 import os
@@ -7,28 +6,29 @@ import subprocess
 import time
 import traceback
 from collections import defaultdict
-from typing import Optional, Tuple
+from datetime import datetime, timezone
 
 import instructor
 import litellm
 import pandas as pd
 from tqdm.auto import tqdm
 
-from moatless import Workspace, FileRepository
 from moatless.benchmark.swebench import (
-    setup_swebench_repo,
-    get_repo_dir_name,
-    found_in_expected_spans,
     found_in_alternative_spans,
-    sorted_instances,
+    found_in_expected_spans,
+    get_repo_dir_name,
     load_instance,
+    setup_swebench_repo,
+    sorted_instances,
 )
 from moatless.benchmark.utils import (
-    trace_metadata,
     get_missing_files,
+    trace_metadata,
 )
 from moatless.file_context import FileContext
-from moatless.loop import Transitions, AgenticLoop
+from moatless.loop import AgenticLoop, Transitions
+from moatless.repository import FileRepository
+from moatless.workspace import Workspace
 
 logger = logging.getLogger("Evaluator")
 
@@ -67,7 +67,6 @@ TEST_SUBSET = [
 
 
 class Evaluation:
-
     def __init__(
         self,
         index_store_dir: str,
@@ -75,12 +74,12 @@ class Evaluation:
         evaluations_dir: str,
         evaluation_name: str,
         transitions: Transitions,
-        instructor_mode: Optional[instructor.Mode] = None,
+        instructor_mode: instructor.Mode | None = None,
         max_cost: float = 0.5,
         max_file_context_tokens: int = 16000,
-        litellm_callback: Optional[str] = None,
-        previous_trajectory_dir: Optional[str] = None,
-        retry_state: Optional[str] = None,
+        litellm_callback: str | None = None,
+        previous_trajectory_dir: str | None = None,
+        retry_state: str | None = None,
         num_workers: int = 1,
         detailed_report: bool = False,
     ):
@@ -121,21 +120,21 @@ class Evaluation:
         # TODO: Run swe-bench-docker after the prediction is generated
         result_file = f"{self.evaluation_dir}/result.json"
         if os.path.exists(result_file):
-            with open(os.path.join(result_file), "r") as f:
+            with open(os.path.join(result_file)) as f:
                 self.report = json.load(f)
         else:
             self.report = {"resolved": []}
 
     def run_evaluation_with_moatless_dataset(
         self,
-        resolved_by: Optional[int] = None,
+        resolved_by: int | None = None,
         use_test_subset: bool = False,
-        instance_ids: Optional[list[str]] = None,
+        instance_ids: list[str] | None = None,
     ):
         file_path = os.path.join(
             os.path.dirname(__file__), "swebench_lite_all_evaluations.json"
         )
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             instances = json.load(f)
 
         instances = sorted(instances, key=lambda x: len(x["resolved_by"]), reverse=True)
@@ -167,7 +166,7 @@ class Evaluation:
         self,
         dataset: str = "princeton-nlp/SWE-bench_Lite",
         split="test",
-        instance_ids: Optional[list[str]] = None,
+        instance_ids: list[str] | None = None,
     ):
         instances = sorted_instances(dataset, split)
 
@@ -246,7 +245,7 @@ class Evaluation:
         try:
             response = loop.run(problem_statement)
             info["status"] = response.status
-        except Exception as e:
+        except Exception:
             info["error"] = traceback.format_exc()
             info["status"] = "error"
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
@@ -284,7 +283,7 @@ class Evaluation:
                 "w",
             ) as file:
                 file.write(md_report)
-        except Exception as e:
+        except Exception:
             logging.exception(
                 f"Error in generating report for {instance['instance_id']} "
             )
@@ -295,7 +294,7 @@ class Evaluation:
         results = []
         transition_results = []
         for i, instance in enumerate(instances):
-            print(
+            logger.info(
                 f"Processing {instance['instance_id']} ({i+1}/{len(instances)} in {repo})"
             )
 
@@ -316,7 +315,7 @@ class Evaluation:
                     "w",
                 ) as file:
                     file.write(md_report)
-            except Exception as e:
+            except Exception:
                 logging.exception(
                     f"Error in generating report for {instance['instance_id']} "
                 )
@@ -365,12 +364,12 @@ class Evaluation:
                 try:
                     group_results, group_transition_results = future.result()
                     if not group_results:
-                        print("Error in processing repo group")
+                        logger.warning("Error in processing repo group")
                         error += 1
                         continue
-                except Exception as e:
+                except Exception:
                     error += 1
-                    logger.exception(f"Error in processing repo group")
+                    logger.exception("Error in processing repo group")
                     continue
 
                 results.extend(group_results)
@@ -390,11 +389,11 @@ class Evaluation:
                 total_identified = df["identified"].sum()
                 total_processed = len(df)
 
-                print(f"Average duration: {avg_duration:.2f} seconds")
-                print(f"Average cost: ${avg_cost:.4f}")
-                print(f"Total identified: {total_identified}")
-                print(f"Total processed: {total_processed}")
-                print(f"Error count: {error}")
+                logger.info(f"Average duration: {avg_duration:.2f} seconds")
+                logger.info(f"Average cost: ${avg_cost:.4f}")
+                logger.info(f"Total identified: {total_identified}")
+                logger.info(f"Total processed: {total_processed}")
+                logger.info(f"Error count: {error}")
 
                 if transition_results:
                     df_search = pd.DataFrame(transition_results)
@@ -470,7 +469,7 @@ class Evaluation:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
 
-    def to_result(self, instance: dict, trajectory: dict) -> Tuple[list, list]:
+    def to_result(self, instance: dict, trajectory: dict) -> tuple[list, list]:
         info = trajectory["info"]
 
         resolved = info.get("instance_id", "") in self.report["resolved"]
@@ -515,7 +514,6 @@ class Evaluation:
 
             if instance.get("expected_spans"):
                 for transition in trajectory["transitions"]:
-
                     if transition["name"] not in result:
                         result[transition["name"]] = 0
                         result[f"{transition['name']}_cost"] = 0
@@ -603,13 +601,15 @@ class Evaluation:
                                         ranked_span["file_path"]
                                     ].append(ranked_span["span_id"])
 
-                                if not result["found_in_search"]:
-                                    if found_in_expected_spans(
+                                if not result["found_in_search"] and (
+                                    found_in_expected_spans(
                                         instance, search_results_spans
-                                    ) or found_in_alternative_spans(
+                                    )
+                                    or found_in_alternative_spans(
                                         instance, search_results_spans
-                                    ):
-                                        result["found_in_search"] = search_iterations
+                                    )
+                                ):
+                                    result["found_in_search"] = search_iterations
 
                                 if not result["file_in_search"]:
                                     missing_files = get_missing_files(
@@ -633,9 +633,9 @@ class Evaluation:
                                     if span["file_path"] not in identified_spans:
                                         identified_spans[span["file_path"]] = []
 
-                                    transition_result[
-                                        "actual_spans"
-                                    ] += f"{span['file_path']}: {','.join(span['span_ids'])} "
+                                    transition_result["actual_spans"] += (
+                                        f"{span['file_path']}: {','.join(span['span_ids'])} "
+                                    )
                                     for span_id in span["span_ids"]:
                                         identified_spans[span["file_path"]].append(
                                             span_id
@@ -679,7 +679,7 @@ class Evaluation:
 
                         if "file_path" in action:
                             if "span_id" not in action:
-                                print(
+                                logger.warning(
                                     f"Span id missing in planning action in {instance['instance_id']}"
                                 )
                             else:
@@ -774,9 +774,9 @@ class Evaluation:
 
         return result, transitions
 
-    def read_trajectory(self, path) -> Optional[dict]:
+    def read_trajectory(self, path) -> dict | None:
         if os.path.exists(path):
-            with open(path, "r") as f:
+            with open(path) as f:
                 return json.load(f)
         else:
             return None
@@ -793,7 +793,7 @@ def create_evaluation_name(
     name: str,
     model: str,
 ):
-    date_str = datetime.datetime.now().strftime("%Y%m%d")
+    date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
     model_name = model.split("/")[-1]
     return f"{date_str}_{name}_{model_name}"
 
@@ -802,26 +802,25 @@ def generate_md_report(trajectory: dict, instance: dict):
     info = trajectory["info"]
     markdown = f"# {instance['instance_id']}\n"
 
-    markdown += f"\n## Problem statement\n"
+    markdown += "\n## Problem statement\n"
     markdown += f"```\n{instance['problem_statement']}\n```\n"
 
     if "error" in trajectory["info"]:
-        markdown += f"\n## Error\n"
+        markdown += "\n## Error\n"
         markdown += f"```\n{trajectory['info']['error']}\n```\n"
     else:
-        markdown += f"\n## Prediction\n"
+        markdown += "\n## Prediction\n"
         markdown += f"```diff\n{info['submission']}\n```\n"
 
-    markdown += f"\n## Golden patch\n"
+    markdown += "\n## Golden patch\n"
     markdown += f"```diff\n{instance['golden_patch']}\n```\n"
 
-    markdown += f"\n## Trajectory\n"
+    markdown += "\n## Trajectory\n"
 
     repo_dir = setup_swebench_repo(instance)
     file_repo = FileRepository(repo_dir)
 
     for j, step in enumerate(trajectory["transitions"]):
-
         for i, traj_action in enumerate(step["actions"]):
             markdown += f"### {j+1} {step['name']} ({i+1})\n\n"
 
@@ -843,7 +842,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                     markdown += f"\n * {action['span_id']}"
 
                 if action.get("file_path") and action.get("span_id"):
-                    markdown += f"\n\n#### File context \n\n"
+                    markdown += "\n\n#### File context \n\n"
                     try:
                         file_context = FileContext(file_repo)
                         file_context.add_span_to_context(
@@ -854,24 +853,24 @@ def generate_md_report(trajectory: dict, instance: dict):
                             show_outcommented_code=True
                         )
                     except Exception as e:
-                        print(e)
+                        logger.error(e)
 
             if step["name"] == "EditCode":
-                markdown += f"#### LLM Response\n\n"
+                markdown += "#### LLM Response\n\n"
                 markdown += f"```\n{action.get('content', '')}\n```\n"
 
                 output = traj_action.get("output")
                 if output:
                     if output.get("diff"):
-                        markdown += f"#### Diff\n\n"
+                        markdown += "#### Diff\n\n"
                         markdown += f"```diff\n{output['diff']}\n```\n"
 
                     if output.get("errors"):
-                        markdown += f"#### Errors\n\n"
+                        markdown += "#### Errors\n\n"
                         markdown += f"{output['errors']}\n\n"
 
                     if output.get("message"):
-                        markdown += f"#### Message\n\n"
+                        markdown += "#### Message\n\n"
                         markdown += f"{output['message']}\n\n"
 
             if step["name"] == "ClarifyCodeChange":
@@ -888,7 +887,7 @@ def generate_md_report(trajectory: dict, instance: dict):
             if step["name"] == "Rejected":
                 markdown += f"*{action['properties']['message']}*\n"
 
-    markdown += f"## Alternative patches\n"
+    markdown += "## Alternative patches\n"
     for alternative in instance["resolved_by"]:
         markdown += f"### {alternative['name']}\n"
         markdown += f"```diff\n{alternative['patch']}\n```\n"

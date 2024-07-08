@@ -4,16 +4,16 @@ import tree_sitter_python as tspython
 from tree_sitter import Language
 
 from moatless.codeblocks.codeblocks import (
-    CodeBlockType,
     CodeBlock,
+    CodeBlockType,
     ReferenceScope,
     RelationshipType,
     ValidationError,
 )
 from moatless.codeblocks.parser.parser import (
     CodeParser,
-    commented_out_keywords,
     NodeMatch,
+    commented_out_keywords,
 )
 
 child_block_types = ["ERROR", "block"]
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 class PythonParser(CodeParser):
-
     def __init__(self, **kwargs):
         language = Language(tspython.language())
 
@@ -73,7 +72,6 @@ class PythonParser(CodeParser):
 
         new_references = []
         for reference in codeblock.relationships:
-
             # Set parent class path as reference path on self
             if reference.path and reference.path[0] == "self":
                 class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
@@ -88,7 +86,6 @@ class PythonParser(CodeParser):
             if reference.path and reference.path[0] == "super()":
                 class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
                 if class_block:
-
                     is_a_rel = [
                         rel
                         for rel in class_block.relationships

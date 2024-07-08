@@ -1,6 +1,4 @@
 import logging
-import tempfile
-from typing import Optional
 
 from astroid import MANAGER
 from pylint.lint import Run
@@ -14,12 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class PylintVerifier(Verifier):
-
     def __init__(self, repo_dir: str, run_tests: bool = True):
         self.repo_dir = repo_dir
         self.run_tests = run_tests
 
-    def verify(self, file: Optional[CodeFile] = None) -> list[VerificationError]:
+    def verify(self, file: CodeFile | None = None) -> list[VerificationError]:
         if not file:
             logger.warning("No file to verify")
             return []
@@ -45,6 +42,6 @@ class PylintVerifier(Verifier):
                 for msg in results.linter.reporter.messages
                 if msg.msg_id[0] in ["E", "F"]
             ]
-        except Exception as e:
-            logger.exception(f"Error running pylint")
+        except Exception:
+            logger.exception("Error running pylint")
             return []

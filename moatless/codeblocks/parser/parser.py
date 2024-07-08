@@ -1,22 +1,22 @@
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import List, Tuple, Optional, Callable
 
 import networkx as nx
 from llama_index.core import get_tokenizer
-from tree_sitter import Node, Language, Parser
+from tree_sitter import Language, Node, Parser
 
 from moatless.codeblocks.codeblocks import (
+    BlockSpan,
     CodeBlock,
     CodeBlockType,
-    Relationship,
-    ReferenceScope,
-    Parameter,
-    RelationshipType,
-    BlockSpan,
     CodeBlockTypeGroup,
+    Parameter,
+    ReferenceScope,
+    Relationship,
+    RelationshipType,
     SpanType,
 )
 from moatless.codeblocks.module import Module
@@ -36,8 +36,8 @@ class NodeMatch:
     first_child: Node = None
     last_child: Node = None
     check_child: Node = None
-    parameters: List[Tuple[Node, Optional[Node]]] = field(default_factory=list)
-    relationships: List[Tuple[Node, str]] = field(default_factory=list)
+    parameters: list[tuple[Node, Node | None]] = field(default_factory=list)
+    relationships: list[tuple[Node, str]] = field(default_factory=list)
     query: str = None
 
 
@@ -48,7 +48,7 @@ def _find_type(node: Node, type: str):
     return None, None
 
 
-def find_type(node: Node, types: List[str]):
+def find_type(node: Node, types: list[str]):
     for child in node.children:
         if child.type in types:
             return child
@@ -68,15 +68,14 @@ def find_nested_type(node: Node, type: str, levels: int = -1):
 
 
 class CodeParser:
-
     def __init__(
         self,
         language: Language,
         encoding: str = "utf8",
         max_tokens_in_span: int = 500,
         min_tokens_for_docs_span: int = 100,
-        index_callback: Optional[Callable[[CodeBlock], None]] = None,
-        tokenizer: Optional[Callable[[str], List]] = None,
+        index_callback: Callable[[CodeBlock], None] | None = None,
+        tokenizer: Callable[[str], list] | None = None,
         apply_gpt_tweaks: bool = False,
         debug: bool = False,
     ):
@@ -146,10 +145,10 @@ class CodeParser:
         node: Node,
         start_byte: int = 0,
         level: int = 0,
-        file_path: Optional[str] = None,
-        parent_block: Optional[CodeBlock] = None,
-        current_span: Optional[BlockSpan] = None,
-    ) -> Tuple[CodeBlock, Node, BlockSpan]:
+        file_path: str | None = None,
+        parent_block: CodeBlock | None = None,
+        current_span: BlockSpan | None = None,
+    ) -> tuple[CodeBlock, Node, BlockSpan]:
         if node.type == "ERROR" or any(
             child.type == "ERROR" for child in node.children
         ):
@@ -351,10 +350,7 @@ class CodeParser:
                 next_parent_node = self.get_parent_next(
                     next_node, node_match.check_child or node
                 )
-                if next_parent_node == next_node:
-                    next_node = None
-                else:
-                    next_node = next_parent_node
+                next_node = None if next_parent_node == next_node else next_parent_node
 
         self.debug_log(f"end   [{level}]: {code_block.content}")
 
@@ -391,7 +387,7 @@ class CodeParser:
             keyword in comment.lower() for keyword in commented_out_keywords
         )
 
-    def find_in_tree(self, node: Node) -> Optional[NodeMatch]:
+    def find_in_tree(self, node: Node) -> NodeMatch | None:
         if self.apply_gpt_tweaks:
             match = self.find_match_with_gpt_tweaks(node)
             if match:
@@ -412,7 +408,7 @@ class CodeParser:
             )
             return NodeMatch(block_type=CodeBlockType.CODE)
 
-    def find_match_with_gpt_tweaks(self, node: Node) -> Optional[NodeMatch]:
+    def find_match_with_gpt_tweaks(self, node: Node) -> NodeMatch | None:
         for label, node_type, query in self.gpt_queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
@@ -427,7 +423,7 @@ class CodeParser:
 
         return None
 
-    def find_match(self, node: Node) -> Optional[NodeMatch]:
+    def find_match(self, node: Node) -> NodeMatch | None:
         self.debug_log(f"find_match() node type {node.type}")
         for label, node_type, query in self.queries:
             if node_type and node.type != node_type and node_type != "_":
@@ -445,7 +441,7 @@ class CodeParser:
 
     def _find_match(
         self, node: Node, query, label: str, capture_from_parent: bool = False
-    ) -> Optional[NodeMatch]:
+    ) -> NodeMatch | None:
         if capture_from_parent:
             captures = query.captures(node.parent)
         else:
@@ -671,7 +667,7 @@ class CodeParser:
             return any(self.has_error(child) for child in node.children)
         return False
 
-    def parse(self, content, file_path: Optional[str] = None) -> Module:
+    def parse(self, content, file_path: str | None = None) -> Module:
         if isinstance(content, str):
             content_in_bytes = bytes(content, self.encoding)
         elif isinstance(content, bytes):
@@ -700,9 +696,8 @@ class CodeParser:
         return content_bytes[node.start_byte : node.end_byte].decode(self.encoding)
 
     def _create_new_span(
-        self, current_span: Optional[BlockSpan], block: CodeBlock
-    ) -> Optional[BlockSpan]:
-
+        self, current_span: BlockSpan | None, block: CodeBlock
+    ) -> BlockSpan | None:
         # Set documentation phase on comments in the start of structure blocks if more than min_tokens_for_docs_span
         # TODO: This is isn't valid in other languages, try to set block type to docstring?
         block_types_with_document_span = [
@@ -831,7 +826,7 @@ class CodeParser:
 
         return None
 
-    def _create_span_id(self, block: CodeBlock, label: Optional[str] = None):
+    def _create_span_id(self, block: CodeBlock, label: str | None = None):
         if block.type.group == CodeBlockTypeGroup.STRUCTURE:
             structure_block = block
         else:

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, Any, List
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 class TrajectoryAction(BaseModel):
     action: ActionRequest
-    retry_message: Optional[str] = None
-    output: Optional[dict[str, Any]] = None
-    completion_cost: Optional[float] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
+    retry_message: str | None = None
+    output: dict[str, Any] | None = None
+    completion_cost: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
     def model_dump(self, **kwargs):
         dict = super().model_dump(**kwargs)
@@ -27,8 +27,8 @@ class TrajectoryAction(BaseModel):
 
 
 class TrajectoryTransition(BaseModel):
-    state: Optional[AgenticState] = None
-    actions: List[TrajectoryAction] = []
+    state: AgenticState | None = None
+    actions: list[TrajectoryAction] = []
 
     @property
     def name(self):
@@ -43,19 +43,18 @@ class TrajectoryTransition(BaseModel):
 
 
 class Trajectory:
-
     def __init__(
         self,
         name: str,
-        initial_message: Optional[str] = None,
-        persist_path: Optional[str] = None,
+        initial_message: str | None = None,
+        persist_path: str | None = None,
     ):
         self._name = name
         self._persist_path = persist_path
         self._initial_message = initial_message
 
         self._transitions: list[TrajectoryTransition] = []
-        self._current_transition: Optional[TrajectoryTransition] = None
+        self._current_transition: TrajectoryTransition | None = None
 
         self._info: dict[str, Any] = {}
 
@@ -75,7 +74,7 @@ class Trajectory:
             transition for transition in self._transitions if transition.name == name
         ]
 
-    def transition_count(self, state: Optional[AgenticState] = None):
+    def transition_count(self, state: AgenticState | None = None):
         if not state:
             return len(self._transitions)
         return len(self.get_transitions(state.name))
@@ -83,11 +82,11 @@ class Trajectory:
     def save_action(
         self,
         action: ActionRequest,
-        output: Optional[dict[str, Any]] = None,
-        retry_message: Optional[str] = None,
-        completion_cost: Optional[float] = None,
-        input_tokens: Optional[int] = None,
-        output_tokens: Optional[int] = None,
+        output: dict[str, Any] | None = None,
+        retry_message: str | None = None,
+        completion_cost: float | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ):
         if self._current_transition:
             self._current_transition.actions.append(

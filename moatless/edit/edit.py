@@ -1,18 +1,17 @@
 import logging
-from typing import Optional, Type
 
-from pydantic import PrivateAttr, Field, BaseModel
+from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.state import AgenticState, Finished
 from moatless.types import (
-    Message,
     ActionRequest,
     ActionResponse,
-    Content,
     AssistantMessage,
+    Content,
+    Message,
     UserMessage,
+    VerificationError,
 )
-from moatless.types import VerificationError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ CHAIN_OF_THOUGHT_PROMPT = "Please provide your thoughts on the code change, if a
 
 
 class CodeChange(ActionRequest):
-    scratch_pad: Optional[str] = Field(
+    scratch_pad: str | None = Field(
         default=None, description="The thoughts on the code change."
     )
     replace: str = Field(..., description="The code to replace the existing code with.")
@@ -88,7 +87,7 @@ class CodeChange(ActionRequest):
 class EditCode(AgenticState):
     instructions: str
     file_path: str
-    span_id: Optional[str] = None
+    span_id: str | None = None
     start_line: int
     end_line: int
 
@@ -102,7 +101,7 @@ class EditCode(AgenticState):
         description="The maximum number of tokens in the file context to show in the prompt.",
     )
 
-    _code_to_replace: Optional[str] = PrivateAttr(default=None)
+    _code_to_replace: str | None = PrivateAttr(default=None)
     _retry: int = PrivateAttr(default=0)
     _messages: list[Message] = PrivateAttr(default_factory=list)
 
@@ -110,9 +109,9 @@ class EditCode(AgenticState):
         self,
         instructions: str,
         file_path: str,
-        span_id: Optional[str] = None,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        span_id: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
         show_initial_message: bool = True,
         max_iterations: int = 8,
         show_file_context: bool = True,
@@ -285,8 +284,8 @@ class EditCode(AgenticState):
         else:
             logger.info(f"No changes found in {self.file_path}.")
             response_message = (
-                f"The code in the replace tag is the same as in the search. Use the reject function if you "
-                f"can't do any changes and want to reject the instructions."
+                "The code in the replace tag is the same as in the search. Use the reject function if you "
+                "can't do any changes and want to reject the instructions."
             )
 
             self._retry += 1
@@ -360,7 +359,7 @@ class EditCode(AgenticState):
     def _add_prepared_response(self):
         return "claude" in self.model and not self.chain_of_thought
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return None
 
     def stop_words(self):

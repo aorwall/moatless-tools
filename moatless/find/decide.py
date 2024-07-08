@@ -1,5 +1,4 @@
 import logging
-from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -61,7 +60,7 @@ class Decision(ActionRequest):
         description="Set to true if all the relevant code have been identified.",
     )
 
-    search_suggestions: Optional[str] = Field(
+    search_suggestions: str | None = Field(
         None,
         description="Suggestions on how to find the relevant code not found in the file context.",
     )
@@ -117,7 +116,7 @@ class DecideRelevance(AgenticState):
                     relevant_count += 1
         return relevant_count
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return Decision
 
     def system_prompt(self) -> str:

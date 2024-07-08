@@ -4,9 +4,9 @@ import os
 from datasets import load_dataset
 
 from moatless.benchmark.utils import (
-    get_missing_spans,
     file_spans_to_dict,
     get_missing_files,
+    get_missing_spans,
 )
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
@@ -105,7 +105,6 @@ def verify_search_trajectory(
 
     iterations = 0
     for transition in trajectory["transitions"]:
-
         if transition["name"] == "SearchCode":
             iterations += 1
 
@@ -199,26 +198,25 @@ def generate_md_report(trajectory: dict, instance: dict):
     info = trajectory["info"]
     markdown = f"# {info['instance_id']}\n"
 
-    markdown += f"\n## Problem statement\n"
+    markdown += "\n## Problem statement\n"
     markdown += f"```\n{instance['problem_statement']}\n```\n"
 
     if "error" in trajectory["info"]:
-        markdown += f"\n## Error\n"
+        markdown += "\n## Error\n"
         markdown += f"```\n{trajectory['info']['error']}\n```\n"
     else:
-        markdown += f"\n## Prediction\n"
+        markdown += "\n## Prediction\n"
         markdown += f"```diff\n{info['submission']}\n```\n"
 
-    markdown += f"\n## Golden patch\n"
+    markdown += "\n## Golden patch\n"
     markdown += f"```diff\n{instance['golden_patch']}\n```\n"
 
-    markdown += f"\n## Trajectory\n"
+    markdown += "\n## Trajectory\n"
 
     repo_dir = setup_swebench_repo(instance)
     file_repo = FileRepository(repo_dir)
 
     for step in trajectory["transitions"]:
-
         for i, action in enumerate(step["actions"]):
             markdown += f"### {step['name']} ({i})\n\n"
 
@@ -235,7 +233,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                 if action.get("action", {}).get("action", {}).get("span_id"):
                     markdown += f"\n * {action['action']['action']['span_id']}"
 
-                    markdown += f"\n\n#### File context \n\n"
+                    markdown += "\n\n#### File context \n\n"
 
                     file_context = FileContext(file_repo)
                     file_context.add_span_to_context(
@@ -246,11 +244,11 @@ def generate_md_report(trajectory: dict, instance: dict):
                     markdown += file_context.create_prompt(show_outcommented_code=True)
 
             if step["name"] == "EditCode":
-                markdown += f"#### LLM Response\n\n"
+                markdown += "#### LLM Response\n\n"
                 markdown += f"```\n{action['action']['content']}\n```\n"
 
                 if action.get("output", {}).get("message"):
-                    markdown += f"#### Output\n\n"
+                    markdown += "#### Output\n\n"
                     markdown += f"{action['output']['message']}\n\n"
 
             if step["name"] == "ClarifyCodeChange":
@@ -267,7 +265,7 @@ def generate_md_report(trajectory: dict, instance: dict):
             if step["name"] == "Rejected":
                 markdown += f"*{action['properties']['message']}*\n"
 
-    markdown += f"## Alternative patches\n"
+    markdown += "## Alternative patches\n"
     for alternative in instance["resolved_by"]:
         markdown += f"### {alternative['name']}\n"
         markdown += f"```diff\n{alternative['patch']}\n```\n"

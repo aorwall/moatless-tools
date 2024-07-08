@@ -69,7 +69,6 @@ def clean_and_reset_state(repo_dir):
 
 
 def create_branch(repo_dir, branch_name):
-
     try:
         subprocess.run(
             ["git", "branch", branch_name],
@@ -79,7 +78,7 @@ def create_branch(repo_dir, branch_name):
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        print(e.stderr)
+        logger.error(e.stderr)
         raise e
 
 
@@ -102,7 +101,7 @@ def create_and_checkout_branch(repo_dir, branch_name):
                 capture_output=True,
             )
         else:
-            output = subprocess.run(
+            subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=repo_dir,
                 check=True,
@@ -110,7 +109,7 @@ def create_and_checkout_branch(repo_dir, branch_name):
                 capture_output=True,
             )
     except subprocess.CalledProcessError as e:
-        print(e.stderr)
+        logger.error(e.stderr)
         raise e
 
 
@@ -160,7 +159,7 @@ def stage_all_files(repo_dir):
 
 def checkout_commit(repo_dir, commit_hash):
     try:
-        output = subprocess.run(
+        subprocess.run(
             ["git", "reset", "--hard", commit_hash],
             cwd=repo_dir,
             check=True,

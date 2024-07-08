@@ -1,6 +1,5 @@
 import fnmatch
 import logging
-from typing import Optional, Type, List
 
 import instructor
 from pydantic import BaseModel, Field
@@ -9,9 +8,9 @@ from moatless.file_context import FileContext, RankedFileSpan
 from moatless.state import ActionResponse, AgenticState
 from moatless.types import (
     ActionRequest,
+    AssistantMessage,
     Message,
     UserMessage,
-    AssistantMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,30 +231,30 @@ class Search(ActionRequest):
         description="Your thoughts on what search parameters to set."
     )
 
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         default=None,
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    query: Optional[str] = Field(
+    query: str | None = Field(
         default=None,
         description="A semantic similarity search query. Use natural language to describe what you are looking for.",
     )
 
-    code_snippet: Optional[str] = Field(
+    code_snippet: str | None = Field(
         default=None,
         description="Specific code snippet to that should be exactly matched.",
     )
 
-    class_names: List[str] = Field(
+    class_names: list[str] = Field(
         default=[], description="Specific class names to include in the search."
     )
 
-    function_names: List[str] = Field(
+    function_names: list[str] = Field(
         default=[], description="Specific function names to include in the search."
     )
 
-    complete: Optional[bool] = Field(
+    complete: bool | None = Field(
         default=False, description="Set to true when the search is complete."
     )
 
@@ -273,15 +272,14 @@ class Search(ActionRequest):
 class ActionCallWithContext(BaseModel):
     action: ActionRequest
     file_context: FileContext
-    message: Optional[str] = None
+    message: str | None = None
 
     class Config:
         arbitrary_types_allowed = True
 
 
 class SearchCode(AgenticState):
-
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Message to the search",
     )
@@ -305,7 +303,7 @@ class SearchCode(AgenticState):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         max_search_results: int = 25,
         max_retries_with_any_file_context: int = 3,
         provide_initial_context: bool = True,
@@ -425,13 +423,13 @@ class SearchCode(AgenticState):
             and self.file_context.files
         ):
             logger.info(
-                f"Exceeded max retries, will finish as there are identified files in the file context. Transitioning to finish."
+                "Exceeded max retries, will finish as there are identified files in the file context. Transitioning to finish."
             )
             return ActionResponse.transition("finish")
         else:
             return ActionResponse.retry(message)
 
-    def _duplicate_search(self, action: Search) -> Optional[str]:
+    def _duplicate_search(self, action: Search) -> str | None:
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
         for transition in previous_transitions:
             for previous_action in transition.actions:
@@ -462,7 +460,7 @@ class SearchCode(AgenticState):
 
         return None
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return Search
 
     def system_prompt(self) -> str:
@@ -551,8 +549,4 @@ def is_test_pattern(file_pattern: str):
 
     test_patterns = ["test_*.py"]
 
-    for pattern in test_patterns:
-        if fnmatch.filter([file_pattern], pattern):
-            return True
-
-    return False
+    return any(fnmatch.filter([file_pattern], pattern) for pattern in test_patterns)
