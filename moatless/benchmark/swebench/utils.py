@@ -273,7 +273,14 @@ def generate_md_report(trajectory: dict, instance: dict):
     return markdown
 
 
-def setup_swebench_repo(instance_data: dict, repo_base_dir: str = "/tmp/repos") -> str:
+def setup_swebench_repo(instance_data: dict | None = None, instance_id: str = None, repo_base_dir: str | None = None) -> str:
+    assert instance_data or instance_id, "Either instance_data or instance_id must be provided"
+    if not instance_data:
+        instance_data = load_instance(instance_id)
+
+    if not repo_base_dir:
+        repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
+
     repo_dir_name = instance_data["repo"].replace("/", "__")
     github_repo_path = f"swe-bench/{repo_dir_name}"
     return setup_github_repo(
@@ -285,10 +292,20 @@ def setup_swebench_repo(instance_data: dict, repo_base_dir: str = "/tmp/repos") 
 
 def create_workspace(
     instance: dict,
-    repo_base_dir: str = "/tmp/repos",
-    index_store_dir: str = "/tmp/index_store",
+    repo_base_dir: str | None = None,
+    index_store_dir: str | None = None
 ):
+    """
+    Create a workspace for the given SWE-bench instance.
+    """
+
+    if not index_store_dir:
+        index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+
     repo_dir = setup_swebench_repo(instance, repo_base_dir=repo_base_dir)
+
+    # TODO: Download index store if not exists
+
     persist_dir = os.path.join(
         index_store_dir, get_repo_dir_name(instance["instance_id"])
     )
