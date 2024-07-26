@@ -27,8 +27,10 @@ class CodeFile(BaseModel):
     file_path: str
     content: str
     module: Module | None = None
-
     dirty: bool = False
+
+    class Config:
+        exclude = {'module', 'dirty'}
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):

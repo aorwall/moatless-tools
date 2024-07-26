@@ -30,12 +30,6 @@ class ContextSpan(BaseModel):
     end_line: int | None = None
     tokens: int | None = None
 
-    def dict(self, **kwargs):
-        return self.model_dump(**kwargs)
-
-    def model_dump(self, **kwargs):
-        return {"span_id": self.span_id, "tokens": self.tokens}
-
 
 @dataclass
 class CurrentPromptSpan:
@@ -50,6 +44,11 @@ class ContextFile(BaseModel):
 
     def __init__(self, **data):
         super().__init__(**data)
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs, exclude={"file"})
+        data['file_path'] = self.file.file_path
+        return data
 
     @property
     def file_path(self):
@@ -396,6 +395,7 @@ class ContextFile(BaseModel):
 
 
 class FileContext:
+
     def __init__(self, repo: FileRepository, max_tokens: int = 4000):
         self._repo = repo
         self._file_context: dict[str, ContextFile] = {}
@@ -411,6 +411,10 @@ class FileContext:
             )
 
         return file_context
+
+    @classmethod
+    def from_dir(cls, repo_dir: str, **kwargs):
+        return cls(FileRepository(repo_dir), **kwargs)
 
     def to_files_with_spans(self) -> list[FileWithSpans]:
         return [
@@ -478,9 +482,7 @@ class FileContext:
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
 
-    def add_span_to_context(
-        self, file_path: str, span_id: str, tokens: int | None = None
-    ):
+    def add_span_to_context(self, file_path: str, span_id: str, tokens: int | None = None):
         context_file = self.get_context_file(file_path)
         if context_file:
             context_file.add_span(span_id, tokens)
@@ -665,17 +667,12 @@ class FileContext:
     def save(self):
         self._repo.save()
 
-    def dict(self):
-        file_dict = []
-        for file_path, file in self._file_context.items():
-            if file.spans:
-                spans = []
-                for span in file.spans:
-                    spans.append({"span_id": span.span_id, "tokens": span.tokens})
-                file_dict.append({"file_path": file_path, "spans": spans})
-            else:
-                file_dict.append({"file_path": file_path})
-        return file_dict
+    def dict(self, **kwargs):
+        if 'exclude_none' not in kwargs:
+            kwargs['exclude_none'] = True
+
+        files = [file.model_dump(**kwargs) for file in self._file_context.values()]
+        return {"max_tokens": self._max_tokens, "files": files}
 
     def reset(self):
         self._file_context = {}
