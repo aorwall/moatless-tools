@@ -22,7 +22,7 @@ class AgenticState(ABC, BaseModel):
         default=False,
         description="The message history from previous initations should be included in the completion request",
     )
-    model: str = Field(default="gpt-4o", description="The model to use for completion")
+    model: str = Field(..., description="The model to use for completion")
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
@@ -34,6 +34,7 @@ class AgenticState(ABC, BaseModel):
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
 
     def __init__(self, **data):
+        logger.info(f"Init {data}")
         super().__init__(**data)
         self._loop = None
 

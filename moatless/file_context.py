@@ -406,8 +406,9 @@ class FileContext(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def __init__(self, **data):
+    def __init__(self, repo: FileRepository, **data):
         super().__init__(**data)
+        self._repo = repo
         if '_file_context' not in self.__dict__:
             self.__dict__['_file_context'] = {}
         if '_max_tokens' not in self.__dict__:

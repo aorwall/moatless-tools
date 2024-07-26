@@ -4,7 +4,7 @@ from moatless.codeblocks.parser.python import PythonParser
 from moatless.file_context import FileContext
 from moatless.index import IndexSettings
 from moatless.index.code_index import CodeIndex
-from moatless.repository import CodeFile, FileRepository
+from moatless.repository import CodeFile, FileRepository, GitRepository
 from moatless.types import FileWithSpans, VerificationError
 from moatless.verify.lint import PylintVerifier
 from moatless.verify.maven import MavenVerifier
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class Workspace:
+
     def __init__(
         self,
         file_repo: FileRepository,
@@ -39,14 +40,22 @@ class Workspace:
     @classmethod
     def from_dirs(
         cls,
-        repo_dir: str,
+        git_repo_url: str | None = None,
+        commit: str | None = None,
+        repo_dir: str | None = None,
         index_dir: str | None = None,
         index_settings: IndexSettings | None = None,
         max_results: int = 25,
         max_file_context_tokens=4000,
         **kwargs,
     ):
-        file_repo = FileRepository(repo_dir)
+        if git_repo_url:
+            file_repo = GitRepository.from_repo(repo_url=git_repo_url, repo_path=repo_dir, commit=commit)
+        elif repo_dir:
+            file_repo = FileRepository(repo_dir)
+        else:
+            raise ValueError("Either git_repo_url or repo_dir must be provided.")
+
         if index_dir:
             try:
                 code_index = CodeIndex.from_persist_dir(
@@ -64,13 +73,24 @@ class Workspace:
         else:
             code_index = None
 
-        workspace = cls(
+        return cls(
             file_repo=file_repo,
             code_index=code_index,
             max_file_context_tokens=max_file_context_tokens,
             **kwargs,
         )
-        return workspace
+
+    def dict(self):
+        return {
+            "repository": self.file_repo.dict(),
+            "file_context": self.file_context.model_dump()
+        }
+
+    def snapshot(self):
+        return {
+            "repository": self.file_repo.snapshot(),
+            "file_context": self.file_context.model_dump(exclude="max_tokens")
+        }
 
     def create_file_context(
         self,
@@ -90,9 +110,6 @@ class Workspace:
         return self.file_repo.get_file(
             file_path, refresh=refresh, from_origin=from_origin
         )
-
-    def save_file(self, file_path: str, updated_content: str | None = None):
-        self.file_repo.save_file(file_path, updated_content)
 
     def save(self):
         self.file_repo.save()

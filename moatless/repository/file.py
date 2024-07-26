@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -175,6 +176,15 @@ class FileRepository:
     def __init__(self, repo_path: str):
         self._repo_path = repo_path
         self._files: dict[str, CodeFile] = {}
+
+    def dict(self):
+        return {
+            "type": "file",
+            "path": self._repo_path
+        }
+
+    def snapshot(self) -> dict:
+        return {}
 
     @property
     def path(self):

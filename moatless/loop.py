@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import random
 import string
 import traceback
@@ -126,7 +127,15 @@ class AgenticLoop:
         """
 
         self._workspace = workspace
+
+        if trajectory_path:
+            parent_dir = os.path.dirname(trajectory_path)
+            if not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
         self._trajectory_path = trajectory_path
+
+        if prompt_log_dir and not os.path.exists(prompt_log_dir):
+            os.makedirs(prompt_log_dir)
         self._prompt_log_dir = prompt_log_dir
 
         self._mocked_actions = mocked_actions
@@ -161,7 +170,7 @@ class AgenticLoop:
             raise Exception("Loop is already running.")
 
         self._trajectory = Trajectory(
-            "AgenticLoop", initial_message=message, persist_path=self._trajectory_path
+            "AgenticLoop", initial_message=message, persist_path=self._trajectory_path, workspace=self.workspace.dict()
         )
 
         self.transition_to(self._transitions.initial_state(**input_data or {}))
@@ -255,7 +264,7 @@ class AgenticLoop:
                 message=f"Max transitions exceeded for state {new_state.name}."
             )
 
-        self.trajectory.new_transition(new_state)
+        self.trajectory.new_transition(new_state, snapshot=self.workspace.snapshot())
 
         self._state = new_state
         self._set_state_loop(self.state)
@@ -268,7 +277,7 @@ class AgenticLoop:
         return self._state
 
     @property
-    def workspace(self):
+    def workspace(self) -> Workspace:
         return self._workspace
 
     @property
@@ -424,7 +433,7 @@ class AgenticLoop:
         if self._instructor_mode:
             return self._instructor_mode
 
-        if "openai" in self.state.model:
+        if "gpt" in self.state.model:
             return instructor.Mode.TOOLS
 
         if self.state.model.startswith("claude"):

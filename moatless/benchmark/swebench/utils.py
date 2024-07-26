@@ -14,6 +14,9 @@ from moatless.utils.repo import setup_github_repo
 from moatless.workspace import Workspace
 
 
+logger = logging.getLogger(__name__)
+
+
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
 ):
@@ -291,22 +294,31 @@ def setup_swebench_repo(instance_data: dict | None = None, instance_id: str = No
 
 
 def create_workspace(
-    instance: dict,
+    instance: dict | None = None,
+    instance_id: str | None = None,
     repo_base_dir: str | None = None,
     index_store_dir: str | None = None
 ):
     """
     Create a workspace for the given SWE-bench instance.
     """
+    assert instance or instance_id, "Either instance or instance_id must be provided"
+    if not instance:
+        instance = load_instance(instance_id)
 
     if not index_store_dir:
         index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
 
-    repo_dir = setup_swebench_repo(instance, repo_base_dir=repo_base_dir)
+    if not repo_base_dir:
+        repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
 
-    # TODO: Download index store if not exists
+    repo_dir_name = instance["repo"].replace("/", "__")
+    repo_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
+    repo_dir = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
+
+    # TODO: Download index store if it doesn't exist
 
     persist_dir = os.path.join(
         index_store_dir, get_repo_dir_name(instance["instance_id"])
     )
-    return Workspace.from_dirs(repo_dir=repo_dir, index_dir=persist_dir)
+    return Workspace.from_dirs(git_repo_url=repo_url, commit=instance["base_commit"], repo_dir=repo_dir, index_dir=persist_dir)
