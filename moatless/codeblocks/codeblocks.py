@@ -2,7 +2,7 @@ import re
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from typing_extensions import deprecated
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
@@ -207,7 +207,7 @@ class Relationship(BaseModel):
     )
 
     @classmethod
-    @root_validator(pre=True)
+    @model_validator(mode="before")
     def validate_path(cls, values):
         external_path = values.get("external_path")
         path = values.get("path")
@@ -322,8 +322,10 @@ class CodeBlock(BaseModel):
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     @classmethod
-    @validator("type", pre=True, always=True)
+    @field_validator("type", mode="before")
     def validate_type(cls, v):
         if v is None:
             raise ValueError("Cannot create CodeBlock without type.")

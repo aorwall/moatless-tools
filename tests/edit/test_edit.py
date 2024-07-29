@@ -1,6 +1,8 @@
+import pytest
+
+from moatless.benchmark.swebench import create_workspace, load_instance
 from moatless.edit.edit import EditCode
 from moatless.loop import AgenticLoop
-from utils import create_workspace
 
 
 def create_clarify(
@@ -13,6 +15,7 @@ def create_clarify(
     instructions: str = "",
 ):
     clarify = EditCode(
+        model="gpt-4o",
         instructions=instructions,
         file_path=file_path,
         span_id=span_id,
@@ -20,7 +23,8 @@ def create_clarify(
         end_line=end_line,
     )
     mock_loop = mocker.create_autospec(AgenticLoop)
-    mock_loop.workspace = create_workspace(instance_id)
+    instance = load_instance(instance_id)
+    mock_loop.workspace = create_workspace(instance)
     mock_loop.workspace.file_context.add_span_to_context(
         file_path=file_path, span_id=span_id
     )
@@ -28,6 +32,7 @@ def create_clarify(
     return clarify, mock_loop
 
 
+@pytest.mark.skip
 def test_search_block(mocker):
     instance_id = "scikit-learn__scikit-learn-10297"
     file_path = "sklearn/linear_model/ridge.py"

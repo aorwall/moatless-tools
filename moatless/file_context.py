@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Set
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.v1 import PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
@@ -403,8 +403,7 @@ class FileContext(BaseModel):
     _file_context: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
     _max_tokens: int = PrivateAttr(default=4000)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(self, repo: FileRepository, **data):
         super().__init__(**data)
@@ -416,8 +415,8 @@ class FileContext(BaseModel):
 
     @classmethod
     def from_dir(cls, repo_dir: str, max_tokens: int = 4000):
-        instance = cls(max_tokens=max_tokens)
-        instance._repo = FileRepository(repo_dir)
+        repo = FileRepository(repo_dir)
+        instance = cls(max_tokens=max_tokens, repo=repo)
         return instance
 
     @classmethod
@@ -434,8 +433,8 @@ class FileContext(BaseModel):
 
     @classmethod
     def from_dict(cls, repo_dir: str, data: Dict):
-        instance = cls(max_tokens=data.get('max_tokens', 4000))
-        instance._repo = FileRepository(repo_dir)
+        repo = FileRepository(repo_dir)
+        instance = cls(max_tokens=data.get('max_tokens', 4000), repo=repo)
         for file_data in data.get('files', []):
             file_path = file_data['file_path']
             show_all_spans = file_data.get('show_all_spans', False)
@@ -454,6 +453,11 @@ class FileContext(BaseModel):
 
         files = [file.model_dump(**kwargs) for file in self.__dict__['_file_context'].values()]
         return {"max_tokens": self.__dict__['_max_tokens'], "files": files}
+
+    def snapshot(self):
+        dict = self.model_dump()
+        del dict["max_tokens"]
+        return dict
 
     def to_files_with_spans(self) -> List[FileWithSpans]:
         return [

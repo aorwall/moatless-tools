@@ -21,10 +21,9 @@ class TrajectoryAction(BaseModel):
     output_tokens: int | None = None
 
     def model_dump(self, **kwargs):
-        dict = super().model_dump(**kwargs)
-        action_dict = self.action.model_dump(**kwargs)
-        dict["action"] = action_dict
-        return dict
+        data = super().model_dump(**kwargs)
+        data["action"] = self.action.model_dump(**kwargs)
+        return data
 
 
 class TrajectoryTransition(BaseModel):
@@ -36,6 +35,15 @@ class TrajectoryTransition(BaseModel):
     @property
     def name(self):
         return self.state.name if self.state else None
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        if self.state:
+            data['state']['name'] = self.state.name
+        
+        data['actions'] = [action.model_dump(**kwargs) for action in self.actions]
+        
+        return data
 
 
 class Trajectory:
@@ -131,6 +139,7 @@ class Trajectory:
             "initial_message": self._initial_message,
             "transitions": transition_dicts,
             "info": self._info,
+            "dummy_field": None  # Add this line
         }
 
     def total_cost(self):

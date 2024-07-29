@@ -120,6 +120,7 @@ class EditCode(AgenticState):
         max_prompt_file_tokens: int = 4000,
         **data,
     ):
+        assert "model" in data
         super().__init__(
             include_message_history=True,
             show_initial_message=show_initial_message,

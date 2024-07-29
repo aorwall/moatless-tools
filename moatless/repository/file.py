@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
@@ -30,8 +30,7 @@ class CodeFile(BaseModel):
     module: Module | None = None
     dirty: bool = False
 
-    class Config:
-        exclude = {'module', 'dirty'}
+    model_config = ConfigDict(exclude={'module', 'dirty'})
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):

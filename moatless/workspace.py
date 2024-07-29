@@ -89,7 +89,7 @@ class Workspace:
     def snapshot(self):
         return {
             "repository": self.file_repo.snapshot(),
-            "file_context": self.file_context.model_dump(exclude="max_tokens")
+            "file_context": self.file_context.snapshot()
         }
 
     def create_file_context(

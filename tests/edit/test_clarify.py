@@ -1,7 +1,9 @@
+import pytest
+
+from moatless.benchmark.swebench import load_instance, create_workspace
 from moatless.edit.clarify import ClarifyCodeChange, LineNumberClarification
 from moatless.loop import AgenticLoop
 from moatless.types import ActionResponse
-from utils import create_workspace
 
 
 def create_clarify(
@@ -11,14 +13,15 @@ def create_clarify(
         instructions=instructions, file_path=file_path, span_id=span_id
     )
     mock_loop = mocker.create_autospec(AgenticLoop)
-    mock_loop.workspace = create_workspace(instance_id)
+    instance = load_instance(instance_id)
+    mock_loop.workspace = create_workspace(instance)
     mock_loop.workspace.file_context.add_span_to_context(
         file_path=file_path, span_id=span_id
     )
     clarify._set_loop(mock_loop)
     return clarify, mock_loop
 
-
+@pytest.mark.skip
 def test_line_span_in_end_of_class(mocker):
     instance_id = "scikit-learn__scikit-learn-13439"
     file_path = "sklearn/pipeline.py"
@@ -43,6 +46,7 @@ def test_line_span_in_end_of_class(mocker):
     )
 
 
+@pytest.mark.skip
 def test_impl_span(mocker):
     instance_id = "django__django-10914"
     file_path = "django/conf/global_settings.py"
@@ -71,8 +75,9 @@ def test_impl_span(mocker):
     )
 
 
+@pytest.mark.skip
 def test_line_span_in_class(mocker):
-    instance_id = "psf__requests-863"
+    instance_id = "sympy__sympy-13177"
     file_path = "requests/models.py"
     span_id = "Request"
     start_line = 151

@@ -35,7 +35,7 @@ class PylintVerifier(Verifier):
             return [
                 VerificationError(
                     code=msg.msg_id,
-                    file_path=msg.file_path.replace(f"{self.repo_dir}/", ""),
+                    file_path=msg.path.replace(f"{self.repo_dir}/", ""),
                     message=msg.msg,
                     line=msg.line,
                 )
