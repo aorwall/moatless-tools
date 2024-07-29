@@ -1,6 +1,8 @@
 import logging
 import os
 import subprocess
+import shutil
+import git
 
 logger = logging.getLogger(__name__)
 
@@ -8,15 +10,43 @@ logger = logging.getLogger(__name__)
 def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
     repo_name = get_repo_dir_name(repo)
     repo_url = f"https://github.com/{repo}.git"
-
     path = f"{base_dir}/{repo_name}"
-    if not os.path.exists(path):
-        os.makedirs(path)
-        logger.info(f"Directory '{path}' was created.")
+
+    if os.path.exists(path):
+        logger.info(f"Repository directory '{path}' already exists.")
+        try:
+            # Attempt to update the existing repository
+            update_repo(path, repo_url, base_commit)
+            logger.info(f"Existing repository at '{path}' was successfully updated.")
+            return path
+        except Exception as e:
+            logger.warning(f"Failed to update existing repository: {e}")
+            logger.info("Removing existing directory and re-cloning...")
+            shutil.rmtree(path)
+
+    # If we've reached here, either the directory didn't exist or update failed
+    os.makedirs(path, exist_ok=True)
+    logger.info(f"Directory '{path}' was created.")
     maybe_clone(repo_url, path)
     checkout_commit(path, base_commit)
-
     return path
+
+def update_repo(path: str, repo_url: str, base_commit: str):
+    """Attempt to update an existing repository."""
+
+    repo = git.Repo(path)
+    
+    # Ensure we're on the main branch (adjust if your default branch is different)
+    repo.git.checkout('main')
+    
+    # Fetch the latest changes
+    repo.git.fetch('--all')
+    
+    # Reset to the specified commit
+    repo.git.reset('--hard', base_commit)
+
+    # Clean the working directory
+    repo.git.clean('-fd')
 
 
 def get_repo_dir_name(repo: str):
@@ -158,15 +188,34 @@ def stage_all_files(repo_dir):
     )
 
 
-def checkout_commit(repo_dir, commit_hash):
-    subprocess.run(
-        ["git", "reset", "--hard", commit_hash],
-        cwd=repo_dir,
-        check=True,
-        text=True,
-        capture_output=True,
-    )
+def checkout_commit(path, commit):
+    try:
+        result = subprocess.run(
+            ["git", "reset", "--hard", commit],
+            cwd=path,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print(f"Git reset successful: {result.stdout}")
+    except subprocess.CalledProcessError as e:
+        print(f"Git reset failed with exit code {e.returncode}")
+        print(f"Error output: {e.stderr}")
+        raise
 
+    try:
+        result = subprocess.run(
+            ["git", "clean", "-fd"],
+            cwd=path,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print(f"Git clean successful: {result.stdout}")
+    except subprocess.CalledProcessError as e:
+        print(f"Git clean failed with exit code {e.returncode}")
+        print(f"Error output: {e.stderr}")
+        raise
 
 def setup_repo(repo_url, repo_dir, branch_name="master"):
     maybe_clone(repo_url, repo_dir)

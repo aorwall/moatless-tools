@@ -6,7 +6,7 @@ from moatless.edit.plan import PlanToCode
 from moatless.loop import AgenticLoop
 from moatless.state import AgenticState
 from moatless.transitions import code_transitions
-from utils import create_workspace, get_instance
+from moatless.benchmark.swebench.utils import create_workspace, load_instance
 
 
 def read_trajectory(path):
@@ -27,8 +27,9 @@ def test_two_edits():
     trajectory = read_trajectory(path)
     actions = get_actions(trajectory)
 
+    print(f'trajectory: {trajectory["info"]["instance_id"]}')
     workspace = create_workspace(trajectory["info"]["instance_id"])
-    instance = get_instance(trajectory["info"]["instance_id"])
+    instance = load_instance(trajectory["info"]["instance_id"])
     spans = get_file_spans_from_patch(workspace.file_repo, instance["patch"])
     for file_path, span_ids in spans.items():
         workspace.file_context.add_spans_to_context(
@@ -60,3 +61,7 @@ def test_two_edits():
         verify_state_func=_verify_state_func,
     )
     loop.run(message=trajectory["initial_message"])
+
+
+if __name__ == "__main__":
+    test_two_edits()

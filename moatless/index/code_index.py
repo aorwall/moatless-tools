@@ -36,6 +36,8 @@ from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
 
+import copy
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +104,28 @@ class CodeIndex:
             blocks_by_class_name=blocks_by_class_name,
             blocks_by_function_name=blocks_by_function_name,
         )
+    
+    def __deepcopy__(self, memo):
+        # Create a shallow copy of the current object
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Store the original vector_store
+        original_vector_store = self._vector_store
+
+        # Temporarily remove the _vector_store to avoid deepcopying it
+        self.__dict__.pop('_vector_store', None)
+
+        # Perform a normal deepcopy of the object
+        for k, v in self.__dict__.items():
+            setattr(result, k, copy.deepcopy(v, memo))
+
+        # Restore the original _vector_store to both objects
+        self._vector_store = original_vector_store
+        result._vector_store = original_vector_store
+
+        return result
 
     @classmethod
     def from_url(cls, url: str, persist_dir: str, file_repo: FileRepository):

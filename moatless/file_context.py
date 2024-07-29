@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Optional, Set, Dict, List
+from typing import Optional, Set, Dict, List, Any
 
 from pydantic import BaseModel
 
@@ -367,6 +367,8 @@ class ContextFile(BaseModel):
 
 
 class FileContext:
+    
+    VERSION = "1.0"  # Add version information
 
     def __init__(self, repo: FileRepository, max_tokens: int = 4000):
         self._repo = repo
@@ -374,12 +376,26 @@ class FileContext:
         self._max_tokens: int = max_tokens
 
     @classmethod
-    def from_json(cls, repo_path: str, context_data: list[Dict]):
-        file_context = cls(FileRepository(repo_path))
+    def from_json(cls, serialized_data: Dict[str, Any]):
+        if serialized_data.get("version") != cls.VERSION:
+            raise ValueError(f"Unsupported serialization version: {serialized_data.get('version')}")
 
-        for file_data in context_data:
+        repo = FileRepository(serialized_data["repo_path"])
+        
+        # Reconstruct _files as a dictionary of CodeFile objects
+        repo._files = {}
+        for file_path, file_data in serialized_data["file_contents"].items():
+            code_file = CodeFile.from_file(repo.path, file_path)
+            code_file.content = file_data["content"]
+            code_file.dirty = file_data["dirty"]
+            repo._files[file_path] = code_file
+        
+        file_context = cls(repo, max_tokens=serialized_data["max_tokens"])
+
+        for file_data in serialized_data["file_context"]:
             file_context.add_spans_to_context(
-                file_path=file_data["file_path"], span_ids=set(file_data["span_ids"])
+                file_path=file_data["file_path"],
+                span_ids=set(file_data.get("span_ids", []))
             )
 
         return file_context
@@ -613,14 +629,29 @@ class FileContext:
     def dict(self):
         file_dict = []
         for file_path, file in self._file_context.items():
+            file_info = {"file_path": file_path}
             if file.spans:
-                spans = []
-                for span in file.spans:
-                    spans.append({"span_id": span.span_id, "tokens": span.tokens})
-                file_dict.append({"file_path": file_path, "spans": spans})
-            else:
-                file_dict.append({"file_path": file_path})
-        return file_dict
+                file_info["spans"] = [
+                    {"span_id": span.span_id, "tokens": span.tokens}
+                    for span in file.spans
+                ]
+                file_info["span_ids"] = [span.span_id for span in file.spans]
+            file_dict.append(file_info)
+
+        return {
+            "version": self.VERSION,
+            "repo_path": self._repo.path,
+            "max_tokens": self._max_tokens,
+            "file_context": file_dict,
+            "repo_files": list(self._repo._files.keys()),
+            "file_contents": {
+                path: {
+                    "content": file.content,
+                    "dirty": file.dirty
+                }
+                for path, file in self._repo._files.items()
+            }
+        }
 
     def reset(self):
         self._file_context = {}
@@ -644,3 +675,58 @@ class FileContext:
             )
             file_context_content += "\n\n" + content
         return file_context_content
+    
+    def serialize(self) -> Dict[str, Any]:
+        """
+        Serialize the FileContext into a dictionary.
+        """
+        serialized = {
+            "version": self.VERSION,
+            "repo_path": self._repo.path,
+            "max_tokens": self._max_tokens,
+            "files": {}
+        }
+        
+        for file_path, context_file in self._file_context.items():
+            serialized["files"][file_path] = {
+                "file_path": context_file.file_path,
+                "module": context_file.module,
+                "content": context_file.content,
+                "spans": [span.dict() for span in context_file.spans],
+                "supports_codeblocks": context_file.file.supports_codeblocks,
+                # Add any other relevant CodeFile attributes here
+            }
+
+        return serialized
+
+    @classmethod
+    def deserialize(cls, serialized_data: Dict[str, Any]) -> 'FileContext':
+        """
+        Deserialize the FileContext from a dictionary and create a new instance.
+        """
+        if serialized_data.get("version") != cls.VERSION:
+            raise ValueError(f"Unsupported serialization version: {serialized_data.get('version')}")
+
+        repo = FileRepository(serialized_data["repo_path"])
+        file_context = cls(repo, max_tokens=serialized_data.get("max_tokens", 4000))
+        
+        for file_path, file_data in serialized_data["files"].items():
+            try:
+                code_file = CodeFile(
+                    file_path=file_data["file_path"],
+                    module=file_data["module"],
+                    content=file_data["content"],
+                    supports_codeblocks=file_data["supports_codeblocks"],
+                    # Reconstruct other CodeFile attributes here
+                )
+                
+                context_file = ContextFile(file=code_file, spans=[])
+                for span_data in file_data["spans"]:
+                    context_file.spans.append(ContextSpan(**span_data))
+                
+                file_context._file_context[file_path] = context_file
+            except KeyError as e:
+                raise ValueError(f"Missing required key in serialized data for file {file_path}: {str(e)}")
+
+        return file_context
+

@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
@@ -25,11 +25,43 @@ class UpdateResult:
 
 class CodeFile(BaseModel):
     file_path: str
-    content: str
     module: Optional[Module] = None
-
     dirty: bool = False
+    
+    _content: str = PrivateAttr()
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._content = data.get('content', '')
+
+    @property
+    def content(self):
+        return self._content
+
+    @content.setter
+    def content(self, new_content):
+        if self._content != new_content:
+            self._content = new_content
+            self.dirty = True
+
+    def save(self):
+        if self.dirty:
+            with open(self.file_path, 'w') as f:
+                f.write(self._content)
+            self.dirty = False
+
+    def dict(self, *args, **kwargs):
+        d = super().dict(*args, **kwargs)
+        d['content'] = self._content
+        return d
+
+    @classmethod
+    def from_file(cls, repo_path: str, file_path: str):
+        full_path = os.path.join(repo_path, file_path)
+        with open(full_path, 'r') as f:
+            content = f.read()
+        return cls(file_path=file_path, content=content)
+    
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
         with open(os.path.join(repo_path, file_path), "r") as f:

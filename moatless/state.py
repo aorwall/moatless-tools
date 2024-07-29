@@ -13,6 +13,10 @@ from moatless.types import (
     AssistantMessage,
     UserMessage,
 )
+from copy import deepcopy
+from inspect import signature
+import inspect
+from typing import Any, Dict
 
 
 class AgenticState(ABC, BaseModel):
@@ -41,7 +45,8 @@ class AgenticState(ABC, BaseModel):
 
     def _set_loop(self, loop: "AgenticLoop"):
         self._loop = loop
-        self.init()
+        if self._loop is not None:
+            self.init()
 
     def __str__(self):
         return self.__class__.__name__
@@ -111,6 +116,11 @@ class AgenticState(ABC, BaseModel):
         """
         raise NotImplementedError
 
+    @classmethod
+    def copy_state(cls, state: 'AgenticState', loop: 'AgenticLoop') -> 'AgenticState':
+        """Class method to create a deep copy of a state."""
+        return state.deep_copy(loop)
+    
     def stop_words(self) -> Optional[List[str]]:
         return None
 
@@ -145,3 +155,52 @@ class Pending(NoopState):
 
     def __init__(self, **data):
         super().__init__(**data)
+
+
+    # def __deepcopy__(self, memo=None) -> 'AgenticState':
+    #     """Create a deep copy of the state while respecting Pydantic's structure and preserving workspace."""
+    #     if memo is None:
+    #         memo = {}
+
+    #     def _copy_value(value: Any, memo: Dict[int, Any]) -> Any:
+    #         if id(value) in memo:
+    #             return memo[id(value)]
+    #         if isinstance(value, (int, float, str, bool, type(None))):
+    #             return value
+    #         elif isinstance(value, list):
+    #             new_list = []
+    #             memo[id(value)] = new_list
+    #             new_list.extend(_copy_value(item, memo) for item in value)
+    #             return new_list
+    #         elif isinstance(value, dict):
+    #             new_dict = {}
+    #             memo[id(value)] = new_dict
+    #             for k, v in value.items():
+    #                 new_dict[_copy_value(k, memo)] = _copy_value(v, memo)
+    #             return new_dict
+    #         elif isinstance(value, Workspace):
+    #             # Don't deep copy the workspace, just return the same instance
+    #             return value
+    #         else:
+    #             return deepcopy(value, memo)
+
+    #     # Create a dictionary of field values
+    #     field_values = {}
+    #     for name, field in self.__fields__.items():
+    #         if hasattr(self, name):
+    #             value = getattr(self, name)
+    #             field_values[name] = _copy_value(value, memo)
+
+    #     # Create a new instance using the model_construct method
+    #     new_state = self.__class__.model_construct(**field_values)
+
+    #     # Copy any additional attributes that aren't Pydantic fields
+    #     for name, value in self.__dict__.items():
+    #         if name not in self.__fields__ and not name.startswith('_'):
+    #             copied_value = _copy_value(value, memo)
+    #             setattr(new_state, name, copied_value)
+
+    #     # Store the new object in the memo dictionary
+    #     memo[id(self)] = new_state
+
+    #     return new_state

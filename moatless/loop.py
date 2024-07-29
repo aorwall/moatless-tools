@@ -1,3 +1,4 @@
+import os
 import logging
 import random
 import string
@@ -23,6 +24,9 @@ from moatless.types import (
     Content,
 )
 
+from .utils_search.visualize_tree import MCTSVisualizer
+# from .loop_search import MCTSNode
+
 logger = logging.getLogger("Loop")
 
 
@@ -31,7 +35,6 @@ class Transition(BaseModel):
     source: Type[AgenticState]
     dest: Type[AgenticState]
     required_fields: set[str] = Field(default_factory=set)
-
 
 class Transitions:
 
@@ -124,6 +127,12 @@ class AgenticLoop:
         self._state: AgenticState = Pending()
 
         self._metadata = metadata
+        
+        self.taskname = self._trajectory_path.replace('trajs', 'flow_chart').replace('.json', '')
+        # self.visualizer = MCTSVisualizer(name=self.taskname)
+        self.nodes = 1
+        self.prev_node = None
+
 
     def run(self, message: Optional[str] = None, input_data: Optional[dict[str, Any]] = None) -> Response:
         """
@@ -138,6 +147,8 @@ class AgenticLoop:
         )
 
         self.transition_to(self._transitions.initial_state(**input_data or {}))
+        # self.root = MCTSNode(0, self.state)
+        # self.visualizer.update_graph(self.root)
 
         while self.is_running():
             try:
@@ -221,10 +232,10 @@ class AgenticLoop:
         if self.trajectory.transition_count(new_state) > new_state.max_iterations:
             new_state = Rejected(message=f"Max transitions exceeded for state {new_state.name}.")
 
-        self.trajectory.new_transition(new_state)
 
-        self._state = new_state
-        self._set_state_loop(self.state)
+        self._state = new_state # set the new state
+        self._set_state_loop(self.state) # set the loop in the new state
+        self.trajectory.new_transition(new_state)   # record transision in the trajectory
 
     @property
     def state(self):
@@ -239,6 +250,7 @@ class AgenticLoop:
         return self._trajectory
 
     def _to_completion_messages(self) -> list[dict]:
+        print(f"stateeee: {self.state}")
         messages = [{"role": "system", "content": self.state.system_prompt()}]
 
         tool_call_id = None
@@ -286,6 +298,9 @@ class AgenticLoop:
             logger.info("Loop is not running.")
             return
 
+        # print(f"workspace files: {safe_repr(self._workspace.file_context.files)}")
+
+        # self.visualizer.add_node_to_graph(self.root)
         action, completion_response = self._next_action()
 
         cost = None
@@ -335,6 +350,15 @@ class AgenticLoop:
             next_state = Rejected(message=f"Got {self._rejections} rejections, aborting.")
         else:
             self._rejections = 0
+        
+        print(f"STATE: {self.state}, ACTION: {action}, NEXT_STATE: {next_state}")
+        self.nodes += 1
+        # child_node = MCTSNode(self.nodes, next_state, 
+        #                       parent=self.root if self.prev_node is None else self.prev_node, 
+        #                       last_action=action, last_completion_response=completion_response)
+        # self.visualizer.add_node_to_graph(child_node)
+        # self.visualizer.update_graph(self.root)
+        # self.prev_node = child_node
 
         logger.info(f"{self.state}: Transitioning to {next_state.name}")
         self.transition_to(next_state)
@@ -374,6 +398,10 @@ class AgenticLoop:
         tokens = token_counter(messages=messages[-1:])
         if tokens > self._max_message_tokens:
             raise ValueError(f"Too many tokens in the new message: {tokens}")
+        
+        # get how many tokens are in input
+        num_tokens = token_counter(messages=messages)
+        logger.info(f"Number of tokens in input: {num_tokens}")
 
         if self.state.action_type() is None:
             completion_response = litellm.completion(
@@ -386,6 +414,10 @@ class AgenticLoop:
             )
             return Content(content=completion_response.choices[0].message.content), completion_response
         else:
+            """
+            if tool call, wrap litellm call in instructor client,
+            which will handle the tool call.
+            """
 
             if "mixtral" in self.state.model:
                 mode = instructor.Mode.MISTRAL_TOOLS
