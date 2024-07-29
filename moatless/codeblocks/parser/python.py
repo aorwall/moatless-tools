@@ -92,7 +92,7 @@ class PythonParser(CodeParser):
                         if rel.type == RelationshipType.IS_A
                     ]
                     if is_a_rel:
-                        super_class = codeblock.root().find_by_path(is_a_rel[0].path)
+                        super_class = codeblock.module.find_by_path(is_a_rel[0].path)
 
                         if super_class:
                             reference.path = (

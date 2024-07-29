@@ -893,10 +893,10 @@ class CodeBlock(BaseModel):
     @property
     def module(self) -> "Module":  # noqa: F821
         if self.parent:
-            return self.parent.root()
+            return self.parent.module
         return self
 
-    @deprecated("Use module()")
+    @deprecated("Use codeblock.module")
     def root(self) -> "Module":  # noqa: F821
         return self.module
 

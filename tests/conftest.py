@@ -31,10 +31,10 @@ def set_env_vars(monkeypatch, request):
     trajectory_dir = request.config.getoption("--trajectory-dir")
     prompt_log_dir = request.config.getoption("--prompt-log-dir")
 
-    logger.info(f"Setting INDEX_STORE_DIR={index_store_dir}")
-    logger.info(f"Setting REPO_DIR={repo_dir}")
-    logger.info(f"Setting TRAJECTORY_DIR={trajectory_dir}")
-    logger.info(f"Setting PROMPT_LOG_DIR={prompt_log_dir}")
+    logger.debug(f"Setting INDEX_STORE_DIR={index_store_dir}")
+    logger.debug(f"Setting REPO_DIR={repo_dir}")
+    logger.debug(f"Setting TRAJECTORY_DIR={trajectory_dir}")
+    logger.debug(f"Setting PROMPT_LOG_DIR={prompt_log_dir}")
 
     monkeypatch.setenv('INDEX_STORE_DIR', index_store_dir)
     monkeypatch.setenv('REPO_DIR', repo_dir)
