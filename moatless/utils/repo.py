@@ -99,7 +99,6 @@ def clean_and_reset_state(repo_dir):
 
 
 def create_branch(repo_dir, branch_name):
-
     try:
         subprocess.run(
             ["git", "branch", branch_name],
@@ -109,7 +108,7 @@ def create_branch(repo_dir, branch_name):
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        print(e.stderr)
+        logger.error(e.stderr)
         raise e
 
 
@@ -132,7 +131,7 @@ def create_and_checkout_branch(repo_dir, branch_name):
                 capture_output=True,
             )
         else:
-            output = subprocess.run(
+            subprocess.run(
                 ["git", "checkout", "-b", branch_name],
                 cwd=repo_dir,
                 check=True,
@@ -140,13 +139,13 @@ def create_and_checkout_branch(repo_dir, branch_name):
                 capture_output=True,
             )
     except subprocess.CalledProcessError as e:
-        print(e.stderr)
+        logger.error(e.stderr)
         raise e
 
 
 def commit_changes(repo_dir, commit_message):
     subprocess.run(
-        ["git", "commit", "-m", commit_message],
+        ["git", "commit", "-m", commit_message, "--no-verify"],
         cwd=repo_dir,
         check=True,
         text=True,
@@ -166,7 +165,7 @@ def checkout_branch(repo_dir, branch_name):
 
 def push_branch(repo_dir, branch_name):
     subprocess.run(
-        ["git", "push", "origin", branch_name],
+        ["git", "push", "origin", branch_name, "--no-verify"],
         cwd=repo_dir,
         check=True,
         text=True,
@@ -203,6 +202,19 @@ def checkout_commit(path, commit):
         print(f"Error output: {e.stderr}")
         raise
 
+        
+def checkout_commit(repo_dir, commit_hash):
+    try:
+        subprocess.run(
+            ["git", "reset", "--hard", commit_hash],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(e.stderr)
+        raise e
     try:
         result = subprocess.run(
             ["git", "clean", "-fd"],

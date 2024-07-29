@@ -1,76 +1,51 @@
 import logging
-from typing import Type, Optional, Union, List
 
-from pydantic import Field, BaseModel, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.codeblocks import CodeBlockType
 from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
-from moatless.edit.prompt import CODER_SYSTEM_PROMPT
+from moatless.edit.prompt import (
+    CODER_FINAL_SYSTEM_PROMPT,
+    CODER_SYSTEM_PROMPT,
+    SELECT_SPAN_SYSTEM_PROMPT,
+)
 from moatless.state import AgenticState
 from moatless.types import (
     ActionRequest,
     ActionResponse,
+    AssistantMessage,
     Message,
     UserMessage,
-    AssistantMessage,
 )
-from moatless.verify.lint import LintMessage
+from moatless.verify.lint import VerificationError
 
 logger = logging.getLogger("PlanToCode")
 
 
-class ApplyChange(BaseModel):
+class ApplyChange(ActionRequest):
     """
-    Request to apply a code change.
+    Request to apply a change to the code.
     """
 
-    instructions: str = Field(..., description="Instructions to do the code change.")
-    file_path: str = Field(..., description="The file path of the code to be updated.")
-    span_id: str = Field(..., description="The span id of the code to be updated.")
+    scratch_pad: str = Field(..., description="Your thoughts on the code change.")
 
-    model_config = ConfigDict(
-        extra="ignore",
+    action: str = Field(
+        ...,
+        description="The action to take, possible values are 'modify', 'review', 'finish', 'reject'",
     )
 
-
-class Finish(BaseModel):
-    """
-    Request to finish the task.
-    """
-
-    message: str = Field(
-        ..., description="Message to return to the user about the completion."
+    instructions: str | None = Field(
+        None, description="Instructions to do the code change."
+    )
+    file_path: str | None = Field(
+        None, description="The file path of the code to be updated."
+    )
+    span_id: str | None = Field(
+        None, description="The span id of the code to be updated."
     )
 
-    model_config = ConfigDict(
-        extra="allow",
-    )
-
-
-class Reject(BaseModel):
-    """
-    Request to reject the task
-    """
-
-    message: str = Field(
-        ..., description="Message to return to the user about the rejection."
-    )
-
-    model_config = ConfigDict(
-        extra="allow",
-    )
-
-
-class TakeAction(ActionRequest):
-    """
-    Request to apply a code change or finish the task.
-    """
-
-    thoughts: str = Field(..., description="Thoughts on the action to be taken.")
-
-    action: Union[ApplyChange, Finish, Reject] = Field(
-        ..., description="Action to be taken."
-    )
+    reject: str | None = Field(None, description="Reject the request and explain why.")
+    finish: str | None = Field(None, description="Finish the request and explain why")
 
     model_config = ConfigDict(
         extra="allow",
@@ -78,22 +53,26 @@ class TakeAction(ActionRequest):
 
 
 class PlanToCode(AgenticState):
-
-    message: Optional[str] = Field(
+    message: str | None = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: Optional[str] = Field(
+    diff: str | None = Field(
         None,
         description="The diff of a previous code change.",
     )
 
     # TODO: Move to a new state handling lint problems
-    lint_messages: Optional[List[LintMessage]] = Field(
+    verification_errors: list[VerificationError] | None = Field(
         None,
         description="The lint errors of the previous code change.",
+    )
+
+    max_prompt_file_tokens: int = Field(
+        4000,
+        description="The maximum number of tokens in the file context to show in the prompt.",
     )
 
     max_tokens_in_edit_prompt: int = Field(
@@ -106,12 +85,26 @@ class PlanToCode(AgenticState):
         description="Whether to expand the context with related spans.",
     )
 
+    allow_hallucinated_spans: bool = Field(
+        False,
+        description="Whether to allow spans that exists but aren't found in the file context.",
+    )
+
+    finish_on_review: bool = Field(
+        False, description="Whether to finish the task if a review is requested."
+    )
+
     def __init__(
         self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        lint_messages: Optional[List[LintMessage]] = None,
-        max_iterations: int = 5,
+        message: str | None = None,
+        diff: str | None = None,
+        lint_messages: list[VerificationError] | None = None,
+        max_prompt_file_tokens: int = 4000,
+        max_tokens_in_edit_prompt: int = 500,
+        max_iterations: int = 8,
+        allow_hallucinated_spans: bool = False,
+        expand_context_with_related_spans: bool = True,
+        finish_on_review: bool = False,
         **data,
     ):
         super().__init__(
@@ -119,39 +112,59 @@ class PlanToCode(AgenticState):
             diff=diff,
             lint_messages=lint_messages,
             include_message_history=True,
+            max_prompt_file_tokens=max_prompt_file_tokens,
+            max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
             max_iterations=max_iterations,
+            allow_hallucinated_spans=allow_hallucinated_spans,
+            expand_context_with_related_spans=expand_context_with_related_spans,
+            finish_on_review=finish_on_review,
             **data,
         )
 
     def init(self):
-        self.file_context.expand_context_with_imports()
+        self.file_context.expand_context_with_init_spans()
 
         if (
             self.expand_context_with_related_spans
             and len(self.loop.trajectory.get_transitions(self.name)) == 0
         ):
-            self.file_context.expand_context_with_related_spans(max_tokens=4000)
+            self.file_context.expand_context_with_related_spans(
+                max_tokens=self.max_prompt_file_tokens
+            )
+            self.file_context.expand_small_classes(max_tokens=1000)
 
-    def handle_action(self, action: TakeAction) -> ActionResponse:
-        if isinstance(action.action, ApplyChange):
-            return self._request_for_change(action.action)
-        elif isinstance(action.action, Finish):
+    def handle_action(self, action: ApplyChange) -> ActionResponse:
+        if action.action == "review":
+            if self.diff and self.finish_on_review:
+                logger.info("Review suggested after diff, will finish")
+                return ActionResponse.transition(
+                    trigger="finish", output={"message": "Finish on suggested review."}
+                )
+            else:
+                return ActionResponse.retry(
+                    "Review isn't possible. If the change is done you can finish or reject the task."
+                )
+
+        if action.finish:
             self.file_context.save()
 
             return ActionResponse.transition(
-                trigger="finish", output={"message": action.action.message}
+                trigger="finish", output={"message": action.finish}
             )
-        elif isinstance(action.action, Reject):
+        elif action.reject:
             return ActionResponse.transition(
-                trigger="reject", output={"message": action.action.message}
+                trigger="reject", output={"message": action.reject}
             )
+
+        elif action.file_path and action.span_id:
+            return self._request_for_change(action)
 
         return ActionResponse.retry(
             "You must either provide an apply_change action or finish."
         )
 
-    def action_type(self) -> Type[TakeAction]:
-        return TakeAction
+    def action_type(self) -> type[ApplyChange]:
+        return ApplyChange
 
     def _request_for_change(self, rfc: ApplyChange) -> ActionResponse:
         logger.info(
@@ -179,6 +192,14 @@ class PlanToCode(AgenticState):
             span_ids = [span.span_id for span in spans]
 
             span_not_in_context = context_file.file.module.find_span_by_id(rfc.span_id)
+            if span_not_in_context and self.allow_hallucinated_spans:
+                logger.info(
+                    f"{self}: Span {rfc.span_id} is not found in the context. Will add it."
+                )
+                block_span = span_not_in_context
+                self.file_context.add_span_to_context(
+                    file_path=rfc.file_path, span_id=block_span.span_id
+                )
 
             # Check if the LLM is referring to a parent span shown in the prompt
             if (
@@ -257,7 +278,9 @@ class PlanToCode(AgenticState):
         )
 
     def system_prompt(self) -> str:
-        return CODER_SYSTEM_PROMPT
+        return (
+            CODER_SYSTEM_PROMPT + SELECT_SPAN_SYSTEM_PROMPT + CODER_FINAL_SYSTEM_PROMPT
+        )
 
     def to_message(self) -> str:
         response_msg = ""
@@ -268,11 +291,10 @@ class PlanToCode(AgenticState):
         if self.diff:
             response_msg += f"\n\n<diff>\n{self.diff}\n</diff>"
 
-        if self.lint_messages:
+        if self.verification_errors:
             lint_str = ""
-            for lint_message in self.lint_messages:
-                if lint_message.lint_id[0] in ["E", "F"]:
-                    lint_str += f" * {lint_message.lint_id}: {lint_message.message} (line {lint_message.line})\n"
+            for lint_message in self.verification_errors:
+                lint_str += f" * {lint_message.code}: {lint_message.message} (line {lint_message.line})\n"
 
             if lint_str:
                 response_msg += f"\n\nThe following lint errors was introduced after this change:\n<lint_errors>\n{lint_str}\n</lint_errors>"
@@ -282,12 +304,14 @@ class PlanToCode(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        content = self.loop.trajectory.initial_message or ""
+        if self.loop.trajectory.initial_message:
+            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
+        else:
+            content = ""
 
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
 
         for transition in previous_transitions:
-
             new_message = transition.state.to_message()
             if new_message and not content:
                 content = new_message

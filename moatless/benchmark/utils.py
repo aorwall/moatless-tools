@@ -2,8 +2,6 @@ import logging
 import re
 import time
 
-import litellm
-
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
@@ -137,8 +135,7 @@ def get_file_spans_from_patch(
     for diff_line in expected_diff_lines:
         file = repository.get_file(diff_line[0])
 
-        if file is None:
-            expected_files_with_spans[diff_line[0]] = []
+        if file is None or file.module is None:
             continue
 
         if file.file_path not in expected_files_with_spans:
@@ -176,7 +173,7 @@ def get_missing_files(
     actual_files_with_spans: dict[str, list[str]],
 ) -> list[str]:
     misses = list(expected_files_with_spans.keys())
-    for actual_file in actual_files_with_spans.keys():
+    for actual_file in actual_files_with_spans:
         if actual_file in misses:
             misses.remove(actual_file)
     return misses

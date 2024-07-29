@@ -1,19 +1,17 @@
 import logging
-from typing import Optional, Type
 
-from pydantic import PrivateAttr, Field, BaseModel
+from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.state import AgenticState, Finished
-from moatless.repository import CodeFile
 from moatless.types import (
-    Message,
     ActionRequest,
     ActionResponse,
-    Content,
     AssistantMessage,
+    Content,
+    Message,
     UserMessage,
+    VerificationError,
 )
-from moatless.verify.lint import lint_updated_code
 
 logger = logging.getLogger(__name__)
 
@@ -70,20 +68,16 @@ import math
 from flask import Flask
 </replace>
 
-Here's an example of a rejection response:
-
-<search>
-import math
-from flask import Flask 
-</search>
-
 Remember, only put the updated version of the code from inside the <search> tags in your response, wrapped in <replace>
-tags. DO NOT include any other surrounding code than the code in the <search> tag!
+tags. DO NOT include any other surrounding code than the code in the <search> tag! DO NOT leave out any code that was inside the <search> tag!
 """
 
 
+CHAIN_OF_THOUGHT_PROMPT = "Please provide your thoughts on the code change, if any, in the tag <scratch_pad>, and then the code change itself."
+
+
 class CodeChange(ActionRequest):
-    thoughts: Optional[str] = Field(
+    scratch_pad: str | None = Field(
         default=None, description="The thoughts on the code change."
     )
     replace: str = Field(..., description="The code to replace the existing code with.")
@@ -93,17 +87,21 @@ class CodeChange(ActionRequest):
 class EditCode(AgenticState):
     instructions: str
     file_path: str
-    span_id: Optional[str] = None
+    span_id: str | None = None
     start_line: int
     end_line: int
 
-    allow_files_not_in_context: bool = False
     show_initial_message: bool = True
     show_file_context: bool = True
-    lint_updated_code: bool = False
+    verify: bool = True
+    chain_of_thought: bool = False
 
-    _file: Optional[CodeFile] = PrivateAttr(default=None)
-    _code_to_replace: Optional[str] = PrivateAttr(default=None)
+    max_prompt_file_tokens: int = Field(
+        4000,
+        description="The maximum number of tokens in the file context to show in the prompt.",
+    )
+
+    _code_to_replace: str | None = PrivateAttr(default=None)
     _retry: int = PrivateAttr(default=0)
     _messages: list[Message] = PrivateAttr(default_factory=list)
 
@@ -111,13 +109,15 @@ class EditCode(AgenticState):
         self,
         instructions: str,
         file_path: str,
-        span_id: Optional[str] = None,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        span_id: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
         show_initial_message: bool = True,
-        max_iterations: int = 4,
+        max_iterations: int = 8,
         show_file_context: bool = True,
-        lint_updated_code: bool = True,
+        verify: bool = True,
+        chain_of_thought: bool = False,
+        max_prompt_file_tokens: int = 4000,
         **data,
     ):
         super().__init__(
@@ -125,7 +125,9 @@ class EditCode(AgenticState):
             show_initial_message=show_initial_message,
             max_iterations=max_iterations,
             show_file_context=show_file_context,
-            lint_updated_code=lint_updated_code,
+            max_prompt_file_tokens=max_prompt_file_tokens,
+            verify=verify,
+            chain_of_thought=chain_of_thought,
             instructions=instructions,
             file_path=file_path,
             span_id=span_id,
@@ -135,16 +137,23 @@ class EditCode(AgenticState):
         )
 
     def init(self):
-        self._file = self.file_context.get_file(self.file_path)
-        if not self._file:
+        file = self.file_context.get_file(self.file_path)
+        if not file:
             raise ValueError(f"File not found: {self.file_path}")
 
-        code_lines = self._file.content.split("\n")
+        code_lines = file.file.content.split("\n")
         lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
         self._code_to_replace = "\n".join(lines_to_replace)
 
     def handle_action(self, content: Content) -> ActionResponse:
         self._messages.append(AssistantMessage(content=content.content))
+
+        scratch_pad = None
+
+        if "<scratch_pad>" in content.content:
+            scratch_pad = content.content.split("<scratch_pad>")[1].split(
+                "</scratch_pad>"
+            )[0]
 
         if "<reject>" in content.content:
             rejection_message = content.content.split("<reject>")[1].split("</reject>")[
@@ -167,13 +176,17 @@ class EditCode(AgenticState):
 
             replacement_code = msg_split[0]
         else:
-            if msg_split[0]:
-                thought = msg_split[0]
-                logger.info(f"Thoughts: {thought}")
+            if msg_split[0] and not scratch_pad:
+                scratch_pad = msg_split[0]
 
-            replacement_code = msg_split[1]
+            if "</replace>" in msg_split[1]:
+                replacement_code = msg_split[1].split("</replace>")[0]
+            else:
+                replacement_code = msg_split[1]
 
-        update_result = self._file.update_content_by_line_numbers(
+        file = self.file_context.get_file(self.file_path)
+
+        update_result = file.update_content_by_line_numbers(
             self.start_line - 1, self.end_line, replacement_code
         )
 
@@ -183,18 +196,61 @@ class EditCode(AgenticState):
             )
 
             message = f"Applied the change to {self.file_path}."
-            lint_messages = []
 
-            if self.lint_updated_code:
-                original_file = self.file_repo.get_file(
-                    self.file_path, from_origin=True
+            if scratch_pad:
+                message += f"\n\n<scratch_pad>\n{scratch_pad}</scratch_pad>"
+
+            original_verification_errors = []
+            if self.verify:
+                logger.info(f"Verifying original code in {self.file_path}.")
+                original_verification_errors = self.workspace.verify(file.file)
+
+            self.file_repo.save_file(file_path=file.file_path)
+
+            verification_errors = []
+            if self.verify:
+                logger.info(f"Verifying updated code in {self.file_path}.")
+                verification_errors_in_update = self.workspace.verify(file.file)
+
+                if len(verification_errors_in_update) > len(
+                    original_verification_errors
+                ):
+                    logger.info(
+                        f"Found {len(verification_errors_in_update)} verification errors in updated code. Which differs from the original {len(original_verification_errors)}."
+                    )
+
+                    for error in verification_errors_in_update:
+                        logger.info(
+                            f"Verification error: {error.code}, {error.message}"
+                        )
+                else:
+                    logger.info(
+                        f"Found {len(verification_errors_in_update)} verification errors in updated code."
+                    )
+
+                original_error_set = set(
+                    (msg.code, msg.message) for msg in original_verification_errors
                 )
 
-                if original_file.supports_codeblocks:
-                    lint_messages = lint_updated_code(
-                        language=self._file.module.language,
-                        original_content=original_file.content,
-                        updated_content=self._file.content,
+                updated_error_set = set(
+                    (msg.code, msg.message) for msg in verification_errors_in_update
+                )
+                added_messages_set = updated_error_set - original_error_set
+
+                verification_errors = [
+                    VerificationError(
+                        code=msg.code,
+                        file_path=file.file_path,
+                        message=msg.message,
+                        line=msg.line,
+                    )
+                    for msg in verification_errors_in_update
+                    if (msg.code, msg.message) in added_messages_set
+                ]
+
+                for error in verification_errors:
+                    logger.info(
+                        f"New verification error: {error.code}, {error.message}"
                     )
 
             return ActionResponse.transition(
@@ -202,15 +258,17 @@ class EditCode(AgenticState):
                 output={
                     "message": message,
                     "diff": update_result.diff,
-                    "lint_messages": lint_messages,
+                    "verification_errors": verification_errors,
                 },
             )
 
         if self._retry > 2:
             logger.warning(f"Failed after {self._retry} retries. Will reject change.")
-            return ActionResponse.transition(
-                "reject", output={"message": "Failed to apply changes"}
-            )
+            message = ""
+            if scratch_pad:
+                message += f"<scratch_pad>\n{scratch_pad}</scratch_pad>\n\n"
+            message = "Failed to apply changes. Please try again."
+            return ActionResponse.transition("reject", output={"message": message})
 
         if update_result.diff:
             logger.warning(f"Diff was not applied:\n{update_result.diff}")
@@ -226,8 +284,8 @@ class EditCode(AgenticState):
         else:
             logger.info(f"No changes found in {self.file_path}.")
             response_message = (
-                f"The code in the replace tag is the same as in the search. Use the reject function if you "
-                f"can't do any changes and want to reject the instructions."
+                "The code in the replace tag is the same as in the search. Use the reject function if you "
+                "can't do any changes and want to reject the instructions."
             )
 
             self._retry += 1
@@ -251,10 +309,13 @@ class EditCode(AgenticState):
         system_prompt += "\n\n"
         system_prompt += SEARCH_REPLACE_PROMPT
 
+        if self.chain_of_thought:
+            system_prompt += "\n\n"
+            system_prompt += CHAIN_OF_THOUGHT_PROMPT
+
         return system_prompt
 
     def messages(self) -> list[Message]:
-
         content = ""
         if self.show_initial_message:
             content = f"<main_objective>\n{self.loop.trajectory.initial_message}\n</main_objective>\n\n"
@@ -269,7 +330,19 @@ class EditCode(AgenticState):
                 show_outcommented_code=True,
                 outcomment_code_comment="... other code",
             )
-            content += f"<file_context>\n{file_context_str}\n</file_context>\n"
+        else:
+            file_context = self.create_file_context()
+            file_context.add_span_to_context(self.file_path, self.span_id)
+            file_context.expand_context_with_init_spans()
+            file_context.expand_context_with_related_spans(self.max_prompt_file_tokens)
+            file_context_str = file_context.create_prompt(
+                show_line_numbers=False,
+                show_span_ids=False,
+                exclude_comments=False,
+                show_outcommented_code=True,
+                outcomment_code_comment="... other code",
+            )
+        content += f"<file_context>\n{file_context_str}\n</file_context>\n"
 
         content += f"<search>\n{self._code_to_replace}\n</search>"
 
@@ -284,9 +357,9 @@ class EditCode(AgenticState):
 
     @property
     def _add_prepared_response(self):
-        return self.model.startswith("claude")
+        return "claude" in self.model and not self.chain_of_thought
 
-    def action_type(self) -> Optional[Type[BaseModel]]:
+    def action_type(self) -> type[BaseModel] | None:
         return None
 
     def stop_words(self):

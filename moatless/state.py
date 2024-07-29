@@ -1,22 +1,24 @@
+import logging
 from abc import ABC, abstractmethod
-from typing import Optional, List, Type, Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from moatless import Workspace, FileRepository
 from moatless.file_context import FileContext
+from moatless.repository import FileRepository
 from moatless.types import (
     ActionRequest,
     ActionResponse,
     FileWithSpans,
     Message,
-    AssistantMessage,
-    UserMessage,
 )
 from copy import deepcopy
 from inspect import signature
 import inspect
 from typing import Any, Dict
+from moatless.workspace import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class AgenticState(ABC, BaseModel):
@@ -29,11 +31,11 @@ class AgenticState(ABC, BaseModel):
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
     )
-    max_iterations: int = Field(
-        6, description="The maximum number of transitions to this state."
+    max_iterations: int | None = Field(
+        None, description="The maximum number of transitions to this state."
     )
 
-    _loop: Optional["AgenticLoop"] = PrivateAttr(None)
+    _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -43,7 +45,7 @@ class AgenticState(ABC, BaseModel):
     def handle_action(self, action: ActionRequest) -> ActionResponse:
         raise NotImplementedError
 
-    def _set_loop(self, loop: "AgenticLoop"):
+    def _set_loop(self, loop: "AgenticLoop"):  # noqa: F821
         self._loop = loop
         if self._loop is not None:
             self.init()
@@ -56,7 +58,7 @@ class AgenticState(ABC, BaseModel):
         return self.__class__.__name__
 
     @property
-    def loop(self) -> "AgenticLoop":
+    def loop(self) -> "AgenticLoop":  # noqa: F821
         assert self._loop is not None, "Loop has not been set"
         return self._loop
 
@@ -72,8 +74,12 @@ class AgenticState(ABC, BaseModel):
     def file_context(self) -> FileContext:
         return self.workspace.file_context
 
-    def create_file_context(self, files: List[FileWithSpans] = []) -> FileContext:
-        return self.workspace.create_file_context(files)
+    def create_file_context(
+        self, files: list[FileWithSpans] = None, **kwargs
+    ) -> FileContext:
+        if files is None:
+            files = []
+        return self.workspace.create_file_context(files, **kwargs)
 
     def init(self):
         """Initialization logic for the state."""
@@ -84,7 +90,7 @@ class AgenticState(ABC, BaseModel):
 
     def finish(self, message: str):
         # TODO!!
-        print(message)
+        logger.info(message)
 
     def messages(self) -> list[Message]:
         return []
@@ -95,7 +101,7 @@ class AgenticState(ABC, BaseModel):
 
     def retries(self) -> int:
         retries = 0
-        for action in reversed(self.trajectory.current_step.actions):
+        for action in reversed(self.loop.trajectory.current_step.actions):
             if action.retry_message:
                 retries += 1
             else:
@@ -109,7 +115,7 @@ class AgenticState(ABC, BaseModel):
     def system_prompt(self) -> str:
         return ""
 
-    def action_type(self) -> Optional[Type[ActionRequest]]:
+    def action_type(self) -> type[ActionRequest] | None:
         """
         The type of the action to expect in the completion response.
         If not set a content string is expected.
@@ -121,12 +127,11 @@ class AgenticState(ABC, BaseModel):
         """Class method to create a deep copy of a state."""
         return state.deep_copy(loop)
     
-    def stop_words(self) -> Optional[List[str]]:
+    def stop_words(self) -> list[str] | None:
         return None
 
 
 class NoopState(AgenticState):
-
     def __init__(self, **data):
         super().__init__(**data)
 
@@ -135,11 +140,11 @@ class NoopState(AgenticState):
 
 
 class Finished(NoopState):
-    message: str
+    message: str | None
 
-    output: Optional[dict[str, Any]] = None
+    output: dict[str, Any] | None = None
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str | None = None, **kwargs):
         super().__init__(message=message)
         self.output = kwargs
 
@@ -147,12 +152,11 @@ class Finished(NoopState):
 class Rejected(NoopState):
     message: str
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, **kwargs):
         super().__init__(message=message)
 
 
 class Pending(NoopState):
-
     def __init__(self, **data):
         super().__init__(**data)
 

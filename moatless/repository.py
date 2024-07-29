@@ -3,11 +3,11 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from pydantic import BaseModel, PrivateAttr
 
-from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
+from moatless.codeblocks import get_parser_by_path
+from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.python import PythonParser
 
@@ -18,14 +18,18 @@ logger = logging.getLogger(__name__)
 class UpdateResult:
     file_path: str
     updated: bool
-    diff: Optional[str] = None
-    error: Optional[str] = None
-    new_span_ids: Optional[set[str]] = None
+    diff: str | None = None
+    error: str | None = None
+    new_span_ids: set[str] | None = None
 
 
 class CodeFile(BaseModel):
     file_path: str
+
     module: Optional[Module] = None
+    content: str
+    module: Module | None = None
+
     dirty: bool = False
     
     _content: str = PrivateAttr()
@@ -64,10 +68,10 @@ class CodeFile(BaseModel):
     
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
-        with open(os.path.join(repo_path, file_path), "r") as f:
-            if supports_codeblocks(file_path):
+        with open(os.path.join(repo_path, file_path)) as f:
+            parser = get_parser_by_path(file_path)
+            if parser:
                 content = f.read()
-                parser = PythonParser()
                 module = parser.parse(content)
             else:
                 module = None
@@ -107,16 +111,25 @@ class CodeFile(BaseModel):
             + original_lines[end_line_index:]
         )
         updated_content = "\n".join(updated_lines)
+        logger.info(
+            f"Updating content for {self.file_path} from line {start_line_index} to {end_line_index} with {len(replacement_lines)} lines. The updated file has {len(updated_lines)} lines."
+        )
 
         return self.update_content(updated_content)
 
     def update_content(self, updated_content: str) -> UpdateResult:
         diff = do_diff(self.file_path, self.content, updated_content)
         if diff:
-
-            if supports_codeblocks(self.file_path):
-                parser = PythonParser()
+            parser = get_parser_by_path(self.file_path)
+            if parser:
                 module = parser.parse(updated_content)
+                if not module.children:
+                    return UpdateResult(
+                        file_path=self.file_path,
+                        updated=False,
+                        diff=diff,
+                        error="The updated code is invalid.",
+                    )
 
                 # TODO: Move the prompt instructions to the loop
                 error_blocks = module.find_errors()
@@ -138,7 +151,7 @@ class CodeFile(BaseModel):
                             )
                             if (
                                 parent_block
-                                and not parent_block.type == CodeBlockType.MODULE
+                                and parent_block.type != CodeBlockType.MODULE
                             ):
                                 error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
                             else:
@@ -172,6 +185,9 @@ class CodeFile(BaseModel):
                     self.module.get_all_span_ids()
                 )
 
+                logger.info(
+                    f"Updated content for {self.file_path} with {len(new_span_ids)} new span ids."
+                )
                 self.module = module
             else:
                 new_span_ids = []
@@ -189,20 +205,18 @@ class CodeFile(BaseModel):
         return UpdateResult(file_path=self.file_path, updated=False)
 
 
-_parser = PythonParser()
-
-
 class FileRepository:
-
     def __init__(self, repo_path: str):
         self._repo_path = repo_path
-        self._files = {}
+        self._files: dict[str, CodeFile] = {}
 
     @property
     def path(self):
         return self._repo_path
 
-    def get_file(self, file_path: str, refresh: bool = False, from_origin: bool = False):
+    def get_file(
+        self, file_path: str, refresh: bool = False, from_origin: bool = False
+    ):
         """
         Get a file from the repository.
 
@@ -219,24 +233,22 @@ class FileRepository:
                 logger.warning(f"{full_file_path} is not a file")
                 return None
 
-            with open(full_file_path, "r") as f:
-                if supports_codeblocks(file_path):
+            with open(full_file_path) as f:
+                parser = get_parser_by_path(file_path)
+                if parser:
                     content = f.read()
-                    module = _parser.parse(content)
+                    module = parser.parse(content)
                     file = CodeFile(file_path=file_path, content=content, module=module)
                 else:
-                    file = CodeFile(file_path=file_path, content= f.read())
+                    file = CodeFile(file_path=file_path, content=f.read())
 
             if refresh or not from_origin:
                 self._files[file_path] = file
         return file
 
-    def save_file(self, file_path: str, updated_content: Optional[str] = None):
+    def save_file(self, file_path: str, updated_content: str | None = None):
         file = self._files.get(file_path)
-
-        full_file_path = os.path.join(self._repo_path, file.file_path)
-        logger.debug(f"Writing updated content to {full_file_path}")
-
+        full_file_path = os.path.join(self._repo_path, file_path)
         with open(full_file_path, "w") as f:
             updated_content = updated_content or file.module.to_string()
             f.write(updated_content)
@@ -269,7 +281,7 @@ class FileRepository:
         return found_files
 
     def has_matching_files(self, file_pattern: str):
-        for matched_file in glob.iglob(
+        for _matched_file in glob.iglob(
             file_pattern, root_dir=self._repo_path, recursive=True
         ):
             return True
@@ -302,9 +314,7 @@ def remove_duplicate_lines(replacement_lines, original_lines):
     return replacement_lines
 
 
-def do_diff(
-    file_path: str, original_content: str, updated_content: str
-) -> Optional[str]:
+def do_diff(file_path: str, original_content: str, updated_content: str) -> str | None:
     return "".join(
         difflib.unified_diff(
             original_content.strip().splitlines(True),
@@ -314,6 +324,3 @@ def do_diff(
             lineterm="\n",
         )
     )
-
-def supports_codeblocks(path: str):
-    return path.endswith(".py")

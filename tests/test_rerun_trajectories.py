@@ -2,7 +2,6 @@ import json
 
 from moatless.benchmark.utils import get_file_spans_from_patch
 from moatless.edit.edit import EditCode
-from moatless.edit.plan import PlanToCode
 from moatless.loop import AgenticLoop
 from moatless.state import AgenticState
 from moatless.transitions import code_transitions

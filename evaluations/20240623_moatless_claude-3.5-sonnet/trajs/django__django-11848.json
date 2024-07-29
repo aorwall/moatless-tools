@@ -1,0 +1,257 @@
+{
+  "name": "AgenticLoop",
+  "initial_message": "django.utils.http.parse_http_date two digit year check is incorrect\nDescription\n\t \n\t\t(last modified by Ad Timmering)\n\t \nRFC 850 does not mention this, but in RFC 7231 (and there's something similar in RFC 2822), there's the following quote:\nRecipients of a timestamp value in rfc850-date format, which uses a\ntwo-digit year, MUST interpret a timestamp that appears to be more\nthan 50 years in the future as representing the most recent year in\nthe past that had the same last two digits.\nCurrent logic is hard coded to consider 0-69 to be in 2000-2069, and 70-99 to be 1970-1999, instead of comparing versus the current year.\n",
+  "transitions": [
+    {
+      "name": "SearchCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_search_results": 75,
+        "max_retries_with_any_file_context": 3,
+        "provide_initial_context": true,
+        "initial_context_tokens": 6000,
+        "initial_search_results": 100,
+        "initial_context_spans_per_file": 5,
+        "support_test_files": false
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To address the issue with django.utils.http.parse_http_date's two-digit year check, we need to locate the relevant code in the Django codebase. Based on the issue description, we should focus on the following:\n\n1. The function parse_http_date in django/utils/http.py\n2. The logic for interpreting two-digit years in HTTP dates\n3. The current implementation that uses a hard-coded range (0-69 for 2000-2069, 70-99 for 1970-1999)\n4. The need to compare against the current year instead of using fixed ranges\n\nLet's start by searching for the parse_http_date function in the django/utils/http.py file.",
+            "search_requests": [
+              {
+                "file_pattern": "django/utils/http.py",
+                "query": "parse_http_date function implementation in django.utils.http",
+                "class_names": [],
+                "function_names": [
+                  "parse_http_date"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "output": {
+            "ranked_spans": [
+              {
+                "file_path": "django/utils/http.py",
+                "span_id": "parse_http_date",
+                "rank": 0,
+                "tokens": 287
+              }
+            ],
+            "search_requests": [
+              {
+                "file_pattern": "django/utils/http.py",
+                "query": "parse_http_date function implementation in django.utils.http",
+                "code_snippet": null,
+                "class_names": [],
+                "function_names": [
+                  "parse_http_date"
+                ]
+              }
+            ],
+            "complete": false
+          },
+          "completion_cost": 0.011778,
+          "input_tokens": 2551,
+          "output_tokens": 275
+        }
+      ]
+    },
+    {
+      "name": "IdentifyCode",
+      "state": {
+        "include_message_history": false,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "ranked_spans": [
+          {
+            "file_path": "django/utils/http.py",
+            "span_id": "parse_http_date",
+            "rank": 0,
+            "tokens": 287
+          }
+        ],
+        "expand_context": true,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "Let's analyze the search results to identify the relevant code for the reported issue:\n\n1. The issue is about the `parse_http_date` function in `django.utils.http`, specifically regarding the two-digit year check.\n\n2. In the search results, we can see the `parse_http_date` function in the `django/utils/http.py` file. This is the exact function we need to focus on.\n\n3. The problematic part of the code is within this function, specifically:\n\n   ```python\n   if year < 100:\n       if year < 70:\n           year += 2000\n       else:\n           year += 1900\n   ```\n\n   This is the hard-coded logic mentioned in the issue description, where years 0-69 are considered to be 2000-2069, and 70-99 are considered to be 1970-1999.\n\n4. The entire `parse_http_date` function is relevant because it contains the context for parsing HTTP dates, including the problematic year conversion.\n\n5. The `RFC850_DATE` regex constant is also relevant, as it's used to match dates with two-digit years:\n\n   ```python\n   RFC850_DATE = re.compile(r'^\\w{6,9}, %s-%s-%s %s GMT$' % (__D, __M, __Y2, __T))\n   ```\n\n   Here, `__Y2` is defined earlier as `r'(?P<year>\\d{2})'`, which captures the two-digit year.\n\n6. The `parse_http_date_safe` function is a wrapper around `parse_http_date`, so it's indirectly affected by this issue and should be included for context.\n\nBased on this analysis, we should identify the entire `parse_http_date` function, the `RFC850_DATE` constant, and the `parse_http_date_safe` function as relevant to the reported issue.",
+            "identified_spans": [
+              {
+                "file_path": "django/utils/http.py",
+                "span_ids": [
+                  "parse_http_date",
+                  "parse_http_date_safe"
+                ]
+              }
+            ]
+          },
+          "output": {},
+          "completion_cost": 0.014625,
+          "input_tokens": 2155,
+          "output_tokens": 544
+        }
+      ]
+    },
+    {
+      "name": "DecideRelevance",
+      "state": {
+        "include_message_history": false,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "expand_context": true,
+        "finish_after_relevant_count": 1,
+        "max_prompt_file_tokens": 12000
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "After analyzing the file context, I have found the relevant code for the reported issue. The parse_http_date function in django/utils/http.py contains the logic for interpreting two-digit years in HTTP dates. \n\nThe current implementation uses a hard-coded range for interpreting two-digit years:\n\n```python\nif year < 100:\n    if year < 70:\n        year += 2000\n    else:\n        year += 1900\n```\n\nThis code directly corresponds to the issue description, which states that the current logic is hard-coded to consider 0-69 to be in 2000-2069, and 70-99 to be 1970-1999.\n\nThe file context provides all the necessary information to address the reported issue. The parse_http_date function needs to be modified to compare the two-digit year against the current year instead of using fixed ranges, as per the RFC 7231 recommendation mentioned in the issue description.\n\nSince we have identified the exact location and the code that needs to be changed, I believe we have all the relevant information needed to address this issue. No further search is required, and the task can be considered complete.",
+            "relevant": true,
+            "complete": true
+          },
+          "output": {},
+          "completion_cost": 0.011373000000000001,
+          "input_tokens": 2166,
+          "output_tokens": 325
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "To address the issue, we need to modify the parse_http_date function to handle two-digit years according to RFC 7231. We'll compare the parsed year with the current year and adjust it based on the 50-year rule.",
+            "action": "modify",
+            "instructions": "Update the parse_http_date function to handle two-digit years according to RFC 7231 specification.",
+            "file_path": "django/utils/http.py",
+            "span_id": "parse_http_date"
+          },
+          "output": {
+            "instructions": "Update the parse_http_date function to handle two-digit years according to RFC 7231 specification.",
+            "file_path": "django/utils/http.py",
+            "span_id": "parse_http_date",
+            "start_line": 158,
+            "end_line": 191
+          },
+          "completion_cost": 0.009381,
+          "input_tokens": 2192,
+          "output_tokens": 187
+        }
+      ]
+    },
+    {
+      "name": "EditCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "instructions": "Update the parse_http_date function to handle two-digit years according to RFC 7231 specification.",
+        "file_path": "django/utils/http.py",
+        "span_id": "parse_http_date",
+        "start_line": 158,
+        "end_line": 191,
+        "show_initial_message": true,
+        "show_file_context": false,
+        "verify": true,
+        "chain_of_thought": false,
+        "max_prompt_file_tokens": 8000
+      },
+      "actions": [
+        {
+          "action": {
+            "content": "\ndef parse_http_date(date):\n    \"\"\"\n    Parse a date format as specified by HTTP RFC7231 section 7.1.1.1.\n\n    The three formats allowed by the RFC are accepted, even if only the first\n    one is still in widespread use.\n\n    Return an integer expressed in seconds since the epoch, in UTC.\n    \"\"\"\n    # email.utils.parsedate() does the job for RFC1123 dates; unfortunately\n    # RFC7231 makes it mandatory to support RFC850 dates too. So we roll\n    # our own RFC-compliant parsing.\n    for regex in RFC1123_DATE, RFC850_DATE, ASCTIME_DATE:\n        m = regex.match(date)\n        if m is not None:\n            break\n    else:\n        raise ValueError(\"%r is not in a valid HTTP date format\" % date)\n    try:\n        year = int(m.group('year'))\n        if year < 100:\n            current_year = datetime.datetime.now().year\n            current_century = current_year - (current_year % 100)\n            future_year = current_century + year\n            if future_year > current_year + 50:\n                year = future_year - 100\n            else:\n                year = future_year\n        month = MONTHS.index(m.group('mon').lower()) + 1\n        day = int(m.group('day'))\n        hour = int(m.group('hour'))\n        min = int(m.group('min'))\n        sec = int(m.group('sec'))\n        result = datetime.datetime(year, month, day, hour, min, sec)\n        return calendar.timegm(result.utctimetuple())\n    except Exception as exc:\n        raise ValueError(\"%r is not a valid date\" % date) from exc\n"
+          },
+          "output": {
+            "message": "Applied the change to django/utils/http.py.",
+            "diff": "--- django/utils/http.py\n+++ django/utils/http.py\n@@ -176,10 +176,13 @@\n     try:\n         year = int(m.group('year'))\n         if year < 100:\n-            if year < 70:\n-                year += 2000\n+            current_year = datetime.datetime.now().year\n+            current_century = current_year - (current_year % 100)\n+            future_year = current_century + year\n+            if future_year > current_year + 50:\n+                year = future_year - 100\n             else:\n-                year += 1900\n+                year = future_year\n         month = MONTHS.index(m.group('mon').lower()) + 1\n         day = int(m.group('day'))\n         hour = int(m.group('hour'))\n",
+            "errors": []
+          },
+          "completion_cost": 0.013101000000000002,
+          "input_tokens": 2207,
+          "output_tokens": 432
+        }
+      ]
+    },
+    {
+      "name": "PlanToCode",
+      "state": {
+        "include_message_history": true,
+        "model": "claude-3-5-sonnet-20240620",
+        "temperature": 0.0,
+        "max_tokens": 2000,
+        "max_iterations": 8,
+        "message": "Applied the change to django/utils/http.py.",
+        "diff": "--- django/utils/http.py\n+++ django/utils/http.py\n@@ -176,10 +176,13 @@\n     try:\n         year = int(m.group('year'))\n         if year < 100:\n-            if year < 70:\n-                year += 2000\n+            current_year = datetime.datetime.now().year\n+            current_century = current_year - (current_year % 100)\n+            future_year = current_century + year\n+            if future_year > current_year + 50:\n+                year = future_year - 100\n             else:\n-                year += 1900\n+                year = future_year\n         month = MONTHS.index(m.group('mon').lower()) + 1\n         day = int(m.group('day'))\n         hour = int(m.group('hour'))\n",
+        "max_prompt_file_tokens": 12000,
+        "max_tokens_in_edit_prompt": 750,
+        "expand_context_with_related_spans": false,
+        "allow_hallucinated_spans": false,
+        "finish_on_review": true
+      },
+      "actions": [
+        {
+          "action": {
+            "scratch_pad": "The change has been applied successfully. The parse_http_date function now handles two-digit years according to RFC 7231 specification. The logic compares the parsed year with the current year and adjusts it based on the 50-year rule. This addresses the issue described in the bug report. No further changes are needed.",
+            "action": "finish",
+            "finish": "The issue has been resolved by updating the parse_http_date function to handle two-digit years according to RFC 7231 specification. The function now compares the parsed year with the current year and adjusts it based on the 50-year rule, addressing the problem described in the bug report."
+          },
+          "output": {
+            "message": "The issue has been resolved by updating the parse_http_date function to handle two-digit years according to RFC 7231 specification. The function now compares the parsed year with the current year and adjusts it based on the 50-year rule, addressing the problem described in the bug report."
+          },
+          "completion_cost": 0.012213,
+          "input_tokens": 2726,
+          "output_tokens": 269
+        }
+      ]
+    },
+    {
+      "name": "Finished",
+      "state": {
+        "include_message_history": false,
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "message": "The issue has been resolved by updating the parse_http_date function to handle two-digit years according to RFC 7231 specification. The function now compares the parsed year with the current year and adjusts it based on the 50-year rule, addressing the problem described in the bug report.",
+        "output": {
+          "model": "claude-3-5-sonnet-20240620",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "max_prompt_file_tokens": 12000
+        }
+      },
+      "actions": []
+    }
+  ],
+  "info": {
+    "evaluation_name": "20240623_moatless_claude-3.5-sonnet",
+    "instance_id": "django__django-11848",
+    "status": "finished",
+    "duration": 40.29801321029663,
+    "total_cost": 0.07247100000000001,
+    "submission": "diff --git a/django/utils/http.py b/django/utils/http.py\nindex 572cfb4347..01d50c43b4 100644\n--- a/django/utils/http.py\n+++ b/django/utils/http.py\n@@ -176,10 +176,13 @@ def parse_http_date(date):\n     try:\n         year = int(m.group('year'))\n         if year < 100:\n-            if year < 70:\n-                year += 2000\n+            current_year = datetime.datetime.now().year\n+            current_century = current_year - (current_year % 100)\n+            future_year = current_century + year\n+            if future_year > current_year + 50:\n+                year = future_year - 100\n             else:\n-                year += 1900\n+                year = future_year\n         month = MONTHS.index(m.group('mon').lower()) + 1\n         day = int(m.group('day'))\n         hour = int(m.group('hour'))\n"
+  }
+}

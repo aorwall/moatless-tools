@@ -5,20 +5,19 @@ import mimetypes
 import os
 import shutil
 import tempfile
-from typing import List, Dict, Optional
 
 import requests
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.base.embeddings.base import BaseEmbedding
-from llama_index.core.ingestion import IngestionPipeline, DocstoreStrategy
+from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
 from llama_index.core.storage import docstore
 from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
 from llama_index.core.vector_stores.types import (
     BasePydanticVectorStore,
-    VectorStoreQuery,
-    MetadataFilters,
-    MetadataFilter,
     FilterCondition,
+    MetadataFilter,
+    MetadataFilters,
+    VectorStoreQuery,
 )
 from rapidfuzz import fuzz
 
@@ -29,8 +28,8 @@ from moatless.index.settings import IndexSettings
 from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
-    SearchCodeResponse,
     SearchCodeHit,
+    SearchCodeResponse,
 )
 from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
@@ -44,28 +43,35 @@ logger = logging.getLogger(__name__)
 def default_vector_store(settings: IndexSettings):
     try:
         import faiss
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "faiss needs to be installed to set up a default index for CodeIndex. Run 'pip install faiss-cpu'"
-        )
+        ) from e
 
     faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(settings.dimensions))
     return SimpleFaissVectorStore(faiss_index)
 
 
 class CodeIndex:
-
     def __init__(
         self,
         file_repo: FileRepository,
-        vector_store: Optional[BasePydanticVectorStore] = None,
-        docstore: Optional[DocumentStore] = None,
-        embed_model: Optional[BaseEmbedding] = None,
-        blocks_by_class_name: Optional[dict] = None,
-        blocks_by_function_name: Optional[dict] = None,
-        settings: Optional[IndexSettings] = None,
+        vector_store: BasePydanticVectorStore | None = None,
+        docstore: DocumentStore | None = None,
+        embed_model: BaseEmbedding | None = None,
+        blocks_by_class_name: dict | None = None,
+        blocks_by_function_name: dict | None = None,
+        settings: IndexSettings | None = None,
+        max_results: int = 25,
+        max_hits_without_exact_match: int = 100,
+        max_exact_results: int = 5,
     ):
         self._settings = settings or IndexSettings()
+
+        self.max_results = max_results
+        self.max_hits_without_exact_match = max_hits_without_exact_match
+        self.max_exact_results = max_exact_results
+
         self._file_repo = file_repo
 
         self._blocks_by_class_name = blocks_by_class_name or {}
@@ -76,22 +82,20 @@ class CodeIndex:
         self._docstore = docstore or SimpleDocumentStore()
 
     @classmethod
-    def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository):
+    def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository, **kwargs):
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
         docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
 
         settings = IndexSettings.from_persist_dir(persist_dir)
 
         if os.path.exists(os.path.join(persist_dir, "blocks_by_class_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "r") as f:
+            with open(os.path.join(persist_dir, "blocks_by_class_name.json")) as f:
                 blocks_by_class_name = json.load(f)
         else:
             blocks_by_class_name = {}
 
         if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
-            with open(
-                os.path.join(persist_dir, "blocks_by_function_name.json"), "r"
-            ) as f:
+            with open(os.path.join(persist_dir, "blocks_by_function_name.json")) as f:
                 blocks_by_function_name = json.load(f)
         else:
             blocks_by_function_name = {}
@@ -103,6 +107,7 @@ class CodeIndex:
             settings=settings,
             blocks_by_class_name=blocks_by_class_name,
             blocks_by_function_name=blocks_by_function_name,
+            **kwargs,
         )
     
     def __deepcopy__(self, memo):
@@ -169,48 +174,75 @@ class CodeIndex:
 
     def search(
         self,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_name: Optional[str] = None,
-        function_name: Optional[str] = None,
-        file_pattern: Optional[str] = None,
+        query: str | None = None,
+        code_snippet: str | None = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
+        max_results: int = 25,
     ) -> SearchCodeResponse:
+        if class_names or function_names:
+            result = self.find_by_name(
+                class_names=class_names,
+                function_names=function_names,
+                file_pattern=file_pattern,
+            )
+
+            if len(result.hits) == 0 and class_names and function_names:
+                results = []
+                results.extend(
+                    self.find_by_name(
+                        class_names=class_names,
+                        file_pattern=file_pattern,
+                        include_functions_in_class=False,
+                    ).hits
+                )
+                results.extend(
+                    self.find_by_name(
+                        function_names=function_names, file_pattern=file_pattern
+                    ).hits
+                )
+
+                if len(results) > 0 and len(results) <= max_results:
+                    return SearchCodeResponse(
+                        message=f"Found {len(results)} hits.",
+                        hits=results,
+                    )
+
         if query or code_snippet:
             return self.semantic_search(
                 query=query,
                 code_snippet=code_snippet,
-                class_name=class_name,
-                function_name=function_name,
+                class_names=class_names,
+                function_names=function_names,
                 file_pattern=file_pattern,
+                max_results=max_results,
             )
-        else:
-            return self.find_by_name(
-                class_name=class_name,
-                function_name=function_name,
-                file_pattern=file_pattern,
-            )
+
+        return result
 
     def semantic_search(
         self,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_name: Optional[str] = None,
-        function_name: Optional[str] = None,
-        file_pattern: Optional[str] = None,
+        query: str | None = None,
+        code_snippet: str | None = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
         category: str = "implementation",
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
+        max_spans_per_file: int | None = None,
+        exact_match_if_possible: bool = False,
     ) -> SearchCodeResponse:
-
         if query is None:
             query = ""
 
-        if class_name:
-            query += f"\nclass {class_name}"
+        if class_names:
+            query += f", class {class_names}"
 
-        if function_name:
-            query += f"\ndef {function_name}"
+        if function_names:
+            query += f", function {function_names}"
 
         message = ""
         if file_pattern:
@@ -220,7 +252,9 @@ class CodeIndex:
                 exclude_files = []
 
             matching_files = self._file_repo.matching_files(file_pattern)
-            matching_files = [file for file in matching_files if file not in exclude_files]
+            matching_files = [
+                file for file in matching_files if file not in exclude_files
+            ]
 
             if not matching_files:
                 logger.info(
@@ -228,8 +262,6 @@ class CodeIndex:
                 )
                 message += f"No files found for file pattern {file_pattern}. Will search all files.\n"
                 file_pattern = None
-
-                query += f" file: {file_pattern}"
 
         search_results = self._vector_search(
             query, file_pattern=file_pattern, exact_content_match=code_snippet
@@ -245,16 +277,21 @@ class CodeIndex:
 
         for rank, search_hit in enumerate(search_results):
             file = self._file_repo.get_file(search_hit.file_path)
-            spans = []
+            if not file:
+                logger.warning(
+                    f"semantic_search() Could not find file {search_hit.file_path}."
+                )
+                continue
 
+            spans = []
             for span_id in search_hit.span_ids:
                 span = file.module.find_span_by_id(span_id)
 
                 if span:
                     spans.append(span)
                 else:
-                    logger.info(
-                        f"Could not find span with id {span_id} in file {file.file_path}"
+                    logger.debug(
+                        f"semantic_search() Could not find span with id {span_id} in file {file.file_path}"
                     )
 
                     spans_by_line_number = file.module.find_spans_by_line_numbers(
@@ -264,12 +301,20 @@ class CodeIndex:
                     for span_by_line_number in spans_by_line_number:
                         spans.append(span_by_line_number)
 
+            names = []
+            if class_names:
+                names.extend(class_names)
+
+            if function_names:
+                names.extend(function_names)
+
             for span in spans:
-                has_exact_query_match = query and span.initiating_block.has_content(
-                    query, span.span_id
+                has_exact_query_match = (
+                    exact_match_if_possible
+                    and query
+                    and span.initiating_block.has_content(query, span.span_id)
                 )
 
-                span_count += 1
                 if has_exact_query_match:
                     spans_with_exact_query_match += 1
 
@@ -290,29 +335,38 @@ class CodeIndex:
                     ):
                         continue
 
-                    if class_name and class_name not in span.span_id:
+                    if names and not any(
+                        name in span.initiating_block.full_path() for name in names
+                    ):
                         filtered_out += 1
                         continue
 
-                    if function_name and function_name not in span.span_id:
-                        filtered_out += 1
-                        continue
-
+                    span_count += 1
                     files_with_spans[search_hit.file_path].add_span(
-                        span_id=span.span_id, rank=rank
+                        span_id=span.span_id, rank=rank, tokens=span.tokens
                     )
 
-            span_count = sum([len(file.spans) for file in files_with_spans.values()])
+                    if (
+                        max_spans_per_file
+                        and len(files_with_spans[search_hit.file_path].spans)
+                        >= max_spans_per_file
+                    ):
+                        break
 
-            if spans_with_exact_query_match > max_exact_results or (
-                spans_with_exact_query_match == 0
-                and span_count > max_hits_without_exact_match
-            ):
+            if exact_match_if_possible:
+                if spans_with_exact_query_match > max_exact_results or (
+                    spans_with_exact_query_match == 0
+                    and span_count > max_hits_without_exact_match
+                ):
+                    break
+            elif span_count > max_results:
                 break
 
-        if class_name or function_name:
+        span_count = sum([len(file.spans) for file in files_with_spans.values()])
+
+        if class_names or function_names:
             logger.info(
-                f"semantic_search() Filtered out {filtered_out} spans by class name {class_name} and function name {function_name}."
+                f"semantic_search() Filtered out {filtered_out} spans by class names {class_names} and function names {function_names}."
             )
 
         if require_exact_query_match:
@@ -330,34 +384,39 @@ class CodeIndex:
 
     def find_by_name(
         self,
-        class_name: Optional[str] = None,
-        function_name: Optional[str] = None,
-        file_pattern: Optional[str] = None,
+        class_names: list[str] = None,
+        function_names: list[str] = None,
+        file_pattern: str | None = None,
+        include_functions_in_class: bool = True,
         category: str = "implementation",
     ) -> SearchCodeResponse:
-
-        if not class_name and not function_name:
+        if not class_names and not function_names:
             raise ValueError(
                 "At least one of class_name or function_name must be provided."
             )
 
-        if function_name:
-            paths = self._blocks_by_function_name.get(function_name, [])
-        else:
-            paths = self._blocks_by_class_name.get(class_name, [])
+        paths = []
+
+        if function_names:
+            for function_name in function_names:
+                paths.extend(self._blocks_by_function_name.get(function_name, []))
+
+        if class_names:
+            for class_name in class_names:
+                paths.extend(self._blocks_by_class_name.get(class_name, []))
 
         logger.info(
-            f"find_by_name(class_name={class_name}, function_name={function_name}, file_pattern={file_pattern}) {len(paths)} hits."
+            f"find_by_name(class_name={class_names}, function_name={function_names}, file_pattern={file_pattern}) {len(paths)} hits."
         )
 
         if not paths:
-            if function_name:
+            if function_names:
                 return SearchCodeResponse(
-                    message=f"No functions found with the name {function_name}."
+                    message=f"No functions found with the name {function_names}."
                 )
             else:
                 return SearchCodeResponse(
-                    message=f"No classes found with the name {class_name}."
+                    message=f"No classes found with the name {class_names}."
                 )
 
         if category != "test":
@@ -410,24 +469,32 @@ class CodeIndex:
                 invalid_blocks += 1
                 continue
 
-            if class_name and function_name:
-                parent_class = block.find_type_in_parents(CodeBlockType.CLASS)
-                if not parent_class or parent_class.identifier != class_name:
-                    filtered_out_by_class_name += 1
-                    continue
+            if (
+                class_names
+                and function_names
+                and not self._found_class(block, class_names)
+            ):
+                filtered_out_by_class_name += 1
+                continue
 
             if file_path not in files_with_spans:
-                files_with_spans[file_path] = FileWithSpans(file_path=file_path)
+                files_with_spans[file_path] = SearchCodeHit(file_path=file_path)
 
-            files_with_spans[file_path].add_span_id(block.belongs_to_span.span_id)
-            if not function_name:
+            files_with_spans[file_path].add_span(
+                block.belongs_to_span.span_id,
+                rank=0,
+                tokens=block.belongs_to_span.tokens,
+            )
+            if include_functions_in_class and not function_names:
                 for child in block.children:
                     if (
                         child.belongs_to_span.span_id
                         not in files_with_spans[file_path].span_ids
                     ):
-                        files_with_spans[file_path].add_span_id(
-                            child.belongs_to_span.span_id
+                        files_with_spans[file_path].add_span(
+                            child.belongs_to_span.span_id,
+                            rank=0,
+                            tokens=child.belongs_to_span.tokens,
                         )
 
         if filtered_out_by_class_name > 0:
@@ -440,11 +507,18 @@ class CodeIndex:
                 f"find_by_function_name() Ignored {invalid_blocks} invalid blocks."
             )
 
-        if check_all_files:
-            message = f"The provided file pattern didn't match any files. But I found {len(files_with_spans)} matches in other files."
-
-        else:
+        if check_all_files and len(files_with_spans) > 0:
+            message = f"The file pattern {file_pattern} didn't match any files. But I found {len(files_with_spans)} matches in other files."
+        elif len(files_with_spans):
             message = f"Found {len(files_with_spans)} hits."
+        elif class_names and function_names:
+            message = f"No functions found with the names {function_names} in class {class_names}."
+        elif class_names:
+            message = f"No classes found with the name {class_names}."
+        elif function_names:
+            message = f"No functions found with the names {function_names}."
+        else:
+            message = "No results found."
 
         file_paths = [file.file_path for file in files_with_spans.values()]
         if file_pattern:
@@ -453,12 +527,22 @@ class CodeIndex:
         search_hits = []
         for rank, file_path in enumerate(file_paths):
             file = files_with_spans[file_path]
-            search_hits.append(self._create_search_hit(file, rank))
+            for span in file.spans:
+                span.rank = rank
+            search_hits.append(file)
 
         return SearchCodeResponse(
             message=message,
             hits=search_hits,
         )
+
+    def _found_class(self, block: CodeBlock, class_names: list[str]):
+        for class_name in class_names:
+            parent_class = block.find_type_in_parents(CodeBlockType.CLASS)
+            if parent_class and parent_class.identifier == class_name:
+                return True
+        else:
+            return False
 
     def _create_search_hit(self, file: FileWithSpans, rank: int = 0):
         file_hit = SearchCodeHit(file_path=file.file_path)
@@ -471,8 +555,8 @@ class CodeIndex:
         query: str = "",
         exact_query_match: bool = False,
         category: str = "implementation",
-        file_pattern: Optional[str] = None,
-        exact_content_match: Optional[str] = None,
+        file_pattern: str | None = None,
+        exact_content_match: str | None = None,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -484,6 +568,10 @@ class CodeIndex:
             raise ValueError(
                 "At least one of query, span_keywords or content_keywords must be provided."
             )
+
+        logger.info(
+            f"vector_search() Searching for query [{query[:50]}...] and file pattern [{file_pattern}]."
+        )
 
         query_embedding = self._embed_model.get_query_embedding(query)
 
@@ -510,10 +598,9 @@ class CodeIndex:
             include_files = self._file_repo.matching_files(file_pattern)
             if len(include_files) == 0:
                 logger.info(
-                    f"find_code() No files found for file pattern {file_pattern}, will search all files..."
+                    f"vector_search() No files found for file pattern {file_pattern}, return empty result..."
                 )
-                include_files = []
-
+                return []
         else:
             include_files = []
 
@@ -526,7 +613,7 @@ class CodeIndex:
 
         search_results = []
 
-        for node_id, distance in zip(result.ids, result.similarities):
+        for node_id, distance in zip(result.ids, result.similarities, strict=False):
             node_doc = self._docstore.get_document(node_id, raise_error=False)
             if not node_doc:
                 ignored_removed_snippets += 1
@@ -537,7 +624,7 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            if include_files and not node_doc.metadata["file_path"] in include_files:
+            if include_files and node_doc.metadata["file_path"] not in include_files:
                 filtered_out_snippets += 1
                 continue
 
@@ -545,10 +632,11 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            if exact_content_match:
-                if not is_string_in(exact_content_match, node_doc.get_content()):
-                    filtered_out_snippets += 1
-                    continue
+            if exact_content_match and not is_string_in(
+                exact_content_match, node_doc.get_content()
+            ):
+                filtered_out_snippets += 1
+                continue
 
             if node_doc.metadata["file_path"] not in sum_tokens_per_file:
                 sum_tokens_per_file[node_doc.metadata["file_path"]] = 0
@@ -574,24 +662,23 @@ class CodeIndex:
         # TODO: Rerank by file pattern if no exact matches on file pattern
 
         logger.info(
-            f"_vector_search() Found {len(search_results)} search results. "
-            f"Ignored {ignored_removed_snippets} removed search results. "
-            f"Filtered out {filtered_out_snippets} search results."
+            f"vector_search() Returning {len(search_results)} search results. "
+            f"(Ignored {ignored_removed_snippets} removed search results. "
+            f"Filtered out {filtered_out_snippets} search results.)"
         )
 
         return search_results
 
     def run_ingestion(
         self,
-        repo_path: Optional[str] = None,
-        input_files: Optional[list[str]] = None,
-        num_workers: Optional[int] = None,
+        repo_path: str | None = None,
+        input_files: list[str] | None = None,
+        num_workers: int | None = None,
     ):
-
         repo_path = repo_path or self._file_repo.path
 
         # Only extract file name and type to not trigger unnecessary embedding jobs
-        def file_metadata_func(file_path: str) -> Dict:
+        def file_metadata_func(file_path: str) -> dict:
             file_path = file_path.replace(repo_path, "")
             if file_path.startswith("/"):
                 file_path = file_path[1:]
@@ -705,7 +792,7 @@ class CodeIndex:
             f.write(json.dumps(self._blocks_by_function_name, indent=2))
 
 
-def _rerank_files(file_paths: List[str], file_pattern: str):
+def _rerank_files(file_paths: list[str], file_pattern: str):
     if len(file_paths) < 2:
         return file_paths
 

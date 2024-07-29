@@ -4,7 +4,6 @@ from llama_index.core.schema import TextNode
 
 
 class CodeNode(TextNode):
-
     # Skip start and end line in metadata to try to lower the number of changes and triggers of new embeddings.
     @property
     def hash(self):
