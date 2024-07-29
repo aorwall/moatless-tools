@@ -34,7 +34,6 @@ class AgenticState(ABC, BaseModel):
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
 
     def __init__(self, **data):
-        logger.info(f"Init {data}")
         super().__init__(**data)
         self._loop = None
 
