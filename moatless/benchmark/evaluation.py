@@ -205,7 +205,7 @@ class Evaluation:
         repo_dir = setup_swebench_repo(instance)
         persist_dir = os.path.join(self.index_store_dir, get_repo_dir_name(instance_id))
         workspace = Workspace.from_dirs(
-            repo_dir=repo_dir, index_dir=persist_dir, max_file_context_tokens=16000
+            repo_path=repo_dir, index_dir=persist_dir, max_file_context_tokens=16000
         )
 
         problem_statement = instance["problem_statement"]
@@ -226,7 +226,7 @@ class Evaluation:
         )
 
         loop = AgenticLoop(
-            transitions=self.transitions,
+            transition_rules=self.transitions,
             workspace=workspace,
             metadata=metadata,
             mocked_actions=previous_actions,
@@ -252,7 +252,7 @@ class Evaluation:
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
 
         info["duration"] = time.time() - start_time
-        info["total_cost"] = loop.trajectory.total_cost()
+        info["total_cost"] = loop.total_cost()
 
         workspace.save()
 

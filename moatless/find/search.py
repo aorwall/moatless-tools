@@ -278,7 +278,7 @@ class ActionCallWithContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class SearchCode(AgenticState):
+class LegacySearchCode(AgenticState):
     message: Optional[str] = Field(
         None,
         description="Message to the search",
@@ -310,11 +310,12 @@ class SearchCode(AgenticState):
         initial_context_tokens: int = 4000,
         initial_search_results: int = 50,
         initial_context_spans_per_file: int = 5,
+        include_message_history=True,
         **data,
     ):
         super().__init__(
             message=message,
-            include_message_history=True,
+            include_message_history=include_message_history,
             provide_initial_context=provide_initial_context,
             max_search_results=max_search_results,
             max_retries_with_any_file_context=max_retries_with_any_file_context,
@@ -430,7 +431,7 @@ class SearchCode(AgenticState):
             return ActionResponse.retry(message)
 
     def _duplicate_search(self, action: Search) -> Optional[str]:
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_transitions(str(self))
         for transition in previous_transitions:
             for previous_action in transition.actions:
                 if isinstance(previous_action.action, Search):
@@ -506,7 +507,7 @@ class SearchCode(AgenticState):
                 show_outcommented_code=False,
             )
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_transitions(str(self))
         for transition in previous_transitions:
             if transition.state.message:
                 content += transition.state.message

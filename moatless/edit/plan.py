@@ -104,6 +104,7 @@ class PlanToCode(AgenticState):
         message: Optional[str] = None,
         diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
+        include_message_history=True,
         max_prompt_file_tokens: int = 4000,
         max_tokens_in_edit_prompt: int = 500,
         max_iterations: int = 8,
@@ -116,7 +117,7 @@ class PlanToCode(AgenticState):
             message=message,
             diff=diff,
             lint_messages=lint_messages,
-            include_message_history=True,
+            include_message_history=include_message_history,
             max_prompt_file_tokens=max_prompt_file_tokens,
             max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
             max_iterations=max_iterations,
@@ -131,7 +132,7 @@ class PlanToCode(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and len(self.loop.trajectory.get_transitions(self.name)) == 0
+            and len(self.loop.get_transitions(self.name)) == 0
         ):
             self.file_context.expand_context_with_related_spans(
                 max_tokens=self.max_prompt_file_tokens
@@ -314,7 +315,7 @@ class PlanToCode(AgenticState):
         else:
             content = ""
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_transitions(str(self))
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

@@ -329,9 +329,8 @@ def create_workspace(
         index_store_dir, get_repo_dir_name(instance["instance_id"])
     )
     return Workspace.from_dirs(
-        # TODO: Enable this to use GitRepository
-        # git_repo_url=repo_url,
-        # commit=instance["base_commit"],
-        repo_dir=repo_dir,
+        git_repo_url=repo_url,
+        commit=instance["base_commit"],
+        repo_path=repo_dir,
         index_dir=persist_dir,
     )

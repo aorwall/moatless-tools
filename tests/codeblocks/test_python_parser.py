@@ -233,7 +233,6 @@ def test_parse_function_with_class_relationship():
 """
 
     def assertion(codeblock):
-
         pass
 
     _verify_parsing(content, assertion, debug=True, apply_gpt_tweaks=False)
@@ -468,7 +467,6 @@ foo
 """
 
     def assertion(codeblock):
-
         print(codeblock.to_prompt(show_span_id=True))
 
     _verify_parsing(content, assertion, debug=True)

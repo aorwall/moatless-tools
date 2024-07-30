@@ -182,6 +182,9 @@ class FileRepository:
     def snapshot(self) -> dict:
         return {}
 
+    def restore_from_snapshot(self, snapshot: dict):
+        pass
+
     @property
     def path(self):
         return self._repo_path

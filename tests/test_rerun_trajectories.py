@@ -30,7 +30,11 @@ def test_two_edits():
     actions = get_actions(trajectory)
 
     instance = load_instance(trajectory["info"]["instance_id"])
-    workspace = create_workspace(instance, repo_base_dir="/tmp/repos", index_store_dir="/home/albert/20240522-voyage-code-2")
+    workspace = create_workspace(
+        instance,
+        repo_base_dir="/tmp/repos",
+        index_store_dir="/home/albert/20240522-voyage-code-2",
+    )
 
     spans = get_file_spans_from_patch(workspace.file_repo, instance["patch"])
     for file_path, span_ids in spans.items():

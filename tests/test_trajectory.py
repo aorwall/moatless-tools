@@ -12,8 +12,11 @@ from moatless.types import ActionRequest, ActionResponse
 
 
 class DummyState(AgenticState):
+    dummy_param: str = Field(...)
+
     def handle_action(self, action: ActionRequest) -> ActionResponse:
         return ActionResponse(content="Test response")
+
 
 @pytest.fixture
 def test_state():
@@ -23,17 +26,18 @@ def test_state():
 class DummyAction(ActionRequest):
     dummy_field: str = Field(...)
 
+
 def test_trajectory_serialization():
     # Create a dummy trajectory
     trajectory = Trajectory(
         name="Test Trajectory",
         initial_message="Initial message",
         persist_path="/tmp/test_trajectory.json",
-        workspace={"key": "value"}
+        workspace={"key": "value"},
     )
 
     # Add a transition
-    state = DummyState()
+    state = DummyState(dummy_param="test")
     trajectory.new_transition(state, snapshot={"snapshot_key": "snapshot_value"})
 
     # Add an action
@@ -44,7 +48,7 @@ def test_trajectory_serialization():
         retry_message="Retry message",
         completion_cost=0.1,
         input_tokens=10,
-        output_tokens=20
+        output_tokens=20,
     )
 
     # Save some info
@@ -52,9 +56,7 @@ def test_trajectory_serialization():
 
     # Serialize the trajectory
     serialized = json.dumps(
-        trajectory.to_dict(exclude_none=True),
-        indent=2,
-        default=to_jsonable_python
+        trajectory.to_dict(exclude_none=True), indent=2, default=to_jsonable_python
     )
 
     # Deserialize and verify
@@ -68,6 +70,10 @@ def test_trajectory_serialization():
     assert len(deserialized["transitions"]) == 1
     transition = deserialized["transitions"][0]
     assert "name" in transition["state"], "Name field is missing in the state data"
+    assert (
+        "dummy_param" in transition["state"]
+    ), "dummy_param field is missing in the state data"
+    assert transition["state"]["dummy_param"] == "test"
     assert transition["snapshot"] == {"snapshot_key": "snapshot_value"}
     assert isinstance(transition["timestamp"], str)  # Ensure timestamp is serialized
 
@@ -80,6 +86,7 @@ def test_trajectory_serialization():
     assert action["completion_cost"] == 0.1
     assert action["input_tokens"] == 10
     assert action["output_tokens"] == 20
+
 
 # Run the test
 if __name__ == "__main__":

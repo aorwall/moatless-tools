@@ -19,48 +19,21 @@ class Workspace:
     def __init__(
         self,
         file_repo: FileRepository,
-        verification_job: Optional[str] = "pylint",
-        code_index: CodeIndex | None = None,
-        max_file_context_tokens: int = 4000,
-    ):
-        self.code_index = code_index
-        self.file_repo = file_repo
-
-        if verification_job == "maven":
-            self.verifier = MavenVerifier(self.file_repo.path)
-        elif verification_job == "pylint":
-            self.verifier = PylintVerifier(self.file_repo.path)
-        else:
-            self.verifier = None
-
-        self._file_context = self.create_file_context(
-            max_tokens=max_file_context_tokens
-        )
-
-    @classmethod
-    def from_dirs(
-        cls,
-        git_repo_url: Optional[str] = None,
-        commit: Optional[str] = None,
-        repo_dir: Optional[str] = None,
         index_dir: Optional[str] = None,
         index_settings: IndexSettings | None = None,
         max_results: int = 25,
-        max_file_context_tokens=4000,
-        **kwargs,
+        code_index: CodeIndex | None = None,
+        verification_job: Optional[str] = "pylint",
+        max_file_context_tokens: int = 4000,
+        file_context: FileContext | None = None,
     ):
-        if git_repo_url:
-            file_repo = GitRepository.from_repo(
-                repo_url=git_repo_url, repo_path=repo_dir, commit=commit
-            )
-        elif repo_dir:
-            file_repo = FileRepository(repo_dir)
-        else:
-            raise ValueError("Either git_repo_url or repo_dir must be provided.")
+        self.file_repo = file_repo
 
-        if index_dir:
+        if code_index:
+            self.code_index = code_index
+        elif index_dir:
             try:
-                code_index = CodeIndex.from_persist_dir(
+                self.code_index = CodeIndex.from_persist_dir(
                     index_dir, file_repo=file_repo, max_results=max_results
                 )
             except FileNotFoundError:
@@ -72,15 +45,79 @@ class Workspace:
                 )
                 code_index.run_ingestion()
                 code_index.persist(index_dir)
+                self.code_index = code_index
         else:
-            code_index = None
+            self.code_index = None
+
+        if verification_job == "maven":
+            self.verifier = MavenVerifier(self.file_repo.path)
+        elif verification_job == "pylint":
+            self.verifier = PylintVerifier(self.file_repo.path)
+        else:
+            self.verifier = None
+
+        if file_context:
+            self._file_context = file_context
+        else:
+            self._file_context = self.create_file_context(
+                max_tokens=max_file_context_tokens
+            )
+
+    @classmethod
+    def from_dirs(
+        cls,
+        git_repo_url: Optional[str] = None,
+        commit: Optional[str] = None,
+        repo_path: Optional[str] = None,
+        max_file_context_tokens: int = 4000,
+        **kwargs,
+    ):
+        if git_repo_url:
+            file_repo = GitRepository.from_repo(
+                git_repo_url=git_repo_url, repo_path=repo_path, commit=commit
+            )
+        elif repo_path:
+            file_repo = FileRepository(repo_path)
+        else:
+            raise ValueError("Either git_repo_url or repo_dir must be provided.")
 
         return cls(
             file_repo=file_repo,
-            code_index=code_index,
             max_file_context_tokens=max_file_context_tokens,
             **kwargs,
         )
+
+    @classmethod
+    def from_dict(cls, data: dict, index_dir: Optional[str] = None, **kwargs):
+        if "repository" not in data:
+            raise ValueError("Missing repository key")
+
+        if data["repository"].get("git_repo_url"):
+            file_repo = GitRepository.from_repo(
+                git_repo_url=data["repository"].get("git_repo_url"),
+                repo_path=data["repository"].get("repo_path"),
+                commit=data["repository"].get("commit"),
+            )
+        elif data["repository"].get("repo_path"):
+            file_repo = FileRepository(data["repository"].get("repo_path"))
+        else:
+            raise ValueError("Either git_repo_url or repo_dir must be provided.")
+
+        file_context = FileContext(
+            repo=file_repo, max_tokens=data["file_context"].get("max_tokens")
+        )
+        file_context.load_files_from_dict(data["file_context"].get("files", []))
+
+        return cls(
+            file_repo=file_repo,
+            file_context=file_context,
+            index_dir=index_dir,
+            **kwargs,
+        )
+
+    def restore_from_snapshot(self, snapshot: dict):
+        self.file_repo.restore_from_snapshot(snapshot["repository"])
+        self._file_context.restore_from_snapshot(snapshot["file_context"])
 
     def dict(self):
         return {

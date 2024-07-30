@@ -21,6 +21,7 @@ def create_clarify(
     clarify._set_loop(mock_loop)
     return clarify, mock_loop
 
+
 @pytest.mark.skip
 def test_line_span_in_end_of_class(mocker):
     instance_id = "scikit-learn__scikit-learn-13439"

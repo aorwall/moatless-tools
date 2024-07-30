@@ -8,33 +8,33 @@ from moatless.edit.plan_lines import PlanToCodeWithLines
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search_v2 import SearchCode
-from moatless.loop import Transition, Transitions
+from moatless.loop import TransitionRule, TransitionRules
 from moatless.state import Finished, Rejected
 
 CODE_TRANSITIONS = [
-    Transition(
+    TransitionRule(
         source=PlanToCode,
         dest=EditCode,
         trigger="edit_code",
         required_fields=EditCode.required_fields(),
     ),
-    Transition(
+    TransitionRule(
         source=PlanToCode,
         dest=ClarifyCodeChange,
         trigger="edit_code",
         required_fields=ClarifyCodeChange.required_fields(),
     ),
-    Transition(source=PlanToCode, dest=Finished, trigger="finish"),
-    Transition(source=PlanToCode, dest=Rejected, trigger="reject"),
-    Transition(
+    TransitionRule(source=PlanToCode, dest=Finished, trigger="finish"),
+    TransitionRule(source=PlanToCode, dest=Rejected, trigger="reject"),
+    TransitionRule(
         source=ClarifyCodeChange,
         dest=EditCode,
         trigger="edit_code",
         required_fields=EditCode.required_fields(),
     ),
-    Transition(source=ClarifyCodeChange, dest=PlanToCode, trigger="reject"),
-    Transition(source=EditCode, dest=PlanToCode, trigger="finish"),
-    Transition(source=EditCode, dest=PlanToCode, trigger="reject"),
+    TransitionRule(source=ClarifyCodeChange, dest=PlanToCode, trigger="reject"),
+    TransitionRule(source=EditCode, dest=PlanToCode, trigger="finish"),
+    TransitionRule(source=EditCode, dest=PlanToCode, trigger="reject"),
 ]
 
 
@@ -46,7 +46,7 @@ def code_transitions(
     state_params: Optional[dict] = None,
     max_prompt_file_tokens: Optional[int] = 16000,
     max_tokens_in_edit_prompt: Optional[int] = 500,
-) -> Transitions:
+) -> TransitionRules:
     state_params = state_params or {}
     state_params.setdefault(
         PlanToCode,
@@ -56,46 +56,46 @@ def code_transitions(
         },
     )
 
-    return Transitions(
+    return TransitionRules(
         global_params=global_params or {},
         state_params=state_params,
         initial_state=PlanToCode,
-        transitions=CODE_TRANSITIONS,
+        transition_rules=CODE_TRANSITIONS,
     )
 
 
 def code_transitions_use_line_numbers(
     global_params: Optional[dict] = None, state_params: Optional[dict] = None
-) -> Transitions:
-    return Transitions(
+) -> TransitionRules:
+    return TransitionRules(
         global_params=global_params or {},
         state_params=state_params or {},
         initial_state=PlanToCodeWithLines,
-        transitions=[
-            Transition(
+        transition_rules=[
+            TransitionRule(
                 source=PlanToCodeWithLines,
                 dest=EditCode,
                 trigger="edit_code",
                 required_fields=PlanToCodeWithLines.required_fields(),
             ),
-            Transition(source=PlanToCodeWithLines, dest=Finished, trigger="finish"),
-            Transition(source=PlanToCodeWithLines, dest=Rejected, trigger="reject"),
-            Transition(source=EditCode, dest=PlanToCodeWithLines, trigger="finish"),
-            Transition(source=EditCode, dest=PlanToCodeWithLines, trigger="reject"),
+            TransitionRule(source=PlanToCodeWithLines, dest=Finished, trigger="finish"),
+            TransitionRule(source=PlanToCodeWithLines, dest=Rejected, trigger="reject"),
+            TransitionRule(source=EditCode, dest=PlanToCodeWithLines, trigger="finish"),
+            TransitionRule(source=EditCode, dest=PlanToCodeWithLines, trigger="reject"),
         ],
     )
 
 
 def edit_code_transitions(
     global_params: Optional[dict] = None, state_params: Optional[dict] = None
-) -> Transitions:
-    return Transitions(
+) -> TransitionRules:
+    return TransitionRules(
         global_params=global_params or {},
         state_params=state_params or {},
         initial_state=EditCode,
-        transitions=[
-            Transition(source=EditCode, dest=Finished, trigger="finish"),
-            Transition(source=EditCode, dest=Rejected, trigger="reject"),
+        transition_rules=[
+            TransitionRule(source=EditCode, dest=Finished, trigger="finish"),
+            TransitionRule(source=EditCode, dest=Rejected, trigger="reject"),
         ],
     )
 
@@ -107,7 +107,7 @@ def search_transitions(
     max_maybe_finish_iterations: int = 5,
     global_params: Optional[dict] = None,
     state_params: Optional[dict] = None,
-) -> Transitions:
+) -> TransitionRules:
     global_params = global_params or {}
 
     if model is not None:
@@ -130,17 +130,17 @@ def search_transitions(
 
     logger.info(state_params)
 
-    return Transitions(
+    return TransitionRules(
         global_params=global_params,
         state_params=state_params,
         initial_state=SearchCode,
-        transitions=[
-            Transition(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
-            Transition(source=SearchCode, dest=Finished, trigger="finish"),
-            Transition(source=IdentifyCode, dest=SearchCode, trigger="search"),
-            Transition(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
-            Transition(source=DecideRelevance, dest=SearchCode, trigger="search"),
-            Transition(source=DecideRelevance, dest=Finished, trigger="finish"),
+        transition_rules=[
+            TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
+            TransitionRule(source=SearchCode, dest=Finished, trigger="finish"),
+            TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
+            TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
+            TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
+            TransitionRule(source=DecideRelevance, dest=Finished, trigger="finish"),
         ],
     )
 
@@ -151,7 +151,7 @@ def identify_directly_transition(
     max_search_results: Optional[int] = 100,
     global_params: Optional[dict] = None,
     state_params: Optional[dict] = None,
-) -> Transitions:
+) -> TransitionRules:
     global_params = global_params or {}
 
     if model is not None:
@@ -170,13 +170,13 @@ def identify_directly_transition(
 
     logger.info(state_params)
 
-    return Transitions(
+    return TransitionRules(
         global_params=global_params,
         state_params=state_params,
         initial_state=IdentifyCode,
-        transitions=[
-            Transition(source=IdentifyCode, dest=Finished, trigger="search"),
-            Transition(source=IdentifyCode, dest=Finished, trigger="finish"),
+        transition_rules=[
+            TransitionRule(source=IdentifyCode, dest=Finished, trigger="search"),
+            TransitionRule(source=IdentifyCode, dest=Finished, trigger="finish"),
         ],
     )
 
@@ -185,23 +185,23 @@ def search_and_code_transitions(
     max_tokens_in_edit_prompt: Optional[int] = 500,
     global_params: Optional[dict] = None,
     state_params: Optional[dict] = None,
-) -> Transitions:
+) -> TransitionRules:
     state_params = state_params or {}
     if max_tokens_in_edit_prompt is not None:
         state_params.setdefault(
             PlanToCode, {"max_tokens_in_edit_prompt": max_tokens_in_edit_prompt}
         )
-    return Transitions(
+    return TransitionRules(
         global_params=global_params,
         state_params=state_params,
         initial_state=SearchCode,
-        transitions=[
-            Transition(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
-            Transition(source=SearchCode, dest=PlanToCode, trigger="finish"),
-            Transition(source=IdentifyCode, dest=SearchCode, trigger="search"),
-            Transition(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
-            Transition(source=DecideRelevance, dest=SearchCode, trigger="search"),
-            Transition(
+        transition_rules=[
+            TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
+            TransitionRule(source=SearchCode, dest=PlanToCode, trigger="finish"),
+            TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
+            TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
+            TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
+            TransitionRule(
                 source=DecideRelevance,
                 dest=PlanToCode,
                 trigger="finish",
@@ -219,7 +219,7 @@ def identify_and_code_transitions(
     max_search_results: Optional[int] = 100,
     global_params: Optional[dict] = None,
     state_params: Optional[dict] = None,
-) -> Transitions:
+) -> TransitionRules:
     global_params = global_params or {}
 
     if model is not None:
@@ -245,13 +245,13 @@ def identify_and_code_transitions(
             },
         )
 
-    return Transitions(
+    return TransitionRules(
         global_params=global_params,
         state_params=state_params or {},
         initial_state=IdentifyCode,
-        transitions=[
-            Transition(source=IdentifyCode, dest=SearchCode, trigger="search"),
-            Transition(source=IdentifyCode, dest=PlanToCode, trigger="finish"),
+        transition_rules=[
+            TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
+            TransitionRule(source=IdentifyCode, dest=PlanToCode, trigger="finish"),
         ]
         + CODE_TRANSITIONS,
     )

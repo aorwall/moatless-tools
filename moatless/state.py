@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
@@ -34,6 +34,8 @@ class AgenticState(ABC, BaseModel):
     )
 
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
+
+    # model_config = ConfigDict(extra='allow')
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -98,7 +100,7 @@ class AgenticState(ABC, BaseModel):
 
     def retries(self) -> int:
         retries = 0
-        for action in reversed(self.loop.trajectory.current_step.actions):
+        for action in reversed(self.loop._current_transition.actions):
             if action.retry_message:
                 retries += 1
             else:

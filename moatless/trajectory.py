@@ -1,9 +1,10 @@
 import json
 import logging
 from datetime import datetime
+import sys
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic_core import to_jsonable_python
 
 from moatless.state import AgenticState
@@ -27,29 +28,25 @@ class TrajectoryAction(BaseModel):
 
 
 class TrajectoryTransition(BaseModel):
-    id: int
+    id: Optional[int] = None
     parent: Optional["TrajectoryTransition"] = None
     children: list["TrajectoryTransition"] = Field(default_factory=list)
-    state: AgenticState | None = None
+    state: Optional[AgenticState] = None
     snapshot: Optional[dict] = None
     actions: list[TrajectoryAction] = []
     timestamp: datetime = Field(default_factory=datetime.now)
-
-    class Config:
-        exclude = {"parent", "children"}
 
     @property
     def name(self):
         return self.state.name if self.state else None
 
     def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        if self.state:
-            data["state"]["name"] = self.state.name
+        data = super().model_dump(exclude={"parent", "children", "state"}, **kwargs)
         data["actions"] = [action.model_dump(**kwargs) for action in self.actions]
+        data["state"] = self.state.model_dump(**kwargs) if self.state else None
 
         if self.parent:
-            data["parent"] = self.parent.id
+            data["parent_id"] = self.parent.id
 
         return data
 
@@ -67,107 +64,64 @@ class Trajectory:
         self._initial_message = initial_message
         self._workspace = workspace
 
-        self._transitions: list[TrajectoryTransition] = []
-        self._current_transition: TrajectoryTransition | None = None
+        self._transitions: list[dict[str, Any]] = []
 
         self._info: dict[str, Any] = {}
 
-    @property
-    def current_step(self):
-        return self._current_transition
+    @classmethod
+    def load(cls, file_path: str):
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        trajectory = cls(
+            name=data["name"],
+            initial_message=data["initial_message"],
+            workspace=data["workspace"],
+        )
+        trajectory._transitions = data["transitions"]
+        trajectory._info = data["info"]
+
+        return trajectory
 
     @property
     def initial_message(self):
         return self._initial_message
 
-    def get_transitions(self, name: str):
-        logger.info(
-            f"Getting transitions for {name} from {len(self._transitions)} transitions."
-        )
-        return [
-            transition for transition in self._transitions if transition.name == name
-        ]
+    @property
+    def transitions(self) -> list[dict]:
+        return sorted(self._transitions, key=lambda x: x["timestamp"])
 
-    def transition_count(self, state: AgenticState | None = None):
-        if not state:
-            return len(self._transitions)
-        return len(self.get_transitions(state.name))
+    @property
+    def workspace(self) -> dict[str, Any] | None:
+        return self._workspace
 
-    def save_action(
-        self,
-        action: ActionRequest,
-        output: dict[str, Any] | None = None,
-        retry_message: Optional[str] = None,
-        completion_cost: Optional[float] = None,
-        input_tokens: Optional[int] = None,
-        output_tokens: Optional[int] = None,
-    ):
-        if self._current_transition:
-            self._current_transition.actions.append(
-                TrajectoryAction(
-                    action=action,
-                    output=output,
-                    retry_message=retry_message,
-                    completion_cost=completion_cost,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-            )
-            logger.info(
-                f"Saving action {action.__class__.__name__} to {self._current_transition.name} ({len(self._current_transition.actions)} actions)"
-            )
-
-            self._maybe_persist()
-        else:
-            logger.warning(
-                f"No current trajectory step to save action {action.model_dump_json()}."
-            )
-
-    def new_transition(self, state: AgenticState, snapshot: Optional[dict] = None):
-        if self._current_transition:
-            self._transitions.append(self._current_transition)
-
-        transition = TrajectoryTransition(
-            id=len(self._transitions),
-            state=state,
-            snapshot=snapshot,
-            parent=self._current_transition,
-        )
-
-        if self._current_transition:
-            self._current_transition.children.append(transition)
-
-        self._current_transition = transition
+    def create_transition(self, transition: TrajectoryTransition):
+        transition.id = len(self._transitions) + 1
+        self._transitions.append(transition.model_dump())
         self._maybe_persist()
+        return transition
+
+    def save_transition(self, transition: TrajectoryTransition):
+        for i, t in enumerate(self._transitions):
+            if t["id"] == transition.id:
+                self._transitions[i] = transition.model_dump()
+                self._maybe_persist()
+                return
+
+        raise ValueError(f"Transition with id {transition.id} not found")
 
     def save_info(self, info: dict):
         self._info = info
         self._maybe_persist()
 
-    def to_dict(self, **kwargs):
-        transition_dicts = [
-            transition.model_dump(**kwargs) for transition in self._transitions
-        ]
-        if self._current_transition:
-            transition_dicts.append(self._current_transition.model_dump(**kwargs))
-
+    def to_dict(self):
         return {
             "name": self._name,
             "workspace": self._workspace,
             "initial_message": self._initial_message,
-            "transitions": transition_dicts,
+            "transitions": self._transitions,
             "info": self._info,
-            "dummy_field": None,  # Add this line
         }
-
-    def total_cost(self):
-        total_cost = 0
-        for step in self._transitions:
-            for action in step.actions:
-                if action.completion_cost:
-                    total_cost += action.completion_cost
-
-        return total_cost
 
     def _maybe_persist(self):
         if self._persist_path:
@@ -177,7 +131,7 @@ class Trajectory:
         with open(f"{file_path}", "w") as f:
             f.write(
                 json.dumps(
-                    self.to_dict(exclude_none=True),
+                    self.to_dict(),
                     indent=2,
                     default=to_jsonable_python,
                 )

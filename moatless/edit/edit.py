@@ -117,13 +117,14 @@ class EditCode(AgenticState):
         max_iterations: int = 8,
         show_file_context: bool = True,
         verify: bool = True,
+        include_message_history=True,
         chain_of_thought: bool = False,
         max_prompt_file_tokens: int = 4000,
         **data,
     ):
         assert "model" in data
         super().__init__(
-            include_message_history=True,
+            include_message_history=include_message_history,
             show_initial_message=show_initial_message,
             max_iterations=max_iterations,
             show_file_context=show_file_context,

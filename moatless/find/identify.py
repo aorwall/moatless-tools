@@ -65,41 +65,38 @@ class Identify(ActionRequest):
 
 
 class IdentifyCode(AgenticState):
-    file_pattern: Optional[str]
-    query: Optional[str]
-    code_snippet: Optional[str]
-    class_name: Optional[str]
-    function_name: Optional[str]
+    ranked_spans: Optional[list[RankedFileSpan]] = Field(
+        default=None, description="Ranked file spans from the search results."
+    )
 
-    ranked_spans: Optional[list[RankedFileSpan]]
+    expand_context: bool = Field(
+        default=False,
+        description="Whether to expand the search result with relevant code spans .",
+    )
 
-    expand_context: bool
-    max_prompt_file_tokens: int = 4000
+    max_prompt_file_tokens: int = Field(
+        default=4000,
+        description="The maximum number of tokens to include in the prompt.",
+    )
 
     def __init__(
         self,
         ranked_spans: list[RankedFileSpan],
-        file_pattern: Optional[str] = None,
-        query: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        class_name: Optional[str] = None,
-        function_name: Optional[str] = None,
         expand_context: bool = True,
+        include_message_history: bool = False,
         max_prompt_file_tokens: int = 4000,
         **data,
     ):
         super().__init__(
-            file_pattern=file_pattern,
-            query=query,
-            code_snippet=code_snippet,
-            class_name=class_name,
-            function_name=function_name,
             ranked_spans=ranked_spans,
-            include_message_history=False,
+            include_message_history=include_message_history,
             expand_context=expand_context,
             max_prompt_file_tokens=max_prompt_file_tokens,
             **data,
         )
+
+    def model_dump(self, **kwargs):
+        return super().model_dump(**kwargs)
 
     def handle_action(self, action: Identify) -> ActionResponse:
         if action.identified_spans:
@@ -113,19 +110,6 @@ class IdentifyCode(AgenticState):
             return ActionResponse.transition("finish")
         else:
             logger.info("No spans identified.")
-
-        message = "I searched using the following parameters:\n"
-
-        if self.file_pattern:
-            message += f"\n* **File Pattern:** `{self.file_pattern}`"
-        if self.query:
-            message += f"\n* **Query:** `{self.query}`"
-        if self.code_snippet:
-            message += f"\n* **Code Snippet:** `{self.code_snippet}`"
-        if self.class_name:
-            message += f"\n* **Class Name:** `{self.class_name}`"
-        if self.function_name:
-            message += f"\n* **Function Name:** `{self.function_name}`"
 
         message = f"The search returned {len(self.ranked_spans)} results. But unfortunately, I didn’t find any of the search results relevant to the query."
 

@@ -313,6 +313,7 @@ class SearchCode(AgenticState):
         message: Optional[str] = None,
         max_search_results: int = 25,
         max_retries_with_any_file_context: int = 3,
+        include_message_history: bool = True,
         provide_initial_context: bool = True,
         initial_context_tokens: int = 4000,
         initial_search_results: int = 50,
@@ -321,7 +322,7 @@ class SearchCode(AgenticState):
     ):
         super().__init__(
             message=message,
-            include_message_history=True,
+            include_message_history=include_message_history,
             provide_initial_context=provide_initial_context,
             max_search_results=max_search_results,
             max_retries_with_any_file_context=max_retries_with_any_file_context,
@@ -453,7 +454,7 @@ class SearchCode(AgenticState):
                 show_outcommented_code=False,
             )
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_transitions(str(self))
         for transition in previous_transitions:
             if transition.state.message:
                 content += transition.state.message

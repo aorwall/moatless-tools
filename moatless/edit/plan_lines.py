@@ -90,13 +90,14 @@ class PlanToCodeWithLines(AgenticState):
         diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
         max_iterations: int = 5,
+        include_message_history=True,
         **data,
     ):
         super().__init__(
             message=message,
             diff=diff,
             lint_messages=lint_messages,
-            include_message_history=True,
+            include_message_history=include_message_history,
             max_iterations=max_iterations,
             **data,
         )
@@ -113,7 +114,7 @@ class PlanToCodeWithLines(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and len(self.loop.trajectory.get_transitions(self.name)) == 0
+            and len(self.loop.get_transitions(self.name)) == 0
         ):
             self.file_context.expand_context_with_related_spans(max_tokens=4000)
 
@@ -261,7 +262,7 @@ class PlanToCodeWithLines(AgenticState):
 
         content = self.loop.trajectory.initial_message or ""
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_transitions(str(self))
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()
