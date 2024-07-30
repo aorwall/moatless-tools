@@ -1,7 +1,10 @@
+import json
 import logging
 from dataclasses import dataclass
+from typing import Optional, List, Dict, Set
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.v1 import PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import (
@@ -26,30 +29,29 @@ class RankedFileSpan(BaseModel):
 
 class ContextSpan(BaseModel):
     span_id: str
-    start_line: int | None = None
-    end_line: int | None = None
-    tokens: int | None = None
-
-    def dict(self, **kwargs):
-        return self.model_dump(**kwargs)
-
-    def model_dump(self, **kwargs):
-        return {"span_id": self.span_id, "tokens": self.tokens}
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    tokens: Optional[int] = None
 
 
 @dataclass
 class CurrentPromptSpan:
-    span_id: str | None = None
+    span_id: Optional[str] = None
     tokens: int = 0
 
 
 class ContextFile(BaseModel):
     file: CodeFile
-    spans: list[ContextSpan] = []
+    spans: List[ContextSpan] = []
     show_all_spans: bool = False
 
     def __init__(self, **data):
         super().__init__(**data)
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs, exclude={"file"})
+        data["file_path"] = self.file.file_path
+        return data
 
     @property
     def file_path(self):
@@ -99,7 +101,7 @@ class ContextFile(BaseModel):
 
         return f"{self.file_path}\n```\n{code}\n```\n"
 
-    def _find_span(self, codeblock: CodeBlock) -> ContextSpan | None:
+    def _find_span(self, codeblock: CodeBlock) -> Optional[ContextSpan]:
         if not codeblock.belongs_to_span:
             return None
 
@@ -109,7 +111,7 @@ class ContextFile(BaseModel):
 
         return None
 
-    def _within_span(self, line_no: int) -> ContextSpan | None:
+    def _within_span(self, line_no: int) -> Optional[ContextSpan]:
         for span in self.spans:
             if (
                 span.start_line
@@ -146,7 +148,7 @@ class ContextFile(BaseModel):
     def _to_prompt(
         self,
         code_block: CodeBlock,
-        current_span: CurrentPromptSpan | None = None,
+        current_span: Optional[CurrentPromptSpan] = None,
         show_outcommented_code: bool = True,
         outcomment_code_comment: str = "...",
         show_span_id: bool = False,
@@ -264,8 +266,8 @@ class ContextFile(BaseModel):
 
     def add_spans(
         self,
-        span_ids: set[str],
-        tokens: int | None = None,
+        span_ids: Set[str],
+        tokens: Optional[int] = None,
     ):
         for span_id in span_ids:
             self.add_span(span_id, tokens)
@@ -273,7 +275,7 @@ class ContextFile(BaseModel):
     def add_span(
         self,
         span_id: str,
-        tokens: int | None = None,
+        tokens: Optional[int] = None,
     ):
         existing_span = next(
             (span for span in self.spans if span.span_id == span_id), None
@@ -306,7 +308,7 @@ class ContextFile(BaseModel):
     def remove_span(self, span_id: str):
         self.spans = [span for span in self.spans if span.span_id != span_id]
 
-    def get_spans(self) -> list[BlockSpan]:
+    def get_spans(self) -> List[BlockSpan]:
         block_spans = []
         for span in self.spans:
             if not self.file.supports_codeblocks:
@@ -317,7 +319,7 @@ class ContextFile(BaseModel):
                 block_spans.append(block_span)
         return block_spans
 
-    def get_block_span(self, span_id: str) -> BlockSpan | None:
+    def get_block_span(self, span_id: str) -> Optional[BlockSpan]:
         if not self.file.supports_codeblocks:
             return None
         for span in self.spans:
@@ -331,7 +333,7 @@ class ContextFile(BaseModel):
                     )
         return None
 
-    def get_span(self, span_id: str) -> ContextSpan | None:
+    def get_span(self, span_id: str) -> Optional[ContextSpan]:
         for span in self.spans:
             if span.span_id == span_id:
                 return span
@@ -395,30 +397,77 @@ class ContextFile(BaseModel):
                     self.add_span(span_id)
 
 
-class FileContext:
-    def __init__(self, repo: FileRepository, max_tokens: int = 4000):
+class FileContext(BaseModel):
+    _repo: FileRepository = PrivateAttr()
+    _file_context: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
+    _max_tokens: int = PrivateAttr(default=4000)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, repo: FileRepository, **data):
+        super().__init__(**data)
         self._repo = repo
-        self._file_context: dict[str, ContextFile] = {}
-        self._max_tokens: int = max_tokens
+        if "_file_context" not in self.__dict__:
+            self.__dict__["_file_context"] = {}
+        if "_max_tokens" not in self.__dict__:
+            self.__dict__["_max_tokens"] = data.get("max_tokens", 4000)
 
     @classmethod
-    def from_json(cls, repo_path: str, context_data: list[dict]):
-        file_context = cls(FileRepository(repo_path))
+    def from_dir(cls, repo_dir: str, max_tokens: int = 4000):
+        repo = FileRepository(repo_dir)
+        instance = cls(max_tokens=max_tokens, repo=repo)
+        return instance
 
-        for file_data in context_data:
-            file_context.add_spans_to_context(
-                file_path=file_data["file_path"], span_ids=set(file_data["span_ids"])
+    @classmethod
+    def from_json(cls, repo_dir: str, json_data: str):
+        """
+        Create a FileContext instance from JSON data.
+
+        :param repo_dir: The repository directory path.
+        :param json_data: A JSON string representing the FileContext data.
+        :return: A new FileContext instance.
+        """
+        data = json.loads(json_data)
+        return cls.from_dict(repo_dir, data)
+
+    @classmethod
+    def from_dict(cls, repo_dir: str, data: Dict):
+        repo = FileRepository(repo_dir)
+        instance = cls(max_tokens=data.get("max_tokens", 4000), repo=repo)
+        for file_data in data.get("files", []):
+            file_path = file_data["file_path"]
+            show_all_spans = file_data.get("show_all_spans", False)
+            spans = [ContextSpan(**span) for span in file_data.get("spans", [])]
+            instance._file_context[file_path] = ContextFile(
+                file=instance._repo.get_file(file_path),
+                spans=spans,
+                show_all_spans=show_all_spans,
             )
 
-        return file_context
+        return instance
 
-    def to_files_with_spans(self) -> list[FileWithSpans]:
+    def model_dump(self, **kwargs):
+        if "exclude_none" not in kwargs:
+            kwargs["exclude_none"] = True
+
+        files = [
+            file.model_dump(**kwargs)
+            for file in self.__dict__["_file_context"].values()
+        ]
+        return {"max_tokens": self.__dict__["_max_tokens"], "files": files}
+
+    def snapshot(self):
+        dict = self.model_dump()
+        del dict["max_tokens"]
+        return dict
+
+    def to_files_with_spans(self) -> List[FileWithSpans]:
         return [
             FileWithSpans(file_path=file_path, span_ids=list(file.span_ids))
             for file_path, file in self._file_context.items()
         ]
 
-    def add_files_with_spans(self, files_with_spans: list[FileWithSpans]):
+    def add_files_with_spans(self, files_with_spans: List[FileWithSpans]):
         for file_with_spans in files_with_spans:
             self.add_spans_to_context(
                 file_with_spans.file_path, set(file_with_spans.span_ids)
@@ -433,7 +482,7 @@ class FileContext:
             )
 
     def add_file_with_lines(
-        self, file_path: str, start_line: int, end_line: int | None = None
+        self, file_path: str, start_line: int, end_line: Optional[int] = None
     ):
         end_line = end_line or start_line
         if file_path not in self._file_context:
@@ -456,7 +505,7 @@ class FileContext:
 
     def get_file(
         self, file_path: str, add_if_not_found: bool = False
-    ) -> ContextFile | None:
+    ) -> Optional[ContextFile]:
         context_file = self._file_context.get(file_path)
         if not context_file and add_if_not_found:
             file = self._repo.get_file(file_path)
@@ -469,8 +518,8 @@ class FileContext:
     def add_spans_to_context(
         self,
         file_path: str,
-        span_ids: set[str],
-        tokens: int | None = None,
+        span_ids: Set[str],
+        tokens: Optional[int] = None,
     ):
         context_file = self.get_context_file(file_path)
         if context_file:
@@ -479,7 +528,7 @@ class FileContext:
             logger.warning(f"Could not find file {file_path} in the repository")
 
     def add_span_to_context(
-        self, file_path: str, span_id: str, tokens: int | None = None
+        self, file_path: str, span_id: str, tokens: Optional[int] = None
     ):
         context_file = self.get_context_file(file_path)
         if context_file:
@@ -503,18 +552,18 @@ class FileContext:
                 self.remove_file(file_path)
 
     def remove_spans_from_context(
-        self, file_path: str, span_ids: list[str], remove_file: bool = False
+        self, file_path: str, span_ids: List[str], remove_file: bool = False
     ):
         for span_id in span_ids:
             self.remove_span_from_context(file_path, span_id, remove_file)
 
-    def get_spans(self, file_path: str) -> list[BlockSpan]:
+    def get_spans(self, file_path: str) -> List[BlockSpan]:
         context_file = self.get_context_file(file_path)
         if context_file:
             return context_file.get_spans()
         return []
 
-    def get_span(self, file_path: str, span_id: str) -> BlockSpan | None:
+    def get_span(self, file_path: str, span_id: str) -> Optional[BlockSpan]:
         context_file = self.get_context_file(file_path)
         if context_file:
             return context_file.get_block_span(span_id)
@@ -528,7 +577,7 @@ class FileContext:
 
     def add_ranked_spans(
         self,
-        ranked_spans: list[RankedFileSpan],
+        ranked_spans: List[RankedFileSpan],
         decay_rate: float = 1.05,
         min_tokens: int = 50,
     ):
@@ -645,13 +694,13 @@ class FileContext:
 
         return spans
 
-    def get_context_file(self, file_path: str) -> ContextFile | None:
+    def get_context_file(self, file_path: str) -> Optional[ContextFile]:
         if file_path not in self._file_context:
             file = self._repo.get_file(file_path)
             if not file:
                 return None
             self._file_context[file_path] = ContextFile(
-                file=self._repo.get_file(file_path), span_ids=set()
+                file=self._repo.get_file(file_path), spans=[]
             )
 
         return self._file_context[file_path]
@@ -659,26 +708,17 @@ class FileContext:
     def context_size(self):
         return sum(file.context_size() for file in self._file_context.values())
 
-    def save_file(self, file_path: str, updated_content: str | None = None):
+    def save_file(self, file_path: str, updated_content: Optional[str] = None):
         self._repo.save_file(file_path, updated_content)
 
     def save(self):
         self._repo.save()
 
-    def dict(self):
-        file_dict = []
-        for file_path, file in self._file_context.items():
-            if file.spans:
-                spans = []
-                for span in file.spans:
-                    spans.append({"span_id": span.span_id, "tokens": span.tokens})
-                file_dict.append({"file_path": file_path, "spans": spans})
-            else:
-                file_dict.append({"file_path": file_path})
-        return file_dict
-
     def reset(self):
         self._file_context = {}
+
+    def strip_line_breaks_only(self, text):
+        return text.lstrip("\n\r").rstrip("\n\r")
 
     def create_prompt(
         self,
@@ -698,4 +738,4 @@ class FileContext:
                 outcomment_code_comment,
             )
             file_context_content += "\n\n" + content
-        return file_context_content
+        return self.strip_line_breaks_only(file_context_content)

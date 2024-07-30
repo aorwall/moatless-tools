@@ -81,7 +81,7 @@ class CodeParser:
     ):
         try:
             self.tree_parser = Parser()
-            self.tree_parser.set_language(language)
+            self.tree_parser.language = language
             self.tree_language = language
         except Exception as e:
             logger.warning(f"Could not get parser for language {language}.")
@@ -119,9 +119,11 @@ class CodeParser:
             return None
 
     def _build_queries(self, query_file: str):
-        with resources.open_text(
-            "moatless.codeblocks.parser.queries", query_file
-        ) as file:
+        with (
+            resources.files("moatless.codeblocks.parser.queries")
+            .joinpath(query_file)
+            .open() as file
+        ):
             query_list = file.read().strip().split("\n\n")
             parsed_queries = []
             for i, query in enumerate(query_list):

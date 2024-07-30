@@ -4,7 +4,7 @@ import logging
 import os
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
@@ -27,8 +27,9 @@ class CodeFile(BaseModel):
     file_path: str
     content: str
     module: Module | None = None
-
     dirty: bool = False
+
+    model_config = ConfigDict(exclude={"module", "dirty"})
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
@@ -173,6 +174,12 @@ class FileRepository:
     def __init__(self, repo_path: str):
         self._repo_path = repo_path
         self._files: dict[str, CodeFile] = {}
+
+    def dict(self):
+        return {"type": "file", "path": self._repo_path}
+
+    def snapshot(self) -> dict:
+        return {}
 
     @property
     def path(self):

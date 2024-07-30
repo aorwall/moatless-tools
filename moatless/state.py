@@ -22,7 +22,9 @@ class AgenticState(ABC, BaseModel):
         default=False,
         description="The message history from previous initations should be included in the completion request",
     )
-    model: str = Field(default="gpt-4o", description="The model to use for completion")
+    model: str | None = Field(
+        default=None, description="The model to use for completion"
+    )
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
@@ -119,6 +121,11 @@ class AgenticState(ABC, BaseModel):
 
     def stop_words(self) -> list[str] | None:
         return None
+
+    def model_dump(self, *args, **kwargs):
+        data = super().model_dump(*args, **kwargs)
+        data["name"] = self.name
+        return data
 
 
 class NoopState(AgenticState):

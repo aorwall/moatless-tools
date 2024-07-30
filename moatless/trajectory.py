@@ -1,8 +1,9 @@
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
 
 from moatless.state import AgenticState
@@ -20,26 +21,29 @@ class TrajectoryAction(BaseModel):
     output_tokens: int | None = None
 
     def model_dump(self, **kwargs):
-        dict = super().model_dump(**kwargs)
-        action_dict = self.action.model_dump(**kwargs)
-        dict["action"] = action_dict
-        return dict
+        data = super().model_dump(**kwargs)
+        data["action"] = self.action.model_dump(**kwargs)
+        return data
 
 
 class TrajectoryTransition(BaseModel):
     state: AgenticState | None = None
+    snapshot: dict | None = None
     actions: list[TrajectoryAction] = []
+    timestamp: datetime = Field(default_factory=datetime.now)
 
     @property
     def name(self):
         return self.state.name if self.state else None
 
     def model_dump(self, **kwargs):
-        return {
-            "name": self.name,
-            "state": self.state.model_dump(**kwargs) if self.state else None,
-            "actions": [action.model_dump(**kwargs) for action in self.actions],
-        }
+        data = super().model_dump(**kwargs)
+        if self.state:
+            data["state"]["name"] = self.state.name
+
+        data["actions"] = [action.model_dump(**kwargs) for action in self.actions]
+
+        return data
 
 
 class Trajectory:
@@ -48,10 +52,12 @@ class Trajectory:
         name: str,
         initial_message: str | None = None,
         persist_path: str | None = None,
+        workspace: dict | None = None,
     ):
         self._name = name
         self._persist_path = persist_path
         self._initial_message = initial_message
+        self._workspace = workspace
 
         self._transitions: list[TrajectoryTransition] = []
         self._current_transition: TrajectoryTransition | None = None
@@ -109,11 +115,11 @@ class Trajectory:
                 f"No current trajectory step to save action {action.model_dump_json()}."
             )
 
-    def new_transition(self, state: AgenticState):
+    def new_transition(self, state: AgenticState, snapshot: dict | None = None):
         if self._current_transition:
             self._transitions.append(self._current_transition)
 
-        self._current_transition = TrajectoryTransition(state=state)
+        self._current_transition = TrajectoryTransition(state=state, snapshot=snapshot)
         self._maybe_persist()
 
     def save_info(self, info: dict):
@@ -129,9 +135,11 @@ class Trajectory:
 
         return {
             "name": self._name,
+            "workspace": self._workspace,
             "initial_message": self._initial_message,
             "transitions": transition_dicts,
             "info": self._info,
+            "dummy_field": None,  # Add this line
         }
 
     def total_cost(self):

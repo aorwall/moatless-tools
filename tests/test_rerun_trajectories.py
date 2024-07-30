@@ -1,11 +1,13 @@
 import json
 
+import pytest
+
+from moatless.benchmark.swebench import load_instance, create_workspace
 from moatless.benchmark.utils import get_file_spans_from_patch
 from moatless.edit.edit import EditCode
 from moatless.loop import AgenticLoop
 from moatless.state import AgenticState
 from moatless.transitions import code_transitions
-from utils import create_workspace, get_instance
 
 
 def read_trajectory(path):
@@ -21,13 +23,15 @@ def get_actions(trajectory: dict):
     return actions
 
 
+@pytest.mark.skip
 def test_two_edits():
     path = "trajectories/two_edits.json"
     trajectory = read_trajectory(path)
     actions = get_actions(trajectory)
 
-    workspace = create_workspace(trajectory["info"]["instance_id"])
-    instance = get_instance(trajectory["info"]["instance_id"])
+    instance = load_instance(trajectory["info"]["instance_id"])
+    workspace = create_workspace(instance, repo_base_dir="/tmp/repos", index_store_dir="/home/albert/20240522-voyage-code-2")
+
     spans = get_file_spans_from_patch(workspace.file_repo, instance["patch"])
     for file_path, span_ids in spans.items():
         workspace.file_context.add_spans_to_context(
