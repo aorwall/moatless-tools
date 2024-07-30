@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from moatless.edit.clarify import ClarifyCodeChange
 from moatless.edit.edit import EditCode
@@ -41,10 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 def code_transitions(
-    global_params: dict | None = None,
-    state_params: dict | None = None,
-    max_prompt_file_tokens: int | None = 16000,
-    max_tokens_in_edit_prompt: int | None = 500,
+    global_params: Optional[dict] = None,
+    state_params: Optional[dict] = None,
+    max_prompt_file_tokens: Optional[int] = 16000,
+    max_tokens_in_edit_prompt: Optional[int] = 500,
 ) -> Transitions:
     state_params = state_params or {}
     state_params.setdefault(
@@ -64,7 +65,7 @@ def code_transitions(
 
 
 def code_transitions_use_line_numbers(
-    global_params: dict | None = None, state_params: dict | None = None
+    global_params: Optional[dict] = None, state_params: Optional[dict] = None
 ) -> Transitions:
     return Transitions(
         global_params=global_params or {},
@@ -86,7 +87,7 @@ def code_transitions_use_line_numbers(
 
 
 def edit_code_transitions(
-    global_params: dict | None = None, state_params: dict | None = None
+    global_params: Optional[dict] = None, state_params: Optional[dict] = None
 ) -> Transitions:
     return Transitions(
         global_params=global_params or {},
@@ -100,12 +101,12 @@ def edit_code_transitions(
 
 
 def search_transitions(
-    model: str | None = None,
-    max_prompt_file_tokens: int | None = None,
-    max_search_results: int | None = None,
+    model: Optional[str] = None,
+    max_prompt_file_tokens: Optional[int] = None,
+    max_search_results: Optional[int] = None,
     max_maybe_finish_iterations: int = 5,
-    global_params: dict | None = None,
-    state_params: dict | None = None,
+    global_params: Optional[dict] = None,
+    state_params: Optional[dict] = None,
 ) -> Transitions:
     global_params = global_params or {}
 
@@ -145,11 +146,11 @@ def search_transitions(
 
 
 def identify_directly_transition(
-    model: str | None = None,
-    max_prompt_file_tokens: int | None = 30000,
-    max_search_results: int | None = 100,
-    global_params: dict | None = None,
-    state_params: dict | None = None,
+    model: Optional[str] = None,
+    max_prompt_file_tokens: Optional[int] = 30000,
+    max_search_results: Optional[int] = 100,
+    global_params: Optional[dict] = None,
+    state_params: Optional[dict] = None,
 ) -> Transitions:
     global_params = global_params or {}
 
@@ -181,9 +182,9 @@ def identify_directly_transition(
 
 
 def search_and_code_transitions(
-    max_tokens_in_edit_prompt: int | None = 500,
-    global_params: dict | None = None,
-    state_params: dict | None = None,
+    max_tokens_in_edit_prompt: Optional[int] = 500,
+    global_params: Optional[dict] = None,
+    state_params: Optional[dict] = None,
 ) -> Transitions:
     state_params = state_params or {}
     if max_tokens_in_edit_prompt is not None:
@@ -212,12 +213,12 @@ def search_and_code_transitions(
 
 
 def identify_and_code_transitions(
-    model: str | None = None,
-    max_prompt_file_tokens: int | None = 16000,
-    max_tokens_in_edit_prompt: int | None = 500,
-    max_search_results: int | None = 100,
-    global_params: dict | None = None,
-    state_params: dict | None = None,
+    model: Optional[str] = None,
+    max_prompt_file_tokens: Optional[int] = 16000,
+    max_tokens_in_edit_prompt: Optional[int] = 500,
+    max_search_results: Optional[int] = 100,
+    global_params: Optional[dict] = None,
+    state_params: Optional[dict] = None,
 ) -> Transitions:
     global_params = global_params or {}
 

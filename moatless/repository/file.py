@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,8 +19,8 @@ logger = logging.getLogger(__name__)
 class UpdateResult:
     file_path: str
     updated: bool
-    diff: str | None = None
-    error: str | None = None
+    diff: Optional[str] = None
+    error: Optional[str] = None
     new_span_ids: set[str] | None = None
 
 
@@ -217,7 +218,7 @@ class FileRepository:
                 self._files[file_path] = file
         return file
 
-    def save_file(self, file_path: str, updated_content: str | None = None):
+    def save_file(self, file_path: str, updated_content: Optional[str] = None):
         file = self._files.get(file_path)
         full_file_path = os.path.join(self._repo_path, file_path)
         with open(full_file_path, "w") as f:
@@ -285,7 +286,9 @@ def remove_duplicate_lines(replacement_lines, original_lines):
     return replacement_lines
 
 
-def do_diff(file_path: str, original_content: str, updated_content: str) -> str | None:
+def do_diff(
+    file_path: str, original_content: str, updated_content: str
+) -> Optional[str]:
     return "".join(
         difflib.unified_diff(
             original_content.strip().splitlines(True),

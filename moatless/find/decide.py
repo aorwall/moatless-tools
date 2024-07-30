@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -60,7 +61,7 @@ class Decision(ActionRequest):
         description="Set to true if all the relevant code have been identified.",
     )
 
-    search_suggestions: str | None = Field(
+    search_suggestions: Optional[str] = Field(
         None,
         description="Suggestions on how to find the relevant code not found in the file context.",
     )

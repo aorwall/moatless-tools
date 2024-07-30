@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.file_context import FileContext
@@ -18,7 +19,7 @@ class Workspace:
     def __init__(
         self,
         file_repo: FileRepository,
-        verification_job: str | None = "pylint",
+        verification_job: Optional[str] = "pylint",
         code_index: CodeIndex | None = None,
         max_file_context_tokens: int = 4000,
     ):
@@ -39,10 +40,10 @@ class Workspace:
     @classmethod
     def from_dirs(
         cls,
-        git_repo_url: str | None = None,
-        commit: str | None = None,
-        repo_dir: str | None = None,
-        index_dir: str | None = None,
+        git_repo_url: Optional[str] = None,
+        commit: Optional[str] = None,
+        repo_dir: Optional[str] = None,
+        index_dir: Optional[str] = None,
         index_settings: IndexSettings | None = None,
         max_results: int = 25,
         max_file_context_tokens=4000,

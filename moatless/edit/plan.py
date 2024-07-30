@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
@@ -34,18 +35,22 @@ class ApplyChange(ActionRequest):
         description="The action to take, possible values are 'modify', 'review', 'finish', 'reject'",
     )
 
-    instructions: str | None = Field(
+    instructions: Optional[str] = Field(
         None, description="Instructions to do the code change."
     )
-    file_path: str | None = Field(
+    file_path: Optional[str] = Field(
         None, description="The file path of the code to be updated."
     )
-    span_id: str | None = Field(
+    span_id: Optional[str] = Field(
         None, description="The span id of the code to be updated."
     )
 
-    reject: str | None = Field(None, description="Reject the request and explain why.")
-    finish: str | None = Field(None, description="Finish the request and explain why")
+    reject: Optional[str] = Field(
+        None, description="Reject the request and explain why."
+    )
+    finish: Optional[str] = Field(
+        None, description="Finish the request and explain why"
+    )
 
     model_config = ConfigDict(
         extra="allow",
@@ -53,13 +58,13 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCode(AgenticState):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: str | None = Field(
+    diff: Optional[str] = Field(
         None,
         description="The diff of a previous code change.",
     )
@@ -96,8 +101,8 @@ class PlanToCode(AgenticState):
 
     def __init__(
         self,
-        message: str | None = None,
-        diff: str | None = None,
+        message: Optional[str] = None,
+        diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
         max_prompt_file_tokens: int = 4000,
         max_tokens_in_edit_prompt: int = 500,

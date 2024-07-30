@@ -5,7 +5,7 @@ import random
 import string
 import traceback
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
 import instructor
 import litellm
@@ -107,17 +107,17 @@ class AgenticLoop:
         transitions: Transitions,
         workspace: Workspace,
         mocked_actions: list[dict] | None = None,
-        reset_mocks_at_state: str | None = None,
-        verify_state_func: Callable | None = None,
+        reset_mocks_at_state: Optional[str] = None,
+        verify_state_func: Optional[Callable] = None,
         max_cost: float = 0.25,
         max_transitions: int = 25,
-        max_message_tokens: int | None = None,
+        max_message_tokens: Optional[int] = None,
         max_retries: int = 2,
         max_rejections: int = 2,
         instructor_mode: instructor.Mode | None = None,
         metadata: dict[str, Any] | None = None,
-        trajectory_path: str | None = None,
-        prompt_log_dir: str | None = None,
+        trajectory_path: Optional[str] = None,
+        prompt_log_dir: Optional[str] = None,
     ):
         """
         Initialize the Loop instance.
@@ -160,7 +160,7 @@ class AgenticLoop:
         self._metadata = metadata
 
     def run(
-        self, message: str | None = None, input_data: dict[str, Any] | None = None
+        self, message: Optional[str] = None, input_data: dict[str, Any] | None = None
     ) -> Response:
         """
         Run the loop and handle exceptions and cost checking.
@@ -497,7 +497,7 @@ class AgenticLoop:
 
     def _next_action(
         self,
-    ) -> tuple[ActionRequest, float | None, int | None, int | None]:
+    ) -> tuple[ActionRequest, Optional[float], Optional[int], Optional[int]]:
         messages = self._to_completion_messages()
         logger.info(f"{self.state} Create completion with {len(messages)} messages")
 
@@ -616,7 +616,7 @@ class AgenticLoop:
         self,
         messages: list[dict],
         completion: Any | None = None,
-        error: str | None = None,
+        error: Optional[str] = None,
     ):
         if not self._prompt_log_dir:
             return

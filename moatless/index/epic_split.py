@@ -1,7 +1,7 @@
 import re
 import time
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 from llama_index.core.bridge.pydantic import Field
 from llama_index.core.callbacks import CallbackManager
@@ -74,7 +74,7 @@ class EpicSplitter(NodeParser):
 
     repo_path: str = Field(default=None, description="Path to the repository.")
 
-    index_callback: Callable | None = Field(
+    index_callback: Optional[Callable] = Field(
         default=None, description="Callback to call when indexing a code block."
     )
 
@@ -90,12 +90,12 @@ class EpicSplitter(NodeParser):
         include_metadata: bool = True,
         include_prev_next_rel: bool = True,
         text_splitter: TextSplitter | None = None,
-        index_callback: Callable[[CodeBlock], None] | None = None,
-        repo_path: str | None = None,
+        index_callback: Optional[Callable[[CodeBlock], None]] = None,
+        repo_path: Optional[str] = None,
         comment_strategy: CommentStrategy = CommentStrategy.ASSOCIATE,
         # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
-        tokenizer: Callable | None = None,
+        tokenizer: Optional[Callable] = None,
         non_code_file_extensions: list[str] | None = None,
         callback_manager: CallbackManager | None = None,
     ) -> None:
@@ -186,7 +186,7 @@ class EpicSplitter(NodeParser):
         return all_nodes
 
     def _chunk_contents(
-        self, codeblock: CodeBlock | None = None, file_path: str | None = None
+        self, codeblock: CodeBlock | None = None, file_path: Optional[str] = None
     ) -> list[CodeBlockChunk]:
         tokens = codeblock.sum_tokens()
         if tokens == 0:
@@ -221,7 +221,7 @@ class EpicSplitter(NodeParser):
         return self._chunk_block(codeblock, file_path)
 
     def _chunk_block(
-        self, codeblock: CodeBlock, file_path: str | None = None
+        self, codeblock: CodeBlock, file_path: Optional[str] = None
     ) -> list[CodeBlockChunk]:
         chunks: list[CodeBlockChunk] = []
         current_chunk = []

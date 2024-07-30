@@ -3,6 +3,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib import resources
+from typing import Optional
 
 import networkx as nx
 from llama_index.core import get_tokenizer
@@ -147,7 +148,7 @@ class CodeParser:
         node: Node,
         start_byte: int = 0,
         level: int = 0,
-        file_path: str | None = None,
+        file_path: Optional[str] = None,
         parent_block: CodeBlock | None = None,
         current_span: BlockSpan | None = None,
     ) -> tuple[CodeBlock, Node, BlockSpan]:
@@ -669,7 +670,7 @@ class CodeParser:
             return any(self.has_error(child) for child in node.children)
         return False
 
-    def parse(self, content, file_path: str | None = None) -> Module:
+    def parse(self, content, file_path: Optional[str] = None) -> Module:
         if isinstance(content, str):
             content_in_bytes = bytes(content, self.encoding)
         elif isinstance(content, bytes):
@@ -828,7 +829,7 @@ class CodeParser:
 
         return None
 
-    def _create_span_id(self, block: CodeBlock, label: str | None = None):
+    def _create_span_id(self, block: CodeBlock, label: Optional[str] = None):
         if block.type.group == CodeBlockTypeGroup.STRUCTURE:
             structure_block = block
         else:

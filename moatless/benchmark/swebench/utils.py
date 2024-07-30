@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Optional
 
 from datasets import load_dataset
 
@@ -277,9 +278,9 @@ def generate_md_report(trajectory: dict, instance: dict):
 
 
 def setup_swebench_repo(
-    instance_data: dict | None = None,
+    instance_data: Optional[dict] = None,
     instance_id: str = None,
-    repo_base_dir: str | None = None,
+    repo_base_dir: Optional[str] = None,
 ) -> str:
     assert (
         instance_data or instance_id
@@ -300,10 +301,10 @@ def setup_swebench_repo(
 
 
 def create_workspace(
-    instance: dict | None = None,
-    instance_id: str | None = None,
-    repo_base_dir: str | None = None,
-    index_store_dir: str | None = None,
+    instance: Optional[dict] = None,
+    instance_id: Optional[str] = None,
+    repo_base_dir: Optional[str] = None,
+    index_store_dir: Optional[str] = None,
 ):
     """
     Create a workspace for the given SWE-bench instance.

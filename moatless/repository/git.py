@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from git import Repo
 
@@ -9,7 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 class GitRepository(FileRepository):
-    def __init__(self, repo_path: str, repo_url: str | None, commit: str | None = None):
+    def __init__(
+        self, repo_path: str, repo_url: Optional[str], commit: Optional[str] = None
+    ):
         super().__init__(repo_path)
         self._repo_path = repo_path
         self._repo_url = repo_url
@@ -27,7 +30,7 @@ class GitRepository(FileRepository):
         self._current_commit = self._repo.head.commit.hexsha
 
     @classmethod
-    def from_repo(cls, repo_url: str, repo_path: str, commit: str | None = None):
+    def from_repo(cls, repo_url: str, repo_path: str, commit: Optional[str] = None):
         logger.info(
             f"Clone GitRepository from {repo_url} with commit {commit} to {repo_path} "
         )

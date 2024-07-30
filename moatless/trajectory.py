@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 class TrajectoryAction(BaseModel):
     action: ActionRequest
-    retry_message: str | None = None
-    output: dict[str, Any] | None = None
-    completion_cost: float | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
+    retry_message: Optional[str] = None
+    output: Optional[dict[str, Any]] = None
+    completion_cost: Optional[float] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
@@ -31,7 +31,7 @@ class TrajectoryTransition(BaseModel):
     parent: Optional["TrajectoryTransition"] = None
     children: list["TrajectoryTransition"] = Field(default_factory=list)
     state: AgenticState | None = None
-    snapshot: dict | None = None
+    snapshot: Optional[dict] = None
     actions: list[TrajectoryAction] = []
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -58,9 +58,9 @@ class Trajectory:
     def __init__(
         self,
         name: str,
-        initial_message: str | None = None,
-        persist_path: str | None = None,
-        workspace: dict | None = None,
+        initial_message: Optional[str] = None,
+        persist_path: Optional[str] = None,
+        workspace: Optional[dict] = None,
     ):
         self._name = name
         self._persist_path = persist_path
@@ -97,10 +97,10 @@ class Trajectory:
         self,
         action: ActionRequest,
         output: dict[str, Any] | None = None,
-        retry_message: str | None = None,
-        completion_cost: float | None = None,
-        input_tokens: int | None = None,
-        output_tokens: int | None = None,
+        retry_message: Optional[str] = None,
+        completion_cost: Optional[float] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
     ):
         if self._current_transition:
             self._current_transition.actions.append(
@@ -123,11 +123,16 @@ class Trajectory:
                 f"No current trajectory step to save action {action.model_dump_json()}."
             )
 
-    def new_transition(self, state: AgenticState, snapshot: dict | None = None):
+    def new_transition(self, state: AgenticState, snapshot: Optional[dict] = None):
         if self._current_transition:
             self._transitions.append(self._current_transition)
 
-        transition = TrajectoryTransition(id=len(self._transitions), state=state, snapshot=snapshot, parent=self._current_transition)
+        transition = TrajectoryTransition(
+            id=len(self._transitions),
+            state=state,
+            snapshot=snapshot,
+            parent=self._current_transition,
+        )
 
         if self._current_transition:
             self._current_transition.children.append(transition)

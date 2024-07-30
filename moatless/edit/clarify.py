@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -24,7 +25,7 @@ class LineNumberClarification(ActionRequest):
     )
 
     end_line: int = Field(..., description="The end line of the code to be updated.")
-    reject: bool | None = Field(
+    reject: Optional[bool] = Field(
         None, description="Whether the request should be rejected."
     )
 
@@ -34,8 +35,8 @@ class ClarifyCodeChange(AgenticState):
     file_path: str
     span_id: str
 
-    start_line: int | None = None
-    end_line: int | None = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
 
     max_tokens_in_edit_prompt: int = Field(
         500,
@@ -44,7 +45,7 @@ class ClarifyCodeChange(AgenticState):
 
     _file: CodeFile | None = PrivateAttr(None)
     _span: BlockSpan | None = PrivateAttr(None)
-    _file_context_str: str | None = PrivateAttr(None)
+    _file_context_str: Optional[str] = PrivateAttr(None)
 
     def __init__(self, instructions: str, file_path: str, span_id: str, **data):
         super().__init__(
@@ -133,7 +134,9 @@ class ClarifyCodeChange(AgenticState):
         assert self._span is not None, "Span has not been set"
         return self._span
 
-    def _verify_line_numbers(self, line_numbers: LineNumberClarification) -> str | None:
+    def _verify_line_numbers(
+        self, line_numbers: LineNumberClarification
+    ) -> Optional[str]:
         logger.info(
             f"{self}: Verifying line numbers: {line_numbers.start_line} - {line_numbers.end_line}. "
             f"To span with line numbers: {self.span.start_line} - {self.span.end_line}"
@@ -201,7 +204,7 @@ class ClarifyCodeChange(AgenticState):
         start_line: int,
         end_line: int,
         max_tokens: int,
-    ) -> tuple[int | None, int | None]:
+    ) -> tuple[Optional[int], Optional[int]]:
         """
         Find the span that covers the lines from start_line to end_line
         """

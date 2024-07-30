@@ -7,6 +7,7 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Optional
 
 import instructor
 import litellm
@@ -77,9 +78,9 @@ class Evaluation:
         instructor_mode: instructor.Mode | None = None,
         max_cost: float = 0.5,
         max_file_context_tokens: int = 16000,
-        litellm_callback: str | None = None,
-        previous_trajectory_dir: str | None = None,
-        retry_state: str | None = None,
+        litellm_callback: Optional[str] = None,
+        previous_trajectory_dir: Optional[str] = None,
+        retry_state: Optional[str] = None,
         num_workers: int = 1,
         detailed_report: bool = False,
     ):
@@ -127,7 +128,7 @@ class Evaluation:
 
     def run_evaluation_with_moatless_dataset(
         self,
-        resolved_by: int | None = None,
+        resolved_by: Optional[int] = None,
         use_test_subset: bool = False,
         instance_ids: list[str] | None = None,
     ):
@@ -774,7 +775,7 @@ class Evaluation:
 
         return result, transitions
 
-    def read_trajectory(self, path) -> dict | None:
+    def read_trajectory(self, path) -> Optional[dict]:
         if os.path.exists(path):
             with open(path) as f:
                 return json.load(f)

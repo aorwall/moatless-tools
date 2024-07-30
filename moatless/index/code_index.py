@@ -5,6 +5,7 @@ import mimetypes
 import os
 import shutil
 import tempfile
+from typing import Optional
 
 import requests
 from llama_index.core import SimpleDirectoryReader
@@ -57,8 +58,8 @@ class CodeIndex:
         vector_store: BasePydanticVectorStore | None = None,
         docstore: DocumentStore | None = None,
         embed_model: BaseEmbedding | None = None,
-        blocks_by_class_name: dict | None = None,
-        blocks_by_function_name: dict | None = None,
+        blocks_by_class_name: Optional[dict] = None,
+        blocks_by_function_name: Optional[dict] = None,
         settings: IndexSettings | None = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
@@ -150,11 +151,11 @@ class CodeIndex:
 
     def search(
         self,
-        query: str | None = None,
-        code_snippet: str | None = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         max_results: int = 25,
     ) -> SearchCodeResponse:
         if class_names or function_names:
@@ -199,16 +200,16 @@ class CodeIndex:
 
     def semantic_search(
         self,
-        query: str | None = None,
-        code_snippet: str | None = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         category: str = "implementation",
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
-        max_spans_per_file: int | None = None,
+        max_spans_per_file: Optional[int] = None,
         exact_match_if_possible: bool = False,
     ) -> SearchCodeResponse:
         if query is None:
@@ -362,7 +363,7 @@ class CodeIndex:
         self,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         include_functions_in_class: bool = True,
         category: str = "implementation",
     ) -> SearchCodeResponse:
@@ -531,8 +532,8 @@ class CodeIndex:
         query: str = "",
         exact_query_match: bool = False,
         category: str = "implementation",
-        file_pattern: str | None = None,
-        exact_content_match: str | None = None,
+        file_pattern: Optional[str] = None,
+        exact_content_match: Optional[str] = None,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -647,9 +648,9 @@ class CodeIndex:
 
     def run_ingestion(
         self,
-        repo_path: str | None = None,
+        repo_path: Optional[str] = None,
         input_files: list[str] | None = None,
-        num_workers: int | None = None,
+        num_workers: Optional[int] = None,
     ):
         repo_path = repo_path or self._file_repo.path
 

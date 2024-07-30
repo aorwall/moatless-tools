@@ -1,5 +1,6 @@
 import fnmatch
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -57,20 +58,20 @@ class Identify(ActionRequest):
         description="Your thoughts on how to identify the relevant code and why."
     )
 
-    identified_spans: list[FileWithSpans] | None = Field(
+    identified_spans: Optional[list[FileWithSpans]] = Field(
         default=None,
         description="Files and code spans in the search results identified as relevant to the reported issue.",
     )
 
 
 class IdentifyCode(AgenticState):
-    file_pattern: str | None
-    query: str | None
-    code_snippet: str | None
-    class_name: str | None
-    function_name: str | None
+    file_pattern: Optional[str]
+    query: Optional[str]
+    code_snippet: Optional[str]
+    class_name: Optional[str]
+    function_name: Optional[str]
 
-    ranked_spans: list[RankedFileSpan] | None
+    ranked_spans: Optional[list[RankedFileSpan]]
 
     expand_context: bool
     max_prompt_file_tokens: int = 4000
@@ -78,11 +79,11 @@ class IdentifyCode(AgenticState):
     def __init__(
         self,
         ranked_spans: list[RankedFileSpan],
-        file_pattern: str | None = None,
-        query: str | None = None,
-        code_snippet: str | None = None,
-        class_name: str | None = None,
-        function_name: str | None = None,
+        file_pattern: Optional[str] = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
+        class_name: Optional[str] = None,
+        function_name: Optional[str] = None,
         expand_context: bool = True,
         max_prompt_file_tokens: int = 4000,
         **data,

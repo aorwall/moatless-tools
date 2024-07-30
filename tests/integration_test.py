@@ -1,13 +1,13 @@
 import os
 
+import litellm
 import pytest
 from dotenv import load_dotenv
 
-from moatless import Workspace, AgenticLoop
-from moatless.benchmark.swebench import load_instance, setup_swebench_repo, create_workspace
-from moatless.transitions import search_transitions, search_and_code_transitions, code_transitions
-from moatless.benchmark.utils import trace_metadata, get_file_spans_from_patch
-import litellm
+from moatless import AgenticLoop
+from moatless.benchmark.swebench import load_instance, create_workspace
+from moatless.benchmark.utils import trace_metadata
+from moatless.transitions import search_transitions, code_transitions
 
 load_dotenv()
 trajectory_dir = os.getenv("TRAJECTORY_DIR", "/tmp/trajectories")

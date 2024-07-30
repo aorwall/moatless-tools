@@ -22,14 +22,14 @@ class AgenticState(ABC, BaseModel):
         default=False,
         description="The message history from previous initations should be included in the completion request",
     )
-    model: str | None = Field(
+    model: Optional[str] = Field(
         default=None, description="The model to use for completion"
     )
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
     )
-    max_iterations: int | None = Field(
+    max_iterations: Optional[int] = Field(
         None, description="The maximum number of transitions to this state."
     )
 
@@ -137,11 +137,11 @@ class NoopState(AgenticState):
 
 
 class Finished(NoopState):
-    message: str | None
+    message: Optional[str]
 
     output: dict[str, Any] | None = None
 
-    def __init__(self, message: str | None = None, **kwargs):
+    def __init__(self, message: Optional[str] = None, **kwargs):
         super().__init__(message=message)
         self.output = kwargs
 

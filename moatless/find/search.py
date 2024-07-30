@@ -1,5 +1,6 @@
 import fnmatch
 import logging
+from typing import Optional
 
 import instructor
 from pydantic import BaseModel, ConfigDict, Field
@@ -231,17 +232,17 @@ class Search(ActionRequest):
         description="Your thoughts on what search parameters to set."
     )
 
-    file_pattern: str | None = Field(
+    file_pattern: Optional[str] = Field(
         default=None,
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    query: str | None = Field(
+    query: Optional[str] = Field(
         default=None,
         description="A semantic similarity search query. Use natural language to describe what you are looking for.",
     )
 
-    code_snippet: str | None = Field(
+    code_snippet: Optional[str] = Field(
         default=None,
         description="Specific code snippet to that should be exactly matched.",
     )
@@ -254,7 +255,7 @@ class Search(ActionRequest):
         default=[], description="Specific function names to include in the search."
     )
 
-    complete: bool | None = Field(
+    complete: Optional[bool] = Field(
         default=False, description="Set to true when the search is complete."
     )
 
@@ -272,13 +273,13 @@ class Search(ActionRequest):
 class ActionCallWithContext(BaseModel):
     action: ActionRequest
     file_context: FileContext
-    message: str | None = None
+    message: Optional[str] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SearchCode(AgenticState):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         None,
         description="Message to the search",
     )
@@ -302,7 +303,7 @@ class SearchCode(AgenticState):
 
     def __init__(
         self,
-        message: str | None = None,
+        message: Optional[str] = None,
         max_search_results: int = 25,
         max_retries_with_any_file_context: int = 3,
         provide_initial_context: bool = True,
@@ -428,7 +429,7 @@ class SearchCode(AgenticState):
         else:
             return ActionResponse.retry(message)
 
-    def _duplicate_search(self, action: Search) -> str | None:
+    def _duplicate_search(self, action: Search) -> Optional[str]:
         previous_transitions = self.loop.trajectory.get_transitions(str(self))
         for transition in previous_transitions:
             for previous_action in transition.actions:

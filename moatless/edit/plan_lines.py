@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
@@ -30,21 +31,25 @@ class ApplyChange(ActionRequest):
 
     thoughts: str = Field(..., description="Your thoughts on the code change.")
 
-    instructions: str | None = Field(
+    instructions: Optional[str] = Field(
         None, description="Instructions to do the code change."
     )
-    file_path: str | None = Field(
+    file_path: Optional[str] = Field(
         None, description="The file path of the code to be updated."
     )
-    start_line: int | None = Field(
+    start_line: Optional[int] = Field(
         None, description="The start line of the code to be updated."
     )
-    end_line: int | None = Field(
+    end_line: Optional[int] = Field(
         None, description="The end line of the code to be updated."
     )
 
-    reject: str | None = Field(..., description="Reject the request and explain why.")
-    finish: str | None = Field(None, description="Finish the request and explain why")
+    reject: Optional[str] = Field(
+        ..., description="Reject the request and explain why."
+    )
+    finish: Optional[str] = Field(
+        None, description="Finish the request and explain why"
+    )
 
     model_config = ConfigDict(
         extra="allow",
@@ -52,13 +57,13 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCodeWithLines(AgenticState):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: str | None = Field(
+    diff: Optional[str] = Field(
         None,
         description="The diff of a previous code change.",
     )
@@ -81,8 +86,8 @@ class PlanToCodeWithLines(AgenticState):
 
     def __init__(
         self,
-        message: str | None = None,
-        diff: str | None = None,
+        message: Optional[str] = None,
+        diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
         max_iterations: int = 5,
         **data,

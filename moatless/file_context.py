@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Set
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from pydantic.v1 import PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
