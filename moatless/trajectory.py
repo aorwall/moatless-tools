@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
@@ -27,10 +27,16 @@ class TrajectoryAction(BaseModel):
 
 
 class TrajectoryTransition(BaseModel):
+    id: int
+    parent: Optional["TrajectoryTransition"] = None
+    children: list["TrajectoryTransition"] = Field(default_factory=list)
     state: AgenticState | None = None
     snapshot: dict | None = None
     actions: list[TrajectoryAction] = []
     timestamp: datetime = Field(default_factory=datetime.now)
+
+    class Config:
+        exclude = {"parent", "children"}
 
     @property
     def name(self):
@@ -40,8 +46,10 @@ class TrajectoryTransition(BaseModel):
         data = super().model_dump(**kwargs)
         if self.state:
             data["state"]["name"] = self.state.name
-
         data["actions"] = [action.model_dump(**kwargs) for action in self.actions]
+
+        if self.parent:
+            data["parent"] = self.parent.id
 
         return data
 
@@ -119,7 +127,12 @@ class Trajectory:
         if self._current_transition:
             self._transitions.append(self._current_transition)
 
-        self._current_transition = TrajectoryTransition(state=state, snapshot=snapshot)
+        transition = TrajectoryTransition(id=len(self._transitions), state=state, snapshot=snapshot, parent=self._current_transition)
+
+        if self._current_transition:
+            self._current_transition.children.append(transition)
+
+        self._current_transition = transition
         self._maybe_persist()
 
     def save_info(self, info: dict):
