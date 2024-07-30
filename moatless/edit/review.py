@@ -98,7 +98,6 @@ class ApplyChanges(ActionRequest):
 
 
 class ReviewCode(AgenticState):
-
     message: Optional[str] = Field(
         None,
         description="Message to the coder",
@@ -130,7 +129,8 @@ class ReviewCode(AgenticState):
     )
 
     finish_on_no_errors: bool = Field(
-        False, description="Whether to finish the task if no verification errors are found."
+        False,
+        description="Whether to finish the task if no verification errors are found.",
     )
 
     _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)

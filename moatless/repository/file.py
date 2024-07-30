@@ -3,7 +3,6 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,7 +29,7 @@ class CodeFile(BaseModel):
     module: Module | None = None
     dirty: bool = False
 
-    model_config = ConfigDict(exclude={'module', 'dirty'})
+    model_config = ConfigDict(exclude={"module", "dirty"})
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
@@ -177,10 +176,7 @@ class FileRepository:
         self._files: dict[str, CodeFile] = {}
 
     def dict(self):
-        return {
-            "type": "file",
-            "path": self._repo_path
-        }
+        return {"type": "file", "path": self._repo_path}
 
     def snapshot(self) -> dict:
         return {}

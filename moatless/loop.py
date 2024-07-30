@@ -170,7 +170,10 @@ class AgenticLoop:
             raise Exception("Loop is already running.")
 
         self._trajectory = Trajectory(
-            "AgenticLoop", initial_message=message, persist_path=self._trajectory_path, workspace=self.workspace.dict()
+            "AgenticLoop",
+            initial_message=message,
+            persist_path=self._trajectory_path,
+            workspace=self.workspace.dict(),
         )
 
         self.transition_to(self._transitions.initial_state(**input_data or {}))

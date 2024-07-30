@@ -50,7 +50,7 @@ class ContextFile(BaseModel):
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs, exclude={"file"})
-        data['file_path'] = self.file.file_path
+        data["file_path"] = self.file.file_path
         return data
 
     @property
@@ -398,7 +398,6 @@ class ContextFile(BaseModel):
 
 
 class FileContext(BaseModel):
-
     _repo: FileRepository = PrivateAttr()
     _file_context: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
     _max_tokens: int = PrivateAttr(default=4000)
@@ -408,10 +407,10 @@ class FileContext(BaseModel):
     def __init__(self, repo: FileRepository, **data):
         super().__init__(**data)
         self._repo = repo
-        if '_file_context' not in self.__dict__:
-            self.__dict__['_file_context'] = {}
-        if '_max_tokens' not in self.__dict__:
-            self.__dict__['_max_tokens'] = data.get('max_tokens', 4000)
+        if "_file_context" not in self.__dict__:
+            self.__dict__["_file_context"] = {}
+        if "_max_tokens" not in self.__dict__:
+            self.__dict__["_max_tokens"] = data.get("max_tokens", 4000)
 
     @classmethod
     def from_dir(cls, repo_dir: str, max_tokens: int = 4000):
@@ -423,7 +422,7 @@ class FileContext(BaseModel):
     def from_json(cls, repo_dir: str, json_data: str):
         """
         Create a FileContext instance from JSON data.
-        
+
         :param repo_dir: The repository directory path.
         :param json_data: A JSON string representing the FileContext data.
         :return: A new FileContext instance.
@@ -434,11 +433,11 @@ class FileContext(BaseModel):
     @classmethod
     def from_dict(cls, repo_dir: str, data: Dict):
         repo = FileRepository(repo_dir)
-        instance = cls(max_tokens=data.get('max_tokens', 4000), repo=repo)
-        for file_data in data.get('files', []):
-            file_path = file_data['file_path']
-            show_all_spans = file_data.get('show_all_spans', False)
-            spans = [ContextSpan(**span) for span in file_data.get('spans', [])]
+        instance = cls(max_tokens=data.get("max_tokens", 4000), repo=repo)
+        for file_data in data.get("files", []):
+            file_path = file_data["file_path"]
+            show_all_spans = file_data.get("show_all_spans", False)
+            spans = [ContextSpan(**span) for span in file_data.get("spans", [])]
             instance._file_context[file_path] = ContextFile(
                 file=instance._repo.get_file(file_path),
                 spans=spans,
@@ -448,11 +447,14 @@ class FileContext(BaseModel):
         return instance
 
     def model_dump(self, **kwargs):
-        if 'exclude_none' not in kwargs:
-            kwargs['exclude_none'] = True
+        if "exclude_none" not in kwargs:
+            kwargs["exclude_none"] = True
 
-        files = [file.model_dump(**kwargs) for file in self.__dict__['_file_context'].values()]
-        return {"max_tokens": self.__dict__['_max_tokens'], "files": files}
+        files = [
+            file.model_dump(**kwargs)
+            for file in self.__dict__["_file_context"].values()
+        ]
+        return {"max_tokens": self.__dict__["_max_tokens"], "files": files}
 
     def snapshot(self):
         dict = self.model_dump()
@@ -525,7 +527,9 @@ class FileContext(BaseModel):
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
 
-    def add_span_to_context(self, file_path: str, span_id: str, tokens: Optional[int] = None):
+    def add_span_to_context(
+        self, file_path: str, span_id: str, tokens: Optional[int] = None
+    ):
         context_file = self.get_context_file(file_path)
         if context_file:
             context_file.add_span(span_id, tokens)
@@ -714,7 +718,7 @@ class FileContext(BaseModel):
         self._file_context = {}
 
     def strip_line_breaks_only(self, text):
-        return text.lstrip('\n\r').rstrip('\n\r')
+        return text.lstrip("\n\r").rstrip("\n\r")
 
     def create_prompt(
         self,

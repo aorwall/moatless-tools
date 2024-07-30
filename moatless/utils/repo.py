@@ -9,7 +9,9 @@ def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos")
     repo_name = get_repo_dir_name(repo)
     repo_url = f"https://github.com/{repo}.git"
     path = f"{base_dir}/{repo_name}"
-    logger.info(f"Clone Github repo {repo_url} to {path} and checkout commit {base_commit}")
+    logger.info(
+        f"Clone Github repo {repo_url} to {path} and checkout commit {base_commit}"
+    )
     if not os.path.exists(path):
         os.makedirs(path)
         logger.info(f"Directory '{path}' was created.")

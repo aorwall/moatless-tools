@@ -7,15 +7,17 @@ from moatless.utils.repo import maybe_clone, checkout_commit
 
 logger = logging.getLogger(__name__)
 
-class GitRepository(FileRepository):
 
+class GitRepository(FileRepository):
     def __init__(self, repo_path: str, repo_url: str | None, commit: str | None = None):
         super().__init__(repo_path)
         self._repo_path = repo_path
         self._repo_url = repo_url
         self._repo = Repo(path=repo_path)
         if not self._repo.heads:
-            raise Exception("Git repository has no heads, you need to do an initial commit.")
+            raise Exception(
+                "Git repository has no heads, you need to do an initial commit."
+            )
 
         # TODO: Check if current branch is mainline
 
@@ -26,7 +28,9 @@ class GitRepository(FileRepository):
 
     @classmethod
     def from_repo(cls, repo_url: str, repo_path: str, commit: str | None = None):
-        logger.info(f"Clone GitRepository from {repo_url} with commit {commit} to {repo_path} ")
+        logger.info(
+            f"Clone GitRepository from {repo_url} with commit {commit} to {repo_path} "
+        )
 
         maybe_clone(repo_url, repo_path)
 

@@ -22,7 +22,9 @@ class AgenticState(ABC, BaseModel):
         default=False,
         description="The message history from previous initations should be included in the completion request",
     )
-    model: str | None = Field(default=None, description="The model to use for completion")
+    model: str | None = Field(
+        default=None, description="The model to use for completion"
+    )
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
@@ -122,7 +124,7 @@ class AgenticState(ABC, BaseModel):
 
     def model_dump(self, *args, **kwargs):
         data = super().model_dump(*args, **kwargs)
-        data['name'] = self.name
+        data["name"] = self.name
         return data
 
 
@@ -153,5 +155,4 @@ class Rejected(NoopState):
 
 class Pending(NoopState):
     def __init__(self, **data):
-
         super().__init__(**data)

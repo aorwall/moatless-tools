@@ -276,8 +276,14 @@ def generate_md_report(trajectory: dict, instance: dict):
     return markdown
 
 
-def setup_swebench_repo(instance_data: dict | None = None, instance_id: str = None, repo_base_dir: str | None = None) -> str:
-    assert instance_data or instance_id, "Either instance_data or instance_id must be provided"
+def setup_swebench_repo(
+    instance_data: dict | None = None,
+    instance_id: str = None,
+    repo_base_dir: str | None = None,
+) -> str:
+    assert (
+        instance_data or instance_id
+    ), "Either instance_data or instance_id must be provided"
     if not instance_data:
         instance_data = load_instance(instance_id)
 
@@ -297,7 +303,7 @@ def create_workspace(
     instance: dict | None = None,
     instance_id: str | None = None,
     repo_base_dir: str | None = None,
-    index_store_dir: str | None = None
+    index_store_dir: str | None = None,
 ):
     """
     Create a workspace for the given SWE-bench instance.
@@ -321,4 +327,9 @@ def create_workspace(
     persist_dir = os.path.join(
         index_store_dir, get_repo_dir_name(instance["instance_id"])
     )
-    return Workspace.from_dirs(git_repo_url=repo_url, commit=instance["base_commit"], repo_dir=repo_dir, index_dir=persist_dir)
+    return Workspace.from_dirs(
+        git_repo_url=repo_url,
+        commit=instance["base_commit"],
+        repo_dir=repo_dir,
+        index_dir=persist_dir,
+    )

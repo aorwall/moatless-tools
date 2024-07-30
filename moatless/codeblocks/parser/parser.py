@@ -119,7 +119,11 @@ class CodeParser:
             return None
 
     def _build_queries(self, query_file: str):
-        with resources.files("moatless.codeblocks.parser.queries").joinpath(query_file).open() as file:
+        with (
+            resources.files("moatless.codeblocks.parser.queries")
+            .joinpath(query_file)
+            .open() as file
+        ):
             query_list = file.read().strip().split("\n\n")
             parsed_queries = []
             for i, query in enumerate(query_list):

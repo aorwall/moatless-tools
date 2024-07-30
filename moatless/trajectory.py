@@ -39,10 +39,10 @@ class TrajectoryTransition(BaseModel):
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
         if self.state:
-            data['state']['name'] = self.state.name
-        
-        data['actions'] = [action.model_dump(**kwargs) for action in self.actions]
-        
+            data["state"]["name"] = self.state.name
+
+        data["actions"] = [action.model_dump(**kwargs) for action in self.actions]
+
         return data
 
 
@@ -52,7 +52,7 @@ class Trajectory:
         name: str,
         initial_message: str | None = None,
         persist_path: str | None = None,
-        workspace: dict | None = None
+        workspace: dict | None = None,
     ):
         self._name = name
         self._persist_path = persist_path
@@ -139,7 +139,7 @@ class Trajectory:
             "initial_message": self._initial_message,
             "transitions": transition_dicts,
             "info": self._info,
-            "dummy_field": None  # Add this line
+            "dummy_field": None,  # Add this line
         }
 
     def total_cost(self):

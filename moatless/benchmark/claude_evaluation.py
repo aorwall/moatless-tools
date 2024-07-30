@@ -337,6 +337,7 @@ def evaluate_plan(previous_trajectory_dir: Optional[str] = None):
     for instance_id in df.index:
         print(df.loc[instance_id, "instance_id"], df.loc[instance_id, "planned"])
 
+
 if __name__ == "__main__":
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -350,7 +351,7 @@ if __name__ == "__main__":
     # evaluate_search_and_identify()
     evaluate_search_and_code(
         1,
-     "/home/albert/repos/albert/moatless/evaluations/20240623_moatless_claude-3.5-sonnet/trajs",
+        "/home/albert/repos/albert/moatless/evaluations/20240623_moatless_claude-3.5-sonnet/trajs",
         retry_state="PlanToCode",
     )
     # evaluate_search_and_code()

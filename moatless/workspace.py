@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class Workspace:
-
     def __init__(
         self,
         file_repo: FileRepository,
@@ -50,7 +49,9 @@ class Workspace:
         **kwargs,
     ):
         if git_repo_url:
-            file_repo = GitRepository.from_repo(repo_url=git_repo_url, repo_path=repo_dir, commit=commit)
+            file_repo = GitRepository.from_repo(
+                repo_url=git_repo_url, repo_path=repo_dir, commit=commit
+            )
         elif repo_dir:
             file_repo = FileRepository(repo_dir)
         else:
@@ -83,13 +84,13 @@ class Workspace:
     def dict(self):
         return {
             "repository": self.file_repo.dict(),
-            "file_context": self.file_context.model_dump()
+            "file_context": self.file_context.model_dump(),
         }
 
     def snapshot(self):
         return {
             "repository": self.file_repo.snapshot(),
-            "file_context": self.file_context.snapshot()
+            "file_context": self.file_context.snapshot(),
         }
 
     def create_file_context(
