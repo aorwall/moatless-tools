@@ -404,7 +404,7 @@ class ReviewCode(AgenticState):
         else:
             content = ""
 
-        previous_transitions = self.loop.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

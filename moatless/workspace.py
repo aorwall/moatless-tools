@@ -88,7 +88,9 @@ class Workspace:
         )
 
     @classmethod
-    def from_dict(cls, data: dict, index_dir: Optional[str] = None, **kwargs):
+    def from_dict(cls,
+                  data: dict,
+                  **kwargs):
         if "repository" not in data:
             raise ValueError("Missing repository key")
 
@@ -108,10 +110,15 @@ class Workspace:
         )
         file_context.load_files_from_dict(data["file_context"].get("files", []))
 
+        if data.get("code_index", {}).get("index_name"):
+            code_index = CodeIndex.from_index_name(data["code_index"].get("index_name"), file_repo=file_repo)
+        else:
+            code_index = None
+
         return cls(
             file_repo=file_repo,
             file_context=file_context,
-            index_dir=index_dir,
+            code_index=code_index,
             **kwargs,
         )
 
@@ -122,7 +129,10 @@ class Workspace:
     def dict(self):
         return {
             "repository": self.file_repo.dict(),
-            "file_context": self.file_context.model_dump(),
+            "file_context": self.file_context.model_dump(
+                exclude_none=True, exclude_unset=True
+            ),
+            "code_index": self.code_index.dict() if self.code_index else None,
         }
 
     def snapshot(self):

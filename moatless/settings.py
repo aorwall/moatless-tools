@@ -4,27 +4,27 @@ from dataclasses import dataclass
 
 @dataclass
 class _Settings:
-    _agent_model: str = os.environ.get("AGENT_MODEL", "gpt-4o-2024-05-13")
-    _cheap_model: str = os.environ.get("CHEAP_MODEL", "gpt-4o-mini-2024-07-18")
+    _default_model: str = os.environ.get("DEFAULT_MODEL", "gpt-4o-2024-05-13")
+    _cheap_model: str | None = os.environ.get("CHEAP_MODEL", "gpt-4o-mini-2024-07-18")
     _embed_model: str = "text-embedding-3-small"
 
     _max_context_tokens: int = 8000
     _max_message_tokens: int = 16000
 
     @property
-    def agent_model(self) -> str:
-        return self._agent_model
+    def default_model(self) -> str:
+        return self._default_model
 
-    @agent_model.setter
-    def agent_model(self, agent_model: str) -> None:
-        self._agent_model = agent_model
+    @default_model.setter
+    def default_model(self, default_model: str) -> None:
+        self._default_model = default_model
 
     @property
-    def cheap_model(self) -> str:
+    def cheap_model(self) -> str | None:
         return self._cheap_model
 
     @cheap_model.setter
-    def cheap_model(self, cheap_model: str) -> None:
+    def cheap_model(self, cheap_model: str | None) -> None:
         self._cheap_model = cheap_model
 
     @property

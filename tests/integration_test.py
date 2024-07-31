@@ -40,18 +40,11 @@ def test_save_and_load_trajectory():
     dir = f"{moatless_dir}/{datestr}_test_django_16379_search_for_small_change"
     trajectory_path = f"{dir}/trajectory.json"
 
-    metadata = trace_metadata(
-        instance_id=instance["instance_id"],
-        session_id="integration_test",
-        trace_name="search",
-    )
-
     loop = AgenticLoop(
         search_and_code_transitions(global_params=global_params),
         workspace=workspace,
         trajectory_path=trajectory_path,
         prompt_log_dir=dir,
-        metadata=metadata,
     )
 
     response = loop.run(message=instance["problem_statement"])
@@ -130,12 +123,12 @@ def test_different_edit_models():
 
     # Reverts to PlanToCode state and set LLM to GPT-4o-mini in the EditCode state
     response_mini = loop.retry_from_transition(
-        transition_id=4, # PlanToCode
+        transition_id=4,  # PlanToCode
         state_params={
             EditCode: {
                 "model": "gpt-4o-mini-2024-07-18",
             }
-        }
+        },
     )
 
     print("Response")

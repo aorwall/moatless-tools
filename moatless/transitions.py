@@ -8,7 +8,7 @@ from moatless.edit.plan_lines import PlanToCodeWithLines
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search_v2 import SearchCode
-from moatless.loop import TransitionRule, TransitionRules
+from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.state import Finished, Rejected
 
 CODE_TRANSITIONS = [

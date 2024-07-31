@@ -10,7 +10,8 @@ from moatless.benchmark.utils import (
     get_missing_spans,
 )
 from moatless.file_context import FileContext
-from moatless.repository import FileRepository
+from moatless.index import CodeIndex
+from moatless.repository import FileRepository, GitRepository
 from moatless.utils.repo import setup_github_repo
 from moatless.workspace import Workspace
 
@@ -322,15 +323,13 @@ def create_workspace(
     repo_dir_name = instance["repo"].replace("/", "__")
     repo_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
     repo_dir = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
-
-    # TODO: Download index store if it doesn't exist
-
-    persist_dir = os.path.join(
-        index_store_dir, get_repo_dir_name(instance["instance_id"])
+    repo = GitRepository.from_repo(
+        git_repo_url=repo_url, repo_path=repo_dir, commit=instance["base_commit"]
     )
-    return Workspace.from_dirs(
-        git_repo_url=repo_url,
-        commit=instance["base_commit"],
-        repo_path=repo_dir,
-        index_dir=persist_dir,
+
+    code_index = CodeIndex.from_index_name(instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo)
+
+    return Workspace(
+        file_repo=repo,
+        code_index=code_index,
     )

@@ -8,8 +8,7 @@ from moatless.repository.file import FileRepository
 from moatless.settings import Settings
 from moatless.utils.repo import (
     maybe_clone,
-    checkout_commit,
-    create_and_checkout_new_branch,
+    checkout_commit
 )
 
 logger = logging.getLogger(__name__)
@@ -28,38 +27,32 @@ class GitRepository(FileRepository):
                 "Git repository has no heads, you need to do an initial commit."
             )
 
+        # TODO: Add support for branches
+        # self._current_branch = self._repo.active_branch.name
+
         # TODO: Check if current branch is mainline
 
         # TODO: Check if repo is dirty
 
-        try:
-            self._current_branch = self._repo.active_branch.name
-        except TypeError as e:
-            logger.warning(f"Could not determine current branch: {e}")
-            self._current_branch = None
+        if commit:
+            checkout_commit(repo_path, commit)
 
         self._current_commit = self._repo.head.commit.hexsha
         self._initial_commit = self._current_commit
+
 
     @classmethod
     def from_repo(
         cls,
         git_repo_url: str,
         repo_path: str,
-        commit: Optional[str] = None,
-        new_branch: Optional[str] = None,
+        commit: Optional[str] = None
     ):
         logger.info(
-            f"Clone GitRepository from {git_repo_url} with commit {commit} to {repo_path} "
+            f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} "
         )
 
         maybe_clone(git_repo_url, repo_path)
-
-        if commit:
-            checkout_commit(repo_path, commit)
-
-        if new_branch:
-            create_and_checkout_new_branch(repo_path, new_branch)
 
         return cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
 
@@ -72,7 +65,6 @@ class GitRepository(FileRepository):
         )
 
     def restore_from_snapshot(self, snapshot: dict):
-        self._current_branch = snapshot["branch"]
         self._current_commit = snapshot["commit"]
         self._repo.git.checkout(self._current_commit)
 
@@ -81,13 +73,11 @@ class GitRepository(FileRepository):
             "type": "git",
             "repo_path": self._repo_path,
             "git_repo_url": self._repo_url,
-            "branch": self._current_branch,
             "commit": self._current_commit,
         }
 
     def snapshot(self) -> dict:
         return {
-            "branch": self._current_branch,
             "commit": self._current_commit,
         }
 
@@ -106,15 +96,17 @@ class GitRepository(FileRepository):
         if not diff:
             return "No changes."
 
-        prompt = f"Generate a concise commit message for the following git diff:\n\n{diff}\n\nCommit message:"
+        if Settings.cheap_model:
+            prompt = f"Generate a concise commit message for the following git diff:\n\n{diff}\n\nCommit message:"
 
-        try:
-            response = litellm.completion(
-                model=Settings.cheap_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logging.error(f"Error generating commit message: {e}")
-            return "Automated commit"
+            try:
+                response = litellm.completion(
+                    model=Settings.cheap_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=50,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                logging.error(f"Error generating commit message: {e}")
+
+        return "Automated commit by Moatless Tools"

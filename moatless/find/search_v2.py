@@ -454,7 +454,7 @@ class SearchCode(AgenticState):
                 show_outcommented_code=False,
             )
 
-        previous_transitions = self.loop.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
         for transition in previous_transitions:
             if transition.state.message:
                 content += transition.state.message

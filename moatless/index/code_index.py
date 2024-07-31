@@ -55,6 +55,7 @@ class CodeIndex:
     def __init__(
         self,
         file_repo: FileRepository,
+        index_name: Optional[str] = None,
         vector_store: BasePydanticVectorStore | None = None,
         docstore: DocumentStore | None = None,
         embed_model: BaseEmbedding | None = None,
@@ -65,6 +66,8 @@ class CodeIndex:
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
     ):
+        self._index_name = index_name
+
         self._settings = settings or IndexSettings()
 
         self.max_results = max_results
@@ -148,6 +151,25 @@ class CodeIndex:
             docstore=docstore,
             settings=settings,
         )
+
+    @classmethod
+    def from_index_name(cls, index_name: str, file_repo: FileRepository, index_store_dir: Optional[str] = None):
+        if not index_store_dir:
+            index_store_dir = os.getenv("INDEX_STORE_DIR")
+
+        persist_dir = os.path.join(index_store_dir, index_name)
+        if os.path.exists(persist_dir):
+            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
+            return cls.from_persist_dir(persist_dir, file_repo=file_repo)
+
+        store_url = os.path.join(os.getenv("INDEX_STORE_URL"), f"{index_name}.zip")
+        logger.info(f"Downloading existing index {index_name} from {store_url}.")
+        return cls.from_url(store_url, persist_dir, file_repo)
+
+    def dict(self):
+        return {
+            "index_name": self._index_name
+        }
 
     def search(
         self,

@@ -132,7 +132,7 @@ class PlanToCode(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and len(self.loop.get_transitions(self.name)) == 0
+            and self.loop.transition_count(self) == 0
         ):
             self.file_context.expand_context_with_related_spans(
                 max_tokens=self.max_prompt_file_tokens
@@ -311,11 +311,11 @@ class PlanToCode(AgenticState):
         messages: list[Message] = []
 
         if self.loop.trajectory.initial_message:
-            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
+            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>\n"
         else:
             content = ""
 
-        previous_transitions = self.loop.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

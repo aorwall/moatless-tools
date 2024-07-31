@@ -1,4 +1,6 @@
 import logging
+import sys
+import importlib
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -18,16 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class AgenticState(ABC, BaseModel):
-    include_message_history: bool = Field(
-        default=False,
-        description="The message history from previous initations should be included in the completion request",
-    )
     model: Optional[str] = Field(
         default=None, description="The model to use for completion"
     )
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
         1000, description="The maximum number of tokens to generate"
+    )
+    include_message_history: bool = Field(
+        default=False,
+        description="The message history from previous initations should be included in the completion request",
     )
     max_iterations: Optional[int] = Field(
         None, description="The maximum number of transitions to this state."
@@ -48,9 +50,6 @@ class AgenticState(ABC, BaseModel):
     def _set_loop(self, loop: "AgenticLoop"):  # noqa: F821
         self._loop = loop
         self.init()
-
-    def __str__(self):
-        return self.__class__.__name__
 
     @property
     def name(self):
@@ -124,10 +123,9 @@ class AgenticState(ABC, BaseModel):
     def stop_words(self) -> list[str] | None:
         return None
 
-    def model_dump(self, *args, **kwargs):
-        data = super().model_dump(*args, **kwargs)
-        data["name"] = self.name
-        return data
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        return {"name": self.name, **data}
 
 
 class NoopState(AgenticState):
@@ -158,3 +156,39 @@ class Rejected(NoopState):
 class Pending(NoopState):
     def __init__(self, **data):
         super().__init__(**data)
+
+
+def get_state_class(name: str) -> type[AgenticState]:
+    builtin_states = {
+        "NoopState": NoopState,
+        "Finished": Finished,
+        "Rejected": Rejected,
+        "Pending": Pending,
+    }
+    if name in builtin_states:
+        return builtin_states[name]
+
+    # If not a built-in state, try to import dynamically
+    possible_modules = [
+        "moatless.edit",
+        "moatless.find",
+    ]
+
+    for module_name in possible_modules:
+        try:
+            module = importlib.import_module(module_name)
+            if hasattr(module, name):
+                cls = getattr(module, name)
+                if isinstance(cls, type) and issubclass(cls, AgenticState):
+                    return cls
+        except ImportError:
+            logger.debug(f"Could not import module {module_name}")
+
+    # If still not found, try sys.modules as a fallback
+    for module in sys.modules.values():
+        if hasattr(module, name):
+            cls = getattr(module, name)
+            if isinstance(cls, type) and issubclass(cls, AgenticState):
+                return cls
+
+    raise ValueError(f"State {name} not found")

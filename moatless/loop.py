@@ -7,13 +7,13 @@ import sys
 import traceback
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, Tuple
 
 import instructor
 import litellm
 from anthropic import Anthropic
 from litellm import completion_cost, cost_per_token, token_counter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.state import (
     AgenticState,
@@ -21,8 +21,10 @@ from moatless.state import (
     NoopState,
     Pending,
     Rejected,
+    get_state_class,
 )
 from moatless.trajectory import Trajectory, TrajectoryTransition, TrajectoryAction
+from moatless.transition_rules import TransitionRules
 from moatless.types import (
     ActionRequest,
     AssistantMessage,
@@ -34,95 +36,6 @@ from moatless.types import (
 from moatless.workspace import Workspace
 
 logger = logging.getLogger("Loop")
-
-
-class TransitionRule(BaseModel):
-    trigger: str
-    source: type[AgenticState]
-    dest: type[AgenticState]
-    required_fields: set[str] = Field(default_factory=set)
-    excluded_fields: set[str] = Field(default_factory=set)
-
-
-class TransitionRules:
-    def __init__(
-        self,
-        initial_state: type[AgenticState],
-        transition_rules: list[TransitionRule],
-        global_params: dict[str, Any] | None = None,
-        state_params: dict[type[AgenticState], dict[str, Any]] | None = None,
-    ):
-        self._initial_state = initial_state
-        self._global_params = global_params or {}
-        self._state_params = state_params or {}
-        self._source_trigger_index: dict[tuple[type[AgenticState], str], list] = {}
-
-        for transition_rule in transition_rules:
-            if (
-                transition_rule.source,
-                transition_rule.trigger,
-            ) not in self._source_trigger_index:
-                self._source_trigger_index[
-                    (transition_rule.source, transition_rule.trigger)
-                ] = []
-            self._source_trigger_index[
-                (transition_rule.source, transition_rule.trigger)
-            ].append(transition_rule)
-
-    def find_transition_rule_by_source_and_trigger(
-        self, source: type[AgenticState], trigger: str
-    ) -> list[TransitionRule]:
-        return self._source_trigger_index.get((source, trigger), [])
-
-    def initial_state(self, **data) -> AgenticState:
-        params = {}
-        params.update(self._global_params)
-        params.update(self._state_params.get(self._initial_state, {}))
-        params.update(data)
-        return self._initial_state(**params)
-
-    def next_state(
-        self, source: AgenticState, trigger: str, data: dict[str, Any]
-    ) -> AgenticState | None:
-        transition_ruless = self.find_transition_rule_by_source_and_trigger(
-            source.__class__, trigger
-        )
-        for transition_rule in transition_ruless:
-            if transition_rule.required_fields.issubset(data.keys()):
-                params = {}
-                params.update(self._global_params)
-                params.update(self._state_params.get(transition_rule.dest, {}))
-
-                if transition_rule.excluded_fields:
-                    data = {
-                        k: v
-                        for k, v in data.items()
-                        if k not in transition_rule.excluded_fields
-                    }
-
-                params.update(data)
-                return transition_rule.dest(**params)
-        return None
-
-
-def get_state_class(name: str) -> type[AgenticState]:
-    builtin_states = {
-        "NoopState": NoopState,
-        "Finished": Finished,
-        "Rejected": Rejected,
-        "Pending": Pending,
-    }
-    if name in builtin_states:
-        return builtin_states[name]
-
-    # If not a built-in state, try to import dynamically
-    for module in sys.modules.values():
-        if hasattr(module, name):
-            cls = getattr(module, name)
-            if isinstance(cls, type) and issubclass(cls, AgenticState):
-                return cls
-
-    raise ValueError(f"State {name} not found")
 
 
 class AgenticLoop:
@@ -190,9 +103,10 @@ class AgenticLoop:
 
     @classmethod
     def from_trajectory_file(
-        cls, transitions: TransitionRules, trajectory_path: str, **kwargs
+        cls, trajectory_path: str, **kwargs
     ):
         trajectory = Trajectory.load(trajectory_path)
+        transitions = trajectory.transitions
         workspace = Workspace.from_dict(trajectory.workspace)
 
         return cls(
@@ -201,6 +115,9 @@ class AgenticLoop:
             workspace=workspace,
             **kwargs,
         )
+
+    def persist(self, trajectory_path: str):
+        self.trajectory.persist(trajectory_path)
 
     def retry_from_transition(
         self,
@@ -242,7 +159,7 @@ class AgenticLoop:
         elif isinstance(self.state, Rejected):
             return Response(status="rejected", message=self.state.message or "")
 
-        raise RuntimeError(f"Loop exited with unknown state {self.state}.")
+        raise RuntimeError(f"Loop exited with unknown state {self.state.name}.")
 
     def run(
         self, message: Optional[str] = None, input_data: dict[str, Any] | None = None
@@ -256,12 +173,15 @@ class AgenticLoop:
 
         if not self._trajectory:
             self._trajectory = Trajectory(
-                "AgenticLoop",
+                "MoatlessTools",
                 initial_message=message,
                 persist_path=self._trajectory_path,
-                workspace=self.workspace.dict(),
+                workspace=self._workspace,
+                transition_rules=self._transition_rules,
             )
-            initial_state = self._transition_rules.initial_state(**input_data or {})
+            initial_state = self._transition_rules.create_initial_state(
+                **input_data or {}
+            )
             self.transition_to(initial_state)
         else:
             for transition in self._trajectory.transitions:
@@ -272,7 +192,7 @@ class AgenticLoop:
 
             for transition_data in self._trajectory.transitions:
                 transition = self._transitions[transition_data["id"]]
-                if "parent_id" in transition_data:
+                if transition_data.get("parent_id"):
                     parent = self._transitions[transition_data["parent_id"]]
                     transition.parent = parent
                     parent.children.append(transition)
@@ -307,7 +227,7 @@ class AgenticLoop:
         elif isinstance(self.state, Rejected):
             return Response(status="rejected", message=self.state.message or "")
 
-        raise RuntimeError(f"Loop exited with unknown state {self.state}.")
+        raise RuntimeError(f"Loop exited with unknown state {self.state.name}.")
 
     def total_cost(self):
         total_cost = 0
@@ -362,7 +282,6 @@ class AgenticLoop:
     def set_current_transition_from_dict(self, transition_data: dict):
         state_data = transition_data.get("state", {})
         name = state_data.get("name")
-        logger.info(f"Setting current transition to {name}")
         try:
             state_class = get_state_class(name)
             state = state_class(**state_data)
@@ -400,7 +319,7 @@ class AgenticLoop:
             raise ValueError("Invalid state index for reversion")
 
     def transition_to(self, new_state: AgenticState):
-        logger.info(f"Transitioning from {self.state} to {new_state}")
+        logger.info(f"Transitioning from {self.state.name} to {new_state.name}")
 
         if self.transition_count() > self._max_transitions:
             new_state = Rejected(message="Max transitions exceeded.")
@@ -432,20 +351,23 @@ class AgenticLoop:
     def transition_count(self, state: AgenticState | None = None) -> int:
         if not state:
             return len(self._transitions)
-        return len(self.get_transitions(state.name))
 
-    def get_transitions(self, name: str):
-        logger.info(
-            f"Getting transitions for {name} from {len(self._transitions)} transitions."
+        return len(
+            [t for t in self._transitions.values() if t.state.name == state.name]
         )
 
+    def get_previous_transitions(self, state: AgenticState | None):
         previous_transitions = []
         parent_transition = self._current_transition.parent
         while parent_transition:
-            if not name or parent_transition.state.name == name:
+            if not state or parent_transition.state.name == state.name:
                 previous_transitions.insert(0, parent_transition)
 
             parent_transition = parent_transition.parent
+
+        logger.info(
+            f"Found {len(previous_transitions)} previous transitions for {state.name if state else 'all states'}"
+        )
 
         return previous_transitions
 
@@ -555,7 +477,7 @@ class AgenticLoop:
 
         action, cost, input_tokens, output_tokens = self._next_action()
 
-        logger.info(f"{self.state}: Received new action {action.action_name}.")
+        logger.info(f"{self.state.name}: Received new action {action.action_name}.")
         response = self.state.handle_action(action)
 
         self._current_transition.actions.append(
@@ -572,12 +494,12 @@ class AgenticLoop:
 
         if not response.trigger:
             logger.info(
-                f"{self.state}: No transition found. Staying in the same state."
+                f"{self.state.name}: No transition found. Staying in the same state."
             )
             return
 
         if response.trigger == "retry":
-            logger.info(f"{self.state}: Retry requested. {response.retry_message}")
+            logger.info(f"{self.state.name}: Retry requested. {response.retry_message}")
             return
 
         try:
@@ -587,14 +509,14 @@ class AgenticLoop:
                 data=response.output,
             )
         except Exception:
-            logger.error(
+            logger.exception(
                 f"Failed to initiate next state with trigger {response.trigger} and output {response.output}"
             )
             raise
 
         if not next_state:
             raise ValueError(
-                f"No transition found for {self.state} with trigger {response.trigger}"
+                f"No transition found for {self.state.name} with trigger {response.trigger}"
             )
 
         if response.trigger == "rejected" and next_state.__class__ != Rejected:
@@ -605,7 +527,7 @@ class AgenticLoop:
         else:
             self._rejections = 0
 
-        logger.info(f"{self.state}: Transitioning to {next_state.name}")
+        logger.info(f"{self.state.name}: Transitioning to {next_state.name}")
         self.transition_to(next_state)
 
     @property
@@ -624,50 +546,37 @@ class AgenticLoop:
 
         return instructor.Mode.JSON
 
-    def _next_mock_action(self) -> ActionRequest | None:
+    def _next_mock_action(
+        self,
+    ) -> ActionRequest | None:
         if not self._mocked_actions:
-            return None, None, None, None
+            return None
 
         if self._reset_mocks_at_state and self.state.name == self._reset_mocks_at_state:
             logger.info(f"Resetting mocked actions at state {self.state.name}")
             self._mocked_actions = []
-            return None, None, None, None
+            return None
 
         action = self._mocked_actions.pop(0)
-
-        if "action" not in action:
-            return None, None, None, None
-
-        cost = action.get("completion_cost", 0)
-        input_tokens = action.get("input_tokens", 0)
-        output_tokens = action.get("output_tokens", 0)
 
         if self.state.action_type():
             try:
                 logger.info(
-                    f"{self.state} Return mocked response with type {self.state.action_type().__name__} ({len(self._mocked_actions)} left)."
+                    f"{self.state.name} Return mocked response with type {self.state.action_type().__name__} ({len(self._mocked_actions)} left)."
                 )
-                return (
-                    self.state.action_type().model_validate(action["action"]),
-                    cost,
-                    input_tokens,
-                    output_tokens,
-                )
+                return self.state.action_type().model_validate(action)
+
             except Exception:
                 logger.error(
                     f"Failed to parse {action} to {self.state.action_type().__name__} in state {self.state.name}"
                 )
                 raise
-        elif "content" in action["action"]:
+        elif "content" in action:
             logger.info(
-                f"{self.state} Return mocked response ({len(self._mocked_actions)} left)."
+                f"{self.state.name} Return mocked response ({len(self._mocked_actions)} left)."
             )
-            return (
-                Content(content=action["action"]["content"]),
-                cost,
-                input_tokens,
-                output_tokens,
-            )
+            return Content(content=action["content"])
+
 
         else:
             raise ValueError(f"Mocked action {action} does not have 'content' field.")
@@ -676,23 +585,27 @@ class AgenticLoop:
         self,
     ) -> tuple[ActionRequest, Optional[float], Optional[int], Optional[int]]:
         messages = self._to_completion_messages()
-        logger.info(f"{self.state} Create completion with {len(messages)} messages")
+        logger.info(
+            f"{self.state.name} Create completion with {len(messages)} messages"
+        )
 
         if self._verify_state_func:
             self._verify_state_func(self.state)
 
-        mocked_action, cost, input_tokens, output_tokens = self._next_mock_action()
+        mocked_action = self._next_mock_action()
         if mocked_action:
-            return mocked_action, cost, input_tokens, output_tokens
+            return mocked_action, None, None, None
 
         metadata = {}
         if self._metadata:
             metadata.update(self._metadata)
-        metadata["generation_name"] = str(self.state)
+        metadata["generation_name"] = self.state.name
 
         tokens = token_counter(messages=messages[-1:])
         if self._max_message_tokens and tokens > self._max_message_tokens:
             raise ValueError(f"Too many tokens in the new message: {tokens}")
+
+        logger.info(f"{self.state.name}: Do completion request to {self.state.model}")
 
         if self.state.model.startswith("claude") and self.state.action_type():
             try:
@@ -831,17 +744,20 @@ class AgenticLoop:
             if completion:
                 f.write("\n\n## Output\n")
 
-                for block in completion:
-                    if isinstance(block, BaseModel):
-                        block = block.model_dump()
+                if isinstance(completion, list):
+                    for block in completion:
+                        if isinstance(block, BaseModel):
+                            block = block.model_dump()
 
-                    if isinstance(block, dict):
-                        if "content" in block:
-                            f.write(f"{block.get('content')}\n")
+                        if isinstance(block, dict):
+                            if block.get("content"):
+                                f.write(f"{block.get('content')}\n")
+                            else:
+                                f.write(f"```json\n{json.dumps(block, indent=2)}\n```")
                         else:
                             f.write(f"```json\n{json.dumps(block, indent=2)}\n```")
-                    else:
-                        f.write(f"```json\n{json.dumps(block, indent=2)}\n```")
+                else:
+                    f.write(f"```json\n{json.dumps(completion, indent=2)}\n```")
 
             if error:
                 f.write("\n\n# Error\n")

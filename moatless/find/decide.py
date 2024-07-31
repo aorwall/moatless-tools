@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from moatless.find import SearchCode
 from moatless.state import AgenticState
 from moatless.types import (
     ActionRequest,
@@ -108,7 +109,7 @@ class DecideRelevance(AgenticState):
 
     def _relevant_count(self) -> int:
         relevant_count = 0
-        previous_transitions = self.loop.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
         for transition in previous_transitions:
             for previous_action in transition.actions:
                 if (
@@ -125,7 +126,7 @@ class DecideRelevance(AgenticState):
         return MAYBE_FINISH_SYSTEM_PROMPT
 
     def _last_scratch_pad(self):
-        previous_searches = self.loop.get_transitions("SearchCode")
+        previous_searches = self.loop.get_previous_transitions(SearchCode)
         logger.info(f"Previous searches: {len(previous_searches)}")
         if previous_searches and previous_searches[-1].actions:
             last_search = previous_searches[-1].actions[-1].action
