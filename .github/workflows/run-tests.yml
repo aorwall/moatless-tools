@@ -19,5 +19,35 @@ jobs:
       uses: snok/install-poetry@v1
     - name: Install dependencies
       run: poetry install
+    
+    - name: Cache REPO_DIR
+      uses: actions/cache@v3
+      with:
+        path: /tmp/repos
+        key: ${{ runner.os }}-repo-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-repo-
+    
+    - name: Cache INDEX_STORE_DIR
+      uses: actions/cache@v3
+      with:
+        path: /tmp/index-store
+        key: ${{ runner.os }}-index-store-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-index-store-
+    
     - name: Run tests
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        INDEX_STORE_URL: ${{ secrets.INDEX_STORE_URL }}
+        INDEX_STORE_DIR: /tmp/index-store
+        MOATLESS_DIR: /tmp/moatless
+        REPO_DIR: /tmp/repos
       run: poetry run pytest
+    
+    - name: Upload MOATLESS_DIR contents
+      uses: actions/upload-artifact@v3
+      if: ${{ success() && hashFiles('/tmp/moatless/**') != '' }}
+      with:
+        name: moatless-artifacts
+        path: /tmp/moatless
