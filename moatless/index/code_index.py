@@ -153,7 +153,12 @@ class CodeIndex:
         )
 
     @classmethod
-    def from_index_name(cls, index_name: str, file_repo: FileRepository, index_store_dir: Optional[str] = None):
+    def from_index_name(
+        cls,
+        index_name: str,
+        file_repo: FileRepository,
+        index_store_dir: Optional[str] = None,
+    ):
         if not index_store_dir:
             index_store_dir = os.getenv("INDEX_STORE_DIR")
 
@@ -167,9 +172,7 @@ class CodeIndex:
         return cls.from_url(store_url, persist_dir, file_repo)
 
     def dict(self):
-        return {
-            "index_name": self._index_name
-        }
+        return {"index_name": self._index_name}
 
     def search(
         self,

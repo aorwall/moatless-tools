@@ -327,7 +327,9 @@ def create_workspace(
         git_repo_url=repo_url, repo_path=repo_dir, commit=instance["base_commit"]
     )
 
-    code_index = CodeIndex.from_index_name(instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo)
+    code_index = CodeIndex.from_index_name(
+        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo
+    )
 
     return Workspace(
         file_repo=repo,

@@ -6,10 +6,7 @@ from git import Repo
 
 from moatless.repository.file import FileRepository
 from moatless.settings import Settings
-from moatless.utils.repo import (
-    maybe_clone,
-    checkout_commit
-)
+from moatless.utils.repo import maybe_clone, checkout_commit
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +37,8 @@ class GitRepository(FileRepository):
         self._current_commit = self._repo.head.commit.hexsha
         self._initial_commit = self._current_commit
 
-
     @classmethod
-    def from_repo(
-        cls,
-        git_repo_url: str,
-        repo_path: str,
-        commit: Optional[str] = None
-    ):
+    def from_repo(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
         logger.info(
             f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} "
         )

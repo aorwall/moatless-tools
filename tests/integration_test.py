@@ -32,7 +32,7 @@ pytest.mark.llm_integration = pytest.mark.skipif(
 
 
 @pytest.mark.llm_integration
-def test_save_and_load_trajectory():
+def test_run_and_reload_django_16379():
     instance = load_instance("django__django-16379")
     workspace = create_workspace(instance)
 
@@ -48,7 +48,6 @@ def test_save_and_load_trajectory():
     )
 
     response = loop.run(message=instance["problem_statement"])
-
     print("Response")
     print(response)
 
@@ -60,10 +59,7 @@ def test_save_and_load_trajectory():
         "django/core/cache/backends/filebased.py", "FileBasedCache.has_key"
     )
 
-    saved_loop = AgenticLoop.from_trajectory_file(
-        trajectory_path=trajectory_path,
-        transitions=search_and_code_transitions(global_params=global_params),
-    )
+    saved_loop = AgenticLoop.from_trajectory_file(trajectory_path=trajectory_path)
 
     saved_response = saved_loop.run(message=instance["problem_statement"])
 
@@ -121,6 +117,9 @@ def test_different_edit_models():
         "django/core/cache/backends/filebased.py", "FileBasedCache.has_key"
     )
 
+    first_commit = loop.workspace.file_repo._current_commit
+    assert first_commit != loop.workspace.file_repo._initial_commit
+
     # Reverts to PlanToCode state and set LLM to GPT-4o-mini in the EditCode state
     response_mini = loop.retry_from_transition(
         transition_id=4,  # PlanToCode
@@ -137,3 +136,5 @@ def test_different_edit_models():
     diff = loop.workspace.file_repo.diff()
     print("Diff")
     print(diff)
+
+    assert loop.workspace.file_repo._current_commit != first_commit

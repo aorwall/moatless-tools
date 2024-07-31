@@ -102,9 +102,7 @@ class AgenticLoop:
         self._metadata = metadata
 
     @classmethod
-    def from_trajectory_file(
-        cls, trajectory_path: str, **kwargs
-    ):
+    def from_trajectory_file(cls, trajectory_path: str, **kwargs):
         trajectory = Trajectory.load(trajectory_path)
         transitions = trajectory.transitions
         workspace = Workspace.from_dict(trajectory.workspace)
@@ -126,18 +124,22 @@ class AgenticLoop:
     ):
         self.revert_to_transition(transition_id)
         # TODO: I'm using only state params as an easy way test out changes. Need to think about a better way to do this.
-        self._transition_rules._state_params.update(state_params)
+        self._transition_rules.state_params.update(state_params)
 
         # TODO: DRY
         while self.is_running():
             try:
                 self._run()
             except Exception as e:
-                logger.warning(f"Failed to run loop. Error: {e}")
+                logger.warning(
+                    f"{self.transition_name}: Failed to run loop. Error: {e}"
+                )
                 raise
 
             if self.retries() > self._max_retries:
-                logger.warning(f"Max retries reached ({self._max_retries}). Exiting.")
+                logger.warning(
+                    f"{self.transition_name}: Max retries reached ({self._max_retries}). Exiting."
+                )
                 self.trajectory.save_info({"error": "Max retries reached."})
                 return Response(
                     status="rejected",
@@ -147,7 +149,7 @@ class AgenticLoop:
             total_cost = self.total_cost()
             if total_cost > self._max_cost:
                 logger.warning(
-                    f"Max cost reached ({total_cost} > {self._max_cost}). Exiting."
+                    f"{self.transition_name}: Max cost reached ({total_cost} > {self._max_cost}). Exiting."
                 )
                 self.trajectory.save_info({"error": "Max cost reached."})
                 raise RuntimeError(
@@ -201,11 +203,15 @@ class AgenticLoop:
             try:
                 self._run()
             except Exception as e:
-                logger.warning(f"Failed to run loop. Error: {e}")
+                logger.warning(
+                    f"{self.transition_name}: Failed to run loop. Error: {e}"
+                )
                 raise
 
             if self.retries() > self._max_retries:
-                logger.warning(f"Max retries reached ({self._max_retries}). Exiting.")
+                logger.warning(
+                    f"{self.transition_name}: Max retries reached ({self._max_retries}). Exiting."
+                )
                 self.trajectory.save_info({"error": "Max retries reached."})
                 return Response(
                     status="rejected",
@@ -215,7 +221,7 @@ class AgenticLoop:
             total_cost = self.total_cost()
             if total_cost > self._max_cost:
                 logger.warning(
-                    f"Max cost reached ({total_cost} > {self._max_cost}). Exiting."
+                    f"{self.transition_name}: Max cost reached ({total_cost} > {self._max_cost}). Exiting."
                 )
                 self.trajectory.save_info({"error": "Max cost reached."})
                 raise RuntimeError(
@@ -319,7 +325,7 @@ class AgenticLoop:
             raise ValueError("Invalid state index for reversion")
 
     def transition_to(self, new_state: AgenticState):
-        logger.info(f"Transitioning from {self.state.name} to {new_state.name}")
+        self.log_info(f"Transitioning from {self.state.name} to {new_state.name}")
 
         if self.transition_count() > self._max_transitions:
             new_state = Rejected(message="Max transitions exceeded.")
@@ -365,7 +371,7 @@ class AgenticLoop:
 
             parent_transition = parent_transition.parent
 
-        logger.info(
+        self.log_info(
             f"Found {len(previous_transitions)} previous transitions for {state.name if state else 'all states'}"
         )
 
@@ -472,12 +478,12 @@ class AgenticLoop:
 
     def _run(self):
         if not self.is_running():
-            logger.info("Loop is not running.")
+            self.log_info("Loop is not running.")
             return
 
         action, cost, input_tokens, output_tokens = self._next_action()
 
-        logger.info(f"{self.state.name}: Received new action {action.action_name}.")
+        self.log_info(f"Received new action {action.action_name}.")
         response = self.state.handle_action(action)
 
         self._current_transition.actions.append(
@@ -493,13 +499,13 @@ class AgenticLoop:
         self.trajectory.save_transition(self._current_transition)
 
         if not response.trigger:
-            logger.info(
+            self.log_info(
                 f"{self.state.name}: No transition found. Staying in the same state."
             )
             return
 
         if response.trigger == "retry":
-            logger.info(f"{self.state.name}: Retry requested. {response.retry_message}")
+            self.log_info(f"Retry requested. {response.retry_message}")
             return
 
         try:
@@ -527,7 +533,7 @@ class AgenticLoop:
         else:
             self._rejections = 0
 
-        logger.info(f"{self.state.name}: Transitioning to {next_state.name}")
+        self.log_info(f"Transitioning to {next_state.name}")
         self.transition_to(next_state)
 
     @property
@@ -553,7 +559,7 @@ class AgenticLoop:
             return None
 
         if self._reset_mocks_at_state and self.state.name == self._reset_mocks_at_state:
-            logger.info(f"Resetting mocked actions at state {self.state.name}")
+            self.log_info(f"Resetting mocked actions at state {self.state.name}")
             self._mocked_actions = []
             return None
 
@@ -561,22 +567,19 @@ class AgenticLoop:
 
         if self.state.action_type():
             try:
-                logger.info(
-                    f"{self.state.name} Return mocked response with type {self.state.action_type().__name__} ({len(self._mocked_actions)} left)."
+                self.log_info(
+                    f"Return mocked response with type {self.state.action_type().__name__} ({len(self._mocked_actions)} left)."
                 )
                 return self.state.action_type().model_validate(action)
 
             except Exception:
                 logger.error(
-                    f"Failed to parse {action} to {self.state.action_type().__name__} in state {self.state.name}"
+                    f"{self.transition_name}: Failed to parse {action} to {self.state.action_type().__name__} in state {self.state.name}"
                 )
                 raise
         elif "content" in action:
-            logger.info(
-                f"{self.state.name} Return mocked response ({len(self._mocked_actions)} left)."
-            )
+            self.log_info(f"Return mocked response ({len(self._mocked_actions)} left).")
             return Content(content=action["content"])
-
 
         else:
             raise ValueError(f"Mocked action {action} does not have 'content' field.")
@@ -585,9 +588,7 @@ class AgenticLoop:
         self,
     ) -> tuple[ActionRequest, Optional[float], Optional[int], Optional[int]]:
         messages = self._to_completion_messages()
-        logger.info(
-            f"{self.state.name} Create completion with {len(messages)} messages"
-        )
+        self.log_info(f"Create completion with {len(messages)} messages")
 
         if self._verify_state_func:
             self._verify_state_func(self.state)
@@ -605,7 +606,7 @@ class AgenticLoop:
         if self._max_message_tokens and tokens > self._max_message_tokens:
             raise ValueError(f"Too many tokens in the new message: {tokens}")
 
-        logger.info(f"{self.state.name}: Do completion request to {self.state.model}")
+        self.log_info(f"Do completion request to {self.state.model}")
 
         if self.state.model.startswith("claude") and self.state.action_type():
             try:
@@ -625,8 +626,8 @@ class AgenticLoop:
                     )
                 )
 
-                logger.info(
-                    f"{self.state.name}: Input tokens: {completion_response.usage.input_tokens}, Output tokens: {completion_response.usage.output_tokens}"
+                self.log_info(
+                    f"Input tokens: {completion_response.usage.input_tokens}, Output tokens: {completion_response.usage.output_tokens}"
                 )
                 (
                     prompt_tokens_cost_usd_dollar,
@@ -690,7 +691,7 @@ class AgenticLoop:
                 model="claude-3-5-sonnet-20240620",
             )
         except Exception as e:
-            logger.info(f"Error calculating completion cost: {e}")
+            self.log_info(f"Error calculating completion cost: {e}")
             cost = 0
 
         self._log_prompt(
@@ -762,6 +763,18 @@ class AgenticLoop:
             if error:
                 f.write("\n\n# Error\n")
                 f.write(f"\n```\n{error}\n```\n")
+
+    def log_info(self, message: str):
+        logger.info(f"{self.transition_name}: {message}")
+
+    @property
+    def transition_name(self):
+        if self._current_transition:
+            return (
+                f"{self._current_transition.state.name}:{self._current_transition.id}"
+            )
+        else:
+            return "No transition"
 
 
 def generate_call_id():
