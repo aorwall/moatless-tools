@@ -10,8 +10,8 @@ from moatless.edit.edit import EditCode
 from moatless.edit.plan import PlanToCode
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
-from moatless.find.search_v2 import SearchCode
-from moatless.loop import TransitionRule
+from moatless.find.search import SearchCode
+from moatless.transition_rules import TransitionRule
 from moatless.state import Finished, Rejected
 from moatless.transitions import (
     search_and_code_transitions,

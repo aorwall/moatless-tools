@@ -45,6 +45,7 @@ class AgenticLoop:
         workspace: Workspace,
         trajectory: Trajectory | None = None,
         mocked_actions: list[dict] | None = None,
+        expected_states: list[Type[AgenticState]] | None = None,
         reset_mocks_at_state: Optional[str] = None,
         verify_state_func: Optional[Callable] = None,
         max_cost: float = 0.25,
@@ -79,8 +80,21 @@ class AgenticLoop:
         self._prompt_log_dir = prompt_log_dir
 
         self._mocked_actions = mocked_actions
-        self._reset_mocks_at_state = reset_mocks_at_state
+
+        if expected_states and not verify_state_func:
+            def verify_state_func(state: AgenticState):
+                nonlocal expected_states
+                if not expected_states:
+                    raise ValueError(f"No more expected states, but got {state.__class__}")
+                expected_state = expected_states.pop(0)
+                if not (state.name == expected_state or isinstance(state, expected_state)):
+                    raise ValueError(f"Expected state {expected_state} but got {state.__class__.__name__}")
+
+                self.log_info(f"Verified expected next state {expected_state}")
+
         self._verify_state_func = verify_state_func
+
+        self._reset_mocks_at_state = reset_mocks_at_state
 
         self._max_cost = max_cost
         self._max_message_tokens = max_message_tokens
@@ -489,8 +503,7 @@ class AgenticLoop:
         self._current_transition.actions.append(
             TrajectoryAction(
                 action=action,
-                output=response.output,
-                retry_message=response.retry_message,
+                trigger=response.trigger,
                 completion_cost=cost,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -500,9 +513,11 @@ class AgenticLoop:
 
         if not response.trigger:
             self.log_info(
-                f"{self.state.name}: No transition found. Staying in the same state."
+                f"{self.state.name}: No trigger in action response. Staying in the same state."
             )
             return
+
+        self.log_info(f"Received response with trigger {response.trigger}")
 
         if response.trigger == "retry":
             self.log_info(f"Retry requested. {response.retry_message}")
@@ -516,7 +531,7 @@ class AgenticLoop:
             )
         except Exception:
             logger.exception(
-                f"Failed to initiate next state with trigger {response.trigger} and output {response.output}"
+                f"{self.transition_name}: Failed to initiate next state with trigger {response.trigger} and output {response.output}"
             )
             raise
 
@@ -533,7 +548,6 @@ class AgenticLoop:
         else:
             self._rejections = 0
 
-        self.log_info(f"Transitioning to {next_state.name}")
         self.transition_to(next_state)
 
     @property

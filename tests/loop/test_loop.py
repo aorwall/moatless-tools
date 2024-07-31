@@ -16,9 +16,10 @@ def test_rerun_save_and_load_trajectory():
     workspace = create_workspace(instance)
     assert isinstance(workspace.file_repo, GitRepository)
     mocked_actions = trajectory.get_mocked_actions()
+    expected_states = trajectory.get_expected_states()
 
     loop = AgenticLoop(
-        trajectory.transition_rules, workspace=workspace, mocked_actions=mocked_actions
+        trajectory.transition_rules, workspace=workspace, mocked_actions=mocked_actions, expected_states=expected_states
     )
     response = loop.run(message=trajectory.initial_message)
 

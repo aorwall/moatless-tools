@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 class TrajectoryAction(BaseModel):
     action: ActionRequest
-    retry_message: Optional[str] = None
-    output: Optional[dict[str, Any]] = None
+    trigger: Optional[str]
     completion_cost: Optional[float] = None
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
@@ -139,12 +138,27 @@ class Trajectory:
     def get_mocked_actions(self) -> list[dict]:
         """
         Return a list of actions that can be used to mock the trajectory.
+
+        TODO: Provide the end transition and support parent()
         """
         actions = []
         for transition in self._transitions:
             for action in transition["actions"]:
                 actions.append(action["action"])
         return actions
+
+    def get_expected_states(self) -> list[str]:
+        """
+        Return a list of expected states in the trajectory to use for verifcation when rerunning the trajectory.
+
+        TODO: Provide the end transition and support parent()
+        """
+
+        states = []
+        for transition in self._transitions:
+            states.append(transition["state"]["name"])
+        return states
+
 
     def to_dict(self):
         return {
