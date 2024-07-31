@@ -10,9 +10,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     - name: Install Poetry
@@ -21,33 +21,23 @@ jobs:
       run: poetry install
     
     - name: Cache REPO_DIR
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
-        path: /tmp/repos
-        key: ${{ runner.os }}-repo-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-repo-
-    
-    - name: Cache INDEX_STORE_DIR
-      uses: actions/cache@v3
-      with:
-        path: /tmp/index-store
-        key: ${{ runner.os }}-index-store-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-index-store-
-    
+        path: /tmp/cache
+        key: ${{ runner.os }}-moatless-${{ github.sha }}
+
     - name: Run tests
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
         INDEX_STORE_URL: ${{ vars.INDEX_STORE_URL }}
-        INDEX_STORE_DIR: /tmp/index-store
+        INDEX_STORE_DIR: /tmp/cache/index-store
+        REPO_DIR: /tmp/cache/repos
         MOATLESS_DIR: /tmp/moatless
-        REPO_DIR: /tmp/repos
       run: poetry run pytest
     
     - name: Upload MOATLESS_DIR contents
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: ${{ success() && hashFiles('/tmp/moatless/**') != '' }}
       with:
         name: moatless-artifacts

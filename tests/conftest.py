@@ -50,6 +50,15 @@ def set_env_vars(monkeypatch, request):
     logger.debug(f"Setting REPO_DIR={repo_dir}")
     logger.debug(f"Setting MOATLESS_DIR={moatless_dir}")
 
+    if not os.path.exists(index_store_dir):
+        os.makedirs(index_store_dir)
+
+    if not os.path.exists(repo_dir):
+        os.makedirs(repo_dir)
+
+    if not os.path.exists(moatless_dir):
+        os.makedirs(moatless_dir)
+
     monkeypatch.setenv("INDEX_STORE_DIR", index_store_dir)
     monkeypatch.setenv("REPO_DIR", repo_dir)
     monkeypatch.setenv("MOATLESS_DIR", moatless_dir)
