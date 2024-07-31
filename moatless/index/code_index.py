@@ -167,6 +167,11 @@ class CodeIndex:
             logger.info(f"Loading existing index {index_name} from {persist_dir}.")
             return cls.from_persist_dir(persist_dir, file_repo=file_repo)
 
+        if not os.getenv("INDEX_STORE_URL"):
+            raise ValueError(
+                "INDEX_STORE_URL environment variable must be set to a index store URL to download the index."
+            )
+
         store_url = os.path.join(os.getenv("INDEX_STORE_URL"), f"{index_name}.zip")
         logger.info(f"Downloading existing index {index_name} from {store_url}.")
         return cls.from_url(store_url, persist_dir, file_repo)
