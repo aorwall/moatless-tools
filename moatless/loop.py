@@ -267,7 +267,7 @@ class AgenticLoop:
     def retries(self) -> int:
         retries = 0
         for action in reversed(self._current_transition.actions):
-            if action.retry_message:
+            if action.trigger == "retry":
                 retries += 1
             else:
                 return retries
@@ -281,7 +281,7 @@ class AgenticLoop:
             return messages
 
         for action in self._current_transition.actions:
-            if action.retry_message:
+            if action.trigger == "retry":
                 if isinstance(action.action, Content):
                     messages.append(
                         AssistantMessage(
@@ -504,6 +504,7 @@ class AgenticLoop:
             TrajectoryAction(
                 action=action,
                 trigger=response.trigger,
+                retry_message=response.retry_message,
                 completion_cost=cost,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,

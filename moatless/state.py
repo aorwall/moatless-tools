@@ -100,7 +100,7 @@ class AgenticState(ABC, BaseModel):
     def retries(self) -> int:
         retries = 0
         for action in reversed(self.loop._current_transition.actions):
-            if action.retry_message:
+            if action.trigger == "retry":
                 retries += 1
             else:
                 return retries

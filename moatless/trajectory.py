@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class TrajectoryAction(BaseModel):
     action: ActionRequest
     trigger: Optional[str]
+    retry_message: Optional[str]
     completion_cost: Optional[float] = None
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
