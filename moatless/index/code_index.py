@@ -83,6 +83,11 @@ class CodeIndex:
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
 
+        logger.info(f"Initiated CodeIndex {self._index_name} with:\n"
+                    f" * {len(self._blocks_by_class_name)} classes\n"
+                    f" * {len(self._blocks_by_function_name)} functions\n"
+                    f" * {len(self._docstore.docs)} vectors\n")
+
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository, **kwargs):
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
@@ -135,22 +140,7 @@ class CodeIndex:
             raise e
 
         logger.info(f"Downloaded existing index from {url}.")
-
-        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
-
-        if not os.path.exists(os.path.join(persist_dir, "settings.json")):
-            # TODO: Remove this when new indexes are uploaded
-            settings = IndexSettings(embed_model="voyage-code-2")
-        else:
-            settings = IndexSettings.from_persist_dir(persist_dir)
-
-        return cls(
-            file_repo=file_repo,
-            vector_store=vector_store,
-            docstore=docstore,
-            settings=settings,
-        )
+        return cls.from_persist_dir(persist_dir, file_repo)
 
     @classmethod
     def from_index_name(

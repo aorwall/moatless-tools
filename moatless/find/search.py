@@ -428,6 +428,7 @@ class SearchCode(AgenticState):
         content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
 
         if self.provide_initial_context:
+            logger.info("Search for initial context to provide in the prompt")
             result = self.workspace.code_index.semantic_search(
                 query=self.loop.trajectory.initial_message,
                 exact_match_if_possible=False,
