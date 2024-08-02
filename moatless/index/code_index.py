@@ -5,6 +5,7 @@ import mimetypes
 import os
 import shutil
 import tempfile
+from typing import Optional
 
 import requests
 from llama_index.core import SimpleDirectoryReader
@@ -54,16 +55,18 @@ class CodeIndex:
     def __init__(
         self,
         file_repo: FileRepository,
+        index_name: Optional[str] = None,
         vector_store: BasePydanticVectorStore | None = None,
         docstore: DocumentStore | None = None,
         embed_model: BaseEmbedding | None = None,
-        blocks_by_class_name: dict | None = None,
-        blocks_by_function_name: dict | None = None,
+        blocks_by_class_name: Optional[dict] = None,
+        blocks_by_function_name: Optional[dict] = None,
         settings: IndexSettings | None = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
     ):
+        self._index_name = index_name
         self._settings = settings or IndexSettings()
 
         self.max_results = max_results
@@ -78,6 +81,11 @@ class CodeIndex:
         self._embed_model = embed_model or get_embed_model(self._settings.embed_model)
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
+
+        logger.info(f"Initiated CodeIndex {self._index_name} with:\n"
+                    f" * {len(self._blocks_by_class_name)} classes\n"
+                    f" * {len(self._blocks_by_function_name)} functions\n"
+                    f" * {len(self._docstore.docs)} vectors\n")
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository, **kwargs):
@@ -131,30 +139,42 @@ class CodeIndex:
             raise e
 
         logger.info(f"Downloaded existing index from {url}.")
+        return cls.from_persist_dir(persist_dir, file_repo)
 
-        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
+    @classmethod
+    def from_index_name(
+        cls,
+        index_name: str,
+        file_repo: FileRepository,
+        index_store_dir: Optional[str] = None,
+    ):
+        if not index_store_dir:
+            index_store_dir = os.getenv("INDEX_STORE_DIR")
 
-        if not os.path.exists(os.path.join(persist_dir, "settings.json")):
-            # TODO: Remove this when new indexes are uploaded
-            settings = IndexSettings(embed_model="voyage-code-2")
+        persist_dir = os.path.join(index_store_dir, index_name)
+        if os.path.exists(persist_dir):
+            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
+            return cls.from_persist_dir(persist_dir, file_repo=file_repo)
+
+        if os.getenv("INDEX_STORE_URL"):
+            index_store_url = os.getenv("INDEX_STORE_URL")
         else:
-            settings = IndexSettings.from_persist_dir(persist_dir)
+            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20240522-voyage-code-2"
 
-        return cls(
-            file_repo=file_repo,
-            vector_store=vector_store,
-            docstore=docstore,
-            settings=settings,
-        )
+        store_url = os.path.join(index_store_url, f"{index_name}.zip")
+        logger.info(f"Downloading existing index {index_name} from {store_url}.")
+        return cls.from_url(store_url, persist_dir, file_repo)
+
+    def dict(self):
+        return {"index_name": self._index_name}
 
     def search(
         self,
-        query: str | None = None,
-        code_snippet: str | None = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         max_results: int = 25,
     ) -> SearchCodeResponse:
         if class_names or function_names:
@@ -199,16 +219,16 @@ class CodeIndex:
 
     def semantic_search(
         self,
-        query: str | None = None,
-        code_snippet: str | None = None,
+        query: Optional[str] = None,
+        code_snippet: Optional[str] = None,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         category: str = "implementation",
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
-        max_spans_per_file: int | None = None,
+        max_spans_per_file: Optional[int] = None,
         exact_match_if_possible: bool = False,
     ) -> SearchCodeResponse:
         if query is None:
@@ -362,7 +382,7 @@ class CodeIndex:
         self,
         class_names: list[str] = None,
         function_names: list[str] = None,
-        file_pattern: str | None = None,
+        file_pattern: Optional[str] = None,
         include_functions_in_class: bool = True,
         category: str = "implementation",
     ) -> SearchCodeResponse:
@@ -531,8 +551,8 @@ class CodeIndex:
         query: str = "",
         exact_query_match: bool = False,
         category: str = "implementation",
-        file_pattern: str | None = None,
-        exact_content_match: str | None = None,
+        file_pattern: Optional[str] = None,
+        exact_content_match: Optional[str] = None,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -647,9 +667,9 @@ class CodeIndex:
 
     def run_ingestion(
         self,
-        repo_path: str | None = None,
+        repo_path: Optional[str] = None,
         input_files: list[str] | None = None,
-        num_workers: int | None = None,
+        num_workers: Optional[int] = None,
     ):
         repo_path = repo_path or self._file_repo.path
 
@@ -678,14 +698,23 @@ class CodeIndex:
                 "category": category,
             }
 
-        reader = SimpleDirectoryReader(
-            input_dir=repo_path,
-            file_metadata=file_metadata_func,
-            input_files=input_files,
-            filename_as_id=True,
-            required_exts=[".py"],  # TODO: Shouldn't be hardcoded and filtered
-            recursive=True,
-        )
+        if self._settings and self._settings.language == "java":
+            required_exts = [".java"]
+        else:
+            required_exts = [".py"]
+
+        try:
+            reader = SimpleDirectoryReader(
+                input_dir=repo_path,
+                file_metadata=file_metadata_func,
+                input_files=input_files,
+                filename_as_id=True,
+                required_exts=required_exts,
+                recursive=True,
+            )
+        except Exception as e:
+            logger.exception(f"Failed to create reader with input_dir {repo_path}, input_files {input_files} and required_exts {required_exts}.")
+            raise e
 
         embed_pipeline = IngestionPipeline(
             transformations=[self._embed_model],
@@ -716,6 +745,7 @@ class CodeIndex:
                 )
 
         splitter = EpicSplitter(
+            language=self._settings.language,
             min_chunk_size=self._settings.min_chunk_size,
             chunk_size=self._settings.chunk_size,
             hard_token_limit=self._settings.hard_token_limit,
