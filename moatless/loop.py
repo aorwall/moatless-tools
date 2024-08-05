@@ -126,7 +126,7 @@ class AgenticLoop:
 
         self._initial_message = ""
         self._current_state: AgenticState | None = None
-        self._state_history: dict[str, AgenticState] = {}
+        self._state_history: dict[int, AgenticState] = {}
 
         self._metadata = metadata
 
@@ -161,7 +161,7 @@ class AgenticLoop:
                 transition_rules=self._transition_rules,
             )
             pending_state = Pending()
-            self._state_history[pending_state.name] = pending_state
+            self._state_history[pending_state.id] = pending_state
             self._set_current_state(pending_state)
         else:
             for state_data in self._trajectory.states:
@@ -290,6 +290,7 @@ class AgenticLoop:
             trigger = response.trigger
             output = response.output
             
+
         transition_rule = self._transition_rules.get_next_rule(
             self.state,
             trigger,
@@ -315,13 +316,29 @@ class AgenticLoop:
 
         params["id"] = self.state_count() + 1
 
-        logger.info(f"Creating state {transition_rule.dest.__name__} with params {params}")
+        next_state_type = transition_rule.dest
+        if next_state_type not in [Finished, Rejected]:
+
+            if self.state_count() >= self._max_transitions:
+                self.log_info(f"Max transitions exceeded ({self._max_transitions}). Transitioning to Rejected.")
+                next_state_type = Rejected
+                params["message"] = "Max transitions exceeded."   
+            if (
+                params.get("max_iterations")
+                and self.state_count(next_state_type) >= params["max_iterations"]
+            ):
+                self.log_info(f"Max iterations exceeded ({params['max_iterations']}). Transitioning to Rejected.")
+                next_state_type = Rejected
+                params["message"] = f"Max iterations exceeded ({params['max_iterations']})."
+    
+        self.log_info(f"Creating state {next_state_type.__name__} with params {params}")
         params["previous_state"] = self._current_state
         params["_workspace"] = self._workspace
 
-        next_state = transition_rule.dest.model_validate(params)
+        next_state = next_state_type.model_validate(params)
+
         self._current_state.next_states.append(next_state)
-        self._state_history[next_state.name] = next_state
+        self._state_history[next_state.id] = next_state
         return next_state
 
     def total_cost(self):
@@ -377,19 +394,8 @@ class AgenticLoop:
     def transition_to(self, new_state: AgenticState) -> AgenticState:
         self.log_info(f"Transitioning from {self.state.name} to {new_state.name}")
 
-        if self.state_count() > self._max_transitions:
-            new_state = Rejected(message="Max transitions exceeded.")
-
-        if (
-            new_state.max_iterations
-            and self.state_count(new_state) > new_state.max_iterations
-        ):
-            new_state = Rejected(
-                message=f"Max transitions exceeded for state {new_state.name}."
-            )
-
         self._trajectory.save_state(new_state)
-        self._state_history[new_state.name] = new_state
+        self._state_history[new_state.id] = new_state
         self._set_current_state(new_state)
 
         return new_state

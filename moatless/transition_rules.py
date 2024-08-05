@@ -55,6 +55,10 @@ class TransitionRule(BaseModel):
                 data["source"] = get_state_class(data["source"])
             if isinstance(data.get("dest"), str):
                 data["dest"] = get_state_class(data["dest"])
+
+        if data["source"] == data["dest"]:
+            raise ValueError("Source and destination states cannot be the same.")
+
         return data
 
 

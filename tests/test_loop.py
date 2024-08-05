@@ -23,6 +23,16 @@ class TestState(AgenticState):
     def _execute_action(self, action: ActionRequest) -> ActionResponse:
         if action.content == "reject":
             return ActionResponse(trigger="reject", output={"message": "Rejected"})
+        elif action.content == "continue":
+            return ActionResponse(trigger="continue", output={"message": "Continue"})
+        return ActionResponse(trigger="finish", output={"message": "Finished"})
+
+class TestState2(AgenticState):
+    def _execute_action(self, action: ActionRequest) -> ActionResponse:
+        if action.content == "reject":
+            return ActionResponse(trigger="reject", output={"message": "Rejected"})
+        elif action.content == "continue":
+            return ActionResponse(trigger="continue", output={"message": "Continue"})
         return ActionResponse(trigger="finish", output={"message": "Finished"})
 
 class TestTransitionRules(TransitionRules):
@@ -37,13 +47,17 @@ class TestTransitionRules(TransitionRules):
 
 @pytest.fixture
 def mock_workspace():
-    return MagicMock(spec=Workspace)
+    workspace = MagicMock(spec=Workspace)
+    workspace.snapshot.return_value = {}
+    return workspace
 
 @pytest.fixture
 def test_transition_rules():
     rules = [
         TransitionRule(trigger="init", source=Pending, dest=TestState),
         TransitionRule(trigger="finish", source=TestState, dest=Finished),
+        TransitionRule(trigger="continue", source=TestState, dest=TestState2),
+        TransitionRule(trigger="continue", source=TestState2, dest=TestState),
         TransitionRule(trigger="reject", source=TestState, dest=Rejected),
     ]
     return TestTransitionRules(rules)
@@ -75,14 +89,14 @@ def test_loop_run_until_rejected(mock_workspace, test_transition_rules):
     assert len(loop._state_history) == 3  # Pending -> TestState -> Rejected
 
 def test_loop_max_transitions(mock_workspace, test_transition_rules):
-    loop = AgenticLoop(test_transition_rules, mock_workspace, max_transitions=2)
+    loop = AgenticLoop(test_transition_rules, mock_workspace, max_transitions=3)
     
-    with patch.object(AgenticLoop, '_next_action', return_value=(Content(content="test"), None)):
+    with patch.object(AgenticLoop, '_next_action', return_value=(Content(content="continue"), None)):
         response = loop.run("initial message")
     
     assert response.status == "rejected"
-
-    assert len(loop._state_history) == 3, f"Expected 3 states, got {[state.name for state in loop._state_history.values()]}"
+    assert response.message == "Max transitions exceeded."
+    assert len(loop._state_history) == 4, f"Expected 4 states, got {[state.name for state in loop._state_history.values()]}"
 
 @pytest.mark.api_keys_required
 def test_rerun_save_and_load_trajectory():
