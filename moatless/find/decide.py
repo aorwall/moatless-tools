@@ -76,22 +76,6 @@ class DecideRelevance(AgenticState):
     )
     max_prompt_file_tokens: int = 4000
 
-    def __init__(
-        self,
-        expand_context: bool = True,
-        include_message_history=False,
-        finish_after_relevant_count: int = 2,
-        max_prompt_file_tokens: int = 4000,
-        **data,
-    ):
-        super().__init__(
-            expand_context=expand_context,
-            finish_after_relevant_count=finish_after_relevant_count,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            include_message_history=include_message_history,
-            **data,
-        )
-
     def _execute_action(self, action: Decision) -> ActionResponse:
         if action.complete and action.relevant:
             return ActionResponse.transition("finish")

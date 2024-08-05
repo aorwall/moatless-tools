@@ -132,27 +132,12 @@ class ReviewCode(AgenticState):
         description="Whether to finish the task if no verification errors are found.",
     )
 
-    _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)
+    include_message_history: bool = Field(
+        True,
+        description="Whether to include the message history in the prompt.",
+    )
 
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        max_prompt_file_tokens: int = 4000,
-        max_tokens_in_edit_prompt: int = 500,
-        max_iterations: int = 8,
-        include_message_history=True,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            diff=diff,
-            include_message_history=include_message_history,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
-            max_iterations=max_iterations,
-            **data,
-        )
+    _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)
 
     def init(self) -> Optional[ActionResponse]:
         self._verification_errors = self.workspace.verify()

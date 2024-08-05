@@ -84,23 +84,10 @@ class PlanToCodeWithLines(AgenticState):
         description="Whether to expand the context with related spans.",
     )
 
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        lint_messages: list[VerificationError] | None = None,
-        max_iterations: int = 5,
-        include_message_history=True,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            diff=diff,
-            lint_messages=lint_messages,
-            include_message_history=include_message_history,
-            max_iterations=max_iterations,
-            **data,
-        )
+    include_message_history: bool = Field(
+        True,
+        description="Whether to include the message history in the prompt.",
+    )
 
     def init(self):
         # TODO: Make addition to context customizable??

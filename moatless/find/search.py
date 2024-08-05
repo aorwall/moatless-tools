@@ -92,7 +92,7 @@ functions.Search({
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -147,7 +147,7 @@ Search parameters:
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -211,7 +211,7 @@ Assistant:
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -301,36 +301,17 @@ class SearchCode(AgenticState):
         description="The maximum number of retries when there are identified files in file context.",
     )
 
+    include_message_history: bool = Field(
+        True,
+        description="Include message history from previous iterations",
+    )
+
     provide_initial_context: bool = True
     initial_context_tokens: int = 4000
     initial_search_results: int = 50
     initial_context_spans_per_file: int = 5
 
     support_test_files: bool = False
-
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        max_search_results: int = 25,
-        max_retries_with_any_file_context: int = 3,
-        include_message_history: bool = True,
-        provide_initial_context: bool = True,
-        initial_context_tokens: int = 4000,
-        initial_search_results: int = 50,
-        initial_context_spans_per_file: int = 5,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            include_message_history=include_message_history,
-            provide_initial_context=provide_initial_context,
-            max_search_results=max_search_results,
-            max_retries_with_any_file_context=max_retries_with_any_file_context,
-            initial_context_tokens=initial_context_tokens,
-            initial_search_results=initial_search_results,
-            initial_context_spans_per_file=initial_context_spans_per_file,
-            **data,
-        )
 
     def _execute_action(self, action: Search) -> ActionResponse:
         if action.complete:

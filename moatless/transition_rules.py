@@ -5,6 +5,7 @@ from typing import Any, Type, Optional
 
 from moatless.settings import Settings
 from moatless.state import AgenticState, get_state_class
+from moatless.workspace import Workspace
 
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,10 @@ class TransitionRule(BaseModel):
 
 
 class TransitionRules(BaseModel):
-    initial_state: type[AgenticState] = Field(
-        ..., description="The initial state of the loop."
+    initial_state: type[AgenticState] | None = Field(
+        default=None, 
+        description="The initial state for the loop.",
+        deprecated="Initial state should be set in transition_rules instead."
     )
     transition_rules: list[TransitionRule] = Field(
         ..., description="The transition rules for the loop."
@@ -81,7 +84,7 @@ class TransitionRules(BaseModel):
 
     def model_dump(self, **kwargs):
         return {
-            "initial_state": self.initial_state.__name__,
+            "initial_state": self.initial_state.__name__ if self.initial_state else None,
             "transition_rules": [
                 rule.model_dump(**kwargs) for rule in self.transition_rules
             ],
@@ -123,17 +126,24 @@ class TransitionRules(BaseModel):
     ) -> list[TransitionRule]:
         return self._source_trigger_index.get((source, trigger), [])
 
-    def create_initial_state(self, **data) -> AgenticState:
+    def params(self, rule: TransitionRule) -> dict[str, Any]:
         params = {}
         params.update(self.global_params)
-        params.update(self.state_params.get(self.initial_state, {}))
-        params.update(data)
-        print(f"initial_state,{params}")
-        return self.initial_state(**params)
+        params.update(self.state_params.get(rule.dest, {}))
+        return params
 
-    def next_state(
+    def get_next_rule(
         self, source: AgenticState, trigger: str, data: dict[str, Any]
-    ) -> AgenticState | None:
+    ) -> TransitionRule | None:
+        
+        if trigger == "init" and self.initial_state:
+            logger.warning("Using deprecated 'initial_state'. Set initial state in transition_rules instead.")
+            return TransitionRule(
+                trigger="init",
+                source=source.__class__,
+                dest=self.initial_state,
+            )
+
         transition_rules = self.find_transition_rule_by_source_and_trigger(
             source.__class__, trigger
         )
@@ -145,17 +155,6 @@ class TransitionRules(BaseModel):
                 logger.info(f"Missing required fields for transition {transition_rule}")
                 continue
 
-            params = {}
-            params.update(self.global_params)
-            params.update(self.state_params.get(transition_rule.dest, {}))
+            return transition_rule
 
-            if transition_rule.excluded_fields:
-                data = {
-                    k: v
-                    for k, v in data.items()
-                    if k not in transition_rule.excluded_fields
-                }
-
-            params.update(data)
-            return transition_rule.dest(**params)
         return None

@@ -31,12 +31,12 @@ class LineNumberClarification(ActionRequest):
 
 
 class ClarifyCodeChange(AgenticState):
-    instructions: str
-    file_path: str
-    span_id: str
+    instructions: str = Field(..., description="The instructions for the code change.")
+    file_path: str = Field(..., description="The path to the file to be updated.")
+    span_id: str = Field(..., description="The ID of the span to be updated.")
 
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    start_line: Optional[int] = Field(None, description="The start line of the code to be updated.")
+    end_line: Optional[int] = Field(None, description="The end line of the code to be updated.")
 
     max_tokens_in_edit_prompt: int = Field(
         500,
@@ -47,10 +47,6 @@ class ClarifyCodeChange(AgenticState):
     _span: BlockSpan | None = PrivateAttr(None)
     _file_context_str: Optional[str] = PrivateAttr(None)
 
-    def __init__(self, instructions: str, file_path: str, span_id: str, **data):
-        super().__init__(
-            instructions=instructions, file_path=file_path, span_id=span_id, **data
-        )
 
     def init(self):
         self._file = self.file_repo.get_file(self.file_path)
