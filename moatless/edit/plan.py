@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
 from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
@@ -104,17 +104,21 @@ class PlanToCode(AgenticState):
         description="Whether to include the message history in the prompt.",
     )
 
-    def init(self):
-        self.file_context.expand_context_with_init_spans()
+    _expanded_context: bool = PrivateAttr(False)
 
-        if (
-            self.expand_context_with_related_spans
-            and len(self.get_previous_states(self)) == 0
-        ):
-            self.file_context.expand_context_with_related_spans(
-                max_tokens=self.max_prompt_file_tokens
-            )
-            self.file_context.expand_small_classes(max_tokens=1000)
+    def init(self):
+        if not self._expanded_context:
+            self.file_context.expand_context_with_init_spans()
+
+            if (
+                self.expand_context_with_related_spans
+                and len(self.get_previous_states(self)) == 0
+            ):
+                self.file_context.expand_context_with_related_spans(
+                    max_tokens=self.max_prompt_file_tokens
+                )
+                self.file_context.expand_small_classes(max_tokens=1000)
+            self._expanded_context = True
 
     def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
@@ -288,6 +292,8 @@ class PlanToCode(AgenticState):
         return response_msg
 
     def messages(self) -> list[Message]:
+        self.init()
+
         messages: list[Message] = []
 
         if self.initial_message:

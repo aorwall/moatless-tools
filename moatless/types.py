@@ -56,6 +56,11 @@ class ActionTransaction(BaseModel):
     response: Optional[ActionResponse] = None
     usage: Optional[Usage] = None
 
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["request"] = self.request.model_dump(**kwargs)
+        data["response"] = self.response.model_dump(**kwargs) if self.response else None
+        return data
 
 
 class EmptyRequest(ActionRequest):

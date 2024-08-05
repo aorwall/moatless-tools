@@ -9,31 +9,17 @@ from pydantic_core import to_jsonable_python
 from moatless.workspace import Workspace
 from moatless.transition_rules import TransitionRules
 from moatless.state import AgenticState, get_state_class
-from moatless.types import ActionRequest
+from moatless.types import ActionRequest, ActionTransaction, ActionResponse, Usage, Content
 
 logger = logging.getLogger(__name__)
 
 
-class TrajectoryAction(BaseModel):
-    action: ActionRequest
-    trigger: Optional[str] = None
-    retry_message: Optional[str] = None
-    completion_cost: Optional[float] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        data["action"] = self.action.model_dump(**kwargs)
-        return data
-
-
-class TrajectoryTransition(BaseModel):
+class TrajectoryState(BaseModel):
     id: int
-    state: AgenticState
-    snapshot: Optional[dict] = None
-    actions: List[TrajectoryAction] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.now)
+    snapshot: Optional[dict] = None
+    state: AgenticState
 
     @property
     def name(self):
@@ -42,14 +28,22 @@ class TrajectoryTransition(BaseModel):
     def model_dump(self, **kwargs):
         data = {
             "id": self.id,
+            "name": self.state.name,
             "timestamp": self.timestamp,
-            "state": self.state.model_dump(**kwargs) if self.state else None,
-            "snapshot": self.snapshot,
-            "actions": [action.model_dump(**kwargs) for action in self.actions],
         }
 
-        if kwargs.get("exclude_none", False):
-            data = {k: v for k, v in data.items() if v is not None}
+        if self.snapshot:
+            data["snapshot"] = self.snapshot
+
+        if self.state.previous_state:
+            data["previous_state_id"] = self.state.previous_state.id
+
+        properties = self.state.model_dump(exclude={"previous_state", "next_states", "id"}, **kwargs) if self.state else None
+        if properties:
+            data["properties"] = properties
+
+        if self.state._actions:
+            data["actions"] = [a.model_dump(**kwargs) for a in self.state._actions]
 
         return data
 
@@ -66,11 +60,11 @@ class Trajectory:
         self._name = name
         self._persist_path = persist_path
         self._initial_message = initial_message
-        self._workspace = workspace.dict() if workspace else None
+        self._workspace = workspace
         self._transition_rules = transition_rules
 
-        self._transitions: List[TrajectoryTransition] = []
         self._current_transition_id = 0
+        self._transitions: dict[int, TrajectoryState] = {}
 
         self._info: dict[str, Any] = {}
 
@@ -89,12 +83,64 @@ class Trajectory:
             initial_message=data["initial_message"],
             transition_rules=transition_rules,
         )
-        trajectory._workspace = data["workspace"]
-        trajectory._transitions = []
+        trajectory._workspace = Workspace.from_dict(data["workspace"])
+        trajectory._transitions = {}
+        trajectory._current_transition_id = data.get("current_transition_id", 0)
+
         for t in data["transitions"]:
-            state_class = get_state_class(t["state"]["name"])
-            t["state"] = state_class(**t["state"])
-            trajectory._transitions.append(TrajectoryTransition(**t))
+            state_class = get_state_class(t["name"])
+            state_data = t["properties"]
+            state_data["id"] = t["id"]
+            state = state_class.model_validate(state_data)
+
+            if t.get("snapshot"):
+                try:
+                    trajectory.restore_from_snapshot(t["snapshot"])
+                except Exception as e:
+                    logger.exception(f"Error restoring from snapshot for state {state.name}")
+                    raise e
+
+            state._workspace = trajectory._workspace
+            state._initial_message = trajectory._initial_message
+            state._actions = []
+            if "actions" in t:
+                for a in t["actions"]:
+                    try:
+                        if state.action_type() is None:
+                            request = Content.model_validate(a["request"])
+                        else:
+                            request = state.action_type().model_validate(a["request"])
+                        response = ActionResponse.model_validate(a.get("response"))
+                        if a.get("usage"):
+                            usage = Usage.model_validate(a.get("usage"))
+                        else:
+                            usage = None
+                        state._actions.append(ActionTransaction(request=request, response=response, usage=usage))
+                    except Exception as e:
+                        logger.exception(f"Error loading action for state {state.name}: {a}")
+                        raise e
+
+            trajectory_state = TrajectoryState(
+                id=t["id"],
+                timestamp=datetime.fromisoformat(t["timestamp"]),
+                snapshot=t.get("snapshot"),
+                state=state
+            )
+
+            trajectory._transitions[t["id"]] = trajectory_state
+
+        # Set previous_state and next_states
+        for t in data["transitions"]:
+            try:
+                current_state = trajectory._transitions[t["id"]].state
+                if t["previous_state_id"] is not None:
+                    current_state.previous_state = trajectory._transitions.get(t["previous_state_id"]).state
+            except KeyError as e:
+                logger.error(f"Missing key {e}, existing keys: {trajectory._transitions.keys()}")
+
+        trajectory._info = data.get("info", {})
+
+        logger.info(f"Loaded trajectory {trajectory._name} with {len(trajectory._transitions)} transitions")
 
         return trajectory
 
@@ -104,7 +150,7 @@ class Trajectory:
 
     @property
     def states(self) -> List[dict]:
-        return [t.state.model_dump() for t in self._transitions]
+        return [t.state.model_dump() for t in self.transitions]
 
     @property
     def transition_rules(self) -> TransitionRules:
@@ -114,30 +160,42 @@ class Trajectory:
     def workspace(self) -> dict[str, Any] | None:
         return self._workspace
 
+    @property
+    def transitions(self) -> List[TrajectoryState]:
+        return sorted(self._transitions.values(), key=lambda x: x.id)
+
     def set_current_state(self, state: AgenticState):
         self._current_transition_id = state.id
         self._maybe_persist()
 
+    def get_current_state(self) -> AgenticState:
+        return self._transitions.get(self._current_transition_id).state
+
+    def restore_from_snapshot(self, snapshot: dict):
+        if not self._workspace:
+            logger.info("No workspace to restore from snapshot")
+
+        if "repository" in snapshot:
+            self._workspace.file_repo.restore_from_snapshot(snapshot["repository"])
+
+        if "file_context" in snapshot:
+            self._workspace.file_context.restore_from_snapshot(snapshot["file_context"])
+
     def save_state(self, state: AgenticState):
-        for i, existing_transition in enumerate(self._transitions):
-            if existing_transition.id == self._current_transition_id:
-                self._transitions[i].state = state
-                break
+        if state.id in self._transitions:
+            self._transitions[state.id].state = state
         else:
-            transition = TrajectoryTransition(
-                id=self._current_transition_id,
+            transition = TrajectoryState(
+                id=state.id,
                 state=state,
                 snapshot=state.workspace.snapshot() if state.workspace else None,
             )   
-            self._transitions.append(transition)
+            self._transitions[state.id] = transition
 
         self._maybe_persist()
 
-    def get_state(self, state_id: int) -> AgenticState | None:
-        for transition in self._transitions:
-            if transition.id == state_id:
-                return transition.state
-        return None
+    def get_state(self, state_id: int) -> TrajectoryState | None:
+        return self._transitions.get(state_id)
 
     def save_info(self, info: dict):
         self._info = info
@@ -148,29 +206,30 @@ class Trajectory:
         Return a list of actions that can be used to mock the trajectory.
         """
         actions = []
-        for transition in self._transitions:
-            for action in transition.actions:
-                actions.append(action.action.model_dump())
+
+        for transition in self.transitions:
+            for action in transition.state._actions:
+                actions.append(action.request.model_dump())
         return actions
 
     def get_expected_states(self) -> List[str]:
         """
         Return a list of expected states in the trajectory to use for verification when rerunning the trajectory.
         """
-        return [transition.state.name for transition in self._transitions]
+        return [transition.state.name for transition in self.transitions[1:]]
 
     def to_dict(self):
         return {
             "name": self._name,
             "transition_rules": self._transition_rules.model_dump(
-                exclude_none=True, exclude_unset=True
+                exclude_none=True
             )
             if self._transition_rules
             else None,
-            "workspace": self._workspace,
+            "workspace": self._workspace.dict() if self._workspace else None,
             "initial_message": self._initial_message,
             "current_transition_id": self._current_transition_id,
-            "transitions": [t.model_dump(exclude_none=True, exclude_unset=True) for t in self._transitions],
+            "transitions": [t.model_dump(exclude_none=True) for t in self.transitions],
             "info": self._info,
         }
 

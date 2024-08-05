@@ -155,7 +155,6 @@ class EditCode(AgenticState):
                 replacement_code = msg_split[1]
 
         file = self.file_context.get_file(self.file_path)
-        logger.info(f"self.file_context {self.file_context} file: {file}")
 
         update_result = file.update_content_by_line_numbers(
             self.start_line - 1, self.end_line, replacement_code
@@ -287,6 +286,9 @@ class EditCode(AgenticState):
         return system_prompt
 
     def messages(self) -> list[Message]:
+        if not self._code_to_replace:
+            self.init()
+
         content = ""
         if self.show_initial_message:
             content = f"<main_objective>\n{self.initial_message}\n</main_objective>\n\n"

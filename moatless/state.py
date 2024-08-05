@@ -202,9 +202,10 @@ class AgenticState(ABC, BaseModel):
         return None
 
     def model_dump(self, **kwargs):
-        data = super().model_dump(exclude={"previous_state", "next_states"}, **kwargs)
-        data["name"] = self.name
-        data["previous_state_id"] = self.previous_state.id if self.previous_state else None
+        if 'exclude' not in kwargs:
+            kwargs['exclude'] = {"previous_state", "next_states"}
+        
+        data = super().model_dump(**kwargs)
         return data
 
     @classmethod

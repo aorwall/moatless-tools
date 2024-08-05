@@ -87,14 +87,18 @@ class TransitionRules(BaseModel):
         self._build_source_trigger_index()
 
     def model_dump(self, **kwargs):
-        return {
-            "initial_state": self.initial_state.__name__ if self.initial_state else None,
+        data = {
+            "global_params": self.global_params,
+            "state_params": {k.__name__: v for k, v in self.state_params.items()},
             "transition_rules": [
                 rule.model_dump(**kwargs) for rule in self.transition_rules
             ],
-            "global_params": self.global_params,
-            "state_params": {k.__name__: v for k, v in self.state_params.items()},
         }
+
+        if self.initial_state:
+            data["initial_state"] = self.initial_state.__name__
+
+        return data
 
     @model_validator(mode="before")
     @classmethod

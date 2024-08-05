@@ -9,7 +9,7 @@ from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search import SearchCode
 from moatless.transition_rules import TransitionRule, TransitionRules
-from moatless.state import Finished, Rejected
+from moatless.state import Finished, Rejected, Pending
 
 CODE_TRANSITIONS = [
     TransitionRule(
@@ -194,8 +194,8 @@ def search_and_code_transitions(
     return TransitionRules(
         global_params=global_params,
         state_params=state_params,
-        initial_state=SearchCode,
         transition_rules=[
+            TransitionRule(source=Pending, dest=SearchCode, trigger="init"),
             TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
             TransitionRule(source=SearchCode, dest=PlanToCode, trigger="finish"),
             TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),

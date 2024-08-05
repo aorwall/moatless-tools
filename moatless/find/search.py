@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 import instructor
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ValidationError
 
 from moatless.file_context import RankedFileSpan
 from moatless.index.types import SearchCodeHit
@@ -265,6 +265,7 @@ class SearchRequest(BaseModel):
             ]
         )
 
+    
 
 class Search(ActionRequest):
     """Take action to search for code, identify found and finish up."""
@@ -282,8 +283,14 @@ class Search(ActionRequest):
         default=False, description="Set to true when the search is complete."
     )
 
-    def has_search_attributes(self):
-        return all([search.has_search_attributes() for search in self.search_requests])
+    @model_validator(mode='after')
+    def validate_search_requests(self):
+        if not self.complete:
+            if not self.search_requests:
+                raise ValidationError("If 'complete' is False, at least one search request must exist.")
+            if not any(request.has_search_attributes() for request in self.search_requests):
+                raise ValidationError("At least one search request must have at least one attribute set.")
+        return self
 
 
 class SearchCode(AgenticState):
@@ -324,11 +331,6 @@ class SearchCode(AgenticState):
             )
 
         if isinstance(action, Search):
-            if not action.has_search_attributes():
-                return self._retry(
-                    "You must provide at least one the search attributes query, code_snippet, class_name or function_name to search. If you're finished, set finished to true."
-                )
-
             for request in action.search_requests:
                 if (
                     not self.support_test_files
@@ -367,7 +369,7 @@ class SearchCode(AgenticState):
 
         if len(ranked_spans) == 0:
             logger.info("No search results found. Will retry.")
-            message = "\n\nUnfortunately, I didn’t find any relevant results."
+            message = "\n\nUnfortunately, I didn't find any relevant results."
             return self._retry(message)
 
         return ActionResponse.transition(

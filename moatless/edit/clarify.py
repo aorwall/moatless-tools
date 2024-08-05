@@ -47,7 +47,6 @@ class ClarifyCodeChange(AgenticState):
     _span: BlockSpan | None = PrivateAttr(None)
     _file_context_str: Optional[str] = PrivateAttr(None)
 
-
     def init(self):
         self._file = self.file_repo.get_file(self.file_path)
         self._span = self._file.module.find_span_by_id(self.span_id)
@@ -184,6 +183,9 @@ class ClarifyCodeChange(AgenticState):
         return CLARIFY_CHANGE_SYSTEM_PROMPT
 
     def messages(self) -> list[Message]:
+        if not self._file_context_str:
+            self.init()
+
         messages = [
             Message(
                 role="user",

@@ -69,12 +69,18 @@ class Decision(ActionRequest):
 
 
 class DecideRelevance(AgenticState):
-    expand_context: bool
+    expand_context: bool = Field(
+        False,
+        description="If true, the file context will be expanded with additional context.",
+    )
     finish_after_relevant_count: int = Field(
         2,
         description="Finish the task after this many relevant decisions have been made but not complete.",
     )
-    max_prompt_file_tokens: int = 4000
+    max_prompt_file_tokens: int = Field(
+        4000,
+        description="The maximum number of tokens to include in the file context prompt.",
+    )
 
     def _execute_action(self, action: Decision) -> ActionResponse:
         if action.complete and action.relevant:

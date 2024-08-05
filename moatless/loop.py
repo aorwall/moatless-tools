@@ -25,7 +25,7 @@ from moatless.state import (
     Rejected,
     get_state_class,
 )
-from moatless.trajectory import Trajectory, TrajectoryAction
+from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.types import (
     ActionRequest,
@@ -48,6 +48,7 @@ class AgenticLoop:
         transition_rules: TransitionRules,
         workspace: Workspace,
         input_data: dict[str, Any] | None = None,
+        initial_message: str | None = None,
         trajectory: Trajectory | None = None,
         mocked_actions: list[dict] | None = None,
         expected_states: list[Type[AgenticState]] | None = None,
@@ -71,7 +72,6 @@ class AgenticLoop:
         Args:
 
         """
-        self._trajectory = trajectory
 
         self._workspace = workspace
 
@@ -83,11 +83,26 @@ class AgenticLoop:
                 os.makedirs(parent_dir)
         self._trajectory_path = trajectory_path
 
+        if not trajectory:
+            self._trajectory = Trajectory(
+                "MoatlessTools",
+                initial_message=initial_message,
+                persist_path=self._trajectory_path,
+                workspace=self._workspace,
+                transition_rules=transition_rules,
+            )
+            pending_state = Pending()
+            self._trajectory.save_state(pending_state)
+            self._set_current_state(pending_state)
+        else:
+            self._trajectory = trajectory
+            self._current_state = trajectory.get_current_state()
+
+        self._initial_message = initial_message
+
         if prompt_log_dir and not os.path.exists(prompt_log_dir):
             os.makedirs(prompt_log_dir)
         self._prompt_log_dir = prompt_log_dir
-
-        self._mocked_actions = mocked_actions
 
         if expected_states and not verify_state_func:
 
@@ -98,9 +113,12 @@ class AgenticLoop:
                         f"No more expected states, but got {state.__class__}"
                     )
                 expected_state = expected_states.pop(0)
-                if not (
-                    state.name == expected_state or isinstance(state, expected_state)
-                ):
+                if isinstance(expected_state, str):
+                    if state.name != expected_state:
+                        raise ValueError(
+                            f"Expected state {expected_state} but got {state.__class__.__name__}"
+                        )
+                elif isinstance(expected_state, AgenticState) and not isinstance(state, expected_state):
                     raise ValueError(
                         f"Expected state {expected_state} but got {state.__class__.__name__}"
                     )
@@ -108,7 +126,7 @@ class AgenticLoop:
                 self.log_info(f"Verified expected next state {expected_state}")
 
         self._verify_state_func = verify_state_func
-
+        self._mocked_actions = mocked_actions
         self._reset_mocks_at_state = reset_mocks_at_state
 
         self._max_cost = max_cost
@@ -123,50 +141,20 @@ class AgenticLoop:
         self._rejections = 0
 
         self._transition_rules = transition_rules
-
-        self._initial_message = ""
-        self._current_state: AgenticState | None = None
-        self._state_history: dict[int, AgenticState] = {}
-
         self._metadata = metadata
-
-        self._type = "standard"
-
-        for k, v in kwargs.items():
-            setattr(self, k, v)
 
     @classmethod
     def from_trajectory_file(cls, trajectory_path: str, **kwargs):
         trajectory = Trajectory.load(trajectory_path)
-        transitions = trajectory.transitions
-        workspace = Workspace.from_dict(trajectory.workspace)
-
         return cls(
-            transition_rules=transitions,
+            transition_rules=trajectory.transitions,
             trajectory=trajectory,
-            workspace=workspace,
+            workspace=trajectory.workspace,
             **kwargs,
         )
 
     def persist(self, trajectory_path: str):
         self.trajectory.persist(trajectory_path)
-
-    def initialize_or_load_trajectory(self, message: Optional[str] = None) -> None:
-        if not self._trajectory:
-            self._trajectory = Trajectory(
-                "MoatlessTools",
-                initial_message=message,
-                persist_path=self._trajectory_path,
-                workspace=self._workspace,
-                transition_rules=self._transition_rules,
-            )
-            pending_state = Pending()
-            self._state_history[pending_state.id] = pending_state
-            self._set_current_state(pending_state)
-        else:
-            for state_data in self._trajectory.states:
-                self.set_current_state_from_dict(state_data)
-                self.workspace.restore_from_snapshot(state_data.get("snapshot"))
 
     def run(self, message: Optional[str] = None) -> Response:
         """
@@ -196,7 +184,11 @@ class AgenticLoop:
         if self.is_running():
             raise RuntimeError("Loop is already running.")
 
-        self.initialize_or_load_trajectory(message)
+        # TODO: Move to always set this when the Loop is created instead
+        if message:
+            logger.warning("Setting initial message in run is deprecated. Set in contructor.")
+            self._initial_message = message
+            self._trajectory._initial_message = message
 
         while not self.is_finished():
             self._execute_state_until_transition()
@@ -289,7 +281,6 @@ class AgenticLoop:
             
             trigger = response.trigger
             output = response.output
-            
 
         transition_rule = self._transition_rules.get_next_rule(
             self.state,
@@ -314,7 +305,7 @@ class AgenticLoop:
     
             params[k] = v
 
-        params["id"] = self.state_count() + 1
+        params["id"] = self.state_count()
 
         next_state_type = transition_rule.dest
         if next_state_type not in [Finished, Rejected]:
@@ -332,19 +323,24 @@ class AgenticLoop:
                 params["message"] = f"Max iterations exceeded ({params['max_iterations']})."
     
         self.log_info(f"Creating state {next_state_type.__name__} with params {params}")
-        params["previous_state"] = self._current_state
-        params["_workspace"] = self._workspace
 
-        next_state = next_state_type.model_validate(params)
+        try:
+            next_state = next_state_type.model_validate(params)
+            next_state.previous_state = self._current_state
+            next_state._workspace = self._workspace
+            next_state._initial_message = self._initial_message
+        except Exception as e:
+            logger.error(f"Failed to create state {next_state_type.__name__} with params {params}")
+            raise e
 
+        self._trajectory.save_state(next_state)
         self._current_state.next_states.append(next_state)
-        self._state_history[next_state.id] = next_state
         return next_state
 
     def total_cost(self):
         total_cost = 0
-        for state in self._state_history.values():
-            total_cost += state.total_cost()
+        for state in self._trajectory.transitions:
+            total_cost += state.state.total_cost()
         return total_cost
 
     def is_running(self) -> bool:
@@ -357,36 +353,13 @@ class AgenticLoop:
         self._current_state = state
         self._trajectory.set_current_state(state)
 
-    def set_current_state_from_dict(self, state_data: dict):
-        name = state_data.get("name")
-        try:
-            state_class = get_state_class(name)
-            state = state_class.model_validate(state_data)
-
-            # Set previous_state if it exists
-            if state_data.get("previous_state_id") is not None:
-                state.previous_state = self._state_history.get(state_data["previous_state_id"])
-
-            # Set next_states if they exist
-            for next_state_id in state_data.get("next_state_ids", []):
-                next_state = self._state_history.get(next_state_id)
-                if next_state:
-                    state.next_states.append(next_state)
-
-            self._set_current_state(state)
-            state.init()
-
-        except Exception as e:
-            logger.exception(f"Failed to load state {name}")
-            raise e
-
     def revert_to_state(self, state_id: int) -> AgenticState:
         state = self._trajectory.get_state(state_id)
         if state:
             self.log_info(f"Reverting to state {state_id}")
-            self._set_current_state(state)
+            self._set_current_state(state.state)
             self.workspace.restore_from_snapshot(state.snapshot)
-            return state
+            return state.state
         else:
             logger.warning(f"Tried to revert to state {state_id} but it does not exist.")
             raise ValueError(f"Could not revert to state {state_id} as it does not exist.")
@@ -395,7 +368,6 @@ class AgenticLoop:
         self.log_info(f"Transitioning from {self.state.name} to {new_state.name}")
 
         self._trajectory.save_state(new_state)
-        self._state_history[new_state.id] = new_state
         self._set_current_state(new_state)
 
         return new_state
@@ -529,15 +501,15 @@ class AgenticLoop:
     
     def state_count(self, state: AgenticState | None = None) -> int:
         if not state:
-            return len(self._state_history)
+            return len(self._trajectory.transitions)
 
         return len(
-            [s for s in self._state_history.values() if s.name == state.name]
+            [s for s in self._trajectory.transitions if s.state.name == state.name]
         )
 
     @property
     def state(self):
-        return self._current_state if self._current_state else Pending()
+        return self._current_state
 
     @property
     def workspace(self) -> Workspace:
@@ -686,10 +658,10 @@ class AgenticLoop:
         time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         prompt_path = (
-            f"{self._prompt_log_dir}/{self._current_state.name}:{self._current_state.id}"
+            f"{self._prompt_log_dir}/{self._current_state.id}_{self._current_state.name}"
         )
-        if self.retries() > 0:
-            prompt_path += f"_retry_{self.retries()}"
+        if self.state.retries() > 0:
+            prompt_path += f"_retry_{self.state.retries()}"
 
         prompt_path += f"_{time_str}.md"
 
@@ -751,3 +723,15 @@ class AgenticLoop:
             return f"{self._current_state.name}:{self._current_state.id}"
         else:
             return "No state"
+
+
+def generate_call_id():
+    prefix = "call_"
+    chars = string.ascii_letters + string.digits
+    length = 24
+
+    random_chars = "".join(random.choices(chars, k=length))
+
+    random_string = prefix + random_chars
+
+    return random_string
