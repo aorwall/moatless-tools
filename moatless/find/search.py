@@ -332,7 +332,7 @@ class SearchCode(AgenticState):
             **data,
         )
 
-    def handle_action(self, action: Search) -> ActionResponse:
+    def _execute_action(self, action: Search) -> ActionResponse:
         if action.complete:
             return ActionResponse.transition(
                 "finish",
@@ -433,7 +433,7 @@ class SearchCode(AgenticState):
                 query=self.loop.trajectory.initial_message,
                 exact_match_if_possible=False,
                 max_spans_per_file=5,
-                max_results=50,
+                max_results=100,
             )
 
             file_context = self.create_file_context(max_tokens=4000)

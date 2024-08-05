@@ -170,7 +170,7 @@ class ReviewCode(AgenticState):
 
         return None
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info(f"Review suggested after diff, will finish")

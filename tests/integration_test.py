@@ -19,8 +19,8 @@ load_dotenv()
 moatless_dir = os.getenv("MOATLESS_DIR", "/tmp/moatless")
 
 global_params = {
-    "model": "azure/gpt-4o",
-    "temperature": 0.2,
+    "model": "gpt-4o-mini-2024-07-18",  # "azure/gpt-4o",
+    "temperature": 0.5,
     "max_tokens": 2000,
     "max_prompt_file_tokens": 8000,
 }

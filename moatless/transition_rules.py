@@ -2,6 +2,8 @@ import logging
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from typing import Any, Type, Optional
+
+from moatless.settings import Settings
 from moatless.state import AgenticState, get_state_class
 
 
@@ -89,7 +91,7 @@ class TransitionRules(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def validate_state_classes(cls, data: Any) -> Any:
+    def validate_before_init(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if isinstance(data.get("initial_state"), str):
                 data["initial_state"] = get_state_class(data["initial_state"])
@@ -99,6 +101,13 @@ class TransitionRules(BaseModel):
                     get_state_class(k) if isinstance(k, str) else k: v
                     for k, v in data["state_params"].items()
                 }
+
+        if "global_params" not in data:
+            data["global_params"] = {}
+
+        if "model" not in data["global_params"]:
+            logger.info(f"No model specified in global_params. Using default model: {Settings.default_model}")
+            data["global_params"]["model"] = Settings.default_model
 
         return data
 

@@ -82,7 +82,7 @@ class ClarifyCodeChange(AgenticState):
             outcomment_code_comment="... other code",
         )
 
-    def handle_action(self, request: LineNumberClarification) -> ActionResponse:
+    def _execute_action(self, request: LineNumberClarification) -> ActionResponse:
         logger.info(
             f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
         )

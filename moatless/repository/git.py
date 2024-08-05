@@ -57,7 +57,13 @@ class GitRepository(FileRepository):
 
     def restore_from_snapshot(self, snapshot: dict):
         self._current_commit = snapshot["commit"]
+
+
         self._repo.git.checkout(self._current_commit)
+
+        # TODO: Check diff and only reset changed files
+
+        self.restore_from_disk()
 
     def dict(self):
         return {

@@ -10,7 +10,7 @@ from moatless.types import ActionResponse
 class MockStateA(AgenticState):
     value: int = 0
 
-    def handle_action(self, action: str, **kwargs):
+    def _execute_action(self, action: str, **kwargs):
         if action == "to_b":
             return ActionResponse(output={"message": "Moving to B"}, trigger="to_b")
         return ActionResponse(output={"message": "Staying in A"}, trigger=None)
@@ -19,7 +19,7 @@ class MockStateA(AgenticState):
 class MockStateB(AgenticState):
     default_name: str = ""
 
-    def handle_action(self, action: str, **kwargs):
+    def _execute_action(self, action: str, **kwargs):
         if action == "finish":
             return ActionResponse(output={"message": "Finishing"}, trigger="finish")
         elif action == "reject":
@@ -177,25 +177,25 @@ def test_next_state():
 
     # Test successful transition
     source_state = MockStateA(value=5)
-    action_response = source_state.handle_action("to_b")
+    action_response = source_state._execute_action("to_b")
     next_state = rules.next_state(source_state, action_response.trigger, {"value": 5})
     assert isinstance(next_state, MockStateB)
     assert next_state.name == "MockStateB"
     assert next_state.model == "claude-3.5-sonnet"
 
     # Test transition with missing required fields
-    action_response = source_state.handle_action("to_b")
+    action_response = source_state._execute_action("to_b")
     next_state = rules.next_state(source_state, action_response.trigger, {})
     assert next_state is None
 
     # Test transition to Finished state
     source_state = MockStateB(default_name="TestB")
-    action_response = source_state.handle_action("finish")
+    action_response = source_state._execute_action("finish")
     next_state = rules.next_state(source_state, action_response.trigger, {})
     assert isinstance(next_state, Finished)
 
     # Test transition to Rejected state
-    action_response = source_state.handle_action("reject")
+    action_response = source_state._execute_action("reject")
     next_state = rules.next_state(
         source_state, action_response.trigger, {"message": "Custom rejection message"}
     )

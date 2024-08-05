@@ -10,6 +10,7 @@ from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode
 from llama_index.core.utils import get_tokenizer, get_tqdm_iterable
 
+from moatless.codeblocks import create_parser
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, PathTree
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.index.code_node import CodeNode
@@ -39,6 +40,10 @@ SPLIT_BLOCK_TYPES = [
 
 
 class EpicSplitter(NodeParser):
+    language: str = Field(
+        default="python", description="Language of the code blocks to parse."
+    )
+
     text_splitter: TextSplitter = Field(
         description="Text splitter to use for splitting non code documents into nodes."
     )
@@ -82,6 +87,7 @@ class EpicSplitter(NodeParser):
 
     def __init__(
         self,
+        language: str = "python",
         chunk_size: int = 750,
         min_chunk_size: int = 100,
         max_chunk_size: int = 1500,
@@ -106,6 +112,7 @@ class EpicSplitter(NodeParser):
         # self._fallback_code_splitter = fallback_code_splitter
 
         super().__init__(
+            language=language,
             chunk_size=chunk_size,
             chunk_overlap=0,
             text_splitter=text_splitter or TokenTextSplitter(),
@@ -142,10 +149,10 @@ class EpicSplitter(NodeParser):
             content = node.get_content()
 
             try:
-                # TODO: Derive language from file extension
                 starttime = time.time_ns()
 
-                parser = PythonParser(index_callback=self.index_callback)
+                # TODO: Derive language from file extension
+                parser = create_parser(language=self.language, index_callback=self.index_callback)
                 codeblock = parser.parse(content, file_path=file_path)
 
                 parse_time = time.time_ns() - starttime

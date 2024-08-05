@@ -3,6 +3,7 @@ import sys
 import importlib
 from abc import ABC, abstractmethod
 from typing import Any, Optional
+from copy import deepcopy
 
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 
@@ -37,14 +38,31 @@ class AgenticState(ABC, BaseModel):
 
     _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
 
+    _executed: bool = PrivateAttr(False)
+    _last_action: Optional[ActionRequest] = PrivateAttr(None)
+    _response: Optional[ActionResponse] = PrivateAttr(None)
+
     # model_config = ConfigDict(extra='allow')
 
     def __init__(self, **data):
         super().__init__(**data)
         self._loop = None
 
-    @abstractmethod
     def handle_action(self, action: ActionRequest) -> ActionResponse:
+        if self._executed:
+            raise ValueError(f"State has already been executed")
+
+        self._last_action = action
+        response = self._execute_action(action)
+
+        if response.trigger and response.trigger != "retry":
+            self._executed = True
+            self._response = response
+
+        return response
+
+    @abstractmethod
+    def _execute_action(self, action: ActionRequest) -> ActionResponse:
         raise NotImplementedError
 
     def _set_loop(self, loop: "AgenticLoop"):  # noqa: F821
@@ -54,6 +72,18 @@ class AgenticState(ABC, BaseModel):
     @property
     def name(self):
         return self.__class__.__name__
+
+    @property
+    def executed(self):
+        return self._executed
+
+    @property
+    def last_action(self) -> Optional[ActionRequest]:
+        return self._last_action
+
+    @property
+    def response(self) -> Optional[ActionResponse]:
+        return self._response
 
     @property
     def loop(self) -> "AgenticLoop":  # noqa: F821
@@ -127,13 +157,34 @@ class AgenticState(ABC, BaseModel):
         data = super().model_dump(**kwargs)
         return {"name": self.name, **data}
 
+    def clone(self) -> "AgenticState":
+        data = self.model_dump(exclude={"_executed", "_last_action", "_response"})
+        new_state = self.__class__(**data)
+        new_state._loop = self._loop
+        return new_state
+
+    def __eq__(self, other):
+        if not isinstance(other, AgenticState):
+            return NotImplemented
+
+        if self.model_dump() != other.model_dump():
+            return False
+
+        if self._loop and other._loop:
+            self_context = self._loop.workspace.file_context
+            other_context = other._loop.workspace.file_context
+
+            return self_context.model_dump() == other_context.model_dump()
+
+        return True
+
 
 class NoopState(AgenticState):
     def __init__(self, **data):
         super().__init__(**data)
 
-    def handle_action(self, action: ActionRequest):
-        raise NotImplementedError
+    def _execute_action(self, action: ActionRequest):
+        raise ValueError("NoopState cannot handle actions")
 
 
 class Finished(NoopState):

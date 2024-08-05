@@ -148,7 +148,7 @@ class EditCode(AgenticState):
         lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
         self._code_to_replace = "\n".join(lines_to_replace)
 
-    def handle_action(self, content: Content) -> ActionResponse:
+    def _execute_action(self, content: Content) -> ActionResponse:
         self._messages.append(AssistantMessage(content=content.content))
 
         scratch_pad = None

@@ -139,7 +139,7 @@ class PlanToCode(AgenticState):
             )
             self.file_context.expand_small_classes(max_tokens=1000)
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info("Review suggested after diff, will finish")
@@ -176,6 +176,11 @@ class PlanToCode(AgenticState):
         logger.info(
             f"request_for_change(file_path={rfc.file_path}, span_id={rfc.span_id})"
         )
+
+        if not rfc.instructions:
+            return ActionResponse.retry(
+                f"Please provide instructions for the code change."
+            )
 
         context_file = self.file_context.get_file(rfc.file_path)
         if not context_file:

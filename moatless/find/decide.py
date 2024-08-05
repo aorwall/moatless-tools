@@ -92,7 +92,7 @@ class DecideRelevance(AgenticState):
             **data,
         )
 
-    def handle_action(self, action: Decision) -> ActionResponse:
+    def _execute_action(self, action: Decision) -> ActionResponse:
         if action.complete and action.relevant:
             return ActionResponse.transition("finish")
 

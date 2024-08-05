@@ -8,6 +8,7 @@ import traceback
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional, Type, Tuple
+import subprocess
 
 import instructor
 import litellm
@@ -15,6 +16,7 @@ from anthropic import Anthropic
 from litellm import completion_cost, cost_per_token, token_counter
 from pydantic import BaseModel, Field, PrivateAttr
 
+from moatless.repository import GitRepository
 from moatless.state import (
     AgenticState,
     Finished,
@@ -43,12 +45,14 @@ class AgenticLoop:
         self,
         transition_rules: TransitionRules,
         workspace: Workspace,
+        input_data: dict[str, Any] | None = None,
         trajectory: Trajectory | None = None,
         mocked_actions: list[dict] | None = None,
         expected_states: list[Type[AgenticState]] | None = None,
         reset_mocks_at_state: Optional[str] = None,
         verify_state_func: Optional[Callable] = None,
         max_cost: float = 0.25,
+        max_actions: int = 2,
         max_transitions: int = 25,
         max_message_tokens: Optional[int] = None,
         max_retries: int = 2,
@@ -57,6 +61,7 @@ class AgenticLoop:
         metadata: dict[str, Any] | None = None,
         trajectory_path: Optional[str] = None,
         prompt_log_dir: Optional[str] = None,
+        **kwargs,
     ):
         """
         Initialize the Loop instance.
@@ -64,10 +69,11 @@ class AgenticLoop:
         Args:
 
         """
-
         self._trajectory = trajectory
 
         self._workspace = workspace
+
+        self._input_data = input_data
 
         if trajectory_path:
             parent_dir = os.path.dirname(trajectory_path)
@@ -82,13 +88,20 @@ class AgenticLoop:
         self._mocked_actions = mocked_actions
 
         if expected_states and not verify_state_func:
+
             def verify_state_func(state: AgenticState):
                 nonlocal expected_states
                 if not expected_states:
-                    raise ValueError(f"No more expected states, but got {state.__class__}")
+                    raise ValueError(
+                        f"No more expected states, but got {state.__class__}"
+                    )
                 expected_state = expected_states.pop(0)
-                if not (state.name == expected_state or isinstance(state, expected_state)):
-                    raise ValueError(f"Expected state {expected_state} but got {state.__class__.__name__}")
+                if not (
+                    state.name == expected_state or isinstance(state, expected_state)
+                ):
+                    raise ValueError(
+                        f"Expected state {expected_state} but got {state.__class__.__name__}"
+                    )
 
                 self.log_info(f"Verified expected next state {expected_state}")
 
@@ -99,6 +112,7 @@ class AgenticLoop:
         self._max_cost = max_cost
         self._max_message_tokens = max_message_tokens
         self._max_transitions = max_transitions
+        self._max_actions = max_actions
         self._max_retries = max_retries
         self._max_rejections = max_rejections
         self._instructor_mode = instructor_mode
@@ -110,10 +124,14 @@ class AgenticLoop:
 
         self._initial_message = ""
         self._transitions: dict[int, TrajectoryTransition] = {}
-        self._current_state: AgenticState = Pending()
         self._current_transition: TrajectoryTransition | None = None
 
         self._metadata = metadata
+
+        self._type = "standard"
+
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     @classmethod
     def from_trajectory_file(cls, trajectory_path: str, **kwargs):
@@ -136,39 +154,12 @@ class AgenticLoop:
         transition_id: int,
         state_params: dict[Type[AgenticState], Any] = None,
     ):
-        self.revert_to_transition(transition_id)
+        self.clone_transition(transition_id)
         # TODO: I'm using only state params as an easy way test out changes. Need to think about a better way to do this.
         self._transition_rules.state_params.update(state_params)
 
-        # TODO: DRY
-        while self.is_running():
-            try:
-                self._run()
-            except Exception as e:
-                logger.warning(
-                    f"{self.transition_name}: Failed to run loop. Error: {e}"
-                )
-                raise
-
-            if self.retries() > self._max_retries:
-                logger.warning(
-                    f"{self.transition_name}: Max retries reached ({self._max_retries}). Exiting."
-                )
-                self.trajectory.save_info({"error": "Max retries reached."})
-                return Response(
-                    status="rejected",
-                    message="The loop was aborted because the number of retries exceeded the limit.",
-                )
-
-            total_cost = self.total_cost()
-            if total_cost > self._max_cost:
-                logger.warning(
-                    f"{self.transition_name}: Max cost reached ({total_cost} > {self._max_cost}). Exiting."
-                )
-                self.trajectory.save_info({"error": "Max cost reached."})
-                raise RuntimeError(
-                    "The loop was aborted because the cost exceeded the limit.",
-                )
+        while not self.is_finished():
+            self.run_until_transition()
 
         if isinstance(self.state, Finished):
             return Response(status="finished", message=self.state.message or "")
@@ -177,16 +168,7 @@ class AgenticLoop:
 
         raise RuntimeError(f"Loop exited with unknown state {self.state.name}.")
 
-    def run(
-        self, message: Optional[str] = None, input_data: dict[str, Any] | None = None
-    ) -> Response:
-        """
-        Run the loop and handle exceptions and cost checking.
-        """
-
-        if self.is_running():
-            raise Exception("Loop is already running.")
-
+    def initialize_or_load_trajectory(self, message: Optional[str] = None) -> None:
         if not self._trajectory:
             self._trajectory = Trajectory(
                 "MoatlessTools",
@@ -195,16 +177,15 @@ class AgenticLoop:
                 workspace=self._workspace,
                 transition_rules=self._transition_rules,
             )
-            initial_state = self._transition_rules.create_initial_state(
-                **input_data or {}
+            pending_transition = self._create_transition(
+                state=Pending(),
+                snapshot=self._workspace.snapshot()
             )
-            self.transition_to(initial_state)
+            self._set_current_transition(pending_transition)
         else:
             for transition in self._trajectory.transitions:
                 self.set_current_transition_from_dict(transition)
-                self._transitions[self._current_transition.id] = (
-                    self._current_transition
-                )
+                self.workspace.restore_from_snapshot(transition.get("snapshot"))
 
             for transition_data in self._trajectory.transitions:
                 transition = self._transitions[transition_data["id"]]
@@ -213,9 +194,46 @@ class AgenticLoop:
                     transition.parent = parent
                     parent.children.append(transition)
 
-        while self.is_running():
+    def run(self, message: Optional[str] = None) -> Response:
+        """
+        Run the loop and handle exceptions and cost checking.
+        """
+
+        if self.is_running():
+            raise Exception("Loop is already running.")
+
+        self.initialize_or_load_trajectory(message)
+
+        while not self.is_finished():
+            self.run_until_transition()
+
+        if isinstance(self.state, Finished):
+            return Response(status="finished", message=self.state.message or "")
+        elif isinstance(self.state, Rejected):
+            return Response(status="rejected", message=self.state.message or "")
+
+        raise RuntimeError(f"Loop exited with unknown state {self.state.name}.")
+
+    def run_until_transition(self) -> TrajectoryTransition:
+        while not self.is_finished():
+            total_cost = self.total_cost()
+            if total_cost > self._max_cost:
+                logger.warning(
+                    f"{self.transition_name}: Max cost reached ({total_cost} > {self._max_cost}). Exiting."
+                )
+                self.trajectory.save_info({"error": "Max cost reached."})
+                raise RuntimeError(
+                    "The loop was aborted because the cost exceeded the limit.",
+                )
+            else:
+                self.log_info(
+                    f"Running transition {len(self._transitions)}. Current total cost: {total_cost}"
+                )
+
             try:
-                self._run()
+                transition = self._run()
+                if transition:
+                    return transition
             except Exception as e:
                 logger.warning(
                     f"{self.transition_name}: Failed to run loop. Error: {e}"
@@ -227,27 +245,9 @@ class AgenticLoop:
                     f"{self.transition_name}: Max retries reached ({self._max_retries}). Exiting."
                 )
                 self.trajectory.save_info({"error": "Max retries reached."})
-                return Response(
-                    status="rejected",
-                    message="The loop was aborted because the number of retries exceeded the limit.",
-                )
+                return self.transition_to(Rejected(message="Max retries reached."))
 
-            total_cost = self.total_cost()
-            if total_cost > self._max_cost:
-                logger.warning(
-                    f"{self.transition_name}: Max cost reached ({total_cost} > {self._max_cost}). Exiting."
-                )
-                self.trajectory.save_info({"error": "Max cost reached."})
-                raise RuntimeError(
-                    "The loop was aborted because the cost exceeded the limit.",
-                )
-
-        if isinstance(self.state, Finished):
-            return Response(status="finished", message=self.state.message or "")
-        elif isinstance(self.state, Rejected):
-            return Response(status="rejected", message=self.state.message or "")
-
-        raise RuntimeError(f"Loop exited with unknown state {self.state.name}.")
+        raise RuntimeError("Loop exited without a transition.")
 
     def total_cost(self):
         total_cost = 0
@@ -260,6 +260,9 @@ class AgenticLoop:
 
     def is_running(self) -> bool:
         return not isinstance(self.state, NoopState)
+
+    def is_finished(self) -> bool:
+        return isinstance(self.state, (Finished, Rejected))
 
     def _set_state_loop(self, state: AgenticState):
         state._set_loop(self)
@@ -299,13 +302,17 @@ class AgenticLoop:
 
         return messages
 
+    def _set_current_transition(self, transition: TrajectoryTransition):
+        self._current_transition = transition
+        self._transitions[transition.id] = transition
+        self._trajectory.set_current_transition_id(transition.id)
+
     def set_current_transition_from_dict(self, transition_data: dict):
         state_data = transition_data.get("state", {})
         name = state_data.get("name")
         try:
             state_class = get_state_class(name)
             state = state_class(**state_data)
-            self.workspace.restore_from_snapshot(transition_data.get("snapshot"))
 
             transition = TrajectoryTransition(
                 id=transition_data["id"],
@@ -317,28 +324,56 @@ class AgenticLoop:
                 timestamp=datetime.fromisoformat(transition_data["timestamp"]),
             )
 
-            state._set_loop(self)
+            self._set_current_transition(transition)
+            self._set_state_loop(state)
             state.init()
 
-            self._current_state = state
-            self._current_transition = transition
         except Exception as e:
             logger.exception(f"Failed to load state {name}")
             raise e
 
     def set_current_transition(self, transition: TrajectoryTransition):
-        self.workspace.restore_from_snapshot(transition.snapshot)
-        self._current_state = transition.state
-        self._current_transition = transition
+        self._set_current_transition(transition)
 
-    def revert_to_transition(self, transition_id: int):
+    def revert_to_transition(self, transition_id: int) -> TrajectoryTransition:
         transition = self._transitions.get(transition_id)
         if transition:
-            self.set_current_transition(transition)
+            self.log_info(f"Reverting to transition {transition_id}")
+            self._set_current_transition(transition)
+            self.workspace.restore_from_snapshot(transition.snapshot)
+            return transition
         else:
-            raise ValueError("Invalid state index for reversion")
+            logger.warning(
+                f"Tried to revert to transition {transition_id} but it does not exist. Existing transition ids: {self._transitions.keys()}"
+            )
+            raise ValueError(
+                f"Could not revert to transition {transition_id} as it does not exist."
+            )
 
-    def transition_to(self, new_state: AgenticState):
+    def _create_transition(
+        self,
+        state: AgenticState,
+        snapshot: dict | None = None,
+        parent: TrajectoryTransition | None = None,
+    ):
+        transition = TrajectoryTransition(
+            id=len(self._transitions) + 1, state=state, snapshot=snapshot, parent=parent
+        )
+        self.trajectory.create_transition(transition)
+        self._transitions[transition.id] = transition
+        return transition
+
+    def clone_current_transition(self):
+        cloned_state = self.state.clone()
+        cloned_transition = self._create_transition(
+                state=cloned_state,
+                snapshot=self._current_transition.snapshot,
+                parent=self._current_transition.parent,
+            )
+        self._set_current_transition(cloned_transition)
+        return cloned_transition
+
+    def transition_to(self, new_state: AgenticState) -> TrajectoryTransition:
         self.log_info(f"Transitioning from {self.state.name} to {new_state.name}")
 
         if self.transition_count() > self._max_transitions:
@@ -352,7 +387,7 @@ class AgenticLoop:
                 message=f"Max transitions exceeded for state {new_state.name}."
             )
 
-        transition = TrajectoryTransition(
+        transition = self._create_transition(
             state=new_state,
             snapshot=self.workspace.snapshot(),
             parent=self._current_transition,
@@ -361,12 +396,10 @@ class AgenticLoop:
         if self._current_transition:
             self._current_transition.children.append(transition)
 
-        transition = self.trajectory.create_transition(transition)
+        self._set_current_transition(transition)
+        self._set_state_loop(new_state)
 
-        self._transitions[transition.id] = transition
-        self._current_transition = transition
-        self._current_state = new_state
-        self._set_state_loop(self.state)
+        return transition
 
     def transition_count(self, state: AgenticState | None = None) -> int:
         if not state:
@@ -393,7 +426,7 @@ class AgenticLoop:
 
     @property
     def state(self):
-        return self._current_state
+        return self._current_transition.state if self._current_transition else Pending()
 
     @property
     def workspace(self) -> Workspace:
@@ -490,10 +523,23 @@ class AgenticLoop:
 
         return messages
 
-    def _run(self):
-        if not self.is_running():
-            self.log_info("Loop is not running.")
-            return
+    def _run(self) -> TrajectoryTransition | None:
+        """
+        Run the loop for one iteration.
+
+        Returns:
+
+        """
+        if self.is_finished():
+            self.log_info("Loop already finished.")
+            return None
+
+        if isinstance(self.state, Pending):
+            logger.info("Initializing first state.")
+            initial_state = self._transition_rules.create_initial_state(
+                **(self._input_data or {})
+            )
+            return self.transition_to(initial_state)
 
         action, cost, input_tokens, output_tokens = self._next_action()
 
@@ -510,19 +556,19 @@ class AgenticLoop:
                 output_tokens=output_tokens,
             )
         )
-        self.trajectory.save_transition(self._current_transition)
+        self.trajectory.update_transition(self._current_transition)
 
         if not response.trigger:
             self.log_info(
                 f"{self.state.name}: No trigger in action response. Staying in the same state."
             )
-            return
+            return None
 
         self.log_info(f"Received response with trigger {response.trigger}")
 
         if response.trigger == "retry":
             self.log_info(f"Retry requested. {response.retry_message}")
-            return
+            return None
 
         try:
             next_state = self._transition_rules.next_state(
@@ -549,7 +595,7 @@ class AgenticLoop:
         else:
             self._rejections = 0
 
-        self.transition_to(next_state)
+        return self.transition_to(next_state)
 
     @property
     def instructor_mode(self):
@@ -703,7 +749,7 @@ class AgenticLoop:
         try:
             cost = completion_cost(
                 completion_response=completion_response,
-                model="claude-3-5-sonnet-20240620",
+                model=self.state.model,
             )
         except Exception as e:
             self.log_info(f"Error calculating completion cost: {e}")
@@ -727,8 +773,15 @@ class AgenticLoop:
         if not self._prompt_log_dir:
             return
 
-        transition_no = self.transition_count()
-        prompt_path = f"{self._prompt_log_dir}/{transition_no:02d}_{self.state.name}.md"
+        time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        prompt_path = (
+            f"{self._prompt_log_dir}/{self._current_transition.id}_{self.state.name}"
+        )
+        if self.retries() > 0:
+            prompt_path += f"_retry_{self.retries()}"
+
+        prompt_path += f"_{time_str}.md"
 
         with open(prompt_path, "w") as f:
             f.write("\n\n# Completion\n")

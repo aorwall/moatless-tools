@@ -1,4 +1,7 @@
+import os
 import tempfile
+
+import pytest
 
 from moatless import AgenticLoop
 from moatless.benchmark.swebench import create_workspace, load_instance
@@ -6,7 +9,13 @@ from moatless.repository import GitRepository
 from moatless.settings import Settings
 from moatless.trajectory import Trajectory
 
+pytest.mark.api_keys_required = pytest.mark.skipif(
+    "VOYAGE_API_KEY" not in os.environ or os.environ["VOYAGE_API_KEY"] == "",
+    reason="VOYAGE_API_KEY environment variable is required"
+)
 
+
+@pytest.mark.api_keys_required
 def test_rerun_save_and_load_trajectory():
     trajectory = Trajectory.load("tests/trajectories/django__django_16379.json")
     Settings.cheap_model = None  # To not use an LLM when generating commit messages

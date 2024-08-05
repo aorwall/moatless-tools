@@ -98,7 +98,7 @@ class IdentifyCode(AgenticState):
     def model_dump(self, **kwargs):
         return super().model_dump(**kwargs)
 
-    def handle_action(self, action: Identify) -> ActionResponse:
+    def _execute_action(self, action: Identify) -> ActionResponse:
         if action.identified_spans:
             self.file_context.add_files_with_spans(action.identified_spans)
 

@@ -118,7 +118,7 @@ class PlanToCodeWithLines(AgenticState):
         ):
             self.file_context.expand_context_with_related_spans(max_tokens=4000)
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.finish:
             self.file_context.save()
 

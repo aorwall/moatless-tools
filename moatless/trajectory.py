@@ -29,7 +29,7 @@ class TrajectoryAction(BaseModel):
 
 
 class TrajectoryTransition(BaseModel):
-    id: Optional[int] = None
+    id: int
     parent: Optional["TrajectoryTransition"] = None
     children: list["TrajectoryTransition"] = Field(default_factory=list)
     state: AgenticState
@@ -57,6 +57,7 @@ class TrajectoryTransition(BaseModel):
         return data
 
 
+
 class Trajectory:
     def __init__(
         self,
@@ -73,6 +74,8 @@ class Trajectory:
         self._transition_rules = transition_rules
 
         self._transitions: list[dict[str, Any]] = []
+
+        self._current_transition_id = 0
 
         self._info: dict[str, Any] = {}
 
@@ -114,14 +117,13 @@ class Trajectory:
         return self._workspace
 
     def create_transition(self, transition: TrajectoryTransition):
-        transition.id = len(self._transitions) + 1
         self._transitions.append(
             transition.model_dump(exclude_none=True, exclude_unset=True)
         )
         self._maybe_persist()
         return transition
 
-    def save_transition(self, transition: TrajectoryTransition):
+    def update_transition(self, transition: TrajectoryTransition):
         for i, t in enumerate(self._transitions):
             if t["id"] == transition.id:
                 self._transitions[i] = transition.model_dump(
@@ -131,6 +133,10 @@ class Trajectory:
                 return
 
         raise ValueError(f"Transition with id {transition.id} not found")
+
+    def set_current_transition_id(self, transition_id: int):
+        self._current_transition_id = transition_id
+        self._maybe_persist()
 
     def save_info(self, info: dict):
         self._info = info
@@ -160,7 +166,6 @@ class Trajectory:
             states.append(transition["state"]["name"])
         return states
 
-
     def to_dict(self):
         return {
             "name": self._name,
@@ -171,6 +176,7 @@ class Trajectory:
             else None,
             "workspace": self._workspace,
             "initial_message": self._initial_message,
+            "current_transition_id": self._current_transition_id,
             "transitions": self._transitions,
             "info": self._info,
         }

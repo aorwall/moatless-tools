@@ -176,6 +176,10 @@ class FileRepository:
         self._repo_path = repo_path
         self._files: dict[str, CodeFile] = {}
 
+    @property
+    def repo_dir(self):
+        return self._repo_path
+
     def dict(self):
         return {"type": "file", "path": self._repo_path}
 
@@ -184,6 +188,10 @@ class FileRepository:
 
     def restore_from_snapshot(self, snapshot: dict):
         pass
+
+    def restore_from_disk(self):
+        for file_path in self._files.keys():
+            self.get_file(file_path, refresh=True)
 
     @property
     def path(self):
@@ -198,8 +206,8 @@ class FileRepository:
         Args:
 
         """
-        file = self._files.get(file_path)
-        if not file or refresh or from_origin:
+        existing_file = self._files.get(file_path)
+        if not existing_file or refresh or from_origin:
             full_file_path = os.path.join(self._repo_path, file_path)
             if not os.path.exists(full_file_path):
                 logger.warning(f"File not found: {full_file_path}")
@@ -213,13 +221,19 @@ class FileRepository:
                 if parser:
                     content = f.read()
                     module = parser.parse(content)
-                    file = CodeFile(file_path=file_path, content=content, module=module)
+                    found_file = CodeFile(file_path=file_path, content=content, module=module)
                 else:
-                    file = CodeFile(file_path=file_path, content=f.read())
+                    found_file = CodeFile(file_path=file_path, content=f.read())
 
-            if refresh or not from_origin:
-                self._files[file_path] = file
-        return file
+            if not existing_file:
+                existing_file = found_file
+                self._files[file_path] = existing_file
+            elif refresh or not from_origin:
+                existing_file.content = found_file.content
+                existing_file.module = found_file.module
+                existing_file.dirty = False
+
+        return existing_file
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
         file = self._files.get(file_path)

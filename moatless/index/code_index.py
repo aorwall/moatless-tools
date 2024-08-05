@@ -67,7 +67,6 @@ class CodeIndex:
         max_exact_results: int = 5,
     ):
         self._index_name = index_name
-
         self._settings = settings or IndexSettings()
 
         self.max_results = max_results
@@ -157,12 +156,12 @@ class CodeIndex:
             logger.info(f"Loading existing index {index_name} from {persist_dir}.")
             return cls.from_persist_dir(persist_dir, file_repo=file_repo)
 
-        if not os.getenv("INDEX_STORE_URL"):
-            raise ValueError(
-                "INDEX_STORE_URL environment variable must be set to a index store URL to download the index."
-            )
+        if os.getenv("INDEX_STORE_URL"):
+            index_store_url = os.getenv("INDEX_STORE_URL")
+        else:
+            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20240522-voyage-code-2"
 
-        store_url = os.path.join(os.getenv("INDEX_STORE_URL"), f"{index_name}.zip")
+        store_url = os.path.join(index_store_url, f"{index_name}.zip")
         logger.info(f"Downloading existing index {index_name} from {store_url}.")
         return cls.from_url(store_url, persist_dir, file_repo)
 
@@ -699,14 +698,23 @@ class CodeIndex:
                 "category": category,
             }
 
-        reader = SimpleDirectoryReader(
-            input_dir=repo_path,
-            file_metadata=file_metadata_func,
-            input_files=input_files,
-            filename_as_id=True,
-            required_exts=[".py"],  # TODO: Shouldn't be hardcoded and filtered
-            recursive=True,
-        )
+        if self._settings and self._settings.language == "java":
+            required_exts = [".java"]
+        else:
+            required_exts = [".py"]
+
+        try:
+            reader = SimpleDirectoryReader(
+                input_dir=repo_path,
+                file_metadata=file_metadata_func,
+                input_files=input_files,
+                filename_as_id=True,
+                required_exts=required_exts,
+                recursive=True,
+            )
+        except Exception as e:
+            logger.exception(f"Failed to create reader with input_dir {repo_path}, input_files {input_files} and required_exts {required_exts}.")
+            raise e
 
         embed_pipeline = IngestionPipeline(
             transformations=[self._embed_model],
@@ -737,6 +745,7 @@ class CodeIndex:
                 )
 
         splitter = EpicSplitter(
+            language=self._settings.language,
             min_chunk_size=self._settings.min_chunk_size,
             chunk_size=self._settings.chunk_size,
             hard_token_limit=self._settings.hard_token_limit,
