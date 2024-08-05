@@ -1,7 +1,9 @@
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from moatless.find import SearchCode
 from moatless.state import AgenticState
 from moatless.types import (
     ActionRequest,
@@ -60,7 +62,7 @@ class Decision(ActionRequest):
         description="Set to true if all the relevant code have been identified.",
     )
 
-    search_suggestions: str | None = Field(
+    search_suggestions: Optional[str] = Field(
         None,
         description="Suggestions on how to find the relevant code not found in the file context.",
     )
@@ -77,6 +79,7 @@ class DecideRelevance(AgenticState):
     def __init__(
         self,
         expand_context: bool = True,
+        include_message_history=False,
         finish_after_relevant_count: int = 2,
         max_prompt_file_tokens: int = 4000,
         **data,
@@ -85,11 +88,11 @@ class DecideRelevance(AgenticState):
             expand_context=expand_context,
             finish_after_relevant_count=finish_after_relevant_count,
             max_prompt_file_tokens=max_prompt_file_tokens,
-            include_message_history=False,
+            include_message_history=include_message_history,
             **data,
         )
 
-    def handle_action(self, action: Decision) -> ActionResponse:
+    def _execute_action(self, action: Decision) -> ActionResponse:
         if action.complete and action.relevant:
             return ActionResponse.transition("finish")
 
@@ -106,7 +109,7 @@ class DecideRelevance(AgenticState):
 
     def _relevant_count(self) -> int:
         relevant_count = 0
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
         for transition in previous_transitions:
             for previous_action in transition.actions:
                 if (
@@ -123,7 +126,7 @@ class DecideRelevance(AgenticState):
         return MAYBE_FINISH_SYSTEM_PROMPT
 
     def _last_scratch_pad(self):
-        previous_searches = self.loop.trajectory.get_transitions("SearchCode")
+        previous_searches = self.loop.get_previous_transitions(SearchCode)
         logger.info(f"Previous searches: {len(previous_searches)}")
         if previous_searches and previous_searches[-1].actions:
             last_search = previous_searches[-1].actions[-1].action

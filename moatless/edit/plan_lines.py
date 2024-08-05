@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
@@ -30,21 +31,25 @@ class ApplyChange(ActionRequest):
 
     thoughts: str = Field(..., description="Your thoughts on the code change.")
 
-    instructions: str | None = Field(
+    instructions: Optional[str] = Field(
         None, description="Instructions to do the code change."
     )
-    file_path: str | None = Field(
+    file_path: Optional[str] = Field(
         None, description="The file path of the code to be updated."
     )
-    start_line: int | None = Field(
+    start_line: Optional[int] = Field(
         None, description="The start line of the code to be updated."
     )
-    end_line: int | None = Field(
+    end_line: Optional[int] = Field(
         None, description="The end line of the code to be updated."
     )
 
-    reject: str | None = Field(..., description="Reject the request and explain why.")
-    finish: str | None = Field(None, description="Finish the request and explain why")
+    reject: Optional[str] = Field(
+        ..., description="Reject the request and explain why."
+    )
+    finish: Optional[str] = Field(
+        None, description="Finish the request and explain why"
+    )
 
     model_config = ConfigDict(
         extra="allow",
@@ -52,13 +57,13 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCodeWithLines(AgenticState):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: str | None = Field(
+    diff: Optional[str] = Field(
         None,
         description="The diff of a previous code change.",
     )
@@ -81,17 +86,18 @@ class PlanToCodeWithLines(AgenticState):
 
     def __init__(
         self,
-        message: str | None = None,
-        diff: str | None = None,
+        message: Optional[str] = None,
+        diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
         max_iterations: int = 5,
+        include_message_history=True,
         **data,
     ):
         super().__init__(
             message=message,
             diff=diff,
             lint_messages=lint_messages,
-            include_message_history=True,
+            include_message_history=include_message_history,
             max_iterations=max_iterations,
             **data,
         )
@@ -108,11 +114,11 @@ class PlanToCodeWithLines(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and len(self.loop.trajectory.get_transitions(self.name)) == 0
+            and self.loop.transition_count(self) == 0
         ):
             self.file_context.expand_context_with_related_spans(max_tokens=4000)
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.finish:
             self.file_context.save()
 
@@ -256,7 +262,7 @@ class PlanToCodeWithLines(AgenticState):
 
         content = self.loop.trajectory.initial_message or ""
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

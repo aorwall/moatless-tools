@@ -10,8 +10,8 @@ from moatless.edit.edit import EditCode
 from moatless.edit.plan import PlanToCode
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
-from moatless.find.search_v2 import SearchCode
-from moatless.loop import Transition
+from moatless.find.search import SearchCode
+from moatless.transition_rules import TransitionRule
 from moatless.state import Finished, Rejected
 from moatless.transitions import (
     search_and_code_transitions,
@@ -177,8 +177,8 @@ def evaluate_search():
         },
         initial_state=SearchCode,
         transitions=[
-            Transition(source=SearchCode, dest=Finished, trigger="did_search"),
-            Transition(source=SearchCode, dest=Finished, trigger="finish"),
+            TransitionRule(source=SearchCode, dest=Finished, trigger="did_search"),
+            TransitionRule(source=SearchCode, dest=Finished, trigger="finish"),
         ],
     )
 
@@ -298,19 +298,19 @@ def evaluate_plan(previous_trajectory_dir: Optional[str] = None):
         },
         initial_state=SearchCode,
         transitions=[
-            Transition(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
-            Transition(source=IdentifyCode, dest=SearchCode, trigger="search"),
-            Transition(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
-            Transition(source=DecideRelevance, dest=SearchCode, trigger="search"),
-            Transition(
+            TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),
+            TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
+            TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
+            TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
+            TransitionRule(
                 source=DecideRelevance,
                 dest=PlanToCode,
                 trigger="finish",
                 exclude_fields={"message"},
             ),
-            Transition(source=PlanToCode, dest=Finished, trigger="edit_code"),
-            Transition(source=PlanToCode, dest=Rejected, trigger="finish"),
-            Transition(source=PlanToCode, dest=Rejected, trigger="reject"),
+            TransitionRule(source=PlanToCode, dest=Finished, trigger="edit_code"),
+            TransitionRule(source=PlanToCode, dest=Rejected, trigger="finish"),
+            TransitionRule(source=PlanToCode, dest=Rejected, trigger="reject"),
         ],
     )
 

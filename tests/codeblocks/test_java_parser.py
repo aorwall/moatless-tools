@@ -14,7 +14,6 @@ def _verify_parsing(content, assertion, apply_gpt_tweaks=True, debug=True):
 
 
 def test_override_function():
-
     content = """public class Foo {
     @Override
     public void helloWorld() {

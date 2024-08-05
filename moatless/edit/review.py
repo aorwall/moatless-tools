@@ -9,7 +9,6 @@ from moatless.edit.prompt import (
     CODER_SYSTEM_PROMPT,
     SELECT_SPAN_SYSTEM_PROMPT,
     CODER_FINAL_SYSTEM_PROMPT,
-    INCLUDE_SPAN_SYSTEM_PROMPT,
 )
 from moatless.state import AgenticState
 from moatless.types import (
@@ -142,12 +141,13 @@ class ReviewCode(AgenticState):
         max_prompt_file_tokens: int = 4000,
         max_tokens_in_edit_prompt: int = 500,
         max_iterations: int = 8,
+        include_message_history=True,
         **data,
     ):
         super().__init__(
             message=message,
             diff=diff,
-            include_message_history=True,
+            include_message_history=include_message_history,
             max_prompt_file_tokens=max_prompt_file_tokens,
             max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
             max_iterations=max_iterations,
@@ -170,7 +170,7 @@ class ReviewCode(AgenticState):
 
         return None
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info(f"Review suggested after diff, will finish")
@@ -373,10 +373,7 @@ class ReviewCode(AgenticState):
 
     def system_prompt(self) -> str:
         return (
-            CODER_SYSTEM_PROMPT
-            + SELECT_SPAN_SYSTEM_PROMPT
-            + INCLUDE_SPAN_SYSTEM_PROMPT
-            + CODER_FINAL_SYSTEM_PROMPT
+            CODER_SYSTEM_PROMPT + SELECT_SPAN_SYSTEM_PROMPT + CODER_FINAL_SYSTEM_PROMPT
         )
 
     def to_message(self) -> str:
@@ -407,7 +404,7 @@ class ReviewCode(AgenticState):
         else:
             content = ""
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

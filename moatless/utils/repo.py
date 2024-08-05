@@ -172,6 +172,20 @@ def checkout_commit(repo_dir, commit_hash):
         raise e
 
 
+def create_and_checkout_new_branch(repo_dir: str, branch_name: str):
+    try:
+        subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(e.stderr)
+        raise e
+
+
 def setup_repo(repo_url, repo_dir, branch_name="master"):
     maybe_clone(repo_url, repo_dir)
     clean_and_reset_state(repo_dir)

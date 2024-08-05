@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Set
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from pydantic.v1 import PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
@@ -434,17 +434,19 @@ class FileContext(BaseModel):
     def from_dict(cls, repo_dir: str, data: Dict):
         repo = FileRepository(repo_dir)
         instance = cls(max_tokens=data.get("max_tokens", 4000), repo=repo)
-        for file_data in data.get("files", []):
+        instance.load_files_from_dict(data.get("files", []))
+        return instance
+
+    def load_files_from_dict(self, files: list[dict]):
+        for file_data in files:
             file_path = file_data["file_path"]
             show_all_spans = file_data.get("show_all_spans", False)
             spans = [ContextSpan(**span) for span in file_data.get("spans", [])]
-            instance._file_context[file_path] = ContextFile(
-                file=instance._repo.get_file(file_path),
+            self._file_context[file_path] = ContextFile(
+                file=self._repo.get_file(file_path),
                 spans=spans,
                 show_all_spans=show_all_spans,
             )
-
-        return instance
 
     def model_dump(self, **kwargs):
         if "exclude_none" not in kwargs:
@@ -460,6 +462,10 @@ class FileContext(BaseModel):
         dict = self.model_dump()
         del dict["max_tokens"]
         return dict
+
+    def restore_from_snapshot(self, snapshot: dict):
+        self._file_context = {}
+        self.load_files_from_dict(snapshot.get("files", []))
 
     def to_files_with_spans(self) -> List[FileWithSpans]:
         return [

@@ -21,6 +21,7 @@ def create_clarify(
     clarify._set_loop(mock_loop)
     return clarify, mock_loop
 
+
 @pytest.mark.skip
 def test_line_span_in_end_of_class(mocker):
     instance_id = "scikit-learn__scikit-learn-13439"
@@ -33,7 +34,7 @@ def test_line_span_in_end_of_class(mocker):
 
     request = LineNumberClarification(start_line=562, end_line=563, thoughts="")
 
-    response = coding.handle_action(request)
+    response = coding._execute_action(request)
     assert response == ActionResponse(
         trigger="edit_code",
         output={
@@ -62,7 +63,7 @@ def test_impl_span(mocker):
         start_line=start_line, end_line=end_line, thoughts=""
     )
 
-    response = coding.handle_action(request)
+    response = coding._execute_action(request)
     assert response == ActionResponse(
         trigger="edit_code",
         output={
@@ -91,7 +92,7 @@ def test_line_span_in_class(mocker):
         start_line=start_line, end_line=end_line, thoughts=""
     )
 
-    response = coding.handle_action(request)
+    response = coding._execute_action(request)
     assert response == ActionResponse(
         trigger="edit_code",
         output={

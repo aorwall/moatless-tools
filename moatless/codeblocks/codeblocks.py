@@ -192,7 +192,7 @@ class RelationshipType(str, Enum):
 
 class Relationship(BaseModel):
     scope: ReferenceScope = Field(description="The scope of the reference.")
-    identifier: str | None = Field(default=None, description="ID")
+    identifier: Optional[str] = Field(default=None, description="ID")
     type: RelationshipType = Field(
         default=RelationshipType.USES, description="The type of the reference."
     )
@@ -240,7 +240,7 @@ class Relationship(BaseModel):
 
 class Parameter(BaseModel):
     identifier: str = Field(description="The identifier of the parameter.")
-    type: str | None = Field(description="The type of the parameter.")
+    type: Optional[str] = Field(description="The type of the parameter.")
 
 
 class SpanType(str, Enum):
@@ -303,7 +303,7 @@ class ValidationError(BaseModel):
 class CodeBlock(BaseModel):
     content: str
     type: CodeBlockType
-    identifier: str | None = None
+    identifier: Optional[str] = None
     parameters: list[Parameter] = []  # TODO: Move to Function sub class
     relationships: list[Relationship] = []
     span_ids: set[str] = set()
@@ -461,7 +461,7 @@ class CodeBlock(BaseModel):
 
     def show_related_spans(
         self,
-        span_id: str | None = None,  # TODO: Set max tokens to show
+        span_id: Optional[str] = None,  # TODO: Set max tokens to show
     ):
         related_spans = self.find_related_spans(span_id)
         for span in related_spans:
@@ -699,12 +699,12 @@ class CodeBlock(BaseModel):
     def to_prompt(
         self,
         span_ids: set[str] | None = None,
-        start_line: int | None = None,
-        end_line: int | None = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
         show_outcommented_code: bool = True,
         outcomment_code_comment: str = "...",
         show_span_id: bool = False,
-        current_span_id: str | None = None,
+        current_span_id: Optional[str] = None,
         show_line_numbers: bool = False,
         exclude_block_types: list[CodeBlockType] | None = None,
         include_block_types: list[CodeBlockType] | None = None,
@@ -1174,7 +1174,7 @@ class CodeBlock(BaseModel):
         return None
 
     def find_last_by_end_line(
-        self, end_line: int, tokens: int | None = None
+        self, end_line: int, tokens: Optional[int] = None
     ) -> Optional["CodeBlock"]:
         last_child = None
         for child in self.children:
@@ -1243,7 +1243,7 @@ class CodeBlock(BaseModel):
                     line_number, tokens - self.tokens
                 )
 
-    def tokens_from_line(self, line_number: int) -> int | None:
+    def tokens_from_line(self, line_number: int) -> Optional[int]:
         if not self.previous or self.previous.end_line < line_number:
             return self.tokens
 
@@ -1301,7 +1301,7 @@ class CodeBlock(BaseModel):
     def is_within_lines(self, start_line: int, end_line: int):
         return self.start_line >= start_line and self.end_line <= end_line
 
-    def has_content(self, query: str, span_id: str | None = None):
+    def has_content(self, query: str, span_id: Optional[str] = None):
         if (
             self.content
             and query in self.content

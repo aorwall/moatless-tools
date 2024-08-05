@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -77,7 +78,7 @@ CHAIN_OF_THOUGHT_PROMPT = "Please provide your thoughts on the code change, if a
 
 
 class CodeChange(ActionRequest):
-    scratch_pad: str | None = Field(
+    scratch_pad: Optional[str] = Field(
         default=None, description="The thoughts on the code change."
     )
     replace: str = Field(..., description="The code to replace the existing code with.")
@@ -87,7 +88,7 @@ class CodeChange(ActionRequest):
 class EditCode(AgenticState):
     instructions: str
     file_path: str
-    span_id: str | None = None
+    span_id: Optional[str] = None
     start_line: int
     end_line: int
 
@@ -101,7 +102,7 @@ class EditCode(AgenticState):
         description="The maximum number of tokens in the file context to show in the prompt.",
     )
 
-    _code_to_replace: str | None = PrivateAttr(default=None)
+    _code_to_replace: Optional[str] = PrivateAttr(default=None)
     _retry: int = PrivateAttr(default=0)
     _messages: list[Message] = PrivateAttr(default_factory=list)
 
@@ -109,20 +110,21 @@ class EditCode(AgenticState):
         self,
         instructions: str,
         file_path: str,
-        span_id: str | None = None,
-        start_line: int | None = None,
-        end_line: int | None = None,
+        span_id: Optional[str] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
         show_initial_message: bool = True,
         max_iterations: int = 8,
         show_file_context: bool = True,
         verify: bool = True,
+        include_message_history=True,
         chain_of_thought: bool = False,
         max_prompt_file_tokens: int = 4000,
         **data,
     ):
         assert "model" in data
         super().__init__(
-            include_message_history=True,
+            include_message_history=include_message_history,
             show_initial_message=show_initial_message,
             max_iterations=max_iterations,
             show_file_context=show_file_context,
@@ -146,7 +148,7 @@ class EditCode(AgenticState):
         lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
         self._code_to_replace = "\n".join(lines_to_replace)
 
-    def handle_action(self, content: Content) -> ActionResponse:
+    def _execute_action(self, content: Content) -> ActionResponse:
         self._messages.append(AssistantMessage(content=content.content))
 
         scratch_pad = None

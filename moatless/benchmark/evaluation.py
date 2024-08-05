@@ -7,12 +7,14 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Optional
 
 import instructor
 import litellm
 import pandas as pd
 from tqdm.auto import tqdm
 
+from moatless.transition_rules import TransitionRules
 from moatless.benchmark.swebench import (
     found_in_alternative_spans,
     found_in_expected_spans,
@@ -26,11 +28,11 @@ from moatless.benchmark.utils import (
     trace_metadata,
 )
 from moatless.file_context import FileContext
-from moatless.loop import AgenticLoop, Transitions
-from moatless.repository import FileRepository
+from moatless.loop import AgenticLoop
+from moatless.repository import FileRepository, GitRepository
 from moatless.workspace import Workspace
 
-logger = logging.getLogger("Evaluator")
+logger = logging.getLogger(__name__)
 
 TEST_SUBSET = [
     "astropy__astropy-14995",
@@ -73,13 +75,15 @@ class Evaluation:
         repo_base_dir: str,
         evaluations_dir: str,
         evaluation_name: str,
-        transitions: Transitions,
+        transitions: TransitionRules,
         instructor_mode: instructor.Mode | None = None,
         max_cost: float = 0.5,
+        max_transitions: int = 25,
+        max_expansions: int = 2,
         max_file_context_tokens: int = 16000,
-        litellm_callback: str | None = None,
-        previous_trajectory_dir: str | None = None,
-        retry_state: str | None = None,
+        litellm_callback: Optional[str] = None,
+        previous_trajectory_dir: Optional[str] = None,
+        retry_state: Optional[str] = None,
         num_workers: int = 1,
         detailed_report: bool = False,
     ):
@@ -92,6 +96,8 @@ class Evaluation:
         self.evaluation_name = evaluation_name
         self.max_file_context_tokens = max_file_context_tokens
         self.max_cost = max_cost
+        self.max_expansions = max_expansions
+        self.max_transitions = max_transitions
         self.instructor_mode = instructor_mode
 
         self.transitions = transitions
@@ -106,9 +112,11 @@ class Evaluation:
         self.previous_trajectory_dir = previous_trajectory_dir
         self.retry_state = retry_state
 
+        logger.info(f"Save trajectories to directory: {self.trajectory_dir}")
         if not os.path.exists(self.trajectory_dir):
             os.makedirs(self.trajectory_dir)
 
+        logger.info(f"Save logs to directory: {self.logs_dir}")
         if not os.path.exists(self.logs_dir):
             os.makedirs(self.logs_dir)
 
@@ -123,11 +131,11 @@ class Evaluation:
             with open(os.path.join(result_file)) as f:
                 self.report = json.load(f)
         else:
-            self.report = {"resolved": []}
+            self.report = {"resolved_ids": []}
 
     def run_evaluation_with_moatless_dataset(
         self,
-        resolved_by: int | None = None,
+        resolved_by: Optional[int] = None,
         use_test_subset: bool = False,
         instance_ids: list[str] | None = None,
     ):
@@ -204,7 +212,7 @@ class Evaluation:
         repo_dir = setup_swebench_repo(instance)
         persist_dir = os.path.join(self.index_store_dir, get_repo_dir_name(instance_id))
         workspace = Workspace.from_dirs(
-            repo_dir=repo_dir, index_dir=persist_dir, max_file_context_tokens=16000
+            repo_path=repo_dir, index_dir=persist_dir, max_file_context_tokens=16000
         )
 
         problem_statement = instance["problem_statement"]
@@ -225,7 +233,7 @@ class Evaluation:
         )
 
         loop = AgenticLoop(
-            transitions=self.transitions,
+            transition_rules=self.transitions,
             workspace=workspace,
             metadata=metadata,
             mocked_actions=previous_actions,
@@ -233,6 +241,8 @@ class Evaluation:
             trajectory_path=trajectory_path,
             prompt_log_dir=prompt_log_dir,
             max_cost=self.max_cost,
+            max_transitions=self.max_transitions,
+            max_actions=self.max_expansions,
             instructor_mode=self.instructor_mode,
         )
 
@@ -251,18 +261,27 @@ class Evaluation:
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
 
         info["duration"] = time.time() - start_time
-        info["total_cost"] = loop.trajectory.total_cost()
+        info["total_cost"] = loop.total_cost()
 
-        workspace.save()
+        if isinstance(workspace.file_repo, GitRepository):
+            diff = workspace.file_repo.diff()
+        else:
+            workspace.save()
 
-        output = subprocess.run(
-            ["git", "diff"],
-            capture_output=True,
-            text=True,
-            cwd=repo_dir,
-        )
+            output = subprocess.run(
+                ["git", "diff"],
+                capture_output=True,
+                text=True,
+                cwd=repo_dir,
+            )
 
-        info["submission"] = output.stdout
+            if output:
+                diff = output.stdout
+            else:
+                diff = None
+
+        info["submission"] = diff
+
         loop.trajectory.save_info(info)
         return loop.trajectory.to_dict()
 
@@ -350,6 +369,8 @@ class Evaluation:
 
         results = []
         transition_results = []
+
+        logger.info(f"Processing {len(instances)} instances with {len(repo_groups)} repos with {self.num_workers} workers")
 
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=self.num_workers
@@ -469,10 +490,15 @@ class Evaluation:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
 
-    def to_result(self, instance: dict, trajectory: dict) -> tuple[list, list]:
+    def to_result(self, instance: dict, trajectory: dict) -> tuple[dict, list]:
         info = trajectory["info"]
 
-        resolved = info.get("instance_id", "") in self.report["resolved"]
+        if "resolved_ids" in self.report and instance["instance_id"] in self.report["resolved_ids"]:
+            result_status = "resolved"
+        else:
+            result_status = info.get("status")
+
+        resolved = result_status == "resolved"
 
         try:
             transitions = []
@@ -482,6 +508,7 @@ class Evaluation:
                 "total_cost": info.get("total_cost", 0),
                 "resolved_by": (len(instance.get("resolved_by", []))),
                 "status": None,
+                "result_status": result_status,
                 "transitions": len(trajectory["transitions"]),
                 "edited": False,
                 "planned": False,
@@ -512,13 +539,32 @@ class Evaluation:
             id_iterations = 0
             search_iterations = 0
 
+            selected_transition_ids = []
+            if "current_transition_id" in trajectory:
+                transitions_map = {t["id"]: t for t in trajectory["transitions"]}
+
+                transition = transitions_map.get(trajectory["current_transition_id"])
+                while transition:
+                    selected_transition_ids.append(transition["id"])
+                    if "parent_id" in transition:
+                        transition = transitions_map.get(transition["parent_id"])
+                    else:
+                        break
+
+            logger.info(f"Selected transitions: {selected_transition_ids}")
+
             if instance.get("expected_spans"):
                 for transition in trajectory["transitions"]:
-                    if transition["name"] not in result:
-                        result[transition["name"]] = 0
-                        result[f"{transition['name']}_cost"] = 0
+                    if selected_transition_ids and transition["id"] not in selected_transition_ids:
+                        continue
 
-                    result[transition["name"]] += 1
+                    state_name = transition["state"]["name"]
+
+                    if state_name not in result:
+                        result[state_name] = 0
+                        result[f"{state_name}_cost"] = 0
+
+                    result[state_name] += 1
 
                     expected_span_str = ""
                     for file_path, span_ids in instance["expected_spans"].items():
@@ -527,7 +573,7 @@ class Evaluation:
                     transition_result = {
                         "instance_id": instance["instance_id"],
                         "resolved": resolved,
-                        "name": transition["name"],
+                        "name": state_name,
                         "cost": 0,
                         "expected_spans": expected_span_str,
                         "actual_spans": "",
@@ -537,14 +583,14 @@ class Evaluation:
                         continue
 
                     for traj_action in transition["actions"]:
-                        result[f"{transition['name']}_cost"] += traj_action.get(
+                        result[f"{state_name}_cost"] += traj_action.get(
                             "completion_cost", 0
                         )
                         transition_result["cost"] += traj_action.get(
                             "completion_cost", 0
                         )
 
-                    if transition["name"] == "SearchCode":
+                    if state_name == "SearchCode":
                         search_iterations += 1
 
                         action = transition["actions"][-1]
@@ -570,57 +616,40 @@ class Evaluation:
                                 ) or search_request.get("function_names"):
                                     result["p_function"] += 1
 
-                        if "output" in action and action.get("output"):
-                            output = action["output"]
+                    if state_name == "IdentifyCode":
+                        id_iterations += 1
 
-                            if "query" in output:
-                                result["p_query"] += 1
-
-                            if "file_pattern" in output:
-                                result["p_file"] += 1
-
-                            if "code_snippet" in output:
-                                result["p_code"] += 1
-
-                            if "class_name" in output or "class_names" in output:
-                                result["p_class"] += 1
-
-                            if "function_name" in output or "function_names" in output:
-                                result["p_function"] += 1
-
-                            if output.get("ranked_spans"):
-                                for ranked_span in output["ranked_spans"]:
-                                    if (
+                        state = transition["state"]
+                        if state.get("ranked_spans"):
+                            for ranked_span in state["ranked_spans"]:
+                                if (
                                         ranked_span["file_path"]
                                         not in search_results_spans
-                                    ):
-                                        search_results_spans[
-                                            ranked_span["file_path"]
-                                        ] = []
+                                ):
                                     search_results_spans[
                                         ranked_span["file_path"]
-                                    ].append(ranked_span["span_id"])
+                                    ] = []
+                                search_results_spans[
+                                    ranked_span["file_path"]
+                                ].append(ranked_span["span_id"])
 
-                                if not result["found_in_search"] and (
+                            if not result["found_in_search"] and (
                                     found_in_expected_spans(
                                         instance, search_results_spans
                                     )
                                     or found_in_alternative_spans(
-                                        instance, search_results_spans
-                                    )
-                                ):
-                                    result["found_in_search"] = search_iterations
+                                instance, search_results_spans
+                            )
+                            ):
+                                result["found_in_search"] = search_iterations
 
-                                if not result["file_in_search"]:
-                                    missing_files = get_missing_files(
-                                        instance["expected_spans"],
-                                        search_results_spans,
-                                    )
-                                    if not missing_files:
-                                        result["file_in_search"] = search_iterations
-
-                    if transition["name"] == "IdentifyCode":
-                        id_iterations += 1
+                            if not result["file_in_search"]:
+                                missing_files = get_missing_files(
+                                    instance["expected_spans"],
+                                    search_results_spans,
+                                )
+                                if not missing_files:
+                                    result["file_in_search"] = search_iterations
 
                         action = transition["actions"][-1]
                         if action.get("action"):
@@ -672,7 +701,7 @@ class Evaluation:
                                 result.get("expected_identified") or 1000,
                             )
 
-                    if transition["name"] == "PlanToCode":
+                    if state_name == "PlanToCode":
                         action = transition["actions"][-1]["action"]
                         if action.get("action") == "review":
                             result["review"] = True
@@ -700,40 +729,40 @@ class Evaluation:
                         ):
                             result["planned"] = True
 
-                    if transition["name"] == "EditCode":
+                    if state_name == "EditCode":
                         result["edit_retries"] = len(transition["actions"]) - 1
 
                         action = transition["actions"][-1]
-                        output = action.get("output", {})
+                        edited = action.get("trigger") == "finish"
 
-                        if output:
-                            edited = output.get("diff")
+                        if edited and "file_path" in transition["state"]:
+                            file_path = transition["state"]["file_path"]
+                            if file_path not in edited_spans:
+                                edited_spans[file_path] = []
+                            edited_spans[file_path].append(
+                                transition["state"]["span_id"]
+                            )
+                            transition_result["actual_spans"] = (
+                                f"{file_path}: {transition['state']['span_id']} "
+                            )
 
-                            if edited:
-                                result["has_diff"] = True
-
-                            for lint in output.get("verification_errors", []):
-                                lint_codes.add(lint["code"])
-
-                            if edited and "file_path" in transition["state"]:
-                                file_path = transition["state"]["file_path"]
-                                if file_path not in edited_spans:
-                                    edited_spans[file_path] = []
-                                edited_spans[file_path].append(
-                                    transition["state"]["span_id"]
-                                )
-                                transition_result["actual_spans"] = (
-                                    f"{file_path}: {transition['state']['span_id']} "
-                                )
-
-                            if not result.get("edited") and (
+                        if not result.get("edited") and (
                                 found_in_expected_spans(
                                     instance,
                                     edited_spans,
                                 )
                                 or found_in_alternative_spans(instance, edited_spans)
-                            ):
-                                result["edited"] = True
+                        ):
+                            result["edited"] = True
+
+
+                        output = action.get("output", {})
+                        if output:
+                            if edited:
+                                result["has_diff"] = True
+
+                            for lint in output.get("verification_errors", []):
+                                lint_codes.add(lint["code"])
 
                     transitions.append(transition_result)
 
@@ -751,9 +780,8 @@ class Evaluation:
 
             result["lints"] = ",".join(lint_codes)
 
-            if info.get("instance_id", "") in self.report["resolved"]:
-                result["status"] = "resolved"
-            elif result["edited"]:
+
+            if result["edited"]:
                 result["status"] = "edited"
             elif result["identified"]:
                 result["status"] = "identified"
@@ -774,7 +802,7 @@ class Evaluation:
 
         return result, transitions
 
-    def read_trajectory(self, path) -> dict | None:
+    def read_trajectory(self, path) -> Optional[dict]:
         if os.path.exists(path):
             with open(path) as f:
                 return json.load(f)
@@ -822,13 +850,14 @@ def generate_md_report(trajectory: dict, instance: dict):
 
     for j, step in enumerate(trajectory["transitions"]):
         for i, traj_action in enumerate(step["actions"]):
-            markdown += f"### {j+1} {step['name']} ({i+1})\n\n"
+            state_name = step['state']
+            markdown += f"### {j+1} {state_name} ({i+1})\n\n"
 
             if not traj_action.get("action"):
                 continue
             action = traj_action["action"]
 
-            if step["name"] == "PlanToCode":
+            if state_name == "PlanToCode":
                 if action.get("scratch_pad"):
                     markdown += "*" + action["scratch_pad"] + "*"
 
@@ -855,7 +884,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                     except Exception as e:
                         logger.error(e)
 
-            if step["name"] == "EditCode":
+            if state_name == "EditCode":
                 markdown += "#### LLM Response\n\n"
                 markdown += f"```\n{action.get('content', '')}\n```\n"
 
@@ -873,7 +902,7 @@ def generate_md_report(trajectory: dict, instance: dict):
                         markdown += "#### Message\n\n"
                         markdown += f"{output['message']}\n\n"
 
-            if step["name"] == "ClarifyCodeChange":
+            if state_name == "ClarifyCodeChange":
                 if action.get("thoughts"):
                     markdown += "*" + action["thoughts"] + "*"
 
@@ -881,10 +910,10 @@ def generate_md_report(trajectory: dict, instance: dict):
                     markdown += f"\n* Start Line: {action['output']['start_line']}\n"
                     markdown += f"\n* End Line: {action['output']['end_line']}\n"
 
-            if step["name"] == "Finished":
+            if state_name == "Finished":
                 markdown += f"*{action['properties']['message']}*\n"
 
-            if step["name"] == "Rejected":
+            if state_name == "Rejected":
                 markdown += f"*{action['properties']['message']}*\n"
 
     markdown += "## Alternative patches\n"

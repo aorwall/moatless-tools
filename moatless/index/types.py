@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,10 +13,10 @@ class CodeSnippet:
     tokens: int = None
     language: str = "python"
     span_ids: list[str] = None
-    start_line: int | None = None
-    end_line: int | None = None
-    start_block: str | None = None
-    end_block: str | None = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    start_block: Optional[str] = None
+    end_block: Optional[str] = None
 
 
 class SpanHit(BaseModel):
@@ -53,7 +54,7 @@ class SearchCodeHit(BaseModel):
 
 
 class SearchCodeResponse(BaseModel):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         default=None, description="A message to return to the user."
     )
 

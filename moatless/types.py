@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -47,25 +47,25 @@ class Content(ActionRequest):
 
 class Message(BaseModel):
     role: str
-    content: str | None = None
-    action: ActionRequest | None = Field(default=None)
+    content: Optional[str] = None
+    action: Optional[ActionRequest] = Field(default=None)
 
 
 class AssistantMessage(Message):
     role: str = "assistant"
-    content: str | None = None
-    action: ActionRequest | None = Field(default=None)
+    content: Optional[str] = None
+    action: Optional[ActionRequest] = Field(default=None)
 
 
 class UserMessage(Message):
     role: str = "user"
-    content: str | None = None
+    content: Optional[str] = None
 
 
 class ActionResponse(BaseModel):
-    trigger: str | None = None
-    output: dict[str, Any] | None = None
-    retry_message: str | None = None
+    trigger: Optional[str] = None
+    output: Optional[dict[str, Any]] = None
+    retry_message: Optional[str] = None
 
     @classmethod
     def retry(cls, retry_message: str):
@@ -84,7 +84,7 @@ class ActionResponse(BaseModel):
 class Response(BaseModel):
     status: str
     message: str
-    output: dict[str, Any] | None = None
+    output: Optional[dict[str, Any]] = None
 
 
 class VerificationError(BaseModel):

@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
@@ -34,18 +35,22 @@ class ApplyChange(ActionRequest):
         description="The action to take, possible values are 'modify', 'review', 'finish', 'reject'",
     )
 
-    instructions: str | None = Field(
+    instructions: Optional[str] = Field(
         None, description="Instructions to do the code change."
     )
-    file_path: str | None = Field(
+    file_path: Optional[str] = Field(
         None, description="The file path of the code to be updated."
     )
-    span_id: str | None = Field(
+    span_id: Optional[str] = Field(
         None, description="The span id of the code to be updated."
     )
 
-    reject: str | None = Field(None, description="Reject the request and explain why.")
-    finish: str | None = Field(None, description="Finish the request and explain why")
+    reject: Optional[str] = Field(
+        None, description="Reject the request and explain why."
+    )
+    finish: Optional[str] = Field(
+        None, description="Finish the request and explain why"
+    )
 
     model_config = ConfigDict(
         extra="allow",
@@ -53,13 +58,13 @@ class ApplyChange(ActionRequest):
 
 
 class PlanToCode(AgenticState):
-    message: str | None = Field(
+    message: Optional[str] = Field(
         None,
         description="Message to the coder",
     )
 
     # TODO: Move to a new state handling changes
-    diff: str | None = Field(
+    diff: Optional[str] = Field(
         None,
         description="The diff of a previous code change.",
     )
@@ -96,9 +101,10 @@ class PlanToCode(AgenticState):
 
     def __init__(
         self,
-        message: str | None = None,
-        diff: str | None = None,
+        message: Optional[str] = None,
+        diff: Optional[str] = None,
         lint_messages: list[VerificationError] | None = None,
+        include_message_history=True,
         max_prompt_file_tokens: int = 4000,
         max_tokens_in_edit_prompt: int = 500,
         max_iterations: int = 8,
@@ -111,7 +117,7 @@ class PlanToCode(AgenticState):
             message=message,
             diff=diff,
             lint_messages=lint_messages,
-            include_message_history=True,
+            include_message_history=include_message_history,
             max_prompt_file_tokens=max_prompt_file_tokens,
             max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
             max_iterations=max_iterations,
@@ -126,14 +132,14 @@ class PlanToCode(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and len(self.loop.trajectory.get_transitions(self.name)) == 0
+            and self.loop.transition_count(self) == 0
         ):
             self.file_context.expand_context_with_related_spans(
                 max_tokens=self.max_prompt_file_tokens
             )
             self.file_context.expand_small_classes(max_tokens=1000)
 
-    def handle_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info("Review suggested after diff, will finish")
@@ -170,6 +176,11 @@ class PlanToCode(AgenticState):
         logger.info(
             f"request_for_change(file_path={rfc.file_path}, span_id={rfc.span_id})"
         )
+
+        if not rfc.instructions:
+            return ActionResponse.retry(
+                f"Please provide instructions for the code change."
+            )
 
         context_file = self.file_context.get_file(rfc.file_path)
         if not context_file:
@@ -305,11 +316,11 @@ class PlanToCode(AgenticState):
         messages: list[Message] = []
 
         if self.loop.trajectory.initial_message:
-            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
+            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>\n"
         else:
             content = ""
 
-        previous_transitions = self.loop.trajectory.get_transitions(str(self))
+        previous_transitions = self.loop.get_previous_transitions(self)
 
         for transition in previous_transitions:
             new_message = transition.state.to_message()

@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from networkx import DiGraph
 from pydantic import (
@@ -14,10 +15,10 @@ logger = logging.getLogger(__name__)
 class Module(CodeBlock):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    file_path: str | None = None
+    file_path: Optional[str] = None
     content: str = None
     spans_by_id: dict[str, BlockSpan] = {}
-    language: str | None = None
+    language: Optional[str] = None
     parent: CodeBlock | None = None
 
     _graph: DiGraph = None  # TODO: Move to central CodeGraph
@@ -101,7 +102,7 @@ class Module(CodeBlock):
 
         return True
 
-    def find_related_span_ids(self, span_id: str | None = None) -> set[str]:
+    def find_related_span_ids(self, span_id: Optional[str] = None) -> set[str]:
         related_span_ids = set()
 
         blocks = self.find_blocks_by_span_id(span_id)
