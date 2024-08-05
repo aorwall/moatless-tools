@@ -36,6 +36,7 @@ from moatless.types import (
     Usage,
     UserMessage,
 )
+from moatless.utils.llm_utils import instructor_mode_by_model
 from moatless.workspace import Workspace
 
 logger = logging.getLogger("Loop")
@@ -528,31 +529,6 @@ class AgenticLoop:
             [s for s in self._state_history.values() if s.name == state.name]
         )
 
-    def get_previous_states(self, state: AgenticState | None):
-        """
-        Retrieves previous states of the same type as the given state.
-        If no state is provided, it returns all previous states.
-
-        Args:
-            state (AgenticState | None): The state to filter by. If None, all previous states are returned.
-
-        Returns:
-            list: A list of previous states, filtered by type if a state is provided.
-        """
-        previous_states = []
-        current_state = self.state
-
-        while current_state and current_state.previous_state:
-            if not state or isinstance(current_state.previous_state, type(state)):
-                previous_states.insert(0, current_state.previous_state)
-            current_state = current_state.previous_state
-
-        self.log_info(
-            f"Found {len(previous_states)} previous states of type {state.__class__.__name__ if state else 'all types'}"
-        )
-
-        return previous_states
-
     @property
     def state(self):
         return self._current_state if self._current_state else Pending()
@@ -657,16 +633,7 @@ class AgenticLoop:
         if self._instructor_mode:
             return self._instructor_mode
 
-        if "gpt" in self.state.model:
-            return instructor.Mode.TOOLS
-
-        if self.state.model.startswith("claude"):
-            return instructor.Mode.ANTHROPIC_TOOLS
-
-        if self.state.model.startswith("openrouter/anthropic/claude"):
-            return instructor.Mode.TOOLS
-
-        return instructor.Mode.JSON
+        return instructor_mode_by_model(self.state.model)
 
     def _next_mock_action(
         self,

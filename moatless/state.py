@@ -131,6 +131,31 @@ class AgenticState(ABC, BaseModel):
     def required_fields(cls) -> set[str]:
         return set()
 
+    def get_previous_states(self, state: Optional["AgenticState"] = None) -> list["AgenticState"]:
+        """
+        Retrieves previous states of the same type as the given state.
+        If no state is provided, it returns all previous states.
+
+        Args:
+            state (AgenticState | None): The state to filter by. If None, all previous states are returned.
+
+        Returns:
+            list: A list of previous states, filtered by type if a state is provided.
+        """
+        previous_states = []
+        current_state = self
+
+        while current_state and current_state.previous_state:
+            current_state = current_state.previous_state
+            if not state or isinstance(current_state, type(state)):
+                previous_states.insert(0, current_state)
+            
+        logger.debug(
+            f"Found {len(previous_states)} previous states of type {state.__class__.__name__ if state else 'all types'}"
+        )
+
+        return previous_states
+
     def retries(self) -> int:
         retries = 0
         for action in reversed(self._actions):

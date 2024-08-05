@@ -14,6 +14,7 @@ from moatless.types import (
     Message,
     UserMessage,
 )
+from moatless.utils.llm_utils import instructor_mode_by_model
 
 logger = logging.getLogger(__name__)
 
@@ -392,7 +393,8 @@ class SearchCode(AgenticState):
     def system_prompt(self) -> str:
         system_prompt = SEARCH_SYSTEM_PROMPT
 
-        if self.loop.instructor_mode == instructor.Mode.JSON:
+        instructor_mode = instructor_mode_by_model(self.model)
+        if instructor_mode == instructor.Mode.JSON:
             system_prompt += SEARCH_JSON_FEW_SHOT
         elif self.model.startswith("openai"):
             system_prompt += SEARCH_FUNCTIONS_FEW_SHOT_OPENAI_FUNC
@@ -406,12 +408,12 @@ class SearchCode(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
+        content = f"<issue>\n{self.initial_message}\n</issue>"
 
         if self.provide_initial_context:
             logger.info("Search for initial context to provide in the prompt")
             result = self.workspace.code_index.semantic_search(
-                query=self.loop.trajectory.initial_message,
+                query=self.initial_message,
                 exact_match_if_possible=False,
                 max_spans_per_file=5,
                 max_results=100,
@@ -433,14 +435,14 @@ class SearchCode(AgenticState):
                 show_outcommented_code=False,
             )
 
-        previous_transitions = self.loop.get_previous_transitions(self)
-        for transition in previous_transitions:
-            if transition.state.message:
-                content += transition.state.message
+        previous_states = self.get_previous_states(self)
+        for previous_state in previous_states:
+            if previous_state.message:
+                content += previous_state.message
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(
-                    action=transition.actions[-1].action,
+                    action=previous_state.last_action.request,
                 )
             )
             content = ""
