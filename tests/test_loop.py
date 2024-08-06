@@ -74,9 +74,9 @@ def test_loop_run_until_finished(mock_workspace, test_transition_rules):
         response = loop.run("initial message")
 
     assert response.status == "finished"
-    assert len(loop._state_history) == 3, f"Expected 3 states, got {[state.name for state in loop._state_history.values()]}"
-    assert loop._state_history[1].initial_message == "initial message"
-    assert isinstance(loop._state_history[2], Finished)
+    assert loop.state_count() == 3, f"Expected 3 states, got {[state.state.name for state in loop._trajectory.transitions()]}"
+    assert loop._initial_message == "initial message"
+    assert isinstance(loop._trajectory.transitions[2].state, Finished)
 
 def test_loop_run_until_rejected(mock_workspace, test_transition_rules):
     loop = AgenticLoop(test_transition_rules, mock_workspace)
@@ -88,7 +88,7 @@ def test_loop_run_until_rejected(mock_workspace, test_transition_rules):
         response = loop.run("initial message")
     
     assert response.status == "rejected"
-    assert len(loop._state_history) == 3  # Pending -> TestState -> Rejected
+    assert loop.state_count() == 3  # Pending -> TestState -> Rejected
 
 def test_loop_max_transitions(mock_workspace, test_transition_rules):
     loop = AgenticLoop(test_transition_rules, mock_workspace, max_transitions=3)
@@ -98,7 +98,7 @@ def test_loop_max_transitions(mock_workspace, test_transition_rules):
     
     assert response.status == "rejected"
     assert response.message == "Max transitions exceeded."
-    assert len(loop._state_history) == 4, f"Expected 4 states, got {[state.name for state in loop._state_history.values()]}"
+    assert loop.state_count() == 4, f"Expected 4 states, got {[t.state.name for t in loop._trajectory.transitions]}"
 
 @pytest.mark.api_keys_required
 def test_rerun_save_and_load_trajectory():

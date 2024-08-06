@@ -265,7 +265,11 @@ class SearchRequest(BaseModel):
             ]
         )
 
-    
+    @model_validator(mode='after')
+    def validate_search_requests(self):
+        if not self.has_search_attributes:
+            raise ValueError("A search request must have at least one attribute set.")
+        return self
 
 class Search(ActionRequest):
     """Take action to search for code, identify found and finish up."""
@@ -287,9 +291,7 @@ class Search(ActionRequest):
     def validate_search_requests(self):
         if not self.complete:
             if not self.search_requests:
-                raise ValidationError("If 'complete' is False, at least one search request must exist.")
-            if not any(request.has_search_attributes() for request in self.search_requests):
-                raise ValidationError("At least one search request must have at least one attribute set.")
+                raise ValueError("At least one search request must exist.")
         return self
 
 

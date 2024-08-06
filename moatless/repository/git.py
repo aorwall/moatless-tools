@@ -70,7 +70,7 @@ class GitRepository(FileRepository):
             "type": "git",
             "repo_path": self._repo_path,
             "git_repo_url": self._repo_url,
-            "commit": self._current_commit,
+            "commit": self._initial_commit,
         }
 
     def snapshot(self) -> dict:
@@ -95,6 +95,8 @@ class GitRepository(FileRepository):
             self._repo.index.add("*")
         self._repo.index.commit(commit_message)
         self._current_commit = self._repo.head.commit.hexsha
+
+        logger.info(f"Committed changes to git with message '{commit_message}' and commit hash '{self._current_commit}'")
 
     def commit_message(self, file_path: str | None = None) -> str:
         if file_path:

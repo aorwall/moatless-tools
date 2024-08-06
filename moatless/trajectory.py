@@ -52,15 +52,20 @@ class Trajectory:
     def __init__(
         self,
         name: str,
+        workspace: Workspace,
         initial_message: Optional[str] = None,
         persist_path: Optional[str] = None,
-        workspace: Optional[Workspace] = None,
         transition_rules: Optional[TransitionRules] = None,
     ):
         self._name = name
         self._persist_path = persist_path
         self._initial_message = initial_message
         self._workspace = workspace
+
+        # Workaround to set to keep the current initial workspace state when loading an existing trajectory.
+        # TODO: Remove this when we have a better way to handle this.
+        self._initial_workspace_state = self._workspace.dict()
+
         self._transition_rules = transition_rules
 
         self._current_transition_id = 0
@@ -78,12 +83,14 @@ class Trajectory:
         else:
             transition_rules = None
 
+        workspace = Workspace.from_dict(data["workspace"])
         trajectory = cls(
             name=data["name"],
             initial_message=data["initial_message"],
             transition_rules=transition_rules,
+            workspace=workspace
         )
-        trajectory._workspace = Workspace.from_dict(data["workspace"])
+
         trajectory._transitions = {}
         trajectory._current_transition_id = data.get("current_transition_id", 0)
 
@@ -92,13 +99,6 @@ class Trajectory:
             state_data = t["properties"]
             state_data["id"] = t["id"]
             state = state_class.model_validate(state_data)
-
-            if t.get("snapshot"):
-                try:
-                    trajectory.restore_from_snapshot(t["snapshot"])
-                except Exception as e:
-                    logger.exception(f"Error restoring from snapshot for state {state.name}")
-                    raise e
 
             state._workspace = trajectory._workspace
             state._initial_message = trajectory._initial_message
@@ -133,14 +133,18 @@ class Trajectory:
         for t in data["transitions"]:
             try:
                 current_state = trajectory._transitions[t["id"]].state
-                if t["previous_state_id"] is not None:
+                if t.get("previous_state_id") is not None:
                     current_state.previous_state = trajectory._transitions.get(t["previous_state_id"]).state
             except KeyError as e:
-                logger.error(f"Missing key {e}, existing keys: {trajectory._transitions.keys()}")
+                logger.exception(f"Missing key {e}, existing keys: {trajectory._transitions.keys()}")
+                raise
 
         trajectory._info = data.get("info", {})
 
         logger.info(f"Loaded trajectory {trajectory._name} with {len(trajectory._transitions)} transitions")
+
+        current_state = trajectory._transitions.get(trajectory._current_transition_id)
+        trajectory.restore_from_snapshot(current_state)
 
         return trajectory
 
@@ -171,15 +175,18 @@ class Trajectory:
     def get_current_state(self) -> AgenticState:
         return self._transitions.get(self._current_transition_id).state
 
-    def restore_from_snapshot(self, snapshot: dict):
-        if not self._workspace:
-            logger.info("No workspace to restore from snapshot")
+    def restore_from_snapshot(self, state: TrajectoryState):
+        if not state.snapshot:
+            logger.info(f"restore_from_snapshot(state: {state.id}:{state.name}) No snapshot found")
+            return
 
-        if "repository" in snapshot:
-            self._workspace.file_repo.restore_from_snapshot(snapshot["repository"])
+        logger.info(f"restore_from_snapshot(starte: {state.id}:{state.name}) Restoring from snapshot")
 
-        if "file_context" in snapshot:
-            self._workspace.file_context.restore_from_snapshot(snapshot["file_context"])
+        if state.snapshot.get("repository"):
+            self._workspace.file_repo.restore_from_snapshot(state.snapshot["repository"])
+
+        if state.snapshot.get("file_context"):
+            self._workspace.file_context.restore_from_snapshot(state.snapshot["file_context"])
 
     def save_state(self, state: AgenticState):
         if state.id in self._transitions:
@@ -226,7 +233,7 @@ class Trajectory:
             )
             if self._transition_rules
             else None,
-            "workspace": self._workspace.dict() if self._workspace else None,
+            "workspace": self._initial_workspace_state,
             "initial_message": self._initial_message,
             "current_transition_id": self._current_transition_id,
             "transitions": [t.model_dump(exclude_none=True) for t in self.transitions],

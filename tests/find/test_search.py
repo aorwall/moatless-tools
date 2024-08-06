@@ -3,6 +3,7 @@ from moatless.find.search import SearchCode, Search, SearchRequest
 from moatless.types import ActionResponse
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
+from pydantic import ValidationError
 
 class TestSearchCode:
     @pytest.fixture
@@ -30,17 +31,14 @@ class TestSearchCode:
         assert response.trigger == "finish"
         assert response.output["message"] == "Search complete"
 
-    def test_execute_action_without_search_attributes(self, search_code):
-        action = Search(
-            scratch_pad="Invalid search",
-            search_requests=[SearchRequest()]
-        )
-
-        response = search_code._execute_action(action)
-
-        assert isinstance(response, ActionResponse)
-        assert response.trigger == "retry"
-        assert "You must provide at least one the search attributes" in response.retry_message
+    def test_validate_search_without_search_attributes(self):
+        with pytest.raises(ValidationError) as excinfo:
+            Search(
+                scratch_pad="Invalid search",
+                search_requests=[]
+            )
+        
+        assert "At least one search request must exist." in str(excinfo.value)
 
     def test_execute_action_with_search_results(self, search_code):
         mock_code_index = MagicMock()

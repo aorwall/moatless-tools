@@ -90,12 +90,19 @@ def test_transition_rules_serialization_deserialization():
     # Check if the internal _source_trigger_index is rebuilt correctly
     assert deserialized_rules._source_trigger_index == rules._source_trigger_index
 
-    json_data = json.dumps(
-        rules.model_dump(exclude_none=True, exclude_unset=True), indent=2
-    )
+    data = rules.model_dump(exclude_none=True, exclude_unset=True)
+
     assert (
-        json_data
-        == """{
+        data
+        == {
+  "global_params": {
+    "model": "gpt-4o"
+  },
+  "state_params": {
+    "MockStateB": {
+      "model": "claude-3.5-sonnet"
+    }
+  },
   "initial_state": "MockStateA",
   "transition_rules": [
     {
@@ -116,17 +123,8 @@ def test_transition_rules_serialization_deserialization():
       "source": "MockStateB",
       "dest": "Rejected"
     }
-  ],
-  "global_params": {
-    "model": "gpt-4o"
-  },
-  "state_params": {
-    "MockStateB": {
-      "model": "claude-3.5-sonnet"
-    }
-  }
-}"""
-    )
+  ]
+})
 
 
 def test_find_transition_rule():

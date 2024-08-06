@@ -41,9 +41,9 @@ def test_agentic_state_create_file_context(test_state):
 
 
 def test_agentic_state_model_dump(test_state):
-    dump = test_state.model_dump()
-    assert "name" in dump
-    assert dump["name"] == "ConcreteAgenticState"
+    dump = test_state.model_dump(exclude_none=True)
+    assert dump == {'id': 1, 'include_message_history': False, 'max_tokens': 1000, 'temperature': 0.0}
+
 
 def test_agentic_state_equality_same_state():
     state1 = ConcreteAgenticState(id=1, temperature=0.5, max_tokens=500)
@@ -161,5 +161,3 @@ def test_finished_state_creation_and_dump():
     assert dumped_state["id"] == 1
     assert dumped_state["message"] == message
     assert dumped_state["output"] == output
-    assert dumped_state["name"] == "Finished"
-    assert dumped_state["previous_state_id"] is None
