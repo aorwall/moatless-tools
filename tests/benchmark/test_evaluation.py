@@ -72,4 +72,11 @@ def test_run_single_evaluation_mcts():
         detailed_report=True,
     )
 
-    evaluation.run_single_instance("django__django-16379")
+    result = evaluation.run_single_instance("django__django-16379")
+
+    assert result["instance_id"] == "django__django-16379"
+    assert result["status"] == "edited"
+    assert result["edited"]
+    assert result["identified"]
+    assert result["found_in_search"]
+    assert result["file_identified"]

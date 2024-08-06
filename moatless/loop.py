@@ -190,6 +190,9 @@ class AgenticLoop:
             self._initial_message = message
             self._trajectory._initial_message = message
 
+        if not isinstance(self._current_state, Pending):
+            self._trajectory.update_workspace_to_current_state()
+
         while not self.is_finished():
             self._execute_state_until_transition()
 
@@ -352,17 +355,6 @@ class AgenticLoop:
     def _set_current_state(self, state: AgenticState):
         self._current_state = state
         self._trajectory.set_current_state(state)
-
-    def revert_to_state(self, state_id: int) -> AgenticState:
-        state = self._trajectory.get_state(state_id)
-        if state:
-            self.log_info(f"Reverting to state {state_id}")
-            self._set_current_state(state.state)
-            self.workspace.restore_from_snapshot(state.snapshot)
-            return state.state
-        else:
-            logger.warning(f"Tried to revert to state {state_id} but it does not exist.")
-            raise ValueError(f"Could not revert to state {state_id} as it does not exist.")
 
     def transition_to(self, new_state: AgenticState) -> AgenticState:
         self.log_info(f"Transitioning from {self.state.name} to {new_state.name}")

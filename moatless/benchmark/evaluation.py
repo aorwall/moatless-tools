@@ -198,7 +198,8 @@ class Evaluation:
         split="test",
     ) -> dict:
         instance = load_instance(instance_id, dataset, split)
-        return self._evaluate_instance(instance)
+        trajectory = self._evaluate_instance(instance)
+        return to_result(instance, trajectory, self.report)
 
     def _evaluate_instance(self, instance: dict, retry: bool = False) -> Trajectory:
         instance_id = instance["instance_id"]

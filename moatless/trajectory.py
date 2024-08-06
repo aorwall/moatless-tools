@@ -145,9 +145,6 @@ class Trajectory:
 
         logger.info(f"Loaded trajectory {trajectory._name} with {len(trajectory._transitions)} transitions")
 
-        current_state = trajectory._transitions.get(trajectory._current_transition_id)
-        trajectory.restore_from_snapshot(current_state)
-
         return trajectory
 
     @property
@@ -167,7 +164,7 @@ class Trajectory:
         return self._transition_rules
 
     @property
-    def workspace(self) -> dict[str, Any] | None:
+    def workspace(self) -> Workspace:
         return self._workspace
 
     @property
@@ -180,6 +177,9 @@ class Trajectory:
 
     def get_current_state(self) -> AgenticState:
         return self._transitions.get(self._current_transition_id).state
+
+    def update_workspace_to_current_state(self):
+        self.restore_from_snapshot(self._transitions[self._current_transition_id])
 
     def restore_from_snapshot(self, state: TrajectoryState):
         if not state.snapshot:
