@@ -28,9 +28,19 @@ class ActionRequest(BaseModel):
         return self.__class__.__name__
 
 class ActionResponse(BaseModel):
-    trigger: Optional[str] = None
-    output: Optional[dict[str, Any]] = None
-    retry_message: Optional[str] = None
+    trigger: Optional[str] = Field(
+        default=None,
+        description="Trigger to transition to the next state. If None, no transition is made.",
+    )
+    output: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Output data to be passed to the next state.",
+    )
+
+    retry_message: Optional[str] = Field(
+        default=None,
+        description="Message to use in retry."
+    )
 
     @classmethod
     def retry(cls, retry_message: str):

@@ -91,6 +91,8 @@ class Trajectory:
             workspace=workspace
         )
 
+        trajectory._info = data.get("info", {})
+
         trajectory._transitions = {}
         trajectory._current_transition_id = data.get("current_transition_id", 0)
 
@@ -151,6 +153,10 @@ class Trajectory:
     @property
     def initial_message(self):
         return self._initial_message
+
+    @property
+    def info(self):
+        return self._info
 
     @property
     def states(self) -> List[dict]:

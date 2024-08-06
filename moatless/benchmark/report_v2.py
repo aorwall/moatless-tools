@@ -3,13 +3,37 @@ import logging
 from moatless import FileRepository
 from moatless.benchmark.swebench import found_in_expected_spans, found_in_alternative_spans, setup_swebench_repo
 from moatless.benchmark.utils import get_missing_files
+from moatless.edit.plan import ApplyChange
+from moatless.file_context import FileContext
+from moatless.find.search import SearchRequest
+
+logger = logging.getLogger(__name__)
+
+import logging
+
+from moatless import FileRepository
+from moatless.benchmark.swebench import found_in_expected_spans, found_in_alternative_spans, setup_swebench_repo
+from moatless.benchmark.utils import get_missing_files
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
 
+import logging
+from typing import Dict, List, Tuple, Optional
 
-def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[dict, list]:
-    info = trajectory["info"]
+from moatless import FileRepository
+from moatless.benchmark.swebench import found_in_expected_spans, found_in_alternative_spans, setup_swebench_repo
+from moatless.benchmark.utils import get_missing_files
+from moatless.file_context import FileContext
+from moatless.trajectory import Trajectory
+from moatless.types import ActionTransaction, Usage, Content
+from moatless.state import AgenticState
+
+logger = logging.getLogger(__name__)
+
+
+def to_result(instance: Dict, trajectory: Trajectory, report: Optional[Dict] = None) -> Dict:
+    info = trajectory._info
 
     if report and "resolved_ids" in report and instance["instance_id"] in report["resolved_ids"]:
         result_status = "resolved"
@@ -19,7 +43,6 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
     resolved = result_status == "resolved"
 
     try:
-        transitions = []
         result = {
             "instance_id": instance["instance_id"],
             "duration": info.get("duration", 0),
@@ -27,7 +50,7 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
             "resolved_by": (len(instance.get("resolved_by", []))),
             "status": None,
             "result_status": result_status,
-            "transitions": len(trajectory["transitions"]),
+            "transitions": len(trajectory.transitions),
             "edited": False,
             "planned": False,
             "identified": None,
@@ -49,34 +72,29 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
         }
 
         lint_codes = set()
-        search_results_spans = {}
-        identified_spans = {}
-        planned_spans = {}
-        edited_spans = {}
+        search_results_spans: Dict[str, List[str]] = {}
+        identified_spans: Dict[str, List[str]] = {}
+        planned_spans: Dict[str, List[str]] = {}
+        edited_spans: Dict[str, List[str]] = {}
 
         id_iterations = 0
         search_iterations = 0
 
         selected_transition_ids = []
-        if "current_transition_id" in trajectory:
-            transitions_map = {t["id"]: t for t in trajectory["transitions"]}
-
-            transition = transitions_map.get(trajectory["current_transition_id"])
-            while transition:
-                selected_transition_ids.append(transition["id"])
-                if "parent_id" in transition:
-                    transition = transitions_map.get(transition["parent_id"])
-                else:
-                    break
+        current_state = trajectory.get_current_state()
+        while current_state:
+            selected_transition_ids.append(current_state.id)
+            current_state = current_state.previous_state
 
         logger.info(f"Selected transitions: {selected_transition_ids}")
 
         if instance.get("expected_spans"):
-            for transition in trajectory["transitions"]:
-                if selected_transition_ids and transition["id"] not in selected_transition_ids:
+            for transition in trajectory.transitions:
+                if selected_transition_ids and transition.id not in selected_transition_ids:
                     continue
 
-                state_name = transition["state"]["name"]
+                state: AgenticState = transition.state
+                state_name = state.name
 
                 if state_name not in result:
                     result[state_name] = 0
@@ -88,76 +106,42 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                 for file_path, span_ids in instance["expected_spans"].items():
                     expected_span_str += f"{file_path}: {span_ids} "
 
-                transition_result = {
-                    "instance_id": instance["instance_id"],
-                    "resolved": resolved,
-                    "name": state_name,
-                    "cost": 0,
-                    "expected_spans": expected_span_str,
-                    "actual_spans": "",
-                }
-
-                if not transition["actions"]:
+                if not state._actions:
                     continue
 
-                for traj_action in transition["actions"]:
-                    result[f"{state_name}_cost"] += traj_action.get(
-                        "completion_cost", 0
-                    )
-                    transition_result["cost"] += traj_action.get(
-                        "completion_cost", 0
-                    )
+                for action in state._actions:
+                    result[f"{state_name}_cost"] += action.usage.completion_cost if action.usage else 0
 
                 if state_name == "SearchCode":
                     search_iterations += 1
 
-                    action = transition["actions"][-1]
+                    action = state._actions[-1]
 
-                    if "search_requests" in action["action"]:
-                        for search_request in action["action"]["search_requests"]:
-                            if search_request.get("query"):
+                    if isinstance(action.request, SearchRequest):
+                        for search_request in action.request.search_requests:
+                            if search_request.query:
                                 result["p_query"] += 1
-
-                            if search_request.get("file_pattern"):
+                            if search_request.file_pattern:
                                 result["p_file"] += 1
-
-                            if search_request.get("code_snippet"):
+                            if search_request.code_snippet:
                                 result["p_code"] += 1
-
-                            if search_request.get(
-                                    "class_name"
-                            ) or search_request.get("class_names"):
+                            if search_request.class_name or search_request.class_names:
                                 result["p_class"] += 1
-
-                            if search_request.get(
-                                    "function_name"
-                            ) or search_request.get("function_names"):
+                            if search_request.function_name or search_request.function_names:
                                 result["p_function"] += 1
 
                 if state_name == "IdentifyCode":
                     id_iterations += 1
 
-                    state = transition["state"]
-                    if state.get("ranked_spans"):
-                        for ranked_span in state["ranked_spans"]:
-                            if (
-                                    ranked_span["file_path"]
-                                    not in search_results_spans
-                            ):
-                                search_results_spans[
-                                    ranked_span["file_path"]
-                                ] = []
-                            search_results_spans[
-                                ranked_span["file_path"]
-                            ].append(ranked_span["span_id"])
+                    if state.ranked_spans:
+                        for ranked_span in state.ranked_spans:
+                            if ranked_span.file_path not in search_results_spans:
+                                search_results_spans[ranked_span.file_path] = []
+                            search_results_spans[ranked_span.file_path].append(ranked_span.span_id)
 
                         if not result["found_in_search"] and (
-                                found_in_expected_spans(
-                                    instance, search_results_spans
-                                )
-                                or found_in_alternative_spans(
-                            instance, search_results_spans
-                        )
+                                found_in_expected_spans(instance, search_results_spans)
+                                or found_in_alternative_spans(instance, search_results_spans)
                         ):
                             result["found_in_search"] = search_iterations
 
@@ -169,24 +153,17 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                             if not missing_files:
                                 result["file_in_search"] = search_iterations
 
-                    action = transition["actions"][-1]
-                    if action.get("action"):
+                    if state._actions:
+                        action = state._actions[-1]
                         identified_str = ""
-                        if action["action"].get("identified_spans"):
-                            for span in action["action"]["identified_spans"]:
-                                identified_str += (
-                                    f"{span['file_path']}: {span['span_ids']} "
-                                )
-                                if span["file_path"] not in identified_spans:
-                                    identified_spans[span["file_path"]] = []
+                        if action.request.identified_spans:
+                            for span in action.request.identified_spans:
+                                identified_str += f"{span.file_path}: {span.span_ids} "
+                                if span.file_path not in identified_spans:
+                                    identified_spans[span.file_path] = []
 
-                                transition_result["actual_spans"] += (
-                                    f"{span['file_path']}: {','.join(span['span_ids'])} "
-                                )
-                                for span_id in span["span_ids"]:
-                                    identified_spans[span["file_path"]].append(
-                                        span_id
-                                    )
+                                for span_id in span.span_ids:
+                                    identified_spans[span.file_path].append(span_id)
                         result["identified_spans"] = identified_str
 
                     if not result["file_identified"]:
@@ -197,91 +174,61 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                         if not missing_files:
                             result["file_identified"] = id_iterations
 
-                    if result[
-                        "expected_identified"
-                    ] is None and found_in_expected_spans(
-                        instance, identified_spans
-                    ):
+                    if result["expected_identified"] is None and found_in_expected_spans(instance, identified_spans):
                         result["expected_identified"] = id_iterations
 
-                    if result[
-                        "alt_identified"
-                    ] is None and found_in_alternative_spans(
-                        instance, identified_spans
-                    ):
+                    if result["alt_identified"] is None and found_in_alternative_spans(instance, identified_spans):
                         result["alt_identified"] = id_iterations
 
-                    if result.get("alt_identified") or result.get(
-                            "expected_identified"
-                    ):
+                    if result.get("alt_identified") or result.get("expected_identified"):
                         result["identified"] = min(
                             result.get("alt_identified") or 1000,
                             result.get("expected_identified") or 1000,
                         )
 
                 if state_name == "PlanToCode":
-                    action = transition["actions"][-1]["action"]
-                    if action.get("action") == "review":
+                    action = state._actions[-1]
+
+                    if action.request.action == "review":
                         result["review"] = True
 
-                    if "file_path" in action:
-                        if "span_id" not in action:
-                            logger.warning(
-                                f"Span id missing in planning action in {instance['instance_id']}"
-                            )
-                        else:
-                            file_path = action["file_path"]
-                            if file_path not in planned_spans:
-                                planned_spans[file_path] = []
-                            planned_spans[file_path].append(action["span_id"])
-                            transition_result["actual_spans"] = (
-                                f"{file_path}: {action['span_id']} "
-                            )
+                    if action.request.file_path:
+                        file_path = action.request.file_path
+                        if file_path not in planned_spans:
+                            planned_spans[file_path] = []
+                        planned_spans[file_path].append(action.request.span_id)
 
                     if not result.get("planned") and (
-                            found_in_expected_spans(
-                                instance,
-                                planned_spans,
-                            )
+                            found_in_expected_spans(instance, planned_spans)
                             or found_in_alternative_spans(instance, planned_spans)
                     ):
                         result["planned"] = True
 
                 if state_name == "EditCode":
-                    result["edit_retries"] = len(transition["actions"]) - 1
+                    result["edit_retries"] = len(state._actions) - 1
 
-                    action = transition["actions"][-1]
-                    edited = action.get("trigger") == "finish"
+                    action = state._actions[-1]
+                    edited = action.response and action.response.trigger == "finish"
 
-                    if edited and "file_path" in transition["state"]:
-                        file_path = transition["state"]["file_path"]
+                    if edited and hasattr(state, 'file_path'):
+                        file_path = state.file_path
                         if file_path not in edited_spans:
                             edited_spans[file_path] = []
-                        edited_spans[file_path].append(
-                            transition["state"]["span_id"]
-                        )
-                        transition_result["actual_spans"] = (
-                            f"{file_path}: {transition['state']['span_id']} "
-                        )
+                        edited_spans[file_path].append(state.span_id)
 
                     if not result.get("edited") and (
-                            found_in_expected_spans(
-                                instance,
-                                edited_spans,
-                            )
+                            found_in_expected_spans(instance, edited_spans)
                             or found_in_alternative_spans(instance, edited_spans)
                     ):
                         result["edited"] = True
 
-                    output = action.get("output", {})
-                    if output:
+                    if action.response and action.response.output:
+                        output = action.response.output
                         if edited:
                             result["has_diff"] = True
 
                         for lint in output.get("verification_errors", []):
                             lint_codes.add(lint["code"])
-
-                transitions.append(transition_result)
 
             if result.get("alt_identified") or result.get("expected_identified"):
                 result["identified"] = min(
@@ -291,9 +238,7 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
 
             result["expected_files"] = list(instance["expected_spans"].keys())
             result["edited_files"] = list(edited_spans.keys())
-            result["identified_spans"] = sum(
-                [len(v) for v in identified_spans.values()]
-            )
+            result["identified_spans"] = sum(len(v) for v in identified_spans.values())
 
         result["lints"] = ",".join(lint_codes)
 
@@ -316,7 +261,96 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
     except Exception as e:
         raise e
 
-    return result, transitions
+    return result
+
+def generate_md_report(trajectory: Trajectory, instance: Dict) -> str:
+    info = trajectory._info
+    markdown = f"# {instance['instance_id']}\n"
+
+    markdown += "\n## Problem statement\n"
+    markdown += f"```\n{instance['problem_statement']}\n```\n"
+
+    if "error" in trajectory._info:
+        markdown += "\n## Error\n"
+        markdown += f"```\n{trajectory._info['error']}\n```\n"
+    else:
+        markdown += "\n## Prediction\n"
+        markdown += f"```diff\n{info['submission']}\n```\n"
+
+    markdown += "\n## Golden patch\n"
+    markdown += f"```diff\n{instance['golden_patch']}\n```\n"
+
+    markdown += "\n## Trajectory\n"
+
+    repo_dir = setup_swebench_repo(instance)
+    file_repo = FileRepository(repo_dir)
+
+    for j, transition in enumerate(trajectory.transitions):
+        state = transition.state
+        for i, action in enumerate(state._actions):
+            markdown += f"### {j+1} {state.name} ({i+1})\n\n"
+
+            if state.name == "PlanToCode":
+                if action.request.file_path:
+                    if action.request.instructions:
+                        markdown += f"\n\n * {action.request.instructions}"
+                    markdown += f"\n * {action.request.file_path}"
+                    markdown += f"\n * {action.request.span_id}"
+
+                    markdown += "\n\n#### File context \n\n"
+                    try:
+                        file_context = FileContext(file_repo)
+                        file_context.add_span_to_context(
+                            action.request.file_path,
+                            action.request.span_id,
+                        )
+                        markdown += file_context.create_prompt(
+                            show_outcommented_code=True
+                        )
+                    except Exception as e:
+                        logger.error(e)
+
+            if state.name == "EditCode":
+                markdown += "#### LLM Response\n\n"
+                markdown += f"```\n{action.request.content if isinstance(action.request, Content) else ''}\n```\n"
+
+                if action.response and action.response.output:
+                    output = action.response.output
+                    if output.get("diff"):
+                        markdown += "#### Diff\n\n"
+                        markdown += f"```diff\n{output['diff']}\n```\n"
+
+                    if output.get("errors"):
+                        markdown += "#### Errors\n\n"
+                        markdown += f"{output['errors']}\n\n"
+
+                    if output.get("message"):
+                        markdown += "#### Message\n\n"
+                        markdown += f"{output['message']}\n\n"
+
+            if state.name == "ClarifyCodeChange":
+
+                if action.request.scratch_pad:
+                    markdown += f"*{action.request.scratch_pad}*"
+
+                if action.response and action.response.output:
+                    output = action.response.output
+                    if output.get("start_line"):
+                        markdown += f"\n* Start Line: {output['start_line']}\n"
+                        markdown += f"\n* End Line: {output['end_line']}\n"
+
+            if state.name == "Finished":
+                markdown += f"*{action.request.thoughts}*\n"
+
+            if state.name == "Rejected":
+                markdown += f"*{action.request.thoughts}*\n"
+
+    markdown += "## Alternative patches\n"
+    for alternative in instance["resolved_by"]:
+        markdown += f"### {alternative['name']}\n"
+        markdown += f"```diff\n{alternative['patch']}\n```\n"
+
+    return markdown
 def generate_md_report(trajectory: dict, instance: dict):
     info = trajectory["info"]
     markdown = f"# {instance['instance_id']}\n"

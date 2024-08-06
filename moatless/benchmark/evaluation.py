@@ -7,7 +7,7 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 import instructor
 import litellm
@@ -15,6 +15,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 from moatless.benchmark.report_v2 import to_result, generate_md_report
+from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRules
 from moatless.benchmark.swebench import (
     found_in_alternative_spans,
@@ -82,6 +83,7 @@ class Evaluation:
         max_transitions: int = 25,
         max_expansions: int = 2,
         max_file_context_tokens: int = 16000,
+        markdown_report: bool = False,
         litellm_callback: Optional[str] = None,
         previous_trajectory_dir: Optional[str] = None,
         retry_state: Optional[str] = None,
@@ -93,6 +95,7 @@ class Evaluation:
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
         self.detailed_report = detailed_report
+        self.markdown_report = markdown_report
 
         self.evaluation_name = evaluation_name
         self.max_file_context_tokens = max_file_context_tokens
@@ -193,11 +196,11 @@ class Evaluation:
         instance_id: str,
         dataset: str = "princeton-nlp/SWE-bench_Lite",
         split="test",
-    ):
+    ) -> dict:
         instance = load_instance(instance_id, dataset, split)
         return self._evaluate_instance(instance)
 
-    def _evaluate_instance(self, instance: dict, retry: bool = False) -> dict:
+    def _evaluate_instance(self, instance: dict, retry: bool = False) -> Trajectory:
         instance_id = instance["instance_id"]
         trajectory_path = os.path.join(self.trajectory_dir, f"{instance_id}.json")
         prompt_log_dir = os.path.join(self.logs_dir, f"{instance_id}")
@@ -205,10 +208,8 @@ class Evaluation:
             os.makedirs(prompt_log_dir)
 
         if os.path.exists(trajectory_path) and not retry:
-            with open(trajectory_path) as file:
-                trajectory = json.load(file)
-            if trajectory["info"].get("status") or trajectory["info"].get("error"):
-                return trajectory
+            # TODO: Retry when failed or not finished?
+            return Trajectory.load(trajectory_path)
 
         repo_dir = setup_swebench_repo(instance)
         persist_dir = os.path.join(self.index_store_dir, get_repo_dir_name(instance_id))
@@ -284,31 +285,30 @@ class Evaluation:
         info["submission"] = diff
 
         loop.trajectory.save_info(info)
-        return loop.trajectory.to_dict()
+        return loop.trajectory
 
-    def _process_instance(self, instance):
+    def _process_instance(self, instance) -> Tuple[dict, str]:
         trajectory = self._evaluate_instance(instance)
-        if not trajectory:
-            return None, None, None
 
-        result, transition_result = to_result(instance, trajectory, self.report)
-        submission = trajectory["info"].get("submission", "")
+        result = to_result(instance, trajectory, self.report)
+        submission = trajectory.info.get("submission", "")
 
-        try:
-            md_report = generate_md_report(trajectory, instance)
-            if not os.path.exists(f"{self.evaluation_dir}/reports"):
-                os.makedirs(f"{self.evaluation_dir}/reports")
-            with open(
-                f"{self.evaluation_dir}/reports/{instance['instance_id']}.md",
-                "w",
-            ) as file:
-                file.write(md_report)
-        except Exception:
-            logging.exception(
-                f"Error in generating report for {instance['instance_id']} "
-            )
+        if self.markdown_report:
+            try:
+                md_report = generate_md_report(trajectory, instance)
+                if not os.path.exists(f"{self.evaluation_dir}/reports"):
+                    os.makedirs(f"{self.evaluation_dir}/reports")
+                with open(
+                    f"{self.evaluation_dir}/reports/{instance['instance_id']}.md",
+                    "w",
+                ) as file:
+                    file.write(md_report)
+            except Exception:
+                logging.exception(
+                    f"Error in generating report for {instance['instance_id']} "
+                )
 
-        return result, transition_result, submission
+        return result, submission
 
     def _process_repo_group(self, repo, instances):
         results = []
@@ -322,9 +322,8 @@ class Evaluation:
             if not trajectory:
                 return None, None
 
-            result, transition_result = to_result(instance, trajectory, report=self.report)
+            result = to_result(instance, trajectory, report=self.report)
             results.append(result)
-            transition_results.extend(transition_result)
 
             try:
                 md_report = generate_md_report(trajectory, instance)
