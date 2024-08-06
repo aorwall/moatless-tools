@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 ROLE_PROMPT = "You are autonomous AI assisistant with superior programming skills."
 
-MAIN_OBJECTIVE_PROMPT = "The main objective is to solve a bigger task specfied by the user, this is wrapped in a <main_objective> tag."
+MAIN_OBJECTIVE_PROMPT = "The main objective is to solve a bigger task specified by the user, this is wrapped in a <main_objective> tag."
 
 SEARCH_REPLACE_PROMPT = """Your task is to solve a smaller task within the main objective. This task is wrapped in a <task> tag.
 
@@ -86,16 +86,16 @@ class CodeChange(ActionRequest):
 
 
 class EditCode(AgenticState):
-    instructions: str
-    file_path: str
-    span_id: Optional[str] = None
-    start_line: int
-    end_line: int
+    instructions: str = Field(..., description="The instructions for the code change.")
+    file_path: str = Field(..., description="The path to the file to be updated.")
+    span_id: Optional[str] = Field(None, description="The ID of the span to be updated.")
+    start_line: int = Field(..., description="The start line of the code to be updated.")
+    end_line: int = Field(..., description="The end line of the code to be updated.")
 
-    show_initial_message: bool = True
-    show_file_context: bool = True
-    verify: bool = True
-    chain_of_thought: bool = False
+    show_initial_message: bool = Field(True, description="Whether to show the initial message.")
+    show_file_context: bool = Field(True, description="Whether to show the file context.")
+    verify: bool = Field(True, description="Whether to verify the code change.")
+    chain_of_thought: bool = Field(False, description="Whether to use chain of thought reasoning.")
 
     max_prompt_file_tokens: int = Field(
         4000,
@@ -105,39 +105,6 @@ class EditCode(AgenticState):
     _code_to_replace: Optional[str] = PrivateAttr(default=None)
     _retry: int = PrivateAttr(default=0)
     _messages: list[Message] = PrivateAttr(default_factory=list)
-
-    def __init__(
-        self,
-        instructions: str,
-        file_path: str,
-        span_id: Optional[str] = None,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        show_initial_message: bool = True,
-        max_iterations: int = 8,
-        show_file_context: bool = True,
-        verify: bool = True,
-        include_message_history=True,
-        chain_of_thought: bool = False,
-        max_prompt_file_tokens: int = 4000,
-        **data,
-    ):
-        assert "model" in data
-        super().__init__(
-            include_message_history=include_message_history,
-            show_initial_message=show_initial_message,
-            max_iterations=max_iterations,
-            show_file_context=show_file_context,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            verify=verify,
-            chain_of_thought=chain_of_thought,
-            instructions=instructions,
-            file_path=file_path,
-            span_id=span_id,
-            start_line=start_line,
-            end_line=end_line,
-            **data,
-        )
 
     def init(self):
         file = self.file_context.get_file(self.file_path)
@@ -319,9 +286,12 @@ class EditCode(AgenticState):
         return system_prompt
 
     def messages(self) -> list[Message]:
+        if not self._code_to_replace:
+            self.init()
+
         content = ""
         if self.show_initial_message:
-            content = f"<main_objective>\n{self.loop.trajectory.initial_message}\n</main_objective>\n\n"
+            content = f"<main_objective>\n{self.initial_message}\n</main_objective>\n\n"
 
         content += f"<instructions>\n{self.instructions}\n</instructions>\n"
 

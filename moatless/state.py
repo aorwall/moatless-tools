@@ -2,18 +2,20 @@ import logging
 import sys
 import importlib
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, List
 from copy import deepcopy
 
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator
 
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
 from moatless.types import (
     ActionRequest,
     ActionResponse,
+    ActionTransaction,
     FileWithSpans,
-    Message,
+    Message, Content, AssistantMessage,
+    Usage, UserMessage,
 )
 from moatless.workspace import Workspace
 
@@ -21,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class AgenticState(ABC, BaseModel):
+    id: int = Field(..., description="The unique identifier of the state")
+    previous_state: Optional["AgenticState"] = Field(
+        default=None, description="The state that led to this state"
+    )
+    next_states: List["AgenticState"] = Field(
+        default_factory=list, description="The states this state transitioned to"
+    )
     model: Optional[str] = Field(
         default=None, description="The model to use for completion"
     )
@@ -36,38 +45,37 @@ class AgenticState(ABC, BaseModel):
         None, description="The maximum number of transitions to this state."
     )
 
-    _loop: Optional["AgenticLoop"] = PrivateAttr(None)  # noqa: F821
+    _workspace: Optional[Workspace] = PrivateAttr(None)
+    _initial_message: Optional[str] = PrivateAttr(None)
 
     _executed: bool = PrivateAttr(False)
-    _last_action: Optional[ActionRequest] = PrivateAttr(None)
-    _response: Optional[ActionResponse] = PrivateAttr(None)
+    _actions: List[ActionTransaction] = PrivateAttr(default_factory=list) 
 
-    # model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        exclude={"previous_state", "next_states"}
+    )
 
     def __init__(self, **data):
         super().__init__(**data)
-        self._loop = None
+        self._workspace = data.get('_workspace')
+        self._initial_message = data.get('_initial_message')
 
-    def handle_action(self, action: ActionRequest) -> ActionResponse:
+    def handle_action(self, action: ActionRequest, usage: Usage | None) -> ActionResponse:
         if self._executed:
             raise ValueError(f"State has already been executed")
 
-        self._last_action = action
         response = self._execute_action(action)
+        self._actions.append(ActionTransaction(request=action, response=response, usage=usage))
 
         if response.trigger and response.trigger != "retry":
             self._executed = True
-            self._response = response
 
         return response
 
     @abstractmethod
     def _execute_action(self, action: ActionRequest) -> ActionResponse:
         raise NotImplementedError
-
-    def _set_loop(self, loop: "AgenticLoop"):  # noqa: F821
-        self._loop = loop
-        self.init()
 
     @property
     def name(self):
@@ -78,29 +86,28 @@ class AgenticState(ABC, BaseModel):
         return self._executed
 
     @property
-    def last_action(self) -> Optional[ActionRequest]:
-        return self._last_action
+    def last_action(self) -> Optional[ActionTransaction]:
+        return self._actions[-1] if self._actions else None
 
     @property
     def response(self) -> Optional[ActionResponse]:
-        return self._response
-
-    @property
-    def loop(self) -> "AgenticLoop":  # noqa: F821
-        assert self._loop is not None, "Loop has not been set"
-        return self._loop
+        return self._actions[-1].response if self._actions else None
 
     @property
     def workspace(self) -> Workspace:
-        return self.loop.workspace
+        return self._workspace
 
     @property
     def file_repo(self) -> FileRepository:
-        return self.workspace.file_repo
+        return self._workspace.file_repo
 
     @property
     def file_context(self) -> FileContext:
-        return self.workspace.file_context
+        return self._workspace.file_context
+
+    @property
+    def initial_message(self) -> str:
+        return self._initial_message
 
     def create_file_context(
         self, files: list[FileWithSpans] = None, **kwargs
@@ -113,9 +120,6 @@ class AgenticState(ABC, BaseModel):
         """Initialization logic for the state."""
         pass
 
-    def transition_to(self, new_state: "AgenticState"):
-        self.loop.transition_to(new_state)
-
     def finish(self, message: str):
         # TODO!!
         logger.info(message)
@@ -127,18 +131,62 @@ class AgenticState(ABC, BaseModel):
     def required_fields(cls) -> set[str]:
         return set()
 
+    def get_previous_states(self, state: Optional["AgenticState"] = None) -> list["AgenticState"]:
+        """
+        Retrieves previous states of the same type as the given state.
+        If no state is provided, it returns all previous states.
+
+        Args:
+            state (AgenticState | None): The state to filter by. If None, all previous states are returned.
+
+        Returns:
+            list: A list of previous states, filtered by type if a state is provided.
+        """
+        previous_states = []
+        current_state = self
+
+        while current_state and current_state.previous_state:
+            current_state = current_state.previous_state
+            if not state or isinstance(current_state, type(state)):
+                previous_states.insert(0, current_state)
+            
+        logger.debug(
+            f"Found {len(previous_states)} previous states of type {state.__class__.__name__ if state else 'all types'}"
+        )
+
+        return previous_states
+
     def retries(self) -> int:
         retries = 0
-        for action in reversed(self.loop._current_transition.actions):
-            if action.trigger == "retry":
+        for action in reversed(self._actions):
+            if action.response.trigger == "retry":
                 retries += 1
             else:
                 return retries
 
         return retries
 
-    def retry_messages(self):
-        return self.loop.retry_messages(self)
+    def retry_messages(self) -> list[Message]:
+        messages: list[Message] = []
+
+        for action in self._actions:
+            if isinstance(action.request, Content):
+                messages.append(
+                    AssistantMessage(
+                        content=action.request.content,
+                    )
+                )
+            else:
+                messages.append(AssistantMessage(action=action.request))
+
+            if action.response.retry_message:
+                messages.append(
+                    UserMessage(
+                        content=action.response.retry_message,
+                    )
+                )
+
+        return messages
 
     def system_prompt(self) -> str:
         return ""
@@ -154,58 +202,61 @@ class AgenticState(ABC, BaseModel):
         return None
 
     def model_dump(self, **kwargs):
+        if 'exclude' not in kwargs:
+            kwargs['exclude'] = {"previous_state", "next_states"}
+        
         data = super().model_dump(**kwargs)
-        return {"name": self.name, **data}
+        return data
+
+    @classmethod
+    @model_validator(mode="before")
+    def validate_previous_state(cls, values):
+        if isinstance(obj, dict) and "previous_state_id" in obj:
+            obj = obj.copy()
+            obj["previous_state"] = None
+        return super().model_validate(obj)
 
     def clone(self) -> "AgenticState":
-        data = self.model_dump(exclude={"_executed", "_last_action", "_response"})
-        new_state = self.__class__(**data)
-        new_state._loop = self._loop
+        new_state = self.__class__(**self.model_dump())
+        if hasattr(self, '_workspace'):
+            new_state._workspace = self._workspace
         return new_state
 
+    def total_cost(self):
+        total_cost = 0
+        for action in self._actions:
+            if action.usage:
+                total_cost += action.usage.completion_cost
+
+        return total_cost
+    
     def __eq__(self, other):
         if not isinstance(other, AgenticState):
             return NotImplemented
-
         if self.model_dump() != other.model_dump():
             return False
-
-        if self._loop and other._loop:
-            self_context = self._loop.workspace.file_context
-            other_context = other._loop.workspace.file_context
-
-            return self_context.model_dump() == other_context.model_dump()
-
         return True
 
 
 class NoopState(AgenticState):
-    def __init__(self, **data):
-        super().__init__(**data)
 
     def _execute_action(self, action: ActionRequest):
         raise ValueError("NoopState cannot handle actions")
 
 
 class Finished(NoopState):
-    message: Optional[str]
-
+    message: Optional[str] = None
     output: dict[str, Any] | None = None
-
-    def __init__(self, message: Optional[str] = None, **kwargs):
-        super().__init__(message=message)
-        self.output = kwargs
 
 
 class Rejected(NoopState):
-    message: str
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(message=message)
+    message: Optional[str] = None
 
 
 class Pending(NoopState):
     def __init__(self, **data):
+        if 'id' not in data:
+            data['id'] = 0
         super().__init__(**data)
 
 

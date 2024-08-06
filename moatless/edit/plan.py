@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
 from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
@@ -99,45 +99,26 @@ class PlanToCode(AgenticState):
         False, description="Whether to finish the task if a review is requested."
     )
 
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        lint_messages: list[VerificationError] | None = None,
-        include_message_history=True,
-        max_prompt_file_tokens: int = 4000,
-        max_tokens_in_edit_prompt: int = 500,
-        max_iterations: int = 8,
-        allow_hallucinated_spans: bool = False,
-        expand_context_with_related_spans: bool = True,
-        finish_on_review: bool = False,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            diff=diff,
-            lint_messages=lint_messages,
-            include_message_history=include_message_history,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
-            max_iterations=max_iterations,
-            allow_hallucinated_spans=allow_hallucinated_spans,
-            expand_context_with_related_spans=expand_context_with_related_spans,
-            finish_on_review=finish_on_review,
-            **data,
-        )
+    include_message_history: bool = Field(
+        True,
+        description="Whether to include the message history in the prompt.",
+    )
+
+    _expanded_context: bool = PrivateAttr(False)
 
     def init(self):
-        self.file_context.expand_context_with_init_spans()
+        if not self._expanded_context:
+            self.file_context.expand_context_with_init_spans()
 
-        if (
-            self.expand_context_with_related_spans
-            and self.loop.transition_count(self) == 0
-        ):
-            self.file_context.expand_context_with_related_spans(
-                max_tokens=self.max_prompt_file_tokens
-            )
-            self.file_context.expand_small_classes(max_tokens=1000)
+            if (
+                self.expand_context_with_related_spans
+                and len(self.get_previous_states(self)) == 0
+            ):
+                self.file_context.expand_context_with_related_spans(
+                    max_tokens=self.max_prompt_file_tokens
+                )
+                self.file_context.expand_small_classes(max_tokens=1000)
+            self._expanded_context = True
 
     def _execute_action(self, action: ApplyChange) -> ActionResponse:
         if action.action == "review":
@@ -151,9 +132,7 @@ class PlanToCode(AgenticState):
                     "Review isn't possible. If the change is done you can finish or reject the task."
                 )
 
-        if action.finish:
-            self.file_context.save()
-
+        if action.action == "finish":
             return ActionResponse.transition(
                 trigger="finish", output={"message": action.finish}
             )
@@ -313,17 +292,19 @@ class PlanToCode(AgenticState):
         return response_msg
 
     def messages(self) -> list[Message]:
+        self.init()
+
         messages: list[Message] = []
 
-        if self.loop.trajectory.initial_message:
-            content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>\n"
+        if self.initial_message:
+            content = f"<issue>\n{self.initial_message}\n</issue>\n"
         else:
             content = ""
 
-        previous_transitions = self.loop.get_previous_transitions(self)
+        previous_states = self.get_previous_states(self)
 
-        for transition in previous_transitions:
-            new_message = transition.state.to_message()
+        for previous_state in previous_states:
+            new_message = previous_state.to_message()
             if new_message and not content:
                 content = new_message
             elif new_message:
@@ -332,7 +313,7 @@ class PlanToCode(AgenticState):
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(
-                    action=transition.actions[-1].action,
+                    action=previous_state.last_action.request,
                 )
             )
             content = ""

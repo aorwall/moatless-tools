@@ -20,13 +20,57 @@ class FileWithSpans(BaseModel):
         for span_id in span_ids:
             self.add_span_id(span_id)
 
-
 class ActionRequest(BaseModel):
     pass
 
     @property
     def action_name(self):
         return self.__class__.__name__
+
+class ActionResponse(BaseModel):
+    trigger: Optional[str] = Field(
+        default=None,
+        description="Trigger to transition to the next state. If None, no transition is made.",
+    )
+    output: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Output data to be passed to the next state.",
+    )
+
+    retry_message: Optional[str] = Field(
+        default=None,
+        description="Message to use in retry."
+    )
+
+    @classmethod
+    def retry(cls, retry_message: str):
+        return cls(trigger="retry", retry_message=retry_message)
+
+    @classmethod
+    def transition(cls, trigger: str, output: dict[str, Any] | None = None):
+        output = output or {}
+        return cls(trigger=trigger, output=output)
+
+    @classmethod
+    def no_transition(cls, output: dict[str, Any]):
+        return cls(output=output)
+
+class Usage(BaseModel):
+    completion_cost: float
+    completion_tokens: int
+    prompt_tokens: int
+
+
+class ActionTransaction(BaseModel):
+    request: ActionRequest
+    response: Optional[ActionResponse] = None
+    usage: Optional[Usage] = None
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["request"] = self.request.model_dump(**kwargs)
+        data["response"] = self.response.model_dump(**kwargs) if self.response else None
+        return data
 
 
 class EmptyRequest(ActionRequest):
@@ -60,25 +104,6 @@ class AssistantMessage(Message):
 class UserMessage(Message):
     role: str = "user"
     content: Optional[str] = None
-
-
-class ActionResponse(BaseModel):
-    trigger: Optional[str] = None
-    output: Optional[dict[str, Any]] = None
-    retry_message: Optional[str] = None
-
-    @classmethod
-    def retry(cls, retry_message: str):
-        return cls(trigger="retry", retry_message=retry_message)
-
-    @classmethod
-    def transition(cls, trigger: str, output: dict[str, Any] | None = None):
-        output = output or {}
-        return cls(trigger=trigger, output=output)
-
-    @classmethod
-    def no_transition(cls, output: dict[str, Any]):
-        return cls(output=output)
 
 
 class Response(BaseModel):

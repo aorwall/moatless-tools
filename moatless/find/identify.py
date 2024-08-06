@@ -71,29 +71,13 @@ class IdentifyCode(AgenticState):
 
     expand_context: bool = Field(
         default=False,
-        description="Whether to expand the search result with relevant code spans .",
+        description="Whether to expand the search result with relevant code spans.",
     )
 
     max_prompt_file_tokens: int = Field(
         default=4000,
         description="The maximum number of tokens to include in the prompt.",
     )
-
-    def __init__(
-        self,
-        ranked_spans: list[RankedFileSpan],
-        expand_context: bool = True,
-        include_message_history: bool = False,
-        max_prompt_file_tokens: int = 4000,
-        **data,
-    ):
-        super().__init__(
-            ranked_spans=ranked_spans,
-            include_message_history=include_message_history,
-            expand_context=expand_context,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            **data,
-        )
 
     def model_dump(self, **kwargs):
         return super().model_dump(**kwargs)
@@ -111,7 +95,7 @@ class IdentifyCode(AgenticState):
         else:
             logger.info("No spans identified.")
 
-        message = f"The search returned {len(self.ranked_spans)} results. But unfortunately, I didn’t find any of the search results relevant to the query."
+        message = f"The search returned {len(self.ranked_spans)} results. But unfortunately, I didn't find any of the search results relevant to the query."
 
         message += "\n\n"
         message += action.scratch_pad
@@ -166,7 +150,7 @@ class IdentifyCode(AgenticState):
             file_context_str = "No relevant code identified yet."
 
         content = f"""<issue>
-{self.loop.trajectory.initial_message}
+{self.initial_message}
 </issue>
 
 <file_context>

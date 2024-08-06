@@ -90,12 +90,19 @@ def test_transition_rules_serialization_deserialization():
     # Check if the internal _source_trigger_index is rebuilt correctly
     assert deserialized_rules._source_trigger_index == rules._source_trigger_index
 
-    json_data = json.dumps(
-        rules.model_dump(exclude_none=True, exclude_unset=True), indent=2
-    )
+    data = rules.model_dump(exclude_none=True, exclude_unset=True)
+
     assert (
-        json_data
-        == """{
+        data
+        == {
+  "global_params": {
+    "model": "gpt-4o"
+  },
+  "state_params": {
+    "MockStateB": {
+      "model": "claude-3.5-sonnet"
+    }
+  },
   "initial_state": "MockStateA",
   "transition_rules": [
     {
@@ -116,17 +123,8 @@ def test_transition_rules_serialization_deserialization():
       "source": "MockStateB",
       "dest": "Rejected"
     }
-  ],
-  "global_params": {
-    "model": "gpt-4o"
-  },
-  "state_params": {
-    "MockStateB": {
-      "model": "claude-3.5-sonnet"
-    }
-  }
-}"""
-    )
+  ]
+})
 
 
 def test_find_transition_rule():
@@ -156,10 +154,14 @@ def test_find_transition_rule():
     assert len(not_found_rules) == 0
 
 
-def test_next_state():
+def test_next_transition_rule():
     rules = TransitionRules(
-        initial_state=MockStateA,
         transition_rules=[
+            TransitionRule(
+                source=Pending,
+                dest=MockStateA,
+                trigger="init",
+            ),
             TransitionRule(
                 source=MockStateA,
                 dest=MockStateB,
@@ -176,53 +178,34 @@ def test_next_state():
     )
 
     # Test successful transition
-    source_state = MockStateA(value=5)
-    action_response = source_state._execute_action("to_b")
-    next_state = rules.next_state(source_state, action_response.trigger, {"value": 5})
-    assert isinstance(next_state, MockStateB)
-    assert next_state.name == "MockStateB"
-    assert next_state.model == "claude-3.5-sonnet"
+    source_state = MockStateA(id=1, value=5)
+    next_transition_rule = rules.get_next_rule(source_state, "to_b", {"value": 5})
+    assert isinstance(next_transition_rule, TransitionRule)
+    assert next_transition_rule.source == MockStateA
+    assert next_transition_rule.dest == MockStateB
+    assert next_transition_rule.trigger == "to_b"
+    assert next_transition_rule.required_fields == {"value"}
 
     # Test transition with missing required fields
-    action_response = source_state._execute_action("to_b")
-    next_state = rules.next_state(source_state, action_response.trigger, {})
-    assert next_state is None
+    next_transition_rule = rules.get_next_rule(source_state, "to_b", {})
+    assert next_transition_rule is None
 
     # Test transition to Finished state
-    source_state = MockStateB(default_name="TestB")
-    action_response = source_state._execute_action("finish")
-    next_state = rules.next_state(source_state, action_response.trigger, {})
-    assert isinstance(next_state, Finished)
+    source_state = MockStateB(id=2, default_name="TestB")
+    next_transition_rule = rules.get_next_rule(source_state, "finish", {})
+    assert next_transition_rule is not None
+    assert next_transition_rule.source == MockStateB
+    assert next_transition_rule.dest == Finished
+    assert next_transition_rule.trigger == "finish"
 
     # Test transition to Rejected state
-    action_response = source_state._execute_action("reject")
-    next_state = rules.next_state(
-        source_state, action_response.trigger, {"message": "Custom rejection message"}
-    )
-    assert isinstance(next_state, Rejected)
-    assert next_state.message == "Custom rejection message"
-
-
-def test_initial_state_creation():
-    rules = TransitionRules(
-        initial_state=MockStateA,
-        transition_rules=[],
-        global_params={"model": "gpt-4o"},
-        state_params={
-            MockStateB: {"model": "claude-3.5-sonnet"},
-        },
-    )
-
-    initial_state = rules.create_initial_state()
-    print(initial_state)
-    assert isinstance(initial_state, MockStateA)
-    assert initial_state.model == "gpt-4o"
-
-    # Test overriding with custom data
-    custom_initial_state = rules.create_initial_state(value=20, model="custom-model")
-    assert isinstance(custom_initial_state, MockStateA)
-    assert custom_initial_state.model == "custom-model"
-    assert custom_initial_state.value == 20
+    next_transition_rule = rules.get_next_rule(
+        source_state, "reject", {}
+    )   
+    assert next_transition_rule is not None
+    assert next_transition_rule.source == MockStateB
+    assert next_transition_rule.dest == Rejected
+    assert next_transition_rule.trigger == "reject"
 
 
 if __name__ == "__main__":

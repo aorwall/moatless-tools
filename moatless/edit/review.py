@@ -132,27 +132,12 @@ class ReviewCode(AgenticState):
         description="Whether to finish the task if no verification errors are found.",
     )
 
-    _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)
+    include_message_history: bool = Field(
+        True,
+        description="Whether to include the message history in the prompt.",
+    )
 
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        max_prompt_file_tokens: int = 4000,
-        max_tokens_in_edit_prompt: int = 500,
-        max_iterations: int = 8,
-        include_message_history=True,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            diff=diff,
-            include_message_history=include_message_history,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            max_tokens_in_edit_prompt=max_tokens_in_edit_prompt,
-            max_iterations=max_iterations,
-            **data,
-        )
+    _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)
 
     def init(self) -> Optional[ActionResponse]:
         self._verification_errors = self.workspace.verify()
@@ -399,15 +384,15 @@ class ReviewCode(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        if self.loop.trajectory.initial_message:
-            content = f"<main_objective>\n{self.loop.trajectory.initial_message}\n</main_objective>"
+        if self.initial_message:
+            content = f"<main_objective>\n{self.initial_message}\n</main_objective>"
         else:
             content = ""
 
-        previous_transitions = self.loop.get_previous_transitions(self)
+        previous_states = self.get_previous_states(self)
 
-        for transition in previous_transitions:
-            new_message = transition.state.to_message()
+        for previous_state in previous_states:
+            new_message = previous_state.to_message()
             if new_message and not content:
                 content = new_message
             elif new_message:
@@ -416,7 +401,7 @@ class ReviewCode(AgenticState):
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(
-                    action=transition.actions[-1].action,
+                    action=previous_state.last_action.request,
                 )
             )
             content = ""

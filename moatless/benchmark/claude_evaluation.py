@@ -4,7 +4,7 @@ from typing import Optional
 
 import instructor
 
-from moatless import Transitions
+from moatless.transition_rules import TransitionRules
 from moatless.benchmark.evaluation import create_evaluation_name, Evaluation
 from moatless.edit.edit import EditCode
 from moatless.edit.plan import PlanToCode
@@ -170,7 +170,7 @@ def run_evaluation():
 
 
 def evaluate_search():
-    transitions = Transitions(
+    transitions = TransitionRules(
         global_params=global_params,
         state_params={
             SearchCode: {"max_search_results": 50, "provide_initial_context": True},
@@ -280,7 +280,7 @@ def evaluate_coding():
 
 
 def evaluate_plan(previous_trajectory_dir: Optional[str] = None):
-    transitions = Transitions(
+    transitions = TransitionRules(
         global_params=global_params,
         state_params={
             SearchCode: {

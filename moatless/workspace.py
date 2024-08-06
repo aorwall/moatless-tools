@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional, Dict
 
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.file_context import FileContext
@@ -135,7 +135,7 @@ class Workspace:
             "code_index": self.code_index.dict() if self.code_index else None,
         }
 
-    def snapshot(self):
+    def snapshot(self) -> Dict[str, Any]:
         return {
             "repository": self.file_repo.snapshot(),
             "file_context": self.file_context.snapshot(),

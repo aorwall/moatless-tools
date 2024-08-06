@@ -84,23 +84,10 @@ class PlanToCodeWithLines(AgenticState):
         description="Whether to expand the context with related spans.",
     )
 
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        diff: Optional[str] = None,
-        lint_messages: list[VerificationError] | None = None,
-        max_iterations: int = 5,
-        include_message_history=True,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            diff=diff,
-            lint_messages=lint_messages,
-            include_message_history=include_message_history,
-            max_iterations=max_iterations,
-            **data,
-        )
+    include_message_history: bool = Field(
+        True,
+        description="Whether to include the message history in the prompt.",
+    )
 
     def init(self):
         # TODO: Make addition to context customizable??
@@ -114,7 +101,7 @@ class PlanToCodeWithLines(AgenticState):
 
         if (
             self.expand_context_with_related_spans
-            and self.loop.transition_count(self) == 0
+            and len(self.get_previous_states(self)) == 0
         ):
             self.file_context.expand_context_with_related_spans(max_tokens=4000)
 
@@ -260,12 +247,12 @@ class PlanToCodeWithLines(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        content = self.loop.trajectory.initial_message or ""
+        content = self.initial_message or ""
 
-        previous_transitions = self.loop.get_previous_transitions(self)
+        previous_states = self.get_previous_states(self)
 
-        for transition in previous_transitions:
-            new_message = transition.state.to_message()
+        for previous_state in previous_states:
+            new_message = previous_state.to_message()
             if new_message and not content:
                 content = new_message
             elif new_message:
@@ -274,7 +261,7 @@ class PlanToCodeWithLines(AgenticState):
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(
-                    action=transition.actions[-1].action,
+                    action=previous_state.last_action.request,
                 )
             )
             content = ""

@@ -70,7 +70,7 @@ class GitRepository(FileRepository):
             "type": "git",
             "repo_path": self._repo_path,
             "git_repo_url": self._repo_url,
-            "commit": self._current_commit,
+            "commit": self._initial_commit,
         }
 
     def snapshot(self) -> dict:
@@ -78,23 +78,40 @@ class GitRepository(FileRepository):
             "commit": self._current_commit,
         }
 
+    def save_file(self, file_path: str, updated_content: Optional[str] = None):
+        super().save_file(file_path, updated_content)
+        self.commit(file_path)
+
     def save(self):
         super().save()
-        commit_message = self.commit_message()
-        self._repo.index.add("*")
+        self.commit()
+
+    def commit(self, file_path: str | None = None):
+        commit_message = self.commit_message(file_path)
+
+        if file_path:
+            self._repo.index.add(file_path)
+        else:
+            self._repo.index.add("*")
         self._repo.index.commit(commit_message)
         self._current_commit = self._repo.head.commit.hexsha
 
-    def diff(self):
-        return self._repo.git.diff(self._initial_commit, self._current_commit)
+        logger.info(f"Committed changes to git with message '{commit_message}' and commit hash '{self._current_commit}'")
 
-    def commit_message(self) -> str:
-        diff = self._repo.git.diff(None)
+    def commit_message(self, file_path: str | None = None) -> str:
+        if file_path:
+            diff = self._repo.git.diff("HEAD", file_path)
+        else:
+            diff = self._repo.git.diff("HEAD")
+
         if not diff:
             return "No changes."
 
         if Settings.cheap_model:
-            prompt = f"Generate a concise commit message for the following git diff:\n\n{diff}\n\nCommit message:"
+            prompt = f"Generate a concise commit message for the following git diff"
+            if file_path:
+                prompt += f" of file {file_path}"
+            prompt += f":\n\n{diff}\n\nCommit message:"
 
             try:
                 response = litellm.completion(
@@ -107,3 +124,6 @@ class GitRepository(FileRepository):
                 logging.error(f"Error generating commit message: {e}")
 
         return "Automated commit by Moatless Tools"
+
+    def diff(self):
+        return self._repo.git.diff(self._initial_commit, self._current_commit)

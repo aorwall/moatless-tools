@@ -69,28 +69,18 @@ class Decision(ActionRequest):
 
 
 class DecideRelevance(AgenticState):
-    expand_context: bool
+    expand_context: bool = Field(
+        False,
+        description="If true, the file context will be expanded with additional context.",
+    )
     finish_after_relevant_count: int = Field(
         2,
         description="Finish the task after this many relevant decisions have been made but not complete.",
     )
-    max_prompt_file_tokens: int = 4000
-
-    def __init__(
-        self,
-        expand_context: bool = True,
-        include_message_history=False,
-        finish_after_relevant_count: int = 2,
-        max_prompt_file_tokens: int = 4000,
-        **data,
-    ):
-        super().__init__(
-            expand_context=expand_context,
-            finish_after_relevant_count=finish_after_relevant_count,
-            max_prompt_file_tokens=max_prompt_file_tokens,
-            include_message_history=include_message_history,
-            **data,
-        )
+    max_prompt_file_tokens: int = Field(
+        4000,
+        description="The maximum number of tokens to include in the file context prompt.",
+    )
 
     def _execute_action(self, action: Decision) -> ActionResponse:
         if action.complete and action.relevant:
@@ -108,15 +98,17 @@ class DecideRelevance(AgenticState):
         )
 
     def _relevant_count(self) -> int:
+        """
+        Count the number of times a decision was made that the file context was relevant.
+        """
         relevant_count = 0
-        previous_transitions = self.loop.get_previous_transitions(self)
-        for transition in previous_transitions:
-            for previous_action in transition.actions:
-                if (
-                    isinstance(previous_action.action, Decision)
-                    and previous_action.action.relevant
-                ):
-                    relevant_count += 1
+        previous_states = self.get_previous_states(self)
+        for previous_state in previous_states:
+            if (
+                previous_state.last_action
+                and previous_state.last_action.request.relevant
+            ):
+                relevant_count += 1
         return relevant_count
 
     def action_type(self) -> type[BaseModel] | None:
@@ -126,11 +118,10 @@ class DecideRelevance(AgenticState):
         return MAYBE_FINISH_SYSTEM_PROMPT
 
     def _last_scratch_pad(self):
-        previous_searches = self.loop.get_previous_transitions(SearchCode)
-        logger.info(f"Previous searches: {len(previous_searches)}")
-        if previous_searches and previous_searches[-1].actions:
-            last_search = previous_searches[-1].actions[-1].action
-            return last_search.scratch_pad
+        previous_states = self.get_previous_states()
+        if previous_states and previous_states[-1].last_action:
+            last_action = previous_states[-1].last_action
+            return last_action.request.scratch_pad
         else:
             return None
 
@@ -155,7 +146,7 @@ class DecideRelevance(AgenticState):
         )
 
         content = f"""<issue>
-{self.loop.trajectory.initial_message}
+{self.initial_message}
 </issue>
 """
 

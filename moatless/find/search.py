@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 import instructor
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ValidationError
 
 from moatless.file_context import RankedFileSpan
 from moatless.index.types import SearchCodeHit
@@ -14,6 +14,7 @@ from moatless.types import (
     Message,
     UserMessage,
 )
+from moatless.utils.llm_utils import instructor_mode_by_model
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ functions.Search({
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -147,7 +148,7 @@ Search parameters:
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -211,7 +212,7 @@ Assistant:
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
 
-Here’s the stack trace of the error:
+Here's the stack trace of the error:
 
 File "/opt/app/db_config/database.py", line 45, in setup_connection
     engine = create_engine(DATABASE_URL)
@@ -264,6 +265,11 @@ class SearchRequest(BaseModel):
             ]
         )
 
+    @model_validator(mode='after')
+    def validate_search_requests(self):
+        if not self.has_search_attributes:
+            raise ValueError("A search request must have at least one attribute set.")
+        return self
 
 class Search(ActionRequest):
     """Take action to search for code, identify found and finish up."""
@@ -281,8 +287,12 @@ class Search(ActionRequest):
         default=False, description="Set to true when the search is complete."
     )
 
-    def has_search_attributes(self):
-        return all([search.has_search_attributes() for search in self.search_requests])
+    @model_validator(mode='after')
+    def validate_search_requests(self):
+        if not self.complete:
+            if not self.search_requests:
+                raise ValueError("At least one search request must exist.")
+        return self
 
 
 class SearchCode(AgenticState):
@@ -301,36 +311,17 @@ class SearchCode(AgenticState):
         description="The maximum number of retries when there are identified files in file context.",
     )
 
+    include_message_history: bool = Field(
+        True,
+        description="Include message history from previous iterations",
+    )
+
     provide_initial_context: bool = True
     initial_context_tokens: int = 4000
     initial_search_results: int = 50
     initial_context_spans_per_file: int = 5
 
     support_test_files: bool = False
-
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        max_search_results: int = 25,
-        max_retries_with_any_file_context: int = 3,
-        include_message_history: bool = True,
-        provide_initial_context: bool = True,
-        initial_context_tokens: int = 4000,
-        initial_search_results: int = 50,
-        initial_context_spans_per_file: int = 5,
-        **data,
-    ):
-        super().__init__(
-            message=message,
-            include_message_history=include_message_history,
-            provide_initial_context=provide_initial_context,
-            max_search_results=max_search_results,
-            max_retries_with_any_file_context=max_retries_with_any_file_context,
-            initial_context_tokens=initial_context_tokens,
-            initial_search_results=initial_search_results,
-            initial_context_spans_per_file=initial_context_spans_per_file,
-            **data,
-        )
 
     def _execute_action(self, action: Search) -> ActionResponse:
         if action.complete:
@@ -342,11 +333,6 @@ class SearchCode(AgenticState):
             )
 
         if isinstance(action, Search):
-            if not action.has_search_attributes():
-                return self._retry(
-                    "You must provide at least one the search attributes query, code_snippet, class_name or function_name to search. If you're finished, set finished to true."
-                )
-
             for request in action.search_requests:
                 if (
                     not self.support_test_files
@@ -385,7 +371,7 @@ class SearchCode(AgenticState):
 
         if len(ranked_spans) == 0:
             logger.info("No search results found. Will retry.")
-            message = "\n\nUnfortunately, I didn’t find any relevant results."
+            message = "\n\nUnfortunately, I didn't find any relevant results."
             return self._retry(message)
 
         return ActionResponse.transition(
@@ -411,7 +397,8 @@ class SearchCode(AgenticState):
     def system_prompt(self) -> str:
         system_prompt = SEARCH_SYSTEM_PROMPT
 
-        if self.loop.instructor_mode == instructor.Mode.JSON:
+        instructor_mode = instructor_mode_by_model(self.model)
+        if instructor_mode == instructor.Mode.JSON:
             system_prompt += SEARCH_JSON_FEW_SHOT
         elif self.model.startswith("openai"):
             system_prompt += SEARCH_FUNCTIONS_FEW_SHOT_OPENAI_FUNC
@@ -425,12 +412,12 @@ class SearchCode(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        content = f"<issue>\n{self.loop.trajectory.initial_message}\n</issue>"
+        content = f"<issue>\n{self.initial_message}\n</issue>"
 
         if self.provide_initial_context:
             logger.info("Search for initial context to provide in the prompt")
             result = self.workspace.code_index.semantic_search(
-                query=self.loop.trajectory.initial_message,
+                query=self.initial_message,
                 exact_match_if_possible=False,
                 max_spans_per_file=5,
                 max_results=100,
@@ -452,14 +439,14 @@ class SearchCode(AgenticState):
                 show_outcommented_code=False,
             )
 
-        previous_transitions = self.loop.get_previous_transitions(self)
-        for transition in previous_transitions:
-            if transition.state.message:
-                content += transition.state.message
+        previous_states = self.get_previous_states(self)
+        for previous_state in previous_states:
+            if previous_state.message:
+                content += previous_state.message
             messages.append(UserMessage(content=content))
             messages.append(
                 AssistantMessage(
-                    action=transition.actions[-1].action,
+                    action=previous_state.last_action.request,
                 )
             )
             content = ""
