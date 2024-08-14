@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from moatless.find import SearchCode
 from moatless.state import AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     Message,

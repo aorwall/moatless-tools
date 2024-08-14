@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from moatless.edit.plan import PlanToCode, ApplyChange
-from moatless.types import ActionResponse, ActionTransaction
+from moatless.schema import ActionResponse, ActionTransaction
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 

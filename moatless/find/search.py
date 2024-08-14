@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator, ValidationError
 from moatless.file_context import RankedFileSpan
 from moatless.index.types import SearchCodeHit
 from moatless.state import ActionResponse, AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     AssistantMessage,
     Message,

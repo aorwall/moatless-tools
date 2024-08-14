@@ -26,7 +26,7 @@ from moatless.benchmark.swebench import found_in_expected_spans, found_in_altern
 from moatless.benchmark.utils import get_missing_files
 from moatless.file_context import FileContext
 from moatless.trajectory import Trajectory
-from moatless.types import ActionTransaction, Usage, Content
+from moatless.schema import ActionTransaction, Usage, Content
 from moatless.state import AgenticState
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ from moatless.edit.prompt import (
     CODER_FINAL_SYSTEM_PROMPT,
 )
 from moatless.state import AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     Message,

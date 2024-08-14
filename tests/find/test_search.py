@@ -1,6 +1,6 @@
 import pytest
 from moatless.find.search import SearchCode, Search, SearchRequest
-from moatless.types import ActionResponse
+from moatless.schema import ActionResponse
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 from pydantic import ValidationError

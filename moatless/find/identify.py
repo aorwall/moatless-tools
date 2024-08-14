@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from moatless.file_context import RankedFileSpan
 from moatless.state import AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     FileWithSpans,

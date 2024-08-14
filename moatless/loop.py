@@ -27,7 +27,7 @@ from moatless.state import (
 )
 from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRule, TransitionRules
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     AssistantMessage,
     Content,

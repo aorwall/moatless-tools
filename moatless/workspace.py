@@ -6,7 +6,7 @@ from moatless.file_context import FileContext
 from moatless.index import IndexSettings
 from moatless.index.code_index import CodeIndex
 from moatless.repository import CodeFile, FileRepository, GitRepository
-from moatless.types import FileWithSpans, VerificationError
+from moatless.schema import FileWithSpans, VerificationError
 from moatless.verify.lint import PylintVerifier
 from moatless.verify.maven import MavenVerifier
 

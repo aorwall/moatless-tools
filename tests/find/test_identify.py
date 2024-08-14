@@ -3,7 +3,7 @@ from moatless.codeblocks.codeblocks import BlockSpan, SpanType
 from moatless.find.identify import IdentifyCode, Identify, is_test_pattern
 from moatless.file_context import RankedFileSpan
 from moatless.repository.file import CodeFile
-from moatless.types import FileWithSpans, ActionResponse
+from moatless.schema import FileWithSpans, ActionResponse
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 

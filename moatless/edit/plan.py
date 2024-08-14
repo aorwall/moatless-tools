@@ -11,7 +11,7 @@ from moatless.edit.prompt import (
     SELECT_SPAN_SYSTEM_PROMPT,
 )
 from moatless.state import AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     AssistantMessage,

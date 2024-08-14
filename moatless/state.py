@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator
 
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     ActionTransaction,

@@ -9,7 +9,7 @@ from pydantic_core import to_jsonable_python
 from moatless.workspace import Workspace
 from moatless.transition_rules import TransitionRules
 from moatless.state import AgenticState, get_state_class
-from moatless.types import ActionRequest, ActionTransaction, ActionResponse, Usage, Content
+from moatless.schema import ActionRequest, ActionTransaction, ActionResponse, Usage, Content
 
 logger = logging.getLogger(__name__)
 

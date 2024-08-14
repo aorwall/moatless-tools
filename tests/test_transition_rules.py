@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 from moatless.transition_rules import TransitionRules, TransitionRule
 from moatless.state import AgenticState, Finished, Rejected, Pending
-from moatless.types import ActionResponse
+from moatless.schema import ActionResponse
 
 
 class MockStateA(AgenticState):

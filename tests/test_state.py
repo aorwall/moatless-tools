@@ -4,7 +4,7 @@ from moatless.state import AgenticState, NoopState, Finished
 from moatless.workspace import Workspace
 from moatless.repository import FileRepository
 from moatless.file_context import FileContext
-from moatless.types import ActionRequest, ActionResponse, Content, FileWithSpans, Usage
+from moatless.schema import ActionRequest, ActionResponse, Content, FileWithSpans, Usage
 
 
 class ConcreteAgenticState(AgenticState):

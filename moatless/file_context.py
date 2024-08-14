@@ -15,7 +15,7 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.repository import CodeFile, FileRepository, UpdateResult
-from moatless.types import FileWithSpans
+from moatless.schema import FileWithSpans
 
 logger = logging.getLogger(__name__)
 

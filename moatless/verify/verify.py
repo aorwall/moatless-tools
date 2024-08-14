@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from moatless.repository import CodeFile
-from moatless.types import VerificationError
+from moatless.schema import VerificationError
 
 
 class Verifier(ABC):

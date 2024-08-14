@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, patch
 from moatless.edit.edit import EditCode
 from moatless.repository.file import UpdateResult
-from moatless.types import ActionResponse, Content
+from moatless.schema import ActionResponse, Content
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from moatless.repository import CodeFile

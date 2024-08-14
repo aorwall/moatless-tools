@@ -8,7 +8,7 @@ from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup
 from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
 from moatless.repository import CodeFile
 from moatless.state import ActionResponse, AgenticState
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     FileWithSpans,
     Message,

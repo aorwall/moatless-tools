@@ -6,7 +6,7 @@ from typing import List
 from moatless.codeblocks.module import Module
 from moatless.index.types import SearchCodeHit, CodeSnippet
 from moatless.repository import FileRepository
-from moatless.types import FileWithSpans
+from moatless.schema import FileWithSpans
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ from moatless.index.types import (
     SearchCodeResponse,
 )
 from moatless.repository import FileRepository
-from moatless.types import FileWithSpans
+from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from moatless.edit.clarify import ClarifyCodeChange, LineNumberClarification
-from moatless.types import ActionResponse, FileWithSpans
+from moatless.schema import ActionResponse, FileWithSpans
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from moatless.repository import CodeFile

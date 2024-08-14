@@ -5,7 +5,7 @@ from pylint.lint import Run
 from pylint.testutils import MinimalTestReporter
 
 from moatless.repository import CodeFile
-from moatless.types import VerificationError
+from moatless.schema import VerificationError
 from moatless.verify.verify import Verifier
 
 logger = logging.getLogger(__name__)

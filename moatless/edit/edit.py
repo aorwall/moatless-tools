@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.state import AgenticState, Finished
-from moatless.types import (
+from moatless.schema import (
     ActionRequest,
     ActionResponse,
     AssistantMessage,

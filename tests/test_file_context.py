@@ -1,6 +1,6 @@
 from moatless.benchmark.swebench import setup_swebench_repo
 from moatless.file_context import FileContext
-from moatless.types import FileWithSpans
+from moatless.schema import FileWithSpans
 
 
 def test_file_context_to_dict():
