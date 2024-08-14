@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
@@ -25,12 +25,10 @@ class UpdateResult:
 
 
 class CodeFile(BaseModel):
-    file_path: str
-    content: str
-    module: Module | None = None
-    dirty: bool = False
-
-    model_config = ConfigDict(exclude={"module", "dirty"})
+    file_path: str = Field(..., description="The path to the file")
+    content: str = Field(..., description="The content of the file")
+    _module: Module | None = PrivateAttr(None)
+    _dirty: bool = PrivateAttr(False)
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
@@ -52,6 +50,16 @@ class CodeFile(BaseModel):
     @property
     def supports_codeblocks(self):
         return self.module is not None
+
+    @property
+    def module(self) -> Module:
+        if not self._module:
+            return None
+        return self._module
+
+    @property
+    def dirty(self) -> bool:
+        return self._dirty
 
     def update_content_by_line_numbers(
         self, start_line_index: int, end_line_index: int, replacement_content: str
@@ -154,11 +162,11 @@ class CodeFile(BaseModel):
                 logger.info(
                     f"Updated content for {self.file_path} with {len(new_span_ids)} new span ids."
                 )
-                self.module = module
+                self._module = module
             else:
                 new_span_ids = []
 
-            self.dirty = True
+            self._dirty = True
             self.content = updated_content
 
             return UpdateResult(
@@ -230,8 +238,8 @@ class FileRepository:
                 self._files[file_path] = existing_file
             elif refresh or not from_origin:
                 existing_file.content = found_file.content
-                existing_file.module = found_file.module
-                existing_file.dirty = False
+                existing_file._module = found_file.module
+                existing_file._dirty = False
 
         return existing_file
 
@@ -242,11 +250,11 @@ class FileRepository:
             updated_content = updated_content or file.module.to_string()
             f.write(updated_content)
 
-        file.dirty = False
+        file._dirty = False
 
     def save(self):
         for file in self._files.values():
-            if file.dirty:
+            if file._dirty:
                 self.save_file(file.file_path, file.content)
 
     def matching_files(self, file_pattern: str):
