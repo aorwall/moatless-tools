@@ -553,6 +553,7 @@ class CodeIndex:
         category: str = "implementation",
         file_pattern: Optional[str] = None,
         exact_content_match: Optional[str] = None,
+        top_k: int = 500
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -578,7 +579,7 @@ class CodeIndex:
         query_bundle = VectorStoreQuery(
             query_str=query,
             query_embedding=query_embedding,
-            similarity_top_k=500,  # TODO: Fix paging?
+            similarity_top_k=top_k,  # TODO: Fix paging?
             filters=filters,
         )
 
@@ -763,7 +764,7 @@ class CodeIndex:
             ]
         )
         logger.info(
-            f"Prepared {len(prepared_nodes)} nodes and {prepared_tokens} tokens"
+            f"Run embed pipeline with {len(prepared_nodes)} nodes and {prepared_tokens} tokens"
         )
 
         embedded_nodes = embed_pipeline.run(

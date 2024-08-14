@@ -1,8 +1,8 @@
 import re
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from typing_extensions import deprecated
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
@@ -118,9 +118,10 @@ INDEXED_BLOCKS = [
 
 
 @deprecated("Use BlockSpans to define code block visibility instead")
-class PathTree(BaseModel):
-    show: bool = Field(default=False, description="Show the block and all sub blocks.")
-    tree: dict[str, "PathTree"] = Field(default_factory=dict)
+@dataclass
+class PathTree:
+    show: bool = False
+    tree: dict[str, "PathTree"] = field(default_factory=dict)
 
     @staticmethod
     def from_block_paths(block_paths: list[BlockPath]) -> "PathTree":
@@ -189,31 +190,18 @@ class RelationshipType(str, Enum):
     DEPENDENCY = "dependency"
     TYPE = "type"
 
+@dataclass
+class Relationship:
+    scope: ReferenceScope
+    external_path: list[str] = field(default_factory=list)
+    resolved_path: list[str] = field(default_factory=list)
+    path: list[str] = field(default_factory=list)
+    type: RelationshipType = RelationshipType.USES
+    identifier: Optional[str] = None
 
-class Relationship(BaseModel):
-    scope: ReferenceScope = Field(description="The scope of the reference.")
-    identifier: Optional[str] = Field(default=None, description="ID")
-    type: RelationshipType = Field(
-        default=RelationshipType.USES, description="The type of the reference."
-    )
-    external_path: list[str] = Field(
-        default=[], description="The path to the referenced parent code block."
-    )
-    resolved_path: list[str] = Field(
-        default=[], description="The path to the file with the referenced code block."
-    )
-    path: list[str] = Field(
-        default=[], description="The path to the referenced code block."
-    )
-
-    @classmethod
-    @model_validator(mode="before")
-    def validate_path(cls, values):
-        external_path = values.get("external_path")
-        path = values.get("path")
-        if not external_path and not path:
+    def __post_init__(self):
+        if not self.external_path and not self.path:
             raise ValueError("Cannot create Reference without external_path or path.")
-        return values
 
     def __hash__(self):
         return hash((self.scope, tuple(self.path)))
@@ -237,10 +225,10 @@ class Relationship(BaseModel):
 
         return f"({start_node})-[:{self.type.name} {{scope: {self.scope.value}}}]->({end_node})"
 
-
-class Parameter(BaseModel):
-    identifier: str = Field(description="The identifier of the parameter.")
-    type: Optional[str] = Field(description="The type of the parameter.")
+@dataclass
+class Parameter:
+    identifier: str
+    type: Optional[str] = None
 
 
 class SpanType(str, Enum):
@@ -248,43 +236,23 @@ class SpanType(str, Enum):
     DOCUMENTATION = "docs"
     IMPLEMENTATION = "impl"
 
-
-class BlockSpan(BaseModel):
-    span_id: str = Field()
-    span_type: SpanType = Field(description="Type of span.")
-    start_line: int = Field(description="Start line of the span.")
-    end_line: int = Field(description="End line of the span.")
-
-    initiating_block: "CodeBlock" = Field(
-        default=None,
-        description="The block that initiated the span.",
-    )
+@dataclass
+class BlockSpan:
+    span_id: str
+    span_type: SpanType
+    start_line: int
+    end_line: int
+    block_paths: list[BlockPath] = field(default_factory=list)
+    initiating_block: Optional['CodeBlock'] = None
+    visible: bool = True
+    index: int = 0
+    parent_block_path: Optional[BlockPath] = None
+    is_partial: bool = False
+    tokens: int = 0
 
     @property
     def block_type(self):
-        return self.initiating_block.type
-
-    # TODO: Remove
-    visible: bool = Field(default=True, description="If the span should be visible.")
-
-    index: int = 0
-
-    parent_block_path: BlockPath = Field(
-        default=None,
-        description="Path to the parent block of the span.",
-    )
-
-    is_partial: bool = Field(
-        default=False,
-        description="If the span is covering a partial part of the parent block.",
-    )
-
-    block_paths: list[BlockPath] = Field(
-        default=[],
-        description="Block paths that should be shown when the span is shown.",
-    )
-
-    tokens: int = Field(default=0, description="Number of tokens in the span.")
+        return self.initiating_block.type if self.initiating_block else None
 
     def __str__(self):
         return f"{self.span_id} ({self.span_type.value}, {self.tokens} tokens)"
@@ -296,63 +264,59 @@ class BlockSpan(BaseModel):
             return block_path
 
 
-class ValidationError(BaseModel):
+@dataclass
+class ValidationError:
     error: str
 
 
-class CodeBlock(BaseModel):
-    content: str
+@dataclass(eq=False, repr=False, slots=True)
+class CodeBlock:
     type: CodeBlockType
+    content: str
     identifier: Optional[str] = None
-    parameters: list[Parameter] = []  # TODO: Move to Function sub class
-    relationships: list[Relationship] = []
-    span_ids: set[str] = set()
-    belongs_to_span: BlockSpan | None = None
-    content_lines: list[str] = []
+    parameters: List['Parameter'] = field(default_factory=list)
+    relationships: List['Relationship'] = field(default_factory=list)
+    span_ids: Set[str] = field(default_factory=set)
+    belongs_to_span: Optional['BlockSpan'] = None
     start_line: int = 0
     end_line: int = 0
-    properties: dict = {}
+    properties: Dict = field(default_factory=dict)
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    children: list["CodeBlock"] = []
-    validation_errors: list[ValidationError] = []
-    parent: Optional["CodeBlock"] = None
-    previous: Optional["CodeBlock"] = None
-    next: Optional["CodeBlock"] = None
+    children: List['CodeBlock'] = field(default_factory=list)
+    validation_errors: List['ValidationError'] = field(default_factory=list)
+    parent: Optional['CodeBlock'] = None
+    previous: Optional['CodeBlock'] = None
+    next: Optional['CodeBlock'] = None
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    _content_lines: Optional[List[str]] = field(default=None, init=False)
 
-    @classmethod
-    @field_validator("type", mode="before")
-    def validate_type(cls, v):
-        if v is None:
-            raise ValueError("Cannot create CodeBlock without type.")
-        return v
+    def __post_init__(self):
+        self._content_lines = None
+        
+        if self.children:
+            for child in self.children:
+                child.parent = self
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        for child in self.children:
-            child.parent = self
+        if self.pre_code and not self.indentation and not self.pre_lines:
+            pre_code_lines = self.pre_code.split("\n")
+            self.pre_lines = len(pre_code_lines) - 1
+            self.indentation = pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
 
+    @property
+    def content_lines(self):
+        if self._content_lines is None:
+            self._content_lines = self.content.split("\n")
+        return self._content_lines
+
+    def validate_pre_code(self):
         if self.pre_code and not re.match(r"^[ \n\\]*$", self.pre_code):
             raise ValueError(
                 f"Failed to parse code block with type {self.type} and content `{self.content}`. "
                 f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`"
             )
-
-        if self.pre_code and not self.indentation and not self.pre_lines:
-            pre_code_lines = self.pre_code.split("\n")
-            self.pre_lines = len(pre_code_lines) - 1
-            if self.pre_lines > 0:
-                self.indentation = pre_code_lines[-1]
-            else:
-                self.indentation = self.pre_code
-
-        self.content_lines = self.content.split("\n")
-        # if self.indentation and self.pre_lines:
-        #    self.content_lines[1:] = [line[len(self.indentation):] for line in self.content_lines[1:]]
 
     def last(self):
         if self.next:
@@ -894,7 +858,7 @@ class CodeBlock(BaseModel):
     def module(self) -> "Module":  # noqa: F821
         if self.parent:
             return self.parent.module
-        return self
+        return None
 
     @deprecated("Use codeblock.module")
     def root(self) -> "Module":  # noqa: F821

@@ -2,6 +2,8 @@ import os
 
 from llama_index.core.base.embeddings.base import BaseEmbedding
 
+from moatless.index.retry_voyage_embedding import VoyageEmbeddingWithRetry
+
 
 def get_embed_model(model_name: str) -> BaseEmbedding:
     if model_name.startswith("voyage"):
@@ -17,11 +19,11 @@ def get_embed_model(model_name: str) -> BaseEmbedding:
                 "VOYAGE_API_KEY environment variable is not set. Please set it to your Voyage API key."
             )
 
-        return VoyageEmbedding(
+        return VoyageEmbeddingWithRetry(
             model_name=model_name,
             voyage_api_key=os.environ.get("VOYAGE_API_KEY"),
             truncation=True,
-            embed_batch_size=50,
+            embed_batch_size=80,
         )
     else:
         # Assumes OpenAI otherwise

@@ -75,6 +75,8 @@ class CodeParser:
         encoding: str = "utf8",
         max_tokens_in_span: int = 500,
         min_tokens_for_docs_span: int = 100,
+        min_lines_to_parse_block: Optional[int] = None,  # If this is set code will just be parsed if they have more line than this
+        enable_code_graph: bool = True,
         index_callback: Callable[[CodeBlock], None] | None = None,
         tokenizer: Callable[[str], list] | None = None,
         apply_gpt_tweaks: bool = False,
@@ -101,11 +103,13 @@ class CodeParser:
         self._previous_block = None
 
         # TODO: Move this to CodeGraph
+        self._enable_code_graph = enable_code_graph
         self._graph = None
 
         self.tokenizer = tokenizer or get_tokenizer()
         self._max_tokens_in_span = max_tokens_in_span
         self._min_tokens_for_docs_span = min_tokens_for_docs_span
+        self._min_lines_to_parse_block = min_lines_to_parse_block
 
     @property
     def language(self):
@@ -163,6 +167,13 @@ class CodeParser:
         pre_code = content_bytes[start_byte : node.start_byte].decode(self.encoding)
         end_line = node.end_point[0]
 
+        # Skip parsing of non structure blocks if they have less lines than min_lines_to_parse_implementation
+        # But still parse classes and modules
+        if (node_match.first_child and self._min_lines_to_parse_block
+                    and node_match.block_type not in [CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]
+                    and (node.end_point[0] - node.start_point[0]) < self._min_lines_to_parse_block):
+            node_match.first_child = None
+
         if node_match.first_child:
             end_byte = self.get_previous(node_match.first_child, node)
         else:
@@ -177,10 +188,14 @@ class CodeParser:
         else:
             identifier = None
 
-        relationships = self.create_references(
-            code, content_bytes, identifier, node_match
-        )
-        parameters = self.create_parameters(content_bytes, node_match, relationships)
+        if self._enable_code_graph:
+            relationships = self.create_references(
+                code, content_bytes, identifier, node_match
+            )
+            parameters = self.create_parameters(content_bytes, node_match, relationships)
+        else:
+            relationships = []
+            parameters = []
 
         if parent_block:
             code_block = CodeBlock(
@@ -195,7 +210,6 @@ class CodeParser:
                 end_line=end_line + 1,
                 pre_code=pre_code,
                 content=code,
-                language=self.language,
                 tokens=self._count_tokens(code),
                 children=[],
                 properties={
@@ -262,12 +276,13 @@ class CodeParser:
 
                 self.comments_with_no_span = []
 
-            self._graph.add_node(code_block.path_string(), block=code_block)
+            if self._enable_code_graph:
+                self._graph.add_node(code_block.path_string(), block=code_block)
 
-            for relationship in relationships:
-                self._graph.add_edge(
-                    code_block.path_string(), ".".join(relationship.path)
-                )
+                for relationship in relationships:
+                    self._graph.add_edge(
+                        code_block.path_string(), ".".join(relationship.path)
+                    )
 
         else:
             current_span = None
@@ -428,10 +443,13 @@ class CodeParser:
 
     def find_match(self, node: Node) -> NodeMatch | None:
         self.debug_log(f"find_match() node type {node.type}")
+
+        queries = 0
         for label, node_type, query in self.queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
             match = self._find_match(node, query, label)
+            queries += 1
             if match:
                 self.debug_log(
                     f"find_match() Found match on node {node.type} with query {label}"
@@ -683,7 +701,8 @@ class CodeParser:
         self._span_counter = {}
 
         # TODO: Should me moved to a central CodeGraph
-        self._graph = nx.DiGraph()
+        if self._enable_code_graph:
+            self._graph = nx.DiGraph()
 
         tree = self.tree_parser.parse(content_in_bytes)
         module, _, _ = self.parse_code(
