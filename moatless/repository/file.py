@@ -27,34 +27,32 @@ class UpdateResult:
 class CodeFile(BaseModel):
     file_path: str = Field(..., description="The path to the file")
     content: str = Field(..., description="The content of the file")
+
     _module: Module | None = PrivateAttr(None)
     _dirty: bool = PrivateAttr(False)
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
         with open(os.path.join(repo_path, file_path)) as f:
-            parser = get_parser_by_path(file_path)
-            if parser:
-                content = f.read()
-                module = parser.parse(content)
-            else:
-                module = None
-            return cls(file_path=file_path, content=content, module=module)
+            content = f.read()
+            return cls(file_path=file_path, content=content)
 
     @classmethod
     def from_content(cls, file_path: str, content: str):
-        parser = PythonParser()
-        module = parser.parse(content)
-        return cls(file_path=file_path, content=content, module=module)
+        return cls(file_path=file_path, content=content)
 
     @property
     def supports_codeblocks(self):
         return self.module is not None
 
     @property
-    def module(self) -> Module:
-        if not self._module:
-            return None
+    def module(self) -> Module | None:
+        if self._module is None:
+            parser = get_parser_by_path(self.file_path)
+            if parser:
+                self._module = parser.parse(self.content)
+            else:
+                return None
         return self._module
 
     @property
@@ -225,13 +223,7 @@ class FileRepository:
                 return None
 
             with open(full_file_path) as f:
-                parser = get_parser_by_path(file_path)
-                if parser:
-                    content = f.read()
-                    module = parser.parse(content)
-                    found_file = CodeFile(file_path=file_path, content=content, module=module)
-                else:
-                    found_file = CodeFile(file_path=file_path, content=f.read())
+                found_file = CodeFile(file_path=file_path, content=f.read())
 
             if not existing_file:
                 existing_file = found_file

@@ -1,8 +1,10 @@
 import logging
 import re
 import time
+from typing import List
 
 from moatless.codeblocks.module import Module
+from moatless.index.types import SearchCodeHit, CodeSnippet
 from moatless.repository import FileRepository
 from moatless.types import FileWithSpans
 
@@ -199,7 +201,8 @@ def get_missing_spans(
 
 
 def calculate_estimated_context_window(instance, results):
-    patch_diffs = get_diff_lines(instance["patch"])
+    patch = instance.get("patch") or instance.get("golden_patch")
+    patch_diffs = get_diff_lines(patch)
     expected_changes = []
 
     for patch_diff in patch_diffs:

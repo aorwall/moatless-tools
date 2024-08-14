@@ -1,13 +1,14 @@
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from datasets import load_dataset
 
 from moatless.benchmark.utils import (
     file_spans_to_dict,
-    get_missing_files,
-    get_missing_spans,
+    get_missing_files, get_missing_spans,
 )
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -18,6 +19,8 @@ from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
+
+_moatless_instances = {}
 
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
@@ -33,6 +36,21 @@ def load_instance(
 ):
     data = load_instances(dataset_name, split=split)
     return data[instance_id]
+
+
+def load_moatless_dataset():
+    global _moatless_instances
+    with open("moatless/benchmark/swebench_lite_all_evaluations.json") as f:
+        dataset = json.load(f)
+        _moatless_instances = {d["instance_id"]: d for d in dataset}
+
+def get_moatless_instance(
+        instance_id: str
+):
+    global _moatless_instances
+    if not _moatless_instances:
+        load_moatless_dataset()
+    return _moatless_instances.get(instance_id)
 
 
 def sorted_instances(
@@ -56,6 +74,7 @@ def found_in_expected_spans(instance: dict, spans: dict):
             logging.warning(
                 f"{instance['instance_id']} Expected spans for {file_path} is empty"
             )
+    
     missing_spans = get_missing_spans(instance["expected_spans"], spans)
     return not missing_spans
 
@@ -306,6 +325,7 @@ def create_workspace(
     instance_id: Optional[str] = None,
     repo_base_dir: Optional[str] = None,
     index_store_dir: Optional[str] = None,
+    create_instance_dir: bool = False,
 ):
     """
     Create a workspace for the given SWE-bench instance.
@@ -322,7 +342,12 @@ def create_workspace(
 
     repo_dir_name = instance["repo"].replace("/", "__")
     repo_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
-    repo_dir = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
+
+    if create_instance_dir:
+        date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        repo_dir = f"{repo_base_dir}/swe-bench_{instance['instance_id']}_{date_str}"
+    else:
+        repo_dir = f"{repo_base_dir}/{repo_dir_name}"
     repo = GitRepository.from_repo(
         git_repo_url=repo_url, repo_path=repo_dir, commit=instance["base_commit"]
     )
