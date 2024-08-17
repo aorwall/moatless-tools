@@ -1,4 +1,5 @@
 import json
+import os
 
 import pandas as pd
 
@@ -22,10 +23,26 @@ experiments_runs = [
     "20240617_moatless_gpt4o",
 ]
 
-dataset_path = (
-    "/home/albert/repos/albert/moatless/datasets/swebench_lite_all_evaluations.json"
-)
+experiment_verified_runs = [
+    "20231010_rag_claude2",
+    "20231010_rag_gpt35",
+    "20231010_rag_swellama13b",
+    "20231010_rag_swellama7b",
+    "20240402_rag_claude3opus",
+    "20240402_rag_gpt4",
+    "20240402_sweagent_claude3opus",
+    "20240402_sweagent_gpt4",
+    "20240509_amazon-q-developer-agent-20240430-dev",
+    "20240615_appmap-navie_gpt4o",
+    "20240617_factory_code_droid",
+    "20240620_sweagent_claude3.5sonnet",
+    "20240628_autocoderover-v20240620",
+    "20240721_amazon-q-developer-agent-20240719-dev"
 
+]
+
+#dataset_path = "/home/albert/repos/albert/moatless/datasets/swebench_lite_all_evaluations.json"
+dataset_path = "/home/albert/repos/albert/moatless/moatless/benchmark/swebench_verified_all_evaluations.json"
 
 def read_predictions(pred_path: str):
     predictions = {}
@@ -36,36 +53,26 @@ def read_predictions(pred_path: str):
     return predictions
 
 
-def generate_report():
+def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
     results = {}
 
-    experiments_dir = "/home/albert/repos/stuffs/experiments/evaluation/lite"
+    experiments_dir = "/home/albert/repos/stuffs/experiments/evaluation/verified"
 
     runs = []
-    for run_name in experiments_runs:
+    for run_name in experiment_verified_runs:
+        all_preds_path = f"{experiments_dir}/{run_name}/all_preds.jsonl"
+        results_path = f"{experiments_dir}/{run_name}/results/results.json"
+        if not os.path.exists(all_preds_path) or not os.path.exists(results_path):
+            print(f"Skipping {run_name}")
+            continue
+
         runs.append(
             (
                 run_name,
-                f"{experiments_dir}/{run_name}/all_preds.jsonl",
-                f"{experiments_dir}/{run_name}/results/results.json",
+                all_preds_path,
+                results_path,
             )
         )
-
-    runs.append(
-        (
-            "autocoderover_v20240620",
-            "/home/albert/repos/stuffs/acr-experiments/evaluation/lite/20240621_autocoderover-v20240620/all_preds.jsonl",
-            "/home/albert/repos/stuffs/acr-experiments/evaluation/lite/20240621_autocoderover-v20240620/results.json",
-        )
-    )
-
-    runs.append(
-        (
-            "20240622_Lingma_Agent",
-            "/home/albert/repos/stuffs/alibaba-experiments/evaluation/lite/20240622_Lingma_Agent/all_preds.jsonl",
-            "/home/albert/repos/stuffs/alibaba-experiments/evaluation/lite/20240622_Lingma_Agent/results.json",
-        )
-    )
 
     for run_name, prediction_file, result_file in runs:
         with open(result_file) as file:
@@ -84,7 +91,7 @@ def generate_report():
     report = []
 
     instances = sorted_instances(
-        split="test", dataset_name="princeton-nlp/SWE-bench_Lite"
+        split="test", dataset_name=dataset_name
     )
     for instance in instances:
         instance_id = instance["instance_id"]
@@ -152,4 +159,4 @@ def generate_report():
 
 
 if __name__ == "__main__":
-    df = generate_report()
+    df = generate_report("princeton-nlp/SWE-bench_Verified")
