@@ -1,7 +1,11 @@
 import pytest
 from unittest.mock import Mock, patch
+
+from moatless.benchmark.swebench import create_workspace
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.edit.expand import ExpandContext
 from moatless.edit.plan import PlanToCode, ApplyChange
-from moatless.schema import StateOutcome, ActionTransaction
+from moatless.state import StateOutcome, ActionTransaction
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 
@@ -112,4 +116,46 @@ class TestPlanToCode:
         assert response.trigger == "retry"
         assert "File nonexistent.py is not found in the file context" in response.retry_message
 
-    # Add more tests for other scenarios in _request_for_change method
+def test_select_class():
+    instance = get_moatless_instance("django__django-11095", split="verified")
+    workspace = create_workspace(instance)
+
+    plan_to_code = PlanToCode(id=0, _workspace=workspace, initial_message="Test initial message")
+
+    workspace.file_context.add_spans_to_context("django/contrib/admin/checks.py", ["ModelAdminChecks", "ModelAdminChecks._check_inlines_item"])
+    mocked_action = ApplyChange(
+        scratch_pad="Applying change",
+        action="modify",
+        file_path="django/contrib/admin/checks.py",
+        span_id="ModelAdminChecks",
+        instructions="Update function"
+    )
+
+    outcome = plan_to_code.execute(mocked_action)
+
+    # Expect clarification
+    assert outcome.trigger == "edit_code"
+    assert outcome.output == {'instructions': 'Update function', 'file_path': 'django/contrib/admin/checks.py', 'span_id': 'ModelAdminChecks'}
+
+
+def test_impl_span():
+    instance = get_moatless_instance("django__django-12419", split="verified")
+    workspace = create_workspace(instance)
+
+    plan_to_code = PlanToCode(id=0, _workspace=workspace, initial_message="Test initial message")
+
+    workspace.file_context.add_spans_to_context("django/contrib/admin/checks.py", ["ModelAdminChecks", "ModelAdminChecks._check_inlines_item"])
+    mocked_action = ApplyChange(
+        scratch_pad="Applying change",
+        action="modify",
+        file_path="django/contrib/admin/checks.py",
+        span_id="ModelAdminChecks",
+        instructions="Update function"
+    )
+
+    outcome = plan_to_code.execute(mocked_action)
+
+    # Expect clarification
+    assert outcome.trigger == "edit_code"
+    assert outcome.output == {'instructions': 'Update function', 'file_path': 'django/contrib/admin/checks.py', 'span_id': 'ModelAdminChecks'}
+

@@ -5,7 +5,7 @@ from moatless import AgenticLoop
 from moatless.benchmark.swebench import load_instance, create_workspace
 from moatless.edit.edit import EditCode
 from moatless.repository.file import UpdateResult
-from moatless.schema import StateOutcome, Content
+from moatless.state import StateOutcome, Content
 from moatless.settings import Settings
 from moatless.trajectory import Trajectory
 from moatless.workspace import Workspace

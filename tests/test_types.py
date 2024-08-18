@@ -1,6 +1,4 @@
 import anthropic.types
-from pydantic import BaseModel
-import pytest
 from moatless.schema import Completion, Usage
 
 class TestCompletion:

@@ -1,6 +1,9 @@
 import pytest
+
+from moatless.benchmark.swebench import create_workspace
+from moatless.benchmark.utils import get_moatless_instance, get_moatless_instances
 from moatless.find.search import SearchCode, Search, SearchRequest
-from moatless.schema import StateOutcome
+from moatless.state import StateOutcome
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 from pydantic import ValidationError
@@ -118,3 +121,81 @@ class TestSearchCode:
         assert len(search.search_requests) == 1
         assert search.search_requests[0].file_pattern == "*.js"
         assert search.search_requests[0].query == "javascript query"
+
+
+def test_find_impl_span():
+
+    instances = get_moatless_instances(split="verified")
+
+    # Filter and sort instances
+    filtered_instances = {
+        k: v for k, v in instances.items()
+        if "django__django-" in k and "12273" <= k.split("-")[-1] <= "12419"
+    }
+    sorted_instances = dict(sorted(filtered_instances.items()))
+
+    for instance_id, instance in sorted_instances.items():
+        print(f"Instance: {instance_id}")
+        workspace = create_workspace(instance)
+
+        search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+
+        mocked_action = Search(
+            scratch_pad="Applying change",
+            search_requests=[
+                SearchRequest(file_pattern="**/global_settings.py", query="SECURE_REFERRER_POLICY setting")
+            ]
+        )
+
+        outcome = search_code.execute(mocked_action)
+        print(outcome)
+
+        workspace.file_context.add_ranked_spans(outcome.output["ranked_spans"])
+        assert "SECURE_REFERRER_POLICY" in workspace.file_context.create_prompt()
+
+def test_find():
+    instance_id = "django__django-12419" #
+    instance = get_moatless_instance(instance_id, split="verified")
+    print(f"Instance: {instance_id}")
+    workspace = create_workspace(instance)
+
+    search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+
+    mocked_action = Search(
+        scratch_pad="Applying change",
+        search_requests=[
+            SearchRequest(file_pattern="**/global_settings.py", query="SECURE_REFERRER_POLICY setting")
+        ]
+    )
+
+    outcome = search_code.execute(mocked_action)
+
+    for ranked_span in outcome.output["ranked_spans"]:
+        print(ranked_span)
+
+    workspace.file_context.add_ranked_spans(outcome.output["ranked_spans"])
+    print(workspace.file_context.create_prompt(show_span_ids=True))
+    assert "SECURE_REFERRER_POLICY = None" in workspace.file_context.create_prompt()
+
+
+def test_find_2():
+    instance_id = "django__django-15104"
+    instance = get_moatless_instance(instance_id, split="verified")
+    workspace = create_workspace(instance)
+
+    search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+
+    print(instance["expected_spans"])
+
+    mocked_action = Search(
+        scratch_pad="Applying change",
+        max_search_results=250,
+        search_requests=[
+            SearchRequest(file_pattern="**/migrations/*.py", query="MigrationAutodetector class with generate_renamed_models method")
+        ]
+    )
+
+    outcome = search_code.execute(mocked_action)
+
+    for span in outcome.output["ranked_spans"]:
+        print(span)

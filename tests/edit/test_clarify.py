@@ -1,7 +1,10 @@
 import pytest
 from unittest.mock import Mock, patch
+
+from moatless.benchmark.swebench import create_workspace
+from moatless.benchmark.utils import get_moatless_instance
 from moatless.edit.clarify import ClarifyCodeChange, LineNumberClarification
-from moatless.schema import StateOutcome, FileWithSpans
+from moatless.state import StateOutcome, FileWithSpans
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from moatless.repository import CodeFile
@@ -133,3 +136,15 @@ class TestClarifyCodeChange:
 
         assert result is not None
         assert "covers the whole code span" in result
+
+def test_clarify_class():
+    instance = get_moatless_instance("django__django-11095", split="verified")
+    workspace = create_workspace(instance)
+    workspace.file_context.add_spans_to_context("django/contrib/admin/checks.py", ["ModelAdminChecks", "ModelAdminChecks._check_inlines_item"])
+
+    clarify_code = ClarifyCodeChange(id=0, _workspace=workspace, initial_message="Test initial message", instructions="update", span_id="ModelAdminChecks", file_path="django/contrib/admin/checks.py")
+    prompt_message = clarify_code.messages()[-1].content
+
+    assert "class ModelAdminChecks(BaseModelAdminChecks):" in prompt_message
+    assert "def _check_inlines_item(self, obj, inline, label):" in prompt_message
+    assert "return inline(obj.model, obj.admin_site).check()" in prompt_message

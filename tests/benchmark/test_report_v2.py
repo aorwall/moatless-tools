@@ -5,12 +5,18 @@ import pandas as pd
 import pytest
 
 from moatless.benchmark.report_v2 import EditStats, PlanStats, SearchStats, StateStats, to_result, BenchmarkResult, to_dataframe
+from moatless.benchmark.utils import get_moatless_instance
 from moatless.trajectory import Trajectory
 
 
 @pytest.fixture
 def django_trajectory():
     file_path = Path("tests/trajectories/django__django_16379.json")
+    return Trajectory.load(str(file_path))
+
+@pytest.fixture
+def scikit_trajectory():
+    file_path = Path("tests/trajectories/scikit-learn__scikit-learn-13779/trajectory.json")
     return Trajectory.load(str(file_path))
 
 
@@ -22,10 +28,12 @@ def dataset():
 
 @pytest.fixture
 def django_instance(dataset):
-    for instance in dataset:
-        if instance["instance_id"] == "django__django-16379":
-            return instance
-    return None
+    return get_moatless_instance("django__django-16379", split="lite")
+
+
+@pytest.fixture
+def scikit_instance(dataset):
+    return get_moatless_instance("scikit-learn__scikit-learn-13779", split="verified")
 
 
 def test_to_result(django_trajectory, django_instance):
@@ -67,6 +75,14 @@ def test_to_result(django_trajectory, django_instance):
     # Test that the expected spans match the details
     assert result.expected_spans == sum(len(spans) for spans in result.expected_spans_details.values())
     assert result.expected_files == len(result.expected_spans_details)
+
+
+def test_scikit_not_edited(scikit_trajectory, scikit_instance):
+    result = to_result(scikit_instance, scikit_trajectory)
+
+    print(json.dumps(result.model_dump(), indent=2))
+
+    assert result.edit.status == "expected_files"
 
 
 def test_to_result_error_case(django_trajectory, django_instance):

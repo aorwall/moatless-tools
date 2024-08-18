@@ -1,14 +1,15 @@
 import pytest
 from unittest.mock import MagicMock
-from moatless.state import State, AgenticState, NoopState, Finished
+from moatless.state import State, AgenticState, NoopState, Finished, ActionRequest, StateOutcome, Content
 from moatless.workspace import Workspace
-from moatless.repository import FileRepository
-from moatless.file_context import FileContext
-from moatless.schema import ActionRequest, StateOutcome, Completion, Content, FileWithSpans, Usage
+from moatless.schema import Completion, FileWithSpans, Usage
 
 class ConcreteState(State):
     def clone(self):
         return ConcreteState(**self.model_dump())
+
+    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+        return StateOutcome(output={"content": "Test response"})
 
 class ConcreteAgenticState(AgenticState):
     def _execute_action(self, action: ActionRequest) -> StateOutcome:

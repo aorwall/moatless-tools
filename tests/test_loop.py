@@ -7,7 +7,7 @@ from moatless.loop import AgenticLoop
 from moatless.state import AgenticState, Finished, Rejected, Pending
 from moatless.transition_rules import TransitionRules, TransitionRule
 from moatless.workspace import Workspace
-from moatless.schema import ActionRequest, StateOutcome, Content
+from moatless.state import ActionRequest, StateOutcome, Content
 
 from moatless.benchmark.swebench import create_workspace, load_instance
 from moatless.repository import GitRepository

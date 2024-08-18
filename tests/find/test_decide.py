@@ -1,7 +1,7 @@
 import pytest
 from moatless.find.decide import DecideRelevance, Decision
 from moatless.find.identify import Identify, IdentifyCode
-from moatless.schema import StateOutcome, ActionTransaction
+from moatless.state import StateOutcome, ActionTransaction
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from unittest.mock import Mock, MagicMock, patch

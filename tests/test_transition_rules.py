@@ -1,14 +1,15 @@
 import json
 
 import pytest
-from pydantic import BaseModel
 from moatless.transition_rules import TransitionRules, TransitionRule
-from moatless.state import AgenticState, Finished, Rejected, Pending, State
-from moatless.schema import StateOutcome
+from moatless.state import Finished, Rejected, Pending, State, ActionRequest, StateOutcome
 
 
 class MockStateA(State):
     value: int = 0
+
+    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+        return StateOutcome(output={"value": self.value})
 
 
 class MockStateB(State):
