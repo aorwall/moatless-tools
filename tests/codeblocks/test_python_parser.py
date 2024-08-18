@@ -798,7 +798,17 @@ def test_ignored_spans():
     with open(file_path, "r") as file:
         content = file.read()
 
+    #def assertion(codeblock):
+    #    print(codeblock.to_tree(show_spans=True))
+
+    #_verify_parsing(content, assertion, debug=False)
+
+    file_path = f"{repo_dir}/requests/sessions.py"
+    with open(file_path, "r") as file:
+        content = file.read()
+
     def assertion(codeblock):
         print(codeblock.to_tree(show_spans=True))
+        assert "imports" in codeblock.span_ids
 
     _verify_parsing(content, assertion, debug=False)

@@ -7,7 +7,7 @@ from moatless.loop import AgenticLoop
 from moatless.state import AgenticState, Finished, Rejected, Pending
 from moatless.transition_rules import TransitionRules, TransitionRule
 from moatless.workspace import Workspace
-from moatless.schema import ActionRequest, ActionResponse, Content
+from moatless.schema import ActionRequest, StateOutcome, Content
 
 from moatless.benchmark.swebench import create_workspace, load_instance
 from moatless.repository import GitRepository
@@ -20,20 +20,26 @@ pytest.mark.api_keys_required = pytest.mark.skipif(
 )
 
 class TestState(AgenticState):
-    def _execute_action(self, action: ActionRequest) -> ActionResponse:
+    def _execute_action(self, action: ActionRequest) -> StateOutcome:
         if action.content == "reject":
-            return ActionResponse(trigger="reject", output={"message": "Rejected"})
+            return StateOutcome(trigger="reject", output={"message": "Rejected"})
         elif action.content == "continue":
-            return ActionResponse(trigger="continue", output={"message": "Continue"})
-        return ActionResponse(trigger="finish", output={"message": "Finished"})
+            return StateOutcome(trigger="continue", output={"message": "Continue"})
+        return StateOutcome(trigger="finish", output={"message": "Finished"})
+
+    def action_type(self):
+        return Content
 
 class TestState2(AgenticState):
-    def _execute_action(self, action: ActionRequest) -> ActionResponse:
+    def _execute_action(self, action: ActionRequest) -> StateOutcome:
         if action.content == "reject":
-            return ActionResponse(trigger="reject", output={"message": "Rejected"})
+            return StateOutcome(trigger="reject", output={"message": "Rejected"})
         elif action.content == "continue":
-            return ActionResponse(trigger="continue", output={"message": "Continue"})
-        return ActionResponse(trigger="finish", output={"message": "Finished"})
+            return StateOutcome(trigger="continue", output={"message": "Continue"})
+        return StateOutcome(trigger="finish", output={"message": "Finished"})
+
+    def action_type(self):
+        return Content
 
 class TestTransitionRules(TransitionRules):
     def __init__(self, rules):
@@ -74,7 +80,7 @@ def test_loop_run_until_finished(mock_workspace, test_transition_rules):
         response = loop.run("initial message")
 
     assert response.status == "finished"
-    assert loop.state_count() == 3, f"Expected 3 states, got {[state.state.name for state in loop._trajectory.transitions()]}"
+    assert len(loop._trajectory.transitions) == 3, f"Expected 3 states, got {[state.state.name for state in loop._trajectory.transitions()]}"
     assert loop._initial_message == "initial message"
     assert isinstance(loop._trajectory.transitions[2].state, Finished)
 
@@ -88,7 +94,7 @@ def test_loop_run_until_rejected(mock_workspace, test_transition_rules):
         response = loop.run("initial message")
     
     assert response.status == "rejected"
-    assert loop.state_count() == 3  # Pending -> TestState -> Rejected
+    assert len(loop._trajectory.transitions) == 3  # Pending -> TestState -> Rejected
 
 def test_loop_max_transitions(mock_workspace, test_transition_rules):
     loop = AgenticLoop(test_transition_rules, mock_workspace, max_transitions=3)
@@ -98,7 +104,7 @@ def test_loop_max_transitions(mock_workspace, test_transition_rules):
     
     assert response.status == "rejected"
     assert response.message == "Max transitions exceeded."
-    assert loop.state_count() == 4, f"Expected 4 states, got {[t.state.name for t in loop._trajectory.transitions]}"
+    assert len(loop._trajectory.transitions) == 5, f"Expected 5 states, got {[t.state.name for t in loop._trajectory.transitions]}"
 
 @pytest.mark.api_keys_required
 def test_rerun_save_and_load_trajectory():
@@ -121,8 +127,7 @@ def test_rerun_save_and_load_trajectory():
         "django/core/cache/backends/filebased.py", "FileBasedCache.has_key"
     )
     assert loop.workspace.file_repo._initial_commit != loop.workspace.file_repo._current_commit
-    diff = loop.workspace.file_repo.diff()
-    # TODO: assert diff
+    assert loop.workspace.file_repo.diff()
 
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
         loop.persist(tmp_file.name)

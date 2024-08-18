@@ -190,6 +190,7 @@ class RelationshipType(str, Enum):
     DEPENDENCY = "dependency"
     TYPE = "type"
 
+
 @dataclass
 class Relationship:
     scope: ReferenceScope
@@ -225,6 +226,7 @@ class Relationship:
 
         return f"({start_node})-[:{self.type.name} {{scope: {self.scope.value}}}]->({end_node})"
 
+
 @dataclass
 class Parameter:
     identifier: str
@@ -236,6 +238,7 @@ class SpanType(str, Enum):
     DOCUMENTATION = "docs"
     IMPLEMENTATION = "impl"
 
+
 @dataclass
 class BlockSpan:
     span_id: str
@@ -243,7 +246,7 @@ class BlockSpan:
     start_line: int
     end_line: int
     block_paths: list[BlockPath] = field(default_factory=list)
-    initiating_block: Optional['CodeBlock'] = None
+    initiating_block: Optional["CodeBlock"] = None
     visible: bool = True
     index: int = 0
     parent_block_path: Optional[BlockPath] = None
@@ -274,10 +277,10 @@ class CodeBlock:
     type: CodeBlockType
     content: str
     identifier: Optional[str] = None
-    parameters: List['Parameter'] = field(default_factory=list)
-    relationships: List['Relationship'] = field(default_factory=list)
+    parameters: List["Parameter"] = field(default_factory=list)
+    relationships: List["Relationship"] = field(default_factory=list)
     span_ids: Set[str] = field(default_factory=set)
-    belongs_to_span: Optional['BlockSpan'] = None
+    belongs_to_span: Optional["BlockSpan"] = None
     start_line: int = 0
     end_line: int = 0
     properties: Dict = field(default_factory=dict)
@@ -285,17 +288,17 @@ class CodeBlock:
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    children: List['CodeBlock'] = field(default_factory=list)
-    validation_errors: List['ValidationError'] = field(default_factory=list)
-    parent: Optional['CodeBlock'] = None
-    previous: Optional['CodeBlock'] = None
-    next: Optional['CodeBlock'] = None
+    children: List["CodeBlock"] = field(default_factory=list)
+    validation_errors: List["ValidationError"] = field(default_factory=list)
+    parent: Optional["CodeBlock"] = None
+    previous: Optional["CodeBlock"] = None
+    next: Optional["CodeBlock"] = None
 
     _content_lines: Optional[List[str]] = field(default=None, init=False)
 
     def __post_init__(self):
         self._content_lines = None
-        
+
         if self.children:
             for child in self.children:
                 child.parent = self
@@ -303,7 +306,9 @@ class CodeBlock:
         if self.pre_code and not self.indentation and not self.pre_lines:
             pre_code_lines = self.pre_code.split("\n")
             self.pre_lines = len(pre_code_lines) - 1
-            self.indentation = pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
+            self.indentation = (
+                pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
+            )
 
     @property
     def content_lines(self):
@@ -1206,6 +1211,26 @@ class CodeBlock:
                 return self.previous.line_witin_token_context(
                     line_number, tokens - self.tokens
                 )
+
+    def find_last_previous_block_with_block_group(
+        self, block_group: CodeBlockTypeGroup
+    ):
+        if not self.previous:
+            return None
+
+        if self.previous.type.group == block_group:
+            return self.previous
+
+        return self.previous.find_last_previous_block_with_block_group(block_group)
+
+    def find_next_block_with_block_group(self, block_group: CodeBlockTypeGroup):
+        if not self.next:
+            return None
+
+        if self.next.type.group == block_group:
+            return self.next
+
+        return self.next.find_next_block_with_block_group(block_group)
 
     def tokens_from_line(self, line_number: int) -> Optional[int]:
         if not self.previous or self.previous.end_line < line_number:

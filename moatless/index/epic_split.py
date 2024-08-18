@@ -114,7 +114,8 @@ class EpicSplitter(NodeParser):
             language=language,
             index_callback=index_callback,
             min_lines_to_parse_block=min_lines_to_parse_block,
-            enable_code_graph=False)
+            enable_code_graph=False,
+        )
         # self._fallback_code_splitter = fallback_code_splitter
 
         super().__init__(
@@ -496,7 +497,7 @@ class EpicSplitter(NodeParser):
 
         # Truncate large chunks
         if tokens > self.hard_token_limit:
-            content = content[:self.hard_token_limit]
+            content = content[: self.hard_token_limit]
             logger.debug(
                 f"Truncating chunk {node_id} in {metadata['file_path']} as it has {tokens} tokens which is"
                 f" more than chunk size {self.chunk_size}."

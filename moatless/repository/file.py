@@ -5,12 +5,11 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.codeblocks import CodeBlockType, CodeBlockTypeGroup
 from moatless.codeblocks.module import Module
-from moatless.codeblocks.parser.python import PythonParser
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ class CodeFile(BaseModel):
         logger.info(
             f"Updating content for {self.file_path} from line {start_line_index} to {end_line_index} with {len(replacement_lines)} lines. The updated file has {len(updated_lines)} lines."
         )
-
+        diff = do_diff(self.file_path, self.content, updated_content)
         return self.update_content(updated_content)
 
     def update_content(self, updated_content: str) -> UpdateResult:
@@ -163,7 +162,7 @@ class CodeFile(BaseModel):
                 self._module = module
             else:
                 new_span_ids = []
-
+            self._module = module
             self._dirty = True
             self.content = updated_content
 

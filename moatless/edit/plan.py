@@ -8,16 +8,10 @@ from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
 from moatless.edit.prompt import (
     CODER_FINAL_SYSTEM_PROMPT,
     CODER_SYSTEM_PROMPT,
-    SELECT_SPAN_SYSTEM_PROMPT,
+    SELECT_SPAN_SYSTEM_PROMPT, WRITE_CODE_SUGGESTIONS_PROMPT,
 )
-from moatless.state import AgenticState
-from moatless.schema import (
-    ActionRequest,
-    ActionResponse,
-    AssistantMessage,
-    Message,
-    UserMessage,
-)
+from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
+
 from moatless.verify.lint import VerificationError
 
 logger = logging.getLogger("PlanToCode")
@@ -85,6 +79,11 @@ class PlanToCode(AgenticState):
         description="The maximum number of tokens in a span to show the edit prompt.",
     )
 
+    expand_classes_with_max_tokens: Optional[int] = Field(
+        None,
+        description="The maximum number of tokens in a class to expand the context. If None, the context will not be expanded.",
+    )
+
     expand_context_with_related_spans: bool = Field(
         True,
         description="Whether to expand the context with related spans.",
@@ -104,60 +103,51 @@ class PlanToCode(AgenticState):
         description="Whether to include the message history in the prompt.",
     )
 
+    write_code_suggestions: bool = Field(
+        True,
+        description="Whether to instruct the LLM to write out the actual code in the instructions.",
+    )
+
     _expanded_context: bool = PrivateAttr(False)
 
-    def init(self):
-        if not self._expanded_context:
-            self.file_context.expand_context_with_init_spans()
-
-            if (
-                self.expand_context_with_related_spans
-                and len(self.get_previous_states(self)) == 0
-            ):
-                self.file_context.expand_context_with_related_spans(
-                    max_tokens=self.max_prompt_file_tokens
-                )
-                self.file_context.expand_small_classes(max_tokens=1000)
-            self._expanded_context = True
-
-    def _execute_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> StateOutcome:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info("Review suggested after diff, will finish")
-                return ActionResponse.transition(
+                return StateOutcome.transition(
                     trigger="finish", output={"message": "Finish on suggested review."}
                 )
             else:
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     "Review isn't possible. If the change is done you can finish or reject the task."
                 )
 
         if action.action == "finish":
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="finish", output={"message": action.finish}
             )
         elif action.reject:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="reject", output={"message": action.reject}
             )
 
         elif action.file_path and action.span_id:
             return self._request_for_change(action)
 
-        return ActionResponse.retry(
+        return StateOutcome.retry(
             "You must either provide an apply_change action or finish."
         )
 
     def action_type(self) -> type[ApplyChange]:
         return ApplyChange
 
-    def _request_for_change(self, rfc: ApplyChange) -> ActionResponse:
+    def _request_for_change(self, rfc: ApplyChange) -> StateOutcome:
         logger.info(
             f"request_for_change(file_path={rfc.file_path}, span_id={rfc.span_id})"
         )
 
         if not rfc.instructions:
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"Please provide instructions for the code change."
             )
 
@@ -171,7 +161,7 @@ class PlanToCode(AgenticState):
             for file in self.file_context.files:
                 files_str += f" * {file.file_path}\n"
 
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"File {rfc.file_path} is not found in the file context. "
                 f"You can only request changes to files that are in file context:\n{files_str}"
             )
@@ -184,7 +174,7 @@ class PlanToCode(AgenticState):
             span_not_in_context = context_file.file.module.find_span_by_id(rfc.span_id)
             if span_not_in_context and self.allow_hallucinated_spans:
                 logger.info(
-                    f"{self}: Span {rfc.span_id} is not found in the context. Will add it."
+                    f"{self.name}: Span {rfc.span_id} is not found in the context. Will add it."
                 )
                 block_span = span_not_in_context
                 self.file_context.add_span_to_context(
@@ -197,29 +187,48 @@ class PlanToCode(AgenticState):
                 and span_not_in_context.initiating_block.has_any_span(set(span_ids))
             ):
                 logger.info(
-                    f"{self}: Use span {rfc.span_id} as it's a parent span of a span in the context."
+                    f"{self.name}: Use span {rfc.span_id} as it's a parent span of a span in the context."
                 )
                 block_span = span_not_in_context
 
             if not block_span:
                 span_str = ", ".join(span_ids)
                 logger.warning(
-                    f"{self}: Span not found: {rfc.span_id}. Available spans: {span_str}"
+                    f"{self.name}: Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     f"Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
 
-        # If span is for a class block, consider the whole class
+        # If span is for a class or function block, consider the whole span
         if block_span:
-            start_line = block_span.start_line
-            if block_span.initiating_block.type == CodeBlockType.CLASS:
-                tokens = block_span.initiating_block.sum_tokens()
-                end_line = block_span.initiating_block.end_line
+            tokens = block_span.initiating_block.sum_tokens()
+            if (
+                block_span.initiating_block.type
+                in [CodeBlockType.CLASS, CodeBlockType.FUNCTION]
+                and tokens < self.max_tokens_in_edit_prompt
+            ):
                 logger.info(
-                    f"{self}: Span {rfc.span_id} is a class block. Consider the whole class ({block_span.initiating_block.start_line} - {end_line}) with {tokens} tokens."
+                    f"{self.name}: Span {rfc.span_id} is a {block_span.initiating_block.type} with {tokens} tokens. Return the whole block."
+                )
+
+                self.file_context.add_spans_to_context(
+                    file_path=rfc.file_path,
+                    span_ids=set(block_span.initiating_block.span_ids),
+                )
+
+                return StateOutcome.transition(
+                    trigger="edit_code",
+                    output={
+                        "instructions": rfc.instructions,
+                        "file_path": rfc.file_path,
+                        "span_id": rfc.span_id,
+                        "start_line": block_span.initiating_block.start_line,
+                        "end_line": block_span.initiating_block.end_line,
+                    },
                 )
             else:
+                start_line = block_span.start_line
                 tokens = block_span.tokens
                 end_line = block_span.end_line
 
@@ -229,7 +238,7 @@ class PlanToCode(AgenticState):
                 spans = self.file_context.get_spans(rfc.file_path)
                 span_ids = [span.span_id for span in spans]
                 span_str = ", ".join(span_ids)
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     f"Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
 
@@ -244,10 +253,10 @@ class PlanToCode(AgenticState):
 
         if tokens > self.max_tokens_in_edit_prompt:
             logger.info(
-                f"{self}: Span has {tokens} tokens, which is higher than the maximum allowed "
+                f"{self.name}: Span has {tokens} tokens, which is higher than the maximum allowed "
                 f"{self.max_tokens_in_edit_prompt} tokens. Ask for clarification."
             )
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="edit_code",
                 output={
                     "instructions": rfc.instructions,
@@ -256,7 +265,7 @@ class PlanToCode(AgenticState):
                 },
             )
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             trigger="edit_code",
             output={
                 "instructions": rfc.instructions,
@@ -268,6 +277,9 @@ class PlanToCode(AgenticState):
         )
 
     def system_prompt(self) -> str:
+        if self.write_code_suggestions:
+            return CODER_SYSTEM_PROMPT + WRITE_CODE_SUGGESTIONS_PROMPT + SELECT_SPAN_SYSTEM_PROMPT + CODER_FINAL_SYSTEM_PROMPT
+
         return (
             CODER_SYSTEM_PROMPT + SELECT_SPAN_SYSTEM_PROMPT + CODER_FINAL_SYSTEM_PROMPT
         )
@@ -292,8 +304,6 @@ class PlanToCode(AgenticState):
         return response_msg
 
     def messages(self) -> list[Message]:
-        self.init()
-
         messages: list[Message] = []
 
         if self.initial_message:
@@ -321,7 +331,7 @@ class PlanToCode(AgenticState):
         content += self.to_message()
         file_context_str = self.file_context.create_prompt(
             show_span_ids=True,
-            exclude_comments=True,
+            exclude_comments=False,
             show_outcommented_code=True,
             outcomment_code_comment="... rest of the code",
         )

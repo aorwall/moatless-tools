@@ -3,28 +3,16 @@ import json
 import pytest
 from pydantic import BaseModel
 from moatless.transition_rules import TransitionRules, TransitionRule
-from moatless.state import AgenticState, Finished, Rejected, Pending
-from moatless.schema import ActionResponse
+from moatless.state import AgenticState, Finished, Rejected, Pending, State
+from moatless.schema import StateOutcome
 
 
-class MockStateA(AgenticState):
+class MockStateA(State):
     value: int = 0
 
-    def _execute_action(self, action: str, **kwargs):
-        if action == "to_b":
-            return ActionResponse(output={"message": "Moving to B"}, trigger="to_b")
-        return ActionResponse(output={"message": "Staying in A"}, trigger=None)
 
-
-class MockStateB(AgenticState):
+class MockStateB(State):
     default_name: str = ""
-
-    def _execute_action(self, action: str, **kwargs):
-        if action == "finish":
-            return ActionResponse(output={"message": "Finishing"}, trigger="finish")
-        elif action == "reject":
-            return ActionResponse(output={"message": "Rejecting"}, trigger="reject")
-        return ActionResponse(output={"message": "Staying in B"}, trigger=None)
 
     @property
     def name(self):

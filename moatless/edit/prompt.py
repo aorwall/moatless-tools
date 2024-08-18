@@ -21,6 +21,17 @@ IMPORTANT:
  * When you are confident that all changes are correct, you can finish the task without further verification.
 """
 
+WRITE_CODE_SUGGESTIONS_PROMPT = """Write out the code changes that need to be made to fix the issue in the instructions.
+
+Use the following format:
+
+file_name.py
+```python
+# The code changes you need to make
+```
+
+"""
+
 SELECT_SPAN_SYSTEM_PROMPT = """
 The code is separated into code spans; you can update one span at a time.
 Before each code change, you first need to request permission to make the change.

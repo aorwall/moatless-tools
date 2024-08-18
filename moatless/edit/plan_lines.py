@@ -10,14 +10,7 @@ from moatless.edit.prompt import (
     CODER_SYSTEM_PROMPT,
     SELECT_LINES_SYSTEM_PROMPT,
 )
-from moatless.state import AgenticState
-from moatless.schema import (
-    ActionRequest,
-    ActionResponse,
-    AssistantMessage,
-    Message,
-    UserMessage,
-)
+from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
 from moatless.utils.tokenizer import count_tokens
 from moatless.verify.lint import VerificationError
 
@@ -105,29 +98,29 @@ class PlanToCodeWithLines(AgenticState):
         ):
             self.file_context.expand_context_with_related_spans(max_tokens=4000)
 
-    def _execute_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> StateOutcome:
         if action.finish:
             self.file_context.save()
 
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="finish", output={"message": action.finish}
             )
         elif action.reject:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="reject", output={"message": action.reject}
             )
 
         elif action.file_path:
             return self._request_for_change(action)
 
-        return ActionResponse.retry(
+        return StateOutcome.retry(
             "You must either provide an apply_change action or finish."
         )
 
     def action_type(self) -> type[ApplyChange]:
         return ApplyChange
 
-    def _request_for_change(self, rfc: ApplyChange) -> ActionResponse:
+    def _request_for_change(self, rfc: ApplyChange) -> StateOutcome:
         logger.info(f"request_for_change(file_path={rfc.file_path}")
 
         context_file = self.file_context.get_file(rfc.file_path)
@@ -140,7 +133,7 @@ class PlanToCodeWithLines(AgenticState):
             for file in self.file_context.files:
                 files_str += f" * {file.file_path}\n"
 
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"File {rfc.file_path} is not found in the file context. "
                 f"You can only request changes to files that are in file context:\n{files_str}"
             )
@@ -149,7 +142,7 @@ class PlanToCodeWithLines(AgenticState):
             not rfc.start_line
             and context_file.module.sum_tokens() > self.max_tokens_in_edit_prompt
         ):
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"The file {rfc.file_path} is to big to edit in one go, please provide start and end line numbers to specify the part of the code that needs to be updated."
             )
 
@@ -163,7 +156,7 @@ class PlanToCodeWithLines(AgenticState):
             )
 
         if structure_block.sum_tokens() < self.max_tokens_in_edit_prompt:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="edit_code",
                 output={
                     "instructions": rfc.instructions,
@@ -185,7 +178,7 @@ class PlanToCodeWithLines(AgenticState):
             clarify_msg = f"The line numbers {rfc.start_line} - {rfc.end_line} only covers to the signature of the {block.type.value}."
             logger.info(f"{self}: {clarify_msg}. Ask for clarification.")
             # TODO: Ask if this was intentional instead instructing the LLM
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change."
             )
 
@@ -198,7 +191,7 @@ class PlanToCodeWithLines(AgenticState):
         if tokens > self.max_tokens_in_edit_prompt:
             clarify_msg = f"Lines {rfc.start_line} - {rfc.end_line} has {tokens} tokens, which is higher than the maximum allowed {self.max_tokens_in_edit_prompt} tokens in completion"
             logger.info(f"{self} {clarify_msg}. Ask for clarification.")
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change. If this is not possible you should reject the request."
             )
 
@@ -209,7 +202,7 @@ class PlanToCodeWithLines(AgenticState):
             rfc.end_line, structure_block.end_line, code_lines
         )
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             trigger="edit_code",
             output={
                 "instructions": rfc.instructions,

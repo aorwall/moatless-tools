@@ -82,10 +82,12 @@ class CodeIndex:
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
 
-        logger.info(f"Initiated CodeIndex {self._index_name} with:\n"
-                    f" * {len(self._blocks_by_class_name)} classes\n"
-                    f" * {len(self._blocks_by_function_name)} functions\n"
-                    f" * {len(self._docstore.docs)} vectors\n")
+        logger.info(
+            f"Initiated CodeIndex {self._index_name} with:\n"
+            f" * {len(self._blocks_by_class_name)} classes\n"
+            f" * {len(self._blocks_by_function_name)} functions\n"
+            f" * {len(self._docstore.docs)} vectors\n"
+        )
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository, **kwargs):
@@ -155,6 +157,8 @@ class CodeIndex:
         if os.path.exists(persist_dir):
             logger.info(f"Loading existing index {index_name} from {persist_dir}.")
             return cls.from_persist_dir(persist_dir, file_repo=file_repo)
+        else:
+            logger.info(f"No existing index found at {persist_dir}.")
 
         if os.getenv("INDEX_STORE_URL"):
             index_store_url = os.getenv("INDEX_STORE_URL")
@@ -177,6 +181,10 @@ class CodeIndex:
         file_pattern: Optional[str] = None,
         max_results: int = 25,
     ) -> SearchCodeResponse:
+        if not query and not code_snippet and not class_names and not function_names:
+            return SearchCodeResponse(message="No search query provided.")
+
+        result = None
         if class_names or function_names:
             result = self.find_by_name(
                 class_names=class_names,
@@ -215,7 +223,7 @@ class CodeIndex:
                 max_results=max_results,
             )
 
-        return result
+        return result or SearchCodeResponse(message="No results found.")
 
     def semantic_search(
         self,
@@ -553,7 +561,7 @@ class CodeIndex:
         category: str = "implementation",
         file_pattern: Optional[str] = None,
         exact_content_match: Optional[str] = None,
-        top_k: int = 500
+        top_k: int = 500,
     ):
         if file_pattern:
             query += f" file:{file_pattern}"
@@ -714,7 +722,9 @@ class CodeIndex:
                 recursive=True,
             )
         except Exception as e:
-            logger.exception(f"Failed to create reader with input_dir {repo_path}, input_files {input_files} and required_exts {required_exts}.")
+            logger.exception(
+                f"Failed to create reader with input_dir {repo_path}, input_files {input_files} and required_exts {required_exts}."
+            )
             raise e
 
         embed_pipeline = IngestionPipeline(

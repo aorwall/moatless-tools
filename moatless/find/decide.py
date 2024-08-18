@@ -4,13 +4,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from moatless.find import SearchCode
-from moatless.state import AgenticState
-from moatless.schema import (
-    ActionRequest,
-    ActionResponse,
-    Message,
-    UserMessage,
-)
+from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
+
 
 logger = logging.getLogger(__name__)
 
@@ -82,17 +77,17 @@ class DecideRelevance(AgenticState):
         description="The maximum number of tokens to include in the file context prompt.",
     )
 
-    def _execute_action(self, action: Decision) -> ActionResponse:
+    def _execute_action(self, action: Decision) -> StateOutcome:
         if action.complete and action.relevant:
-            return ActionResponse.transition("finish")
+            return StateOutcome.transition("finish")
 
         if (
             action.relevant
             and self._relevant_count() >= self.finish_after_relevant_count
         ):
-            return ActionResponse.transition("finish")
+            return StateOutcome.transition("finish")
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             "search",
             output={"message": action.search_suggestions},
         )
@@ -133,7 +128,7 @@ class DecideRelevance(AgenticState):
             self.file_context.expand_context_with_related_spans(
                 max_tokens=self.max_prompt_file_tokens
             )
-            self.file_context.expand_small_classes(
+            self.file_context.expand_classes(
                 max_tokens=self.max_prompt_file_tokens
             )
 

@@ -1,18 +1,40 @@
+import enum
+import random
+import string
 
 import instructor
 
 
-def instructor_mode_by_model(model: str) -> instructor.Mode | None:
-    if "gpt" in model:
-        return instructor.Mode.TOOLS
+class LLMResponseFormat(enum.Enum):
+    TOOLS = "tool_call"
+    ANTHROPIC_TOOLS = "anthropic_tools"
+    JSON = "json_mode"
+    STRUCTURED_OUTPUT = "structured_output"
 
-    if "claude" in model:
-        return instructor.Mode.TOOLS
+
+def response_format_by_model(model: str) -> LLMResponseFormat | None:
+    if "gpt" in model:
+        return LLMResponseFormat.TOOLS  # TODO: LLMResponseFormat.STRUCTURED_OUTPUT
 
     if model.startswith("claude"):
-        return instructor.Mode.ANTHROPIC_TOOLS
+        return LLMResponseFormat.ANTHROPIC_TOOLS
+
+    if "claude" in model:
+        return LLMResponseFormat.TOOLS
 
     if model.startswith("openrouter/anthropic/claude"):
-        return instructor.Mode.TOOLS
+        return LLMResponseFormat.TOOLS
 
-    return instructor.Mode.JSON
+    return LLMResponseFormat.JSON
+
+
+def generate_call_id():
+    prefix = "call_"
+    chars = string.ascii_letters + string.digits
+    length = 24
+
+    random_chars = "".join(random.choices(chars, k=length))
+
+    random_string = prefix + random_chars
+
+    return random_string

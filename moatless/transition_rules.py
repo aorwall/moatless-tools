@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from typing import Any, Type, Optional
 
 from moatless.settings import Settings
-from moatless.state import AgenticState, get_state_class
+from moatless.state import AgenticState, get_state_class, State
 from moatless.workspace import Workspace
 
 
@@ -16,10 +16,10 @@ class TransitionRule(BaseModel):
         ...,
         description="The trigger from the current state that causes the transition to fire.",
     )
-    source: type[AgenticState] = Field(
+    source: type[State] = Field(
         ..., description="The source state that the transition rule is defined for."
     )
-    dest: type[AgenticState] = Field(
+    dest: type[State] = Field(
         ...,
         description="The destination state that the transition rule is defined for.",
     )
@@ -63,10 +63,10 @@ class TransitionRule(BaseModel):
 
 
 class TransitionRules(BaseModel):
-    initial_state: type[AgenticState] | None = Field(
-        default=None, 
+    initial_state: type[State] | None = Field(
+        default=None,
         description="The initial state for the loop.",
-        deprecated="Initial state should be set in transition_rules instead."
+        deprecated="Initial state should be set in transition_rules instead.",
     )
     transition_rules: list[TransitionRule] = Field(
         ..., description="The transition rules for the loop."
@@ -74,13 +74,13 @@ class TransitionRules(BaseModel):
     global_params: dict[str, Any] = Field(
         default_factory=dict, description="Global parameters used by all transitions."
     )
-    state_params: dict[type[AgenticState], dict[str, Any]] = Field(
+    state_params: dict[type[State], dict[str, Any]] = Field(
         default_factory=dict, description="State-specific parameters."
     )
 
-    _source_trigger_index: dict[
-        tuple[type[AgenticState], str], list[TransitionRule]
-    ] = PrivateAttr(default_factory=dict)
+    _source_trigger_index: dict[tuple[type[State], str], list[TransitionRule]] = (
+        PrivateAttr(default_factory=dict)
+    )
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -117,7 +117,9 @@ class TransitionRules(BaseModel):
             data["global_params"] = {}
 
         if "model" not in data["global_params"]:
-            logger.info(f"No model specified in global_params. Using default model: {Settings.default_model}")
+            logger.info(
+                f"No model specified in global_params. Using default model: {Settings.default_model}"
+            )
             data["global_params"]["model"] = Settings.default_model
 
         return data
@@ -130,7 +132,7 @@ class TransitionRules(BaseModel):
             self._source_trigger_index[key].append(rule)
 
     def find_transition_rule_by_source_and_trigger(
-        self, source: type[AgenticState], trigger: str
+        self, source: type[State], trigger: str
     ) -> list[TransitionRule]:
         return self._source_trigger_index.get((source, trigger), [])
 
@@ -141,11 +143,12 @@ class TransitionRules(BaseModel):
         return params
 
     def get_next_rule(
-        self, source: AgenticState, trigger: str, data: dict[str, Any]
+        self, source: State, trigger: str, data: dict[str, Any]
     ) -> TransitionRule | None:
-        
         if trigger == "init" and self.initial_state:
-            logger.warning("Using deprecated 'initial_state'. Set initial state in transition_rules instead.")
+            logger.warning(
+                "Using deprecated 'initial_state'. Set initial state in transition_rules instead."
+            )
             return TransitionRule(
                 trigger="init",
                 source=source.__class__,

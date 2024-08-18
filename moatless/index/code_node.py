@@ -20,4 +20,4 @@ class CodeNode(TextNode):
         """
         Remove all whitespace and convert to lowercase to reduce the number of changes in hashes.
         """
-        return ''.join(text.split()).lower()
+        return "".join(text.split()).lower()

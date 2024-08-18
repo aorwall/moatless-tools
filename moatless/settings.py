@@ -4,12 +4,14 @@ from dataclasses import dataclass
 
 @dataclass
 class _Settings:
+    # Default model used if not provided in global params
     _default_model: str = os.environ.get("DEFAULT_MODEL", "gpt-4o-2024-05-13")
+    # Cheaper model used for supporting tasks like creating commit messages
     _cheap_model: str | None = os.environ.get("CHEAP_MODEL", "gpt-4o-mini-2024-07-18")
+    # Model used for embedding to index and search vector indexes
     _embed_model: str = "text-embedding-3-small"
-
-    _max_context_tokens: int = 8000
-    _max_message_tokens: int = 16000
+    # Flag to determine if llm completions should be included when trajectories are saved
+    _include_completions_in_trajectories: bool = False
 
     @property
     def default_model(self) -> str:
@@ -36,20 +38,12 @@ class _Settings:
         self._embed_model = embed_model
 
     @property
-    def max_context_tokens(self) -> int:
-        return self._max_context_tokens
+    def include_completions_in_trajectories(self) -> bool:
+        return self._include_completions_in_trajectories
 
-    @max_context_tokens.setter
-    def max_context_tokens(self, max_context_tokens: int) -> None:
-        self._max_context_tokens = max_context_tokens
-
-    @property
-    def max_message_tokens(self) -> int:
-        return self._max_message_tokens
-
-    @max_message_tokens.setter
-    def max_message_tokens(self, max_message_tokens: int) -> None:
-        self._max_message_tokens = max_message_tokens
+    @include_completions_in_trajectories.setter
+    def include_completions_in_trajectories(self, include: bool) -> None:
+        self._include_completions_in_trajectories = include
 
 
 Settings = _Settings()

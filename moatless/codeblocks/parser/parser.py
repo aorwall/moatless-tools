@@ -75,7 +75,9 @@ class CodeParser:
         encoding: str = "utf8",
         max_tokens_in_span: int = 500,
         min_tokens_for_docs_span: int = 100,
-        min_lines_to_parse_block: Optional[int] = None,  # If this is set code will just be parsed if they have more line than this
+        min_lines_to_parse_block: Optional[
+            int
+        ] = None,  # If this is set code will just be parsed if they have more line than this
         enable_code_graph: bool = True,
         index_callback: Callable[[CodeBlock], None] | None = None,
         tokenizer: Callable[[str], list] | None = None,
@@ -169,9 +171,14 @@ class CodeParser:
 
         # Skip parsing of non structure blocks if they have less lines than min_lines_to_parse_implementation
         # But still parse classes and modules
-        if (node_match.first_child and self._min_lines_to_parse_block
-                    and node_match.block_type not in [CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]
-                    and (node.end_point[0] - node.start_point[0]) < self._min_lines_to_parse_block):
+        if (
+            node_match.first_child
+            and self._min_lines_to_parse_block
+            and node_match.block_type
+            not in [CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]
+            and (node.end_point[0] - node.start_point[0])
+            < self._min_lines_to_parse_block
+        ):
             node_match.first_child = None
 
         if node_match.first_child:
@@ -192,7 +199,9 @@ class CodeParser:
             relationships = self.create_references(
                 code, content_bytes, identifier, node_match
             )
-            parameters = self.create_parameters(content_bytes, node_match, relationships)
+            parameters = self.create_parameters(
+                content_bytes, node_match, relationships
+            )
         else:
             relationships = []
             parameters = []
@@ -725,7 +734,17 @@ class CodeParser:
         block_types_with_document_span = [
             CodeBlockType.MODULE
         ]  # TODO: Make this configurable
-        if block.type == CodeBlockType.COMMENT and (
+
+        # Set initation phase on imports in module blocks
+        if block.type == CodeBlockType.IMPORT and (
+            not current_span
+            or current_span.span_type != SpanType.INITATION
+            or block.parent.type == CodeBlockType.MODULE
+        ):
+            span_type = SpanType.INITATION
+            span_id = self._create_span_id(block, label="imports")
+
+        elif block.type == CodeBlockType.COMMENT and (
             not current_span
             or current_span.block_type in block_types_with_document_span
             and (
@@ -747,13 +766,6 @@ class CodeParser:
         ):
             span_type = SpanType.INITATION
             span_id = self._create_span_id(block)
-
-        # Set initation phase on imports in module blocks
-        elif block.type == CodeBlockType.IMPORT and (
-            not current_span or current_span.block_type == CodeBlockType.MODULE
-        ):
-            span_type = SpanType.INITATION
-            span_id = self._create_span_id(block, label="imports")
 
         else:
             span_type = SpanType.IMPLEMENTATION
@@ -779,6 +791,20 @@ class CodeParser:
                     initiating_block=block.parent,
                     parent_block_path=block.parent.full_path(),
                 )
+
+        # create new spans on initation after docstring
+        if (
+            current_span.span_type == SpanType.DOCUMENTATION
+            and span_type == SpanType.INITATION
+        ):
+            return BlockSpan(
+                span_id=span_id,
+                span_type=span_type,
+                start_line=block.start_line,
+                end_line=block.start_line,
+                initiating_block=block,
+                parent_block_path=current_span.parent_block_path,
+            )
 
         # create a new span on new structures in classes or modules but not functions
         # * if the parent block doesn't have a span

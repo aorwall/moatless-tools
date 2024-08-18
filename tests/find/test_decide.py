@@ -1,7 +1,7 @@
 import pytest
 from moatless.find.decide import DecideRelevance, Decision
 from moatless.find.identify import Identify, IdentifyCode
-from moatless.schema import ActionResponse, ActionTransaction
+from moatless.schema import StateOutcome, ActionTransaction
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from unittest.mock import Mock, MagicMock, patch
@@ -33,7 +33,7 @@ class TestDecideRelevance:
 
         response = decide_relevance._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
 
     def test_execute_action_relevant_but_not_complete(self, decide_relevance):
@@ -47,7 +47,7 @@ class TestDecideRelevance:
 
         response = decide_relevance._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
 
     def test_execute_action_not_relevant_not_complete(self, decide_relevance):
@@ -60,18 +60,18 @@ class TestDecideRelevance:
 
         response = decide_relevance._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "search"
         assert response.output["message"] == "Try searching for X"
 
     def test_relevant_count(self, decide_relevance: DecideRelevance):
         state3 = DecideRelevance(id=3, expand_context=False, file_context=Mock())
-        state3._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=True), response=ActionResponse(trigger="finish"))]
+        state3._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=True), response=StateOutcome(trigger="finish"))]
         state2 = DecideRelevance(id=2, expand_context=False, file_context=Mock())
-        state2._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=False), response=ActionResponse(trigger="finish"))]
+        state2._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=False), response=StateOutcome(trigger="finish"))]
         state2.previous_state = state3
         state1 = DecideRelevance(id=1, expand_context=False, file_context=Mock())
-        state1._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=True), response=ActionResponse(trigger="finish"))]
+        state1._actions = [ActionTransaction(request=Decision(scratch_pad="Test", relevant=True), response=StateOutcome(trigger="finish"))]
         state1.previous_state = state2
         
         decide_relevance.previous_state = state1

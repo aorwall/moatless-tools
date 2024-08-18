@@ -8,7 +8,8 @@ from datasets import load_dataset
 
 from moatless.benchmark.utils import (
     file_spans_to_dict,
-    get_missing_files, get_missing_spans,
+    get_missing_files,
+    get_missing_spans,
 )
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -20,7 +21,7 @@ from moatless.workspace import Workspace
 logger = logging.getLogger(__name__)
 
 
-_moatless_instances = {}
+
 
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
@@ -36,21 +37,6 @@ def load_instance(
 ):
     data = load_instances(dataset_name, split=split)
     return data[instance_id]
-
-
-def load_moatless_dataset():
-    global _moatless_instances
-    with open("moatless/benchmark/swebench_lite_all_evaluations.json") as f:
-        dataset = json.load(f)
-        _moatless_instances = {d["instance_id"]: d for d in dataset}
-
-def get_moatless_instance(
-        instance_id: str
-):
-    global _moatless_instances
-    if not _moatless_instances:
-        load_moatless_dataset()
-    return _moatless_instances.get(instance_id)
 
 
 def sorted_instances(
@@ -74,7 +60,7 @@ def found_in_expected_spans(instance: dict, spans: dict):
             logging.warning(
                 f"{instance['instance_id']} Expected spans for {file_path} is empty"
             )
-    
+
     missing_spans = get_missing_spans(instance["expected_spans"], spans)
     return not missing_spans
 
@@ -85,7 +71,7 @@ def found_in_alternative_spans(instance: dict, spans: dict):
     for alternative_spans in instance["alternative_spans"]:
         for file_path, span_ids in alternative_spans["spans"].items():
             if not span_ids:
-                logging.warning(
+                logging.info(
                     f"{instance['instance_id']} Alternative spans for {file_path} is empty"
                 )
 
@@ -204,7 +190,7 @@ def verify_search_trajectory(
     ):
         result["expanded_related"] = True
 
-    file_context.expand_small_classes(max_tokens=500)
+    file_context.expand_classes(max_tokens_per_class=500)
     if found_in_expected_spans(
         instance, file_spans_to_dict(file_context.to_files_with_spans())
     ) or found_in_alternative_spans(
@@ -326,6 +312,7 @@ def create_workspace(
     repo_base_dir: Optional[str] = None,
     index_store_dir: Optional[str] = None,
     create_instance_dir: bool = False,
+    max_file_context_tokens: int = 8000,
 ):
     """
     Create a workspace for the given SWE-bench instance.
@@ -359,4 +346,5 @@ def create_workspace(
     return Workspace(
         file_repo=repo,
         code_index=code_index,
+        max_file_context_tokens=max_file_context_tokens,
     )

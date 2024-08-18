@@ -10,15 +10,7 @@ from moatless.edit.prompt import (
     SELECT_SPAN_SYSTEM_PROMPT,
     CODER_FINAL_SYSTEM_PROMPT,
 )
-from moatless.state import AgenticState
-from moatless.schema import (
-    ActionRequest,
-    ActionResponse,
-    Message,
-    UserMessage,
-    AssistantMessage,
-    CodeChange,
-)
+from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
 from moatless.verify.lint import VerificationError
 
 logger = logging.getLogger("PlanToCode")
@@ -139,7 +131,7 @@ class ReviewCode(AgenticState):
 
     _verification_errors: List[VerificationError] = PrivateAttr(default_factory=list)
 
-    def init(self) -> Optional[ActionResponse]:
+    def init(self) -> Optional[StateOutcome]:
         self._verification_errors = self.workspace.verify()
 
         self.file_context.reset_verification_errors()
@@ -149,21 +141,21 @@ class ReviewCode(AgenticState):
             self.file_context.add_verification_error(verification_error)
 
         if self.finish_on_no_errors and not self._verification_errors:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="finish", output={"message": "No errors to review."}
             )
 
         return None
 
-    def _execute_action(self, action: ApplyChange) -> ActionResponse:
+    def _execute_action(self, action: ApplyChange) -> StateOutcome:
         if action.action == "review":
             if self.diff and self.finish_on_review:
                 logger.info(f"Review suggested after diff, will finish")
-                return ActionResponse.transition(
+                return StateOutcome.transition(
                     trigger="finish", output={"message": "Finish on suggested review."}
                 )
             else:
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     "Review isn't possible. If the change is done you can finish or reject the task."
                 )
 
@@ -176,7 +168,7 @@ class ReviewCode(AgenticState):
                 )
 
                 if not include_span.class_name and not include_span.function_name:
-                    return ActionResponse.retry(
+                    return StateOutcome.retry(
                         "You must provide either a class name or a function name or both."
                     )
 
@@ -222,30 +214,30 @@ class ReviewCode(AgenticState):
                     f"\nCouldn't find the following spans:\n{not_found_response}"
                 )
 
-            return ActionResponse.retry(response)
+            return StateOutcome.retry(response)
 
         if action.finish:
             self.file_context.save()
 
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="finish", output={"message": action.finish}
             )
         elif action.reject:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="reject", output={"message": action.reject}
             )
 
         elif action.file_path and action.span_id:
             return self._request_for_change(action)
 
-        return ActionResponse.retry(
+        return StateOutcome.retry(
             "You must either provide an apply_change action or finish."
         )
 
     def action_type(self) -> Type[ApplyChange]:
         return ApplyChange
 
-    def _request_for_change(self, rfc: ApplyChange) -> ActionResponse:
+    def _request_for_change(self, rfc: ApplyChange) -> StateOutcome:
         logger.info(
             f"request_for_change(file_path={rfc.file_path}, span_id={rfc.span_id})"
         )
@@ -260,7 +252,7 @@ class ReviewCode(AgenticState):
             for file in self.file_context.files:
                 files_str += f" * {file.file_path}\n"
 
-            return ActionResponse.retry(
+            return StateOutcome.retry(
                 f"File {rfc.file_path} is not found in the file context. "
                 f"You can only request changes to files that are in file context:\n{files_str}. You can try to add them by using the include_span action."
             )
@@ -295,7 +287,7 @@ class ReviewCode(AgenticState):
                 logger.warning(
                     f"{self}: Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     f"Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
 
@@ -318,7 +310,7 @@ class ReviewCode(AgenticState):
                 spans = self.file_context.get_spans(rfc.file_path)
                 span_ids = [span.span_id for span in spans]
                 span_str = ", ".join(span_ids)
-                return ActionResponse.retry(
+                return StateOutcome.retry(
                     f"Span not found: {rfc.span_id}. Available spans: {span_str}"
                 )
 
@@ -336,7 +328,7 @@ class ReviewCode(AgenticState):
                 f"{self}: Span has {tokens} tokens, which is higher than the maximum allowed "
                 f"{self.max_tokens_in_edit_prompt} tokens. Ask for clarification."
             )
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="edit_code",
                 output={
                     "instructions": rfc.instructions,
@@ -345,7 +337,7 @@ class ReviewCode(AgenticState):
                 },
             )
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             trigger="edit_code",
             output={
                 "instructions": rfc.instructions,

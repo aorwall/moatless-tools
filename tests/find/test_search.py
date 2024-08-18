@@ -1,6 +1,6 @@
 import pytest
 from moatless.find.search import SearchCode, Search, SearchRequest
-from moatless.schema import ActionResponse
+from moatless.schema import StateOutcome
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 from pydantic import ValidationError
@@ -27,7 +27,7 @@ class TestSearchCode:
 
         response = search_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
         assert response.output["message"] == "Search complete"
 
@@ -54,7 +54,7 @@ class TestSearchCode:
 
         response = search_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "did_search"
         assert "ranked_spans" in response.output
         assert len(response.output["ranked_spans"]) == 1
@@ -66,3 +66,55 @@ class TestSearchCode:
         assert "<issue>" in messages[0].content
         assert "Test initial message" in messages[0].content
         assert "<file_context>" in messages[0].content
+
+    def test_handle_direct_search_attributes(self):
+        # Test with direct search attributes
+        search = Search(
+            scratch_pad="Test search",
+            file_pattern="*.py",
+            query="test query",
+            code_snippet="def test_function():",
+            class_names=["TestClass"],
+            function_names=["test_method"]
+        )
+
+        assert len(search.search_requests) == 1
+        assert search.search_requests[0].file_pattern == "*.py"
+        assert search.search_requests[0].query == "test query"
+        assert search.search_requests[0].code_snippet == "def test_function():"
+        assert search.search_requests[0].class_names == ["TestClass"]
+        assert search.search_requests[0].function_names == ["test_method"]
+
+        # Test with both direct attributes and search_requests
+        search = Search(
+            scratch_pad="Test search",
+            file_pattern="*.py",
+            query="test query",
+            search_requests=[
+                SearchRequest(
+                    class_names=["AnotherClass"],
+                    function_names=["another_method"]
+                )
+            ]
+        )
+
+        assert len(search.search_requests) == 2
+        assert search.search_requests[0].class_names == ["AnotherClass"]
+        assert search.search_requests[0].function_names == ["another_method"]
+        assert search.search_requests[1].file_pattern == "*.py"
+        assert search.search_requests[1].query == "test query"
+
+        # Test with only search_requests
+        search = Search(
+            scratch_pad="Test search",
+            search_requests=[
+                SearchRequest(
+                    file_pattern="*.js",
+                    query="javascript query"
+                )
+            ]
+        )
+
+        assert len(search.search_requests) == 1
+        assert search.search_requests[0].file_pattern == "*.js"
+        assert search.search_requests[0].query == "javascript query"

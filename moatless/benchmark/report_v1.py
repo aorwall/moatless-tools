@@ -3,14 +3,20 @@ import logging
 import os
 
 from moatless import FileRepository
-from moatless.benchmark.swebench import found_in_expected_spans, found_in_alternative_spans, setup_swebench_repo
+from moatless.benchmark.swebench import (
+    found_in_expected_spans,
+    found_in_alternative_spans,
+    setup_swebench_repo,
+)
 from moatless.benchmark.utils import get_missing_files
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
 
 
-def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[dict, list]:
+def to_result(
+    instance: dict, trajectory: dict, report: dict | None
+) -> tuple[dict, list]:
     """
     Generate reports from saved trajectories with version 1 format.
     """
@@ -85,9 +91,7 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                     result[f"{transition['name']}_cost"] += traj_action.get(
                         "completion_cost", 0
                     )
-                    transition_result["cost"] += traj_action.get(
-                        "completion_cost", 0
-                    )
+                    transition_result["cost"] += traj_action.get("completion_cost", 0)
 
                 if transition["name"] == "SearchCode":
                     search_iterations += 1
@@ -105,13 +109,13 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                             if search_request.get("code_snippet"):
                                 result["p_code"] += 1
 
-                            if search_request.get(
-                                    "class_name"
-                            ) or search_request.get("class_names"):
+                            if search_request.get("class_name") or search_request.get(
+                                "class_names"
+                            ):
                                 result["p_class"] += 1
 
                             if search_request.get(
-                                    "function_name"
+                                "function_name"
                             ) or search_request.get("function_names"):
                                 result["p_function"] += 1
 
@@ -135,24 +139,17 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
 
                         if output.get("ranked_spans"):
                             for ranked_span in output["ranked_spans"]:
-                                if (
-                                        ranked_span["file_path"]
-                                        not in search_results_spans
-                                ):
-                                    search_results_spans[
-                                        ranked_span["file_path"]
-                                    ] = []
-                                search_results_spans[
-                                    ranked_span["file_path"]
-                                ].append(ranked_span["span_id"])
+                                if ranked_span["file_path"] not in search_results_spans:
+                                    search_results_spans[ranked_span["file_path"]] = []
+                                search_results_spans[ranked_span["file_path"]].append(
+                                    ranked_span["span_id"]
+                                )
 
                             if not result["found_in_search"] and (
-                                    found_in_expected_spans(
-                                        instance, search_results_spans
-                                    )
-                                    or found_in_alternative_spans(
-                                instance, search_results_spans
-                            )
+                                found_in_expected_spans(instance, search_results_spans)
+                                or found_in_alternative_spans(
+                                    instance, search_results_spans
+                                )
                             ):
                                 result["found_in_search"] = search_iterations
 
@@ -182,9 +179,7 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                                     f"{span['file_path']}: {','.join(span['span_ids'])} "
                                 )
                                 for span_id in span["span_ids"]:
-                                    identified_spans[span["file_path"]].append(
-                                        span_id
-                                    )
+                                    identified_spans[span["file_path"]].append(span_id)
                         result["identified_spans"] = identified_str
 
                     if not result["file_identified"]:
@@ -197,20 +192,16 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
 
                     if result[
                         "expected_identified"
-                    ] is None and found_in_expected_spans(
-                        instance, identified_spans
-                    ):
+                    ] is None and found_in_expected_spans(instance, identified_spans):
                         result["expected_identified"] = id_iterations
 
-                    if result[
-                        "alt_identified"
-                    ] is None and found_in_alternative_spans(
+                    if result["alt_identified"] is None and found_in_alternative_spans(
                         instance, identified_spans
                     ):
                         result["alt_identified"] = id_iterations
 
                     if result.get("alt_identified") or result.get(
-                            "expected_identified"
+                        "expected_identified"
                     ):
                         result["identified"] = min(
                             result.get("alt_identified") or 1000,
@@ -237,11 +228,11 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                             )
 
                     if not result.get("planned") and (
-                            found_in_expected_spans(
-                                instance,
-                                planned_spans,
-                            )
-                            or found_in_alternative_spans(instance, planned_spans)
+                        found_in_expected_spans(
+                            instance,
+                            planned_spans,
+                        )
+                        or found_in_alternative_spans(instance, planned_spans)
                     ):
                         result["planned"] = True
 
@@ -272,11 +263,11 @@ def to_result(instance: dict, trajectory: dict, report: dict | None) -> tuple[di
                             )
 
                         if not result.get("edited") and (
-                                found_in_expected_spans(
-                                    instance,
-                                    edited_spans,
-                                )
-                                or found_in_alternative_spans(instance, edited_spans)
+                            found_in_expected_spans(
+                                instance,
+                                edited_spans,
+                            )
+                            or found_in_alternative_spans(instance, edited_spans)
                         ):
                             result["edited"] = True
 
@@ -344,7 +335,7 @@ def generate_md_report(trajectory: dict, instance: dict):
 
     for j, step in enumerate(trajectory["transitions"]):
         for i, traj_action in enumerate(step["actions"]):
-            state_name = step['state']
+            state_name = step["state"]
             markdown += f"### {j+1} {state_name} ({i+1})\n\n"
 
             if not traj_action.get("action"):

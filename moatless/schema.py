@@ -1,6 +1,14 @@
-from typing import Any, Optional
+import logging
+from typing import Any, Optional, Union, List, Set
+
+from instructor import OpenAISchema
+from litellm import completion_cost, cost_per_token
 
 from pydantic import BaseModel, Field
+
+from moatless.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class FileWithSpans(BaseModel):
@@ -20,90 +28,85 @@ class FileWithSpans(BaseModel):
         for span_id in span_ids:
             self.add_span_id(span_id)
 
-class ActionRequest(BaseModel):
-    pass
-
-    @property
-    def action_name(self):
-        return self.__class__.__name__
-
-class ActionResponse(BaseModel):
-    trigger: Optional[str] = Field(
-        default=None,
-        description="Trigger to transition to the next state. If None, no transition is made.",
-    )
-    output: Optional[dict[str, Any]] = Field(
-        default=None,
-        description="Output data to be passed to the next state.",
-    )
-
-    retry_message: Optional[str] = Field(
-        default=None,
-        description="Message to use in retry."
-    )
-
-    @classmethod
-    def retry(cls, retry_message: str):
-        return cls(trigger="retry", retry_message=retry_message)
-
-    @classmethod
-    def transition(cls, trigger: str, output: dict[str, Any] | None = None):
-        output = output or {}
-        return cls(trigger=trigger, output=output)
-
-    @classmethod
-    def no_transition(cls, output: dict[str, Any]):
-        return cls(output=output)
-
 class Usage(BaseModel):
-    completion_cost: float
-    completion_tokens: int
-    prompt_tokens: int
+    completion_cost: float = 0
+    completion_tokens: int = 0
+    prompt_tokens: int = 0
+
+    @classmethod
+    def from_completion_response(
+        cls, completion_response: dict | BaseModel, model: str
+    ) -> Union["Usage", None]:
+        if isinstance(completion_response, BaseModel) and hasattr(
+            completion_response, "usage"
+        ):
+            usage = completion_response.usage.model_dump()
+        elif isinstance(completion_response, dict) and "usage" in completion_response:
+            usage = completion_response["usage"]
+        else:
+            logger.warning(
+                f"No usage info available in completion response: {completion_response}"
+            )
+            return None
+
+        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens", 0)
+        completion_tokens = usage.get("completion_tokens") or usage.get(
+            "output_tokens", 0
+        )
+
+        try:
+            cost = completion_cost(completion_response=completion_response, model=model)
+        except Exception:
+            # If cost calculation fails, fall back to calculating it manually
+            try:
+                prompt_cost, completion_cost = cost_per_token(
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+                cost = prompt_cost + completion_cost
+            except Exception:
+                logger.warning(
+                    f"Failed to calculate cost for completion response: {completion_response}"
+                )
+                cost = 0
+
+        return cls(
+            completion_cost=cost,
+            completion_tokens=completion_tokens,
+            prompt_tokens=prompt_tokens,
+        )
 
 
-class ActionTransaction(BaseModel):
-    request: ActionRequest
-    response: Optional[ActionResponse] = None
-    usage: Optional[Usage] = None
+class Completion(BaseModel):
+    model: str
+    input: list[dict] | None = None
+    response: dict[str, Any] | None = None
+    usage: Usage | None = None
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        data["request"] = self.request.model_dump(**kwargs)
-        data["response"] = self.response.model_dump(**kwargs) if self.response else None
-        return data
+    @classmethod
+    def from_llm_completion(
+        cls, input_messages: list[dict], completion_response: Any, model: str
+    ) -> Optional["Completion"]:
+        if isinstance(completion_response, BaseModel):
+            response = completion_response.model_dump()
+        elif isinstance(completion_response, dict):
+            response = completion_response
+        else:
+            logger.error(
+                f"Unexpected completion response type: {type(completion_response)}"
+            )
+            return None
 
+        usage = Usage.from_completion_response(completion_response, model)
 
-class EmptyRequest(ActionRequest):
-    pass
+        return cls(
+            model=model,
+            input=input_messages,
+            response=response,
+            usage=usage,
+        )
 
-
-class Finish(ActionRequest):
-    thoughts: str = Field(..., description="The reason to finishing the request.")
-
-
-class Reject(ActionRequest):
-    thoughts: str = Field(..., description="The reason for rejecting the request.")
-
-
-class Content(ActionRequest):
-    content: str
-
-
-class Message(BaseModel):
-    role: str
-    content: Optional[str] = None
-    action: Optional[ActionRequest] = Field(default=None)
-
-
-class AssistantMessage(Message):
-    role: str = "assistant"
-    content: Optional[str] = None
-    action: Optional[ActionRequest] = Field(default=None)
-
-
-class UserMessage(Message):
-    role: str = "user"
-    content: Optional[str] = None
 
 
 class Response(BaseModel):

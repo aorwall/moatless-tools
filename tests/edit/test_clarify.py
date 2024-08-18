@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from moatless.edit.clarify import ClarifyCodeChange, LineNumberClarification
-from moatless.schema import ActionResponse, FileWithSpans
+from moatless.schema import StateOutcome, FileWithSpans
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 from moatless.repository import CodeFile
@@ -38,7 +38,7 @@ class TestClarifyCodeChange:
 
         response = clarify_code_change._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "reject"
         assert response.output["message"] == "Cannot complete the task"
 
@@ -56,7 +56,7 @@ class TestClarifyCodeChange:
 
         response = clarify_code_change._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "edit_code"
         assert response.output["instructions"] == "Update function\n\nUpdating lines"
         assert response.output["file_path"] == "test.py"
@@ -76,7 +76,7 @@ class TestClarifyCodeChange:
 
         response = clarify_code_change._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "retry"
         assert response.retry_message == "Invalid line numbers"
 

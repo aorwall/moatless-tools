@@ -16,8 +16,12 @@ class Module(CodeBlock):
     content: str = ""
     spans_by_id: Dict[str, BlockSpan] = field(default_factory=dict)
     language: Optional[str] = None
-    code_block: CodeBlock = field(default_factory=lambda: CodeBlock(content="", type=CodeBlockType.MODULE))
-    _graph: DiGraph = field(default_factory=DiGraph, init=False)   # TODO: Move to central CodeGraph
+    code_block: CodeBlock = field(
+        default_factory=lambda: CodeBlock(content="", type=CodeBlockType.MODULE)
+    )
+    _graph: DiGraph = field(
+        default_factory=DiGraph, init=False
+    )  # TODO: Move to central CodeGraph
 
     def __post_init__(self):
         if not self.code_block.type == CodeBlockType.MODULE:

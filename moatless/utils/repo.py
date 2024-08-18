@@ -24,21 +24,47 @@ def get_repo_dir_name(repo: str):
     return repo.replace("/", "_")
 
 
-def maybe_clone(repo_url, repo_dir):
-    if not os.path.exists(f"{repo_dir}/.git"):
-        logger.info(f"Cloning repo '{repo_url}'")
-        # Clone the repo if the directory doesn't exist
-        result = subprocess.run(
-            ["git", "clone", repo_url, repo_dir],
+def clone_and_checkout(repo_url, repo_dir, commit):
+    if os.path.exists(f"{repo_dir}/.git"):
+        try:
+            checkout_commit(repo_dir, commit)
+            return
+        except Exception as e:
+            logger.warning(
+                f"Failed to checkout commit, will clone the repo again. Error: {e}"
+            )
+
+        subprocess.run(
+            ["rm", "-rf", repo_dir],
             check=True,
             text=True,
             capture_output=True,
         )
 
+    maybe_clone(repo_url, repo_dir)
+    checkout_commit(repo_dir, commit)
+
+
+def maybe_clone(repo_url, repo_dir):
+    if not os.path.exists(f"{repo_dir}/.git"):
+        logger.info(f"Cloning repo '{repo_url}'")
+        # Clone the repo if the directory doesn't exist
+
+        try:
+            result = subprocess.run(
+                ["git", "clone", repo_url, repo_dir],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(e.stderr)
+            raise e
+
         if result.returncode == 0:
             logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
         else:
-            logger.info(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
+            logger.warning(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
             raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
 
 
@@ -159,6 +185,7 @@ def stage_all_files(repo_dir):
 
 
 def checkout_commit(repo_dir, commit_hash):
+    logger.info(f"Checking out commit {commit_hash} in {repo_dir}")
     try:
         subprocess.run(
             ["git", "reset", "--hard", commit_hash],

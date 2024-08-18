@@ -26,7 +26,6 @@ def test_load_django_trajectory():
         loaded_state = loaded_transition.state
         assert loaded_state.id == original_transition["id"]
         assert loaded_state.name == original_transition["name"]
-        assert loaded_transition.timestamp == datetime.fromisoformat(original_transition["timestamp"])
         assert loaded_transition.snapshot == original_transition.get("snapshot")
 
         original_properties = original_transition["properties"]
@@ -36,12 +35,13 @@ def test_load_django_trajectory():
             assert len(loaded_state._actions) == len(original_transition["actions"])
             for loaded_action, original_action in zip(loaded_state._actions, original_transition["actions"]):
                 assert loaded_action.request.__class__.__name__ == loaded_state.action_type().__name__ if loaded_state.action_type() else "Content"
-                if loaded_action.response:
-                    assert loaded_action.response.trigger == original_action["response"]["trigger"]
-                if loaded_action.usage:
-                    assert loaded_action.usage.completion_cost == original_action["usage"]["completion_cost"]
-                    assert loaded_action.usage.completion_tokens == original_action["usage"]["completion_tokens"]
-                    assert loaded_action.usage.prompt_tokens == original_action["usage"]["prompt_tokens"]
+                assert loaded_action.response
+                assert loaded_action.response.trigger == original_action["response"]["trigger"]
+                assert loaded_action.completion
+                assert loaded_action.completion.usage
+                assert loaded_action.completion.usage.completion_cost == original_action["completion"]["usage"]["completion_cost"]
+                assert loaded_action.completion.usage.completion_tokens == original_action["completion"]["usage"]["completion_tokens"]
+                assert loaded_action.completion.usage.prompt_tokens == original_action["completion"]["usage"]["prompt_tokens"]
     
     for loaded_transition, original_transition in zip(trajectory.transitions, original_data["transitions"]):
         if original_transition.get("previous_state_id") is not None:

@@ -1,17 +1,13 @@
 import fnmatch
 import logging
-from typing import Optional
+from typing import Optional, Any, Set
 
 from pydantic import BaseModel, Field
 
 from moatless.file_context import RankedFileSpan
-from moatless.state import AgenticState
+from moatless.state import AgenticState,ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
 from moatless.schema import (
-    ActionRequest,
-    ActionResponse,
     FileWithSpans,
-    Message,
-    UserMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +78,7 @@ class IdentifyCode(AgenticState):
     def model_dump(self, **kwargs):
         return super().model_dump(**kwargs)
 
-    def _execute_action(self, action: Identify) -> ActionResponse:
+    def _execute_action(self, action: Identify) -> StateOutcome:
         if action.identified_spans:
             self.file_context.add_files_with_spans(action.identified_spans)
 
@@ -91,7 +87,7 @@ class IdentifyCode(AgenticState):
                 f"Identified {span_count} spans in {len(action.identified_spans)} files. Current file context size is {self.file_context.context_size()} tokens."
             )
 
-            return ActionResponse.transition("finish")
+            return StateOutcome.transition("finish")
         else:
             logger.info("No spans identified.")
 
@@ -100,7 +96,7 @@ class IdentifyCode(AgenticState):
         message += "\n\n"
         message += action.scratch_pad
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             "search",
             output={"message": message},
         )
@@ -124,7 +120,7 @@ class IdentifyCode(AgenticState):
                 file_context.expand_context_with_related_spans(
                     max_tokens=self.max_prompt_file_tokens, set_tokens=True
                 )
-                file_context.expand_small_classes(
+                file_context.expand_classes(
                     max_tokens=self.max_prompt_file_tokens
                 )
 

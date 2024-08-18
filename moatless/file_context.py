@@ -362,9 +362,12 @@ class ContextFile(BaseModel):
         for child in self.module.children:
             if (
                 child.type == CodeBlockType.IMPORT
-                and child.belongs_to_span.span_type == SpanType.INITATION
-                and child.belongs_to_span.span_id not in init_spans
-            ):
+                or (
+                    child.belongs_to_span
+                    and child.belongs_to_span.span_type == SpanType.INITATION
+                    and child.type != CodeBlockType.COMMENT
+                )
+            ) and child.belongs_to_span.span_id not in init_spans:
                 self.add_span(child.belongs_to_span.span_id)
 
         for span_id in self.span_ids:
@@ -377,30 +380,10 @@ class ContextFile(BaseModel):
                     ):
                         self.add_span(child.belongs_to_span.span_id)
 
-    def expand_small_classes(self, max_tokens: int):
-        """
-        Expand small classes with no other spans selected if the context allows it.
-
-        TODO: This a temporary solution, should be handled by asking the LLM to specify spans in the Identify step.
-        """
-        if not self.file.supports_codeblocks:
-            return
-
-        if len(self.spans) == 1:
-            span = self.module.find_span_by_id(self.spans[0].span_id)
-            if (
-                span
-                and span.initiating_block.type == CodeBlockType.CLASS
-                and span.initiating_block.sum_tokens() < max_tokens
-            ):
-                for span_id in span.initiating_block.get_all_span_ids():
-                    self.add_span(span_id)
-
-
 class FileContext(BaseModel):
     _repo: FileRepository = PrivateAttr()
     _file_context: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
-    _max_tokens: int = PrivateAttr(default=4000)
+    _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -410,10 +393,10 @@ class FileContext(BaseModel):
         if "_file_context" not in self.__dict__:
             self.__dict__["_file_context"] = {}
         if "_max_tokens" not in self.__dict__:
-            self.__dict__["_max_tokens"] = data.get("max_tokens", 4000)
+            self.__dict__["_max_tokens"] = data.get("max_tokens", 8000)
 
     @classmethod
-    def from_dir(cls, repo_dir: str, max_tokens: int = 4000):
+    def from_dir(cls, repo_dir: str, max_tokens: int = 8000):
         repo = FileRepository(repo_dir)
         instance = cls(max_tokens=max_tokens, repo=repo)
         return instance
@@ -433,7 +416,7 @@ class FileContext(BaseModel):
     @classmethod
     def from_dict(cls, repo_dir: str, data: Dict):
         repo = FileRepository(repo_dir)
-        instance = cls(max_tokens=data.get("max_tokens", 4000), repo=repo)
+        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo)
         instance.load_files_from_dict(data.get("files", []))
         return instance
 
@@ -656,9 +639,67 @@ class FileContext(BaseModel):
         for file in self._file_context.values():
             file.expand_context_with_init_spans()
 
-    def expand_small_classes(self, max_tokens: int):
-        for file in self._file_context.values():
-            file.expand_small_classes(max_tokens)
+
+    def expand_classes(self, max_tokens_per_class: int):
+        total_added_tokens = 0
+        expanded_classes = set()
+
+        # Sort files by the number of spans, prioritizing files with more spans
+        sorted_files = sorted(self._file_context.values(), key=lambda f: len(f.spans), reverse=True)
+
+        all_classes = []
+        for file in sorted_files:
+            if not file.file.supports_codeblocks:
+                continue
+
+            class_blocks = []
+            for span in file.spans:
+                block_span = file.module.find_span_by_id(span.span_id)
+                if not block_span:
+                    continue
+
+                if block_span.initiating_block.type != CodeBlockType.CLASS:
+                    class_block = block_span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
+                elif block_span.initiating_block.type == CodeBlockType.CLASS:
+                    class_block = block_span.initiating_block
+                else:
+                    continue
+
+                if class_block and not any(c.full_path() == class_block.full_path() for c in class_blocks):
+                    class_blocks.append(class_block)
+
+            all_classes.extend((file, class_block) for class_block in class_blocks)
+
+        # Sort all classes by the number of spans they contain that are already in context
+        all_classes.sort(key=lambda x: len(set(x[1].get_all_span_ids()) & x[0].span_ids), reverse=True)
+
+        for file, class_block in all_classes:
+            class_tokens = class_block.sum_tokens()
+
+            logger.info(f"Checking class {class_block.full_path()} with {class_tokens} tokens")
+
+            # Skip if the class is already expanded or too large
+            if (class_block.belongs_to_span.span_id in expanded_classes or
+                class_tokens > max_tokens_per_class):
+                logger.info(f"Skipping class {class_block.full_path()}")
+                continue
+
+            # Check if adding this class would exceed the total token limit
+            if total_added_tokens + class_tokens > self._max_tokens:
+                logger.info(f"Exceeded total token limit, stopping. Total added tokens: {total_added_tokens}, class tokens: {class_tokens}, max tokens: {self._max_tokens}")
+                break
+
+            # Expand the class
+            file.add_span(class_block.belongs_to_span.span_id)
+            for span_id in class_block.get_all_span_ids():
+                file.add_span(span_id)
+
+            total_added_tokens += class_tokens
+            expanded_classes.add(class_block.belongs_to_span.span_id)
+
+            logger.info(f"Expanded class {class_block.full_path()} with {class_tokens} tokens, total added tokens: {total_added_tokens}")
+
+        logger.info(f"Expanded {len(expanded_classes)} classes, total added tokens: {total_added_tokens}")
 
     def expand_context_with_related_spans(
         self, max_tokens: int, set_tokens: bool = False

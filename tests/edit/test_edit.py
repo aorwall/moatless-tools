@@ -1,11 +1,17 @@
 import pytest
 from unittest.mock import Mock, patch
+
+from moatless import AgenticLoop
+from moatless.benchmark.swebench import load_instance, create_workspace
 from moatless.edit.edit import EditCode
 from moatless.repository.file import UpdateResult
-from moatless.schema import ActionResponse, Content
+from moatless.schema import StateOutcome, Content
+from moatless.settings import Settings
+from moatless.trajectory import Trajectory
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
-from moatless.repository import CodeFile
+from moatless.repository import CodeFile, GitRepository
+
 
 class TestEditCode:
     
@@ -46,28 +52,23 @@ class TestEditCode:
 
         response = edit_code._execute_action(content)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "reject"
         assert response.output["message"] == "Cannot complete the task"
 
     @patch('moatless.edit.edit.EditCode.file_context')
     def test_execute_action_edit_code(self, mock_file_context, edit_code: EditCode):
-        update_result = UpdateResult(diff="diff", updated=True, file_path="test.py")
-        
         mock_file = Mock(spec=CodeFile)
-        mock_file.update_content_by_line_numbers.return_value = update_result
-        
         mock_context_file = Mock()
         mock_context_file.file = mock_file
-        mock_context_file.update_content_by_line_numbers.return_value = update_result
-        
+
         mock_file_context.get_file.return_value = mock_context_file
 
         content = Content(content="<replace>updated code</replace>")
 
         response = edit_code._execute_action(content)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
         assert "Applied the change to test.py." in response.output["message"]
         assert response.output["diff"] == "diff"
@@ -80,14 +81,13 @@ class TestEditCode:
         mock_file.update_content_by_line_numbers.return_value = Mock(diff=None, updated=False)
         mock_context_file = Mock()
         mock_context_file.file = mock_file
-        mock_context_file.update_content_by_line_numbers.return_value = Mock(diff=None, updated=False)
         mock_file_context.get_file.return_value = mock_context_file
 
         content = Content(content="<replace>unchanged code</replace>")
 
         response = edit_code._execute_action(content)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "retry"
         assert "The code in the replace tag is the same as in the search" in response.retry_message
 
@@ -116,3 +116,20 @@ class TestEditCode:
 
     def test_stop_words(self, edit_code: EditCode):
         assert edit_code.stop_words() == ["</replace>"]
+
+
+@pytest.mark.skip
+def test_expect_failed_edit():
+    trajectory = Trajectory.load("tests/trajectories/django__django-9296.json")
+    Settings.cheap_model = None
+
+    instance = load_instance("django__django-9296", dataset_name="princeton-nlp/SWE-bench_Verified")
+    workspace = create_workspace(instance)
+    assert isinstance(workspace.file_repo, GitRepository)
+    mocked_actions = trajectory.get_mocked_actions()
+    expected_states = trajectory.get_expected_states()
+
+    loop = AgenticLoop(
+        trajectory.transition_rules, workspace=workspace, mocked_actions=mocked_actions, expected_states=expected_states
+    )
+    response = loop.run(message=trajectory.initial_message)

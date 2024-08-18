@@ -1,18 +1,15 @@
-import json
 import logging
 from typing import Optional
 
-import instructor
-
-from moatless.transition_rules import TransitionRules
 from moatless.benchmark.evaluation import create_evaluation_name, Evaluation
 from moatless.edit.edit import EditCode
 from moatless.edit.plan import PlanToCode
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search import SearchCode
-from moatless.transition_rules import TransitionRule
 from moatless.state import Finished, Rejected
+from moatless.transition_rules import TransitionRule
+from moatless.transition_rules import TransitionRules
 from moatless.transitions import (
     search_and_code_transitions,
     search_transitions,

@@ -49,9 +49,9 @@ class Workspace:
         else:
             self.code_index = None
 
-        if verification_job == "maven":
+        if verification_job == "maven" and self.file_repo:
             self.verifier = MavenVerifier(self.file_repo.path)
-        elif verification_job == "pylint":
+        elif verification_job == "pylint" and self.file_repo:
             self.verifier = PylintVerifier(self.file_repo.path)
         else:
             self.verifier = None
@@ -98,10 +98,10 @@ class Workspace:
                 repo_path=data["repository"].get("repo_path"),
                 commit=data["repository"].get("commit"),
             )
-        elif data["repository"].get("repo_path"):
-            file_repo = FileRepository(data["repository"].get("repo_path"))
+        elif data["repository"].get("path"):
+            file_repo = FileRepository(data["repository"].get("path"))
         else:
-            raise ValueError("Either git_repo_url or repo_dir must be provided.")
+            raise ValueError("Either git_repo_url or path must be provided.")
 
         file_context = FileContext(
             repo=file_repo, max_tokens=data["file_context"].get("max_tokens")
@@ -127,6 +127,8 @@ class Workspace:
         self._file_context.restore_from_snapshot(snapshot["file_context"])
 
     def dict(self):
+        if not self.file_repo:
+            return {}
         return {
             "repository": self.file_repo.dict(),
             "file_context": self.file_context.model_dump(

@@ -3,7 +3,7 @@ from moatless.codeblocks.codeblocks import BlockSpan, SpanType
 from moatless.find.identify import IdentifyCode, Identify, is_test_pattern
 from moatless.file_context import RankedFileSpan
 from moatless.repository.file import CodeFile
-from moatless.schema import FileWithSpans, ActionResponse
+from moatless.schema import FileWithSpans, StateOutcome
 from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 
@@ -47,7 +47,7 @@ class TestIdentifyCode:
 
         response = identify_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
 
         # Verify that the file was added to the file context
@@ -62,7 +62,7 @@ class TestIdentifyCode:
 
         response = identify_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "search"
         assert "The search returned 1 results" in response.output["message"]
 

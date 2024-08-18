@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import re
 import time
 from typing import List
@@ -9,6 +11,36 @@ from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
 
 logger = logging.getLogger(__name__)
+_moatless_instances = {}
+
+def load_moatless_datasets(split: str):
+    global _moatless_instances
+
+    file_path = os.path.join(
+        os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
+    )
+    with open(file_path) as f:
+        dataset = json.load(f)
+        _moatless_instances[split] = {d["instance_id"]: d for d in dataset}
+
+
+def get_moatless_instances(split: str = "lite"):
+    global _moatless_instances
+    if split not in _moatless_instances:
+        load_moatless_datasets(split)
+    return _moatless_instances.get(split)
+
+
+def get_moatless_instance(instance_id: str, split: str = "lite"):
+    global _moatless_instances
+    if split not in _moatless_instances:
+        load_moatless_datasets(split)
+    instance = _moatless_instances.get(split).get(instance_id)
+    if not instance:
+        raise ValueError(f"Instance {instance_id} not found in {split} split.")
+
+    return instance
+
 
 
 def find_relevant_spans(original_block: Module, updated_block: Module):
@@ -172,10 +204,10 @@ def file_spans_to_dict(files_with_spans: list[FileWithSpans]) -> dict[str, list[
 
 def get_missing_files(
     expected_files_with_spans: dict[str, list[str]],
-    actual_files_with_spans: dict[str, list[str]],
+    files: list[str],
 ) -> list[str]:
     misses = list(expected_files_with_spans.keys())
-    for actual_file in actual_files_with_spans:
+    for actual_file in files:
         if actual_file in misses:
             misses.remove(actual_file)
     return misses
@@ -186,18 +218,67 @@ def get_missing_spans(
     actual_files_with_spans: dict[str, list[str]],
 ) -> dict[str, list[str]]:
     misses = {}
-    for expected_file, span_ids in expected_files_with_spans.items():
+    for expected_file, expected_span_ids in expected_files_with_spans.items():
         if expected_file not in actual_files_with_spans:
-            misses[expected_file] = span_ids
+            misses[expected_file] = expected_span_ids
             continue
 
-        for span_id in span_ids:
-            if span_id not in actual_files_with_spans[expected_file]:
-                if expected_file not in misses:
-                    misses[expected_file] = []
-                misses[expected_file].append(span_id)
+        actual_span_ids = actual_files_with_spans[expected_file]
+        missing_span_ids = [
+            span_id for span_id in expected_span_ids if span_id not in actual_span_ids
+        ]
+
+        if missing_span_ids:
+            misses[expected_file] = missing_span_ids
 
     return misses
+
+
+def count_identified_spans(
+    expected_files_with_spans: dict[str, list[str]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> int:
+    count = 0
+    for actual_file, actual_span_ids in actual_files_with_spans.items():
+        if expected_files_with_spans.get(actual_file, []):
+            for actual_span_id in actual_span_ids:
+                if actual_span_id in expected_files_with_spans[actual_file]:
+                    count += 1
+    return count
+
+
+def count_identified_files(
+    expected_files_with_spans: dict[str, list[str]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> int:
+    count = 0
+    for actual_file, actual_span_ids in actual_files_with_spans.items():
+        if expected_files_with_spans.get(actual_file, []):
+            count += 1
+    return count
+
+
+def has_identified_spans(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> bool:
+    for expected_file_with_spans in expected_solutions:
+        missing_spans = get_missing_spans(expected_file_with_spans, actual_files_with_spans)
+        if not missing_spans or missing_spans == ["docstring"]:
+            return True
+    return False
+
+
+def has_identified_files(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> bool:
+    for expected_file_with_spans in expected_solutions:
+        if not get_missing_files(
+            expected_file_with_spans, list(actual_files_with_spans.keys())
+        ):
+            return True
+    return False
 
 
 def calculate_estimated_context_window(instance, results):

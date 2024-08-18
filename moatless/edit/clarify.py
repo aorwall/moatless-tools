@@ -7,11 +7,9 @@ from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup
 from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
 from moatless.repository import CodeFile
-from moatless.state import ActionResponse, AgenticState
+from moatless.state import StateOutcome, AgenticState, ActionRequest, Message
 from moatless.schema import (
-    ActionRequest,
     FileWithSpans,
-    Message,
 )
 from moatless.utils.tokenizer import count_tokens
 
@@ -35,8 +33,12 @@ class ClarifyCodeChange(AgenticState):
     file_path: str = Field(..., description="The path to the file to be updated.")
     span_id: str = Field(..., description="The ID of the span to be updated.")
 
-    start_line: Optional[int] = Field(None, description="The start line of the code to be updated.")
-    end_line: Optional[int] = Field(None, description="The end line of the code to be updated.")
+    start_line: Optional[int] = Field(
+        None, description="The start line of the code to be updated."
+    )
+    end_line: Optional[int] = Field(
+        None, description="The end line of the code to be updated."
+    )
 
     max_tokens_in_edit_prompt: int = Field(
         500,
@@ -77,19 +79,19 @@ class ClarifyCodeChange(AgenticState):
             outcomment_code_comment="... other code",
         )
 
-    def _execute_action(self, request: LineNumberClarification) -> ActionResponse:
+    def _execute_action(self, request: LineNumberClarification) -> StateOutcome:
         logger.info(
             f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
         )
 
         if request.reject:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 trigger="reject", output={"message": request.scratch_pad}
             )
 
         retry_message = self._verify_line_numbers(request)
         if retry_message:
-            return ActionResponse.retry(retry_message)
+            return StateOutcome.retry(retry_message)
 
         if request.end_line - request.start_line < 4:
             start_line, end_line = self.get_line_span(
@@ -101,7 +103,7 @@ class ClarifyCodeChange(AgenticState):
         if request.scratch_pad:
             self.instructions += "\n\n" + request.scratch_pad
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             trigger="edit_code",
             output={
                 "instructions": self.instructions,
@@ -186,12 +188,9 @@ class ClarifyCodeChange(AgenticState):
         if not self._file_context_str:
             self.init()
 
-        messages = [
-            Message(
-                role="user",
-                content=f"<instructions>\n{self.instructions}\n</instructions>\n<code>\n{self._file_context_str}\n</code>",
-            )
-        ]
+        content = f"<instructions>\n{self.instructions}\n</instructions>\n<code>\n{self._file_context_str}\n</code>"
+
+        messages = [Message(role="user", content=content)]
 
         messages.extend(self.retry_messages())
 
@@ -229,11 +228,43 @@ class ClarifyCodeChange(AgenticState):
             struture_block is not None
         ), f"No structure bock found for {start_block.path_string()}"
 
-        if struture_block.sum_tokens() < max_tokens:
-            logger.info(
-                f"Return block [{struture_block.path_string()}] ({struture_block.start_line} - {struture_block.end_line}) with {struture_block.sum_tokens()} tokens that covers the provided line span ({start_line} - {end_line})"
+        structure_block_tokens = struture_block.sum_tokens()
+        if structure_block_tokens < max_tokens:
+            previous_block = struture_block.find_last_previous_block_with_block_group(
+                CodeBlockTypeGroup.STRUCTURE
             )
-            return struture_block.start_line, struture_block.end_line
+            if (
+                previous_block
+                and structure_block_tokens + previous_block.sum_tokens() < max_tokens
+            ):
+                start_line = previous_block.start_line
+                structure_block_tokens += previous_block.sum_tokens()
+                logger.info(
+                    f"Start from start line of the previous block {previous_block.path_string()} that fits in the prompt"
+                )
+            else:
+                start_line = struture_block.start_line
+
+            next_structure_block = struture_block.find_next_block_with_block_group(
+                CodeBlockTypeGroup.STRUCTURE
+            )
+            if (
+                next_structure_block
+                and structure_block_tokens + next_structure_block.sum_tokens()
+                < max_tokens
+            ):
+                end_line = next_structure_block.end_line
+                structure_block_tokens += next_structure_block.sum_tokens()
+                logger.info(
+                    f"End at end line of the next block {next_structure_block.path_string()} that fits in the prompt, at line {end_line}"
+                )
+            else:
+                end_line = struture_block.end_line
+
+            logger.info(
+                f"Return block [{struture_block.path_string()}] ({start_line} - {end_line}) with {structure_block_tokens} tokens that covers the provided line span ({start_line} - {end_line})"
+            )
+            return start_line, end_line
 
         if not end_line:
             end_line = start_line

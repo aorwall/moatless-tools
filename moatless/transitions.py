@@ -3,13 +3,14 @@ from typing import Optional
 
 from moatless.edit.clarify import ClarifyCodeChange
 from moatless.edit.edit import EditCode
+from moatless.edit.expand import ExpandContext
 from moatless.edit.plan import PlanToCode
 from moatless.edit.plan_lines import PlanToCodeWithLines
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search import SearchCode
-from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.state import Finished, Rejected, Pending
+from moatless.transition_rules import TransitionRule, TransitionRules
 
 CODE_TRANSITIONS = [
     TransitionRule(
@@ -201,11 +202,12 @@ def search_and_code_transitions(
             TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
             TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
             TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
+            TransitionRule(source=DecideRelevance, dest=ExpandContext, trigger="finish"),
             TransitionRule(
-                source=DecideRelevance,
+                source=ExpandContext,
                 dest=PlanToCode,
                 trigger="finish",
-                exclude_fields={"message"},
+                exclude_fields={"added_spans", "original_tokens","expanded_tokens"},
             ),
         ]
         + CODE_TRANSITIONS,

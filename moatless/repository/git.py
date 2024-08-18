@@ -6,23 +6,24 @@ from git import Repo
 
 from moatless.repository.file import FileRepository
 from moatless.settings import Settings
-from moatless.utils.repo import maybe_clone, checkout_commit
+from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 
 logger = logging.getLogger(__name__)
 
 
 class GitRepository(FileRepository):
     def __init__(
-        self, repo_path: str, git_repo_url: Optional[str], commit: Optional[str] = None
+        self, repo_path: str, git_repo_url: Optional[str], commit: Optional[str] = None, generate_commit_message: bool = False
     ):
         super().__init__(repo_path)
         self._repo_path = repo_path
         self._repo_url = git_repo_url
         self._repo = Repo(path=repo_path)
+        self._generate_commit_message = generate_commit_message
+
         if not self._repo.heads:
-            raise Exception(
-                "Git repository has no heads, you need to do an initial commit."
-            )
+            logger.error(f"Repo at {repo_path} has no branches")
+            # TODO: Fail?
 
         # TODO: Add support for branches
         # self._current_branch = self._repo.active_branch.name
@@ -43,7 +44,10 @@ class GitRepository(FileRepository):
             f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} "
         )
 
-        maybe_clone(git_repo_url, repo_path)
+        if commit:
+            clone_and_checkout(git_repo_url, repo_path, commit)
+        else:
+            maybe_clone(git_repo_url, repo_path)
 
         return cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
 
@@ -57,7 +61,6 @@ class GitRepository(FileRepository):
 
     def restore_from_snapshot(self, snapshot: dict):
         self._current_commit = snapshot["commit"]
-
 
         self._repo.git.checkout(self._current_commit)
 
@@ -96,7 +99,9 @@ class GitRepository(FileRepository):
         self._repo.index.commit(commit_message)
         self._current_commit = self._repo.head.commit.hexsha
 
-        logger.info(f"Committed changes to git with message '{commit_message}' and commit hash '{self._current_commit}'")
+        logger.info(
+            f"Committed changes to git with message '{commit_message}' and commit hash '{self._current_commit}'"
+        )
 
     def commit_message(self, file_path: str | None = None) -> str:
         if file_path:
@@ -107,7 +112,7 @@ class GitRepository(FileRepository):
         if not diff:
             return "No changes."
 
-        if Settings.cheap_model:
+        if Settings.cheap_model and self._generate_commit_message:
             prompt = f"Generate a concise commit message for the following git diff"
             if file_path:
                 prompt += f" of file {file_path}"
@@ -126,4 +131,7 @@ class GitRepository(FileRepository):
         return "Automated commit by Moatless Tools"
 
     def diff(self):
+        logger.info(
+            f"Get diff between {self._initial_commit} and {self._current_commit}"
+        )
         return self._repo.git.diff(self._initial_commit, self._current_commit)

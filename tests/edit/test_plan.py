@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from moatless.edit.plan import PlanToCode, ApplyChange
-from moatless.schema import ActionResponse, ActionTransaction
+from moatless.schema import StateOutcome, ActionTransaction
 from moatless.workspace import Workspace
 from moatless.file_context import FileContext
 
@@ -31,7 +31,7 @@ class TestPlanToCode:
 
         response = plan_to_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "finish"
         assert response.output["message"] == "Task completed successfully"
 
@@ -44,7 +44,7 @@ class TestPlanToCode:
 
         response = plan_to_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "reject"
         assert response.output["message"] == "Cannot complete the task"
 
@@ -56,7 +56,7 @@ class TestPlanToCode:
 
         response = plan_to_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "retry"
         assert "Review isn't possible" in response.retry_message
 
@@ -70,11 +70,11 @@ class TestPlanToCode:
             instructions="Update function"
         )
 
-        mock_request_for_change.return_value = ActionResponse(trigger="edit_code")
+        mock_request_for_change.return_value = StateOutcome(trigger="edit_code")
 
         response = plan_to_code._execute_action(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "edit_code"
         mock_request_for_change.assert_called_once_with(action)
 
@@ -108,7 +108,7 @@ class TestPlanToCode:
 
         response = plan_to_code._request_for_change(action)
 
-        assert isinstance(response, ActionResponse)
+        assert isinstance(response, StateOutcome)
         assert response.trigger == "retry"
         assert "File nonexistent.py is not found in the file context" in response.retry_message
 

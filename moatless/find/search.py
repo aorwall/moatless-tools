@@ -7,14 +7,9 @@ from pydantic import BaseModel, Field, model_validator, ValidationError
 
 from moatless.file_context import RankedFileSpan
 from moatless.index.types import SearchCodeHit
-from moatless.state import ActionResponse, AgenticState
-from moatless.schema import (
-    ActionRequest,
-    AssistantMessage,
-    Message,
-    UserMessage,
-)
-from moatless.utils.llm_utils import instructor_mode_by_model
+from moatless.state import StateOutcome, AgenticState, ActionRequest, AssistantMessage, Message, UserMessage
+
+from moatless.utils.llm_utils import response_format_by_model, LLMResponseFormat
 
 logger = logging.getLogger(__name__)
 
@@ -59,36 +54,44 @@ User:
 The file uploader intermittently fails with "TypeError: cannot unpack non-iterable NoneType object". This issue appears sporadically during high load conditions..
 
 AI Assistant:
-functions.Search({
+functions.Search(
+scratch_pad: "The error indicates that a variable expected to be iterable is None, which might be happening due to race conditions or missing checks under high load. Investigate the file upload logic to ensure all necessary checks are in place and improve concurrency handling.",
+search_requests=[{
     query: "File upload process to fix intermittent 'TypeError: cannot unpack non-iterable NoneType object'",
     file_pattern: "**/uploader/**/*.py"
-)
+}])
 
 User:
 There's a bug in the PaymentProcessor class where transactions sometimes fail to log correctly, resulting in missing transaction records.
 
 AI Assistant:
-functions.Search({
+functions.Search(
+scratch_pad: "Missing transaction logs can cause significant issues in tracking payments. The problem may be related to how the logging mechanism handles transaction states or errors. Investigate the PaymentProcessor class, focusing on the transaction logging part.",
+search_requests=[{
     class_names: ["PaymentProcessor"]
-)
+}])
 
 User:
 The generate_report function sometimes produces incomplete reports under certain conditions. This function is part of the reporting module. Locate the generate_report function in the reports directory to debug and fix the issue.
 
 AI Assistant:
-functions.Search({
+functions.Search(
+scratch_pad: "Incomplete reports suggest that the function might be encountering edge cases or unhandled exceptions that disrupt the report generation. Reviewing the function's logic and error handling in the reporting module is necessary.",
+search_requests=[{
     function_names: ["generate_report"],
     file_pattern: "**/reports/**/*.py"
-)
+}])
 
 User:
 The extract_data function in HTMLParser throws an "AttributeError: 'NoneType' object has no attribute 'find'" error when parsing certain HTML pages.
 
 AI Assistant:
-functions.Search({
+functions.Search(
+scratch_pad: "The error occurs when 'find' is called on a NoneType object, suggesting that the HTML structure might not match expected patterns. ",
+search_requests=[{
     class_names: ["HTMLParser"],
     function_names: ["extract_data"]
-)
+}])
 
 User:
 The database connection setup is missing SSL configuration, causing insecure connections.
@@ -101,10 +104,12 @@ File "/opt/app/db_config/database.py", line 50, in <module>
     connection = setup_connection()
 
 AI Assistant:
-functions.Search({
+functions.Search(
+scratch_pad: "The missing SSL configuration poses a security risk by allowing unencrypted connections. Find the code snippet `engine = create_engine(DATABASE_URL)` provided in the issue.",
+search_requests=[{
     code_snippet: "engine = create_engine(DATABASE_URL)",
     file_pattern: "db_config/database.py"
-)
+}])
 """
 
 SEARCH_FUNCTIONS_FEW_SHOT = """6. Execute the Search function:
@@ -265,11 +270,12 @@ class SearchRequest(BaseModel):
             ]
         )
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_search_requests(self):
         if not self.has_search_attributes:
             raise ValueError("A search request must have at least one attribute set.")
         return self
+
 
 class Search(ActionRequest):
     """Take action to search for code, identify found and finish up."""
@@ -287,10 +293,41 @@ class Search(ActionRequest):
         default=False, description="Set to true when the search is complete."
     )
 
-    @model_validator(mode='after')
+    @model_validator(mode="before")
+    @classmethod
+    def handle_direct_search_attributes(cls, values):
+        search_request_fields = [
+            "file_pattern",
+            "query",
+            "code_snippet",
+            "class_names",
+            "function_names",
+        ]
+        direct_search_attrs = {
+            field: values.pop(field)
+            for field in search_request_fields
+            if field in values
+        }
+
+        if any(direct_search_attrs.values()):
+            logger.warning(
+                f"The following direct search attributes were found: {direct_search_attrs}, will set as SearchRequest"
+            )
+
+            if "search_requests" in values:
+                values["search_requests"].append(direct_search_attrs)
+            else:
+                values["search_requests"] = [direct_search_attrs]
+
+        return values
+
+    @model_validator(mode="after")
     def validate_search_requests(self):
         if not self.complete:
             if not self.search_requests:
+                logger.warning(
+                    f"No search requests found in the search action request."
+                )
                 raise ValueError("At least one search request must exist.")
         return self
 
@@ -323,9 +360,9 @@ class SearchCode(AgenticState):
 
     support_test_files: bool = False
 
-    def _execute_action(self, action: Search) -> ActionResponse:
+    def _execute_action(self, action: Search) -> StateOutcome:
         if action.complete:
-            return ActionResponse.transition(
+            return StateOutcome.transition(
                 "finish",
                 output={
                     "message": action.scratch_pad,
@@ -374,12 +411,12 @@ class SearchCode(AgenticState):
             message = "\n\nUnfortunately, I didn't find any relevant results."
             return self._retry(message)
 
-        return ActionResponse.transition(
+        return StateOutcome.transition(
             trigger="did_search",
             output={"ranked_spans": ranked_spans},
         )
 
-    def _retry(self, message: str) -> ActionResponse:
+    def _retry(self, message: str) -> StateOutcome:
         if (
             self.retries() > self.max_retries_with_any_file_context
             and self.file_context.files
@@ -387,9 +424,9 @@ class SearchCode(AgenticState):
             logger.info(
                 "Exceeded max retries, will finish as there are identified files in the file context. Transitioning to finish."
             )
-            return ActionResponse.transition("finish")
+            return StateOutcome.transition("finish")
         else:
-            return ActionResponse.retry(message)
+            return StateOutcome.retry(message)
 
     def action_type(self) -> type[BaseModel] | None:
         return Search
@@ -397,10 +434,13 @@ class SearchCode(AgenticState):
     def system_prompt(self) -> str:
         system_prompt = SEARCH_SYSTEM_PROMPT
 
-        instructor_mode = instructor_mode_by_model(self.model)
-        if instructor_mode == instructor.Mode.JSON:
+        instructor_mode = response_format_by_model(self.model)
+        if instructor_mode == LLMResponseFormat.JSON:
             system_prompt += SEARCH_JSON_FEW_SHOT
-        elif self.model.startswith("openai"):
+        elif instructor_mode in [
+            LLMResponseFormat.TOOLS,
+            LLMResponseFormat.STRUCTURED_OUTPUT,
+        ]:
             system_prompt += SEARCH_FUNCTIONS_FEW_SHOT_OPENAI_FUNC
         else:
             system_prompt += SEARCH_FUNCTIONS_FEW_SHOT
@@ -414,8 +454,9 @@ class SearchCode(AgenticState):
 
         content = f"<issue>\n{self.initial_message}\n</issue>"
 
-        if self.provide_initial_context:
+        if self.provide_initial_context and self.initial_message:
             logger.info("Search for initial context to provide in the prompt")
+
             result = self.workspace.code_index.semantic_search(
                 query=self.initial_message,
                 exact_match_if_possible=False,
