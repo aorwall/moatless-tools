@@ -84,7 +84,11 @@ class Trajectory:
             data = json.load(f)
 
         if "transition_rules" in data:
-            transition_rules = TransitionRules.model_validate(data["transition_rules"])
+            try:
+                transition_rules = TransitionRules.model_validate(data["transition_rules"])
+            except Exception as e:
+                logger.exception(f"Error loading transition rules. Will still load trajectory.")
+                transition_rules = None
         else:
             transition_rules = None
 

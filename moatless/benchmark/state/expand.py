@@ -20,6 +20,16 @@ class ExpandContext(State):
         description="The maximum number of tokens to expand context with.",
     )
 
+    expand_classes: bool = Field(
+        False,
+        description="Whether to expand with class blocks.",
+    )
+
+    expand_relations: bool = Field(
+        True,
+        description="Whether to expand with related spans.",
+    )
+
     def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
         self.file_context.expand_context_with_init_spans()
 
@@ -35,8 +45,12 @@ class ExpandContext(State):
         flattened_results.sort(key=lambda x: (x[2]))
 
         span_ids = set()
-        span_ids.update(self.get_class_spans())
-        span_ids.update(self.get_related_spans())
+
+        if self.expand_classes:
+            span_ids.update(self.get_class_spans())
+
+        if self.expand_relations:
+            span_ids.update(self.get_related_spans())
 
         added_spans = 0
         original_tokens = self.file_context.context_size()

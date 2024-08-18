@@ -21,7 +21,7 @@ from moatless.file_context import FileContext
 from moatless.repository import FileRepository
 from moatless.schema import (
     Completion,
-    FileWithSpans
+    FileWithSpans, Usage
 )
 from moatless.settings import Settings
 from moatless.utils.llm_utils import LLMResponseFormat, generate_call_id, response_format_by_model
@@ -268,7 +268,7 @@ class AgenticState(State):
     )
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
-        1000, description="The maximum number of tokens to generate"
+        2000, description="The maximum number of tokens to generate"
     )
     max_message_tokens: Optional[int] = Field(
         None, description="The maximum number of tokens in a single message, can be used as a sanity check"
@@ -681,6 +681,13 @@ class AgenticState(State):
 
         return total_cost
 
+    def total_usage(self) -> Usage:
+        total_usage = Usage()
+        for action in self._actions:
+            if action.completion and action.completion.usage:
+                total_usage += action.completion.usage
+        return total_usage
+
     def model_dump(self, **kwargs):
         if "exclude" not in kwargs:
             kwargs["exclude"] = {"previous_state", "next_states"}
@@ -715,6 +722,7 @@ def get_state_class(name: str) -> type[AgenticState]:
     # If not a built-in state, try to import dynamically
     possible_modules = [
         "moatless.edit",
+        "moatless.edit.expand",
         "moatless.find",
     ]
 

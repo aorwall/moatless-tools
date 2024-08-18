@@ -235,7 +235,10 @@ class Evaluation:
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
 
         info["duration"] = time.time() - start_time
-        info["total_cost"] = loop.total_cost()
+        usage = loop.total_usage()
+        info["total_cost"] = usage.completion_cost
+        info["prompt_tokens"] = usage.prompt_tokens
+        info["completion_tokens"] = usage.completion_tokens
 
         if isinstance(workspace.file_repo, GitRepository):
             diff = workspace.file_repo.diff()

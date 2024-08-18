@@ -14,7 +14,7 @@ from moatless.state import (
 from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.schema import (
-    Response
+    Response, Usage
 )
 from moatless.utils.llm_utils import response_format_by_model, LLMResponseFormat
 from moatless.workspace import Workspace
@@ -343,12 +343,19 @@ class AgenticLoop:
         self._current_state.next_states.append(next_state)
         return next_state
 
-    def total_cost(self):
-        total_cost = 0
+    def total_usage(self):
+        total_usage = Usage()
         for state in self._trajectory.transitions:
             if isinstance(state.state, AgenticState):
-                total_cost += state.state.total_cost()
-        return total_cost
+                total_usage += state.state.total_usage()
+        return total_usage
+
+    def total_cost(self):
+        total_usage = self.total_usage()
+        if total_usage:
+            return total_usage.completion_cost
+        else:
+            return 0
 
     def is_running(self) -> bool:
         return not isinstance(self.state, NoopState)

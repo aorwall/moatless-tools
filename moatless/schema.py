@@ -77,6 +77,13 @@ class Usage(BaseModel):
             prompt_tokens=prompt_tokens,
         )
 
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            completion_cost=self.completion_cost + other.completion_cost,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+        )
+
 
 class Completion(BaseModel):
     model: str

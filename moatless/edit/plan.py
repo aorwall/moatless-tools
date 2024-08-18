@@ -79,16 +79,6 @@ class PlanToCode(AgenticState):
         description="The maximum number of tokens in a span to show the edit prompt.",
     )
 
-    expand_classes_with_max_tokens: Optional[int] = Field(
-        None,
-        description="The maximum number of tokens in a class to expand the context. If None, the context will not be expanded.",
-    )
-
-    expand_context_with_related_spans: bool = Field(
-        True,
-        description="Whether to expand the context with related spans.",
-    )
-
     allow_hallucinated_spans: bool = Field(
         False,
         description="Whether to allow spans that exists but aren't found in the file context.",
@@ -228,9 +218,14 @@ class PlanToCode(AgenticState):
                     },
                 )
             else:
-                start_line = block_span.start_line
-                tokens = block_span.tokens
-                end_line = block_span.end_line
+                return StateOutcome.transition(
+                    trigger="edit_code",
+                    output={
+                        "instructions": rfc.instructions,
+                        "file_path": rfc.file_path,
+                        "span_id": rfc.span_id
+                    },
+                )
 
         else:
             span = context_file.get_span(rfc.span_id)

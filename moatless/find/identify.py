@@ -121,7 +121,7 @@ class IdentifyCode(AgenticState):
                     max_tokens=self.max_prompt_file_tokens, set_tokens=True
                 )
                 file_context.expand_classes(
-                    max_tokens=self.max_prompt_file_tokens
+                    max_tokens_per_class=self.max_prompt_file_tokens
                 )
 
             search_result_str = file_context.create_prompt(

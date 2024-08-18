@@ -147,7 +147,7 @@ def write_report(
             + "\n"
         )
 
-    with open("index_eval.csv", "a") as f:
+    with open("index_eval_2.csv", "a") as f:
         f.write(
             f"{instance['instance_id']},{vectors},{indexed_tokens},{all_matching_context_window},{any_matching_context_window}\n"
         )
@@ -180,8 +180,6 @@ def run_indexing():
             f"Processing instance {i + 1}/{len(instances)}: {instance['instance_id']} {instance['created_at']}"
         )
 
-        repo_dir = setup_swebench_repo(instance)
-        repo = FileRepository(repo_dir)
         persist_dir = get_persist_dir(instance)
 
         code_index = None
@@ -196,6 +194,8 @@ def run_indexing():
         else:
             logger.info(f"No index found at {persist_dir}")
 
+            repo_dir = setup_swebench_repo(instance)
+            repo = FileRepository(repo_dir)
             # if not code_index:
             previous_instance = previous_instances.get(instance["repo"])
             if previous_instance:

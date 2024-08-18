@@ -59,7 +59,7 @@ def parse_args():
     return parser.parse_args()
 
 search_model = "openrouter/anthropic/claude-3.5-sonnet"
-plan_model = "openrouter/anthropic/claude-3.5-sonnet"
+plan_model = "claude-3-5-sonnet-20240620" # "openrouter/anthropic/claude-3.5-sonnet"
 edit_model = "azure/gpt-4o"
 
 DEFAULT_STATE_PARAMS = {

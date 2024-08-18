@@ -12,7 +12,7 @@ from moatless.benchmark.swebench import (
 )
 from moatless.benchmark.utils import (
     has_identified_spans,
-    has_identified_files,
+    has_identified_files, count_identified_files, count_identified_spans,
 )
 from moatless.file_context import FileContext, RankedFileSpan
 from moatless.trajectory import Trajectory
@@ -59,6 +59,8 @@ class BenchmarkResult(BaseModel):
     instance_id: str
     duration: float = 0
     total_cost: float = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     resolved_by: int = 0
     transitions: int = 0
     all_transitions: int = 0
@@ -117,6 +119,8 @@ def to_result(
             instance_id=instance["instance_id"],
             duration=info.get("duration", 0),
             total_cost=info.get("total_cost", 0),
+            prompt_tokens=info.get("prompt_tokens", 0),
+            completion_tokens=info.get("completion_tokens", 0),
             resolved_by=len(instance.get("resolved_by", [])),
             transitions=len(selected_transition_ids),
             all_transitions=len(trajectory.transitions),
@@ -169,17 +173,18 @@ def to_result(
                     setattr(result, state_name, current_state_stats)
 
                 if state_name == "SearchCode":
-                    for search_request in state.action_request.search_requests:
-                        if search_request.query:
-                            result.search.p_query += 1
-                        if search_request.file_pattern:
-                            result.search.p_file += 1
-                        if search_request.code_snippet:
-                            result.search.p_code += 1
-                        if search_request.class_names:
-                            result.search.p_class += 1
-                        if search_request.function_names:
-                            result.search.p_function += 1
+                    if state.action_request:
+                        for search_request in state.action_request.search_requests:
+                            if search_request.query:
+                                result.search.p_query += 1
+                            if search_request.file_pattern:
+                                result.search.p_file += 1
+                            if search_request.code_snippet:
+                                result.search.p_code += 1
+                            if search_request.class_names:
+                                result.search.p_class += 1
+                            if search_request.function_names:
+                                result.search.p_function += 1
 
                     if state.outcome and "ranked_spans" in state.outcome:
                         for ranked_span in state.outcome["ranked_spans"]:
@@ -306,11 +311,14 @@ def to_result(
 
 
 def set_found_status(
-    expected_spans, alternative_solutions, identified_spans, result_stats
+    expected_spans, alternative_solutions, identified_spans, result_stats: StateStats
 ):
-    result_stats.found_spans = sum(len(spans) for spans in identified_spans.values())
-    result_stats.found_files = len(identified_spans)
+    result_stats.result_spans = sum(len(spans) for spans in identified_spans.values())
+    result_stats.result_spans = len(identified_spans)
+    result_stats.found_files = count_identified_files(expected_spans, identified_spans)
+    result_stats.found_spans = count_identified_spans(expected_spans, identified_spans)
     result_stats.found_spans_details = identified_spans
+
     expected_files = list(expected_spans.keys())
     if result_stats.found_spans == sum(len(spans) for spans in expected_spans.values()):
         result_stats.status = "expected_spans"
@@ -554,7 +562,7 @@ def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFra
 
     # Reorder columns
     column_order = [
-        "instance_id", "duration", "total_cost", "resolved_by", "status", "resolved",
+        "instance_id", "duration", "total_cost", "promt_tokens", "completion_tokens", "resolved_by", "status", "resolved",
         "transitions", "all_transitions", "expected_spans", "expected_files", "alternative_solutions",
         "expected_spans_details", "error"
     ]

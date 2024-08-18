@@ -48,15 +48,17 @@ def analyze_identified(instance_id: str, result: BenchmarkResult):
 if "__main__" == __name__:
     results = read_results_from_json("/home/albert/repos/albert/swe-planner/evaluations/20240817_search_and_identify_gpt-4o/report.json")
 
-    results = [result for result in results if result.status != "identified" and not get_moatless_instance(result.instance_id, split="verified")["resolved_by"]]
+    # results = [result for result in results if result.status != "identified" and not get_moatless_instance(result.instance_id, split="verified")["resolved_by"]]
     csv_data = []
     for i, result in enumerate(results):
+        if result.instance_id != "django__django-15104":
+            continue
         data = analyze_identified(result.instance_id, result)
         print(f"Analyzing {i+1}/{len(results)}: {result.instance_id}. Found files: {data['found_files']}, Found spans: {data['found_spans']}, Found spans if expanded: {data['found_spans_if_expanded']}, Found files in search: {data['found_files_in_search']}, Found spans in search: {data['found_spans_in_search']}, Original size: {data['original_size']}, Expanded class size: {data['expanded_class_size']}")
         csv_data.append(data)
 
         # Write results to CSV
-        csv_file_path = "analysis_results_expand_state_4000.csv"
+        csv_file_path = "analysis_results_expand_state_tew000.csv"
         with open(csv_file_path, "w", newline="") as csvfile:
             fieldnames = ["instance_id", "resolved_by", "found_files", "found_spans", "found_files_in_search", "found_spans_in_search", "original_size", "expanded_class_size", "found_spans_if_expanded"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

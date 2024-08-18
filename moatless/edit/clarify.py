@@ -4,10 +4,10 @@ from typing import Optional
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
-from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup
+from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup, SpanType
 from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
 from moatless.repository import CodeFile
-from moatless.state import StateOutcome, AgenticState, ActionRequest, Message
+from moatless.state import AgenticState, ActionRequest, Message, StateOutcome
 from moatless.schema import (
     FileWithSpans,
 )
@@ -61,15 +61,23 @@ class ClarifyCodeChange(AgenticState):
         if self.span.initiating_block.type == CodeBlockType.CLASS:
             for child in self.span.initiating_block.children:
                 if (
-                    child.type.group == CodeBlockTypeGroup.STRUCTURE
-                    and child.belongs_to_span
+                    child.belongs_to_span
                     and child.belongs_to_span.span_id != self._span.span_id
+                    and (child.type.group == CodeBlockTypeGroup.STRUCTURE
+                         or child.belongs_to_span.span_type == SpanType.INITATION)
                 ):
-                    file_context.add_span_to_context(
-                        file_path=self.file_path,
-                        span_id=child.belongs_to_span.span_id,
-                        tokens=1,
-                    )  # TODO: Change so 0 can be set and mean "only signature"
+                    if self.file_context.has_span(file_path=self.file_path, span_id=child.belongs_to_span.span_id):
+                        file_context.add_span_to_context(
+                            file_path=self.file_path,
+                            span_id=child.belongs_to_span.span_id,
+                        )
+                    else:
+                        file_context.add_span_to_context(
+                            file_path=self.file_path,
+                            span_id=child.belongs_to_span.span_id,
+                            tokens=1  # TODO: THis is set to 1 to not show the contents Change so 0 can be set and mean "only signature"
+                        )
+
 
         self._file_context_str = file_context.create_prompt(
             show_line_numbers=True,

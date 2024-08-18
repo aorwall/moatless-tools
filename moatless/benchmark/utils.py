@@ -307,6 +307,9 @@ def calculate_estimated_context_window(instance, results):
         sum_tokens += result.tokens
         for change in expected_changes:
             if result.file_path == change["file_path"]:
+                logger.info(
+                    f"Found result for {change['file_path']} ({change['start_line']}-{change['end_line']}) at {result.start_line}-{result.end_line} with distance {result.distance}"
+                )
                 if (
                     result.start_line - 1 <= change["start_line"]
                     and result.end_line + 1 >= change["end_line"]

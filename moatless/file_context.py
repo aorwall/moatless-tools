@@ -359,26 +359,34 @@ class ContextFile(BaseModel):
         if not self.file.supports_codeblocks:
             return
 
+        # Add imports
         for child in self.module.children:
             if (
                 child.type == CodeBlockType.IMPORT
-                or (
-                    child.belongs_to_span
-                    and child.belongs_to_span.span_type == SpanType.INITATION
-                    and child.type != CodeBlockType.COMMENT
-                )
             ) and child.belongs_to_span.span_id not in init_spans:
                 self.add_span(child.belongs_to_span.span_id)
+                init_spans.add(child.belongs_to_span.span_id)
 
+        # Add constructors etc from classes that are already in context
         for span_id in self.span_ids:
             span = self.module.find_span_by_id(span_id)
-            if span and span.initiating_block.type == CodeBlockType.CLASS:
+
+            if span.initiating_block.type != CodeBlockType.CLASS:
+                class_block = span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
+            elif span.initiating_block.type == CodeBlockType.CLASS:
+                class_block = span.initiating_block
+            else:
+                continue
+
+            if class_block and class_block.belongs_to_span.span_id not in init_spans:
                 for child in span.initiating_block.children:
                     if (
                         child.belongs_to_span.span_type == SpanType.INITATION
                         and child.belongs_to_span.span_id not in init_spans
                     ):
                         self.add_span(child.belongs_to_span.span_id)
+                        init_spans.add(child.belongs_to_span.span_id)
+
 
 class FileContext(BaseModel):
     _repo: FileRepository = PrivateAttr()

@@ -619,8 +619,12 @@ class CodeIndex:
         search_results = []
 
         for node_id, distance in zip(result.ids, result.similarities, strict=False):
+
             node_doc = self._docstore.get_document(node_id, raise_error=False)
             if not node_doc:
+                if "autodetector" in node_id:
+                    logger.info(f"Missing {node_id}")
+
                 ignored_removed_snippets += 1
                 # TODO: Retry to get top_k results
                 continue
@@ -711,6 +715,9 @@ class CodeIndex:
             required_exts = [".java"]
         else:
             required_exts = [".py"]
+
+        if input_files:
+            input_files = [os.path.join(repo_path, file) for file in input_files if not file.startswith(repo_path)]
 
         try:
             reader = SimpleDirectoryReader(
