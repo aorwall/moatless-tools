@@ -18,7 +18,8 @@ class MockStateB(State):
     @property
     def name(self):
         return self.default_name or super().name
-
+    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+        return StateOutcome()
 
 def test_transition_rules_serialization_deserialization():
     rules = TransitionRules(

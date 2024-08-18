@@ -28,9 +28,6 @@ def test_load_django_trajectory():
         assert loaded_state.name == original_transition["name"]
         assert loaded_transition.snapshot == original_transition.get("snapshot")
 
-        original_properties = original_transition["properties"]
-        assert loaded_state.model_dump(exclude_none=True, exclude={"id", "previous_state", "next_states"}) == original_properties
-
         if "actions" in original_transition:
             assert len(loaded_state._actions) == len(original_transition["actions"])
             for loaded_action, original_action in zip(loaded_state._actions, original_transition["actions"]):

@@ -163,7 +163,7 @@ class CodeIndex:
         if os.getenv("INDEX_STORE_URL"):
             index_store_url = os.getenv("INDEX_STORE_URL")
         else:
-            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20240522-voyage-code-2"
+            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20240814-voyage-code-2/"
 
         store_url = os.path.join(index_store_url, f"{index_name}.zip")
         logger.info(f"Downloading existing index {index_name} from {store_url}.")

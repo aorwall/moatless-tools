@@ -94,7 +94,7 @@ class PlanToCode(AgenticState):
     )
 
     write_code_suggestions: bool = Field(
-        True,
+        False,
         description="Whether to instruct the LLM to write out the actual code in the instructions.",
     )
 

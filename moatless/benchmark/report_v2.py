@@ -532,7 +532,7 @@ def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFra
 
     def flatten_dict(d, parent_key="", sep="_"):
         items = []
-        general_keys = ["instance_id", "duration", "total_cost", "resolved_by", "status",
+        general_keys = ["instance_id", "duration", "total_cost", "prompt_tokens", "completion_tokens", "resolved_by", "status",
                         "transitions", "all_transitions", "alternative_solutions", "resolved",
                         "expected_spans", "expected_files", "error"]
 
@@ -562,7 +562,7 @@ def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFra
 
     # Reorder columns
     column_order = [
-        "instance_id", "duration", "total_cost", "promt_tokens", "completion_tokens", "resolved_by", "status", "resolved",
+        "instance_id", "duration", "total_cost", "prompt_tokens", "completion_tokens", "resolved_by", "status", "resolved",
         "transitions", "all_transitions", "expected_spans", "expected_files", "alternative_solutions",
         "expected_spans_details", "error"
     ]

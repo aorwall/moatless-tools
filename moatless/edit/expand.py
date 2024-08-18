@@ -30,6 +30,11 @@ class ExpandContext(State):
         description="Whether to expand with related spans.",
     )
 
+    expand_other: bool = Field(
+        False,
+        description="Whether to expand with related spans.",
+    )
+
     def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
         self.file_context.expand_context_with_init_spans()
 
@@ -56,20 +61,25 @@ class ExpandContext(State):
         original_tokens = self.file_context.context_size()
 
         for file_path, span_id, rank in flattened_results:
+            if span_id not in span_ids:
+                continue
+
             # TODO: Check the sum of the tokens in the context and the tokens in the span
             if self.file_context.context_size() > self.expand_to_max_tokens:
                 break
 
-            added_spans += 1
-            self.file_context.add_span_to_context(file_path, span_id)
-
-        # Add possibly relevant spans from the same file
-        for file_path, span_id, rank in flattened_results:
-            if self.file_context.context_size() > self.expand_to_max_tokens:
-                break
 
             added_spans += 1
             self.file_context.add_span_to_context(file_path, span_id)
+
+        if self.expand_other:
+            # Add possibly relevant spans from the same file
+            for file_path, span_id, rank in flattened_results:
+                if self.file_context.context_size() > self.expand_to_max_tokens:
+                    break
+
+                added_spans += 1
+                self.file_context.add_span_to_context(file_path, span_id)
 
         logger.debug(f"Expanded context with {added_spans} spans. Original tokens: {original_tokens}, Expanded tokens: {self.file_context.context_size()}")
 

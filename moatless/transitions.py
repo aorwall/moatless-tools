@@ -183,18 +183,14 @@ def identify_directly_transition(
 
 
 def search_and_code_transitions(
-    max_tokens_in_edit_prompt: Optional[int] = 500,
     global_params: Optional[dict] = None,
     state_params: Optional[dict] = None,
 ) -> TransitionRules:
     state_params = state_params or {}
-    if max_tokens_in_edit_prompt is not None:
-        state_params.setdefault(
-            PlanToCode, {"max_tokens_in_edit_prompt": max_tokens_in_edit_prompt}
-        )
     return TransitionRules(
         global_params=global_params,
         state_params=state_params,
+        initial_state=SearchCode,
         transition_rules=[
             TransitionRule(source=Pending, dest=SearchCode, trigger="init"),
             TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),

@@ -76,7 +76,7 @@ def test_agentic_state_initialization(test_agentic_state):
     assert test_agentic_state.include_message_history == False
     assert test_agentic_state.model is None
     assert test_agentic_state.temperature == 0.0
-    assert test_agentic_state.max_tokens == 1000
+    assert test_agentic_state.max_tokens == 2000
     assert test_agentic_state.max_iterations is None
 
 def test_agentic_state_name(test_agentic_state):
@@ -84,7 +84,7 @@ def test_agentic_state_name(test_agentic_state):
 
 def test_agentic_state_model_dump(test_agentic_state):
     dump = test_agentic_state.model_dump(exclude_none=True)
-    assert dump == {'id': 1, 'include_message_history': False, 'max_tokens': 1000, 'temperature': 0.0}
+    assert dump == {'id': 1, 'include_message_history': False, 'max_tokens': 2000, 'temperature': 0.0}
 
 def test_agentic_state_equality_same_state():
     state1 = ConcreteAgenticState(id=1, temperature=0.5, max_tokens=500)

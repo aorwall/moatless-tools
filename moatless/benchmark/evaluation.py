@@ -46,7 +46,6 @@ class Evaluation:
         evaluations_dir: str,
         evaluation_name: str,
         transitions: TransitionRules,
-        workspace: Workspace | None = None,
         report_mode: str | None = None,
         max_cost: float = 0.5,
         max_transitions: int = 25,
@@ -74,7 +73,6 @@ class Evaluation:
         self.reward_threshold = reward_threshold
 
         self.transitions = transitions
-        self.workspace = workspace
 
         litellm.drop_params = True
 
@@ -346,13 +344,13 @@ class Evaluation:
         logger.info(
             f"Processing {len(instances)} instances with {len(repo_groups)} repos with {self.num_workers} workers"
         )
+        logger.info(self.transitions)
 
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=self.num_workers
         ) as executor:
             futures = []
             for repo, group in repo_groups.items():
-                logger.info(json.dumps(group, indent=2))
                 futures.append(executor.submit(self._process_repo_group, repo, group))
 
             pbar = tqdm(concurrent.futures.as_completed(futures), total=len(futures))
@@ -366,7 +364,7 @@ class Evaluation:
                         continue
                 except Exception:
                     error += 1
-                    logger.exception("Error in processing repo group")
+                    logger.exception(f"Error in processing repo group.")
                     continue
 
                 results.extend(group_results)

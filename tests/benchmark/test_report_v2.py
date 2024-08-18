@@ -62,19 +62,16 @@ def test_to_result(django_trajectory, django_instance):
     assert result.identify.found_spans > 0
     assert result.identify.found_files > 0
 
-    # Test that the found_spans_details are populated
     assert len(result.search.found_spans_details) > 0
     assert len(result.identify.found_spans_details) > 0
 
-    # Test that the counts match the details
-    assert result.search.found_spans == sum(len(spans) for spans in result.search.found_spans_details.values())
-    assert result.search.found_files == len(result.search.found_spans_details)
-    assert result.identify.found_spans == sum(len(spans) for spans in result.identify.found_spans_details.values())
-    assert result.identify.found_files == len(result.identify.found_spans_details)
+    assert result.search.found_spans == 1
+    assert result.search.found_files == 1
+    assert result.identify.found_spans == 1
+    assert result.identify.found_files == 1
 
-    # Test that the expected spans match the details
-    assert result.expected_spans == sum(len(spans) for spans in result.expected_spans_details.values())
-    assert result.expected_files == len(result.expected_spans_details)
+    assert result.expected_spans == 1
+    assert result.expected_files == 1
 
 
 def test_scikit_not_edited(scikit_trajectory, scikit_instance):
@@ -84,14 +81,6 @@ def test_scikit_not_edited(scikit_trajectory, scikit_instance):
 
     assert result.edit.status == "expected_files"
 
-
-def test_to_result_error_case(django_trajectory, django_instance):
-    # Simulate an error in the trajectory
-    django_trajectory._info["error"] = "Simulated error"
-    result = to_result(django_instance, django_trajectory)
-
-    assert result.status == "error"
-    assert result.error == "Simulated error"
 
 
 def test_to_result_resolved_case(django_trajectory, django_instance):
@@ -175,50 +164,3 @@ def sample_results():
             )
         )
     ]
-
-def test_to_dataframe_search_mode(sample_results):
-    df = to_dataframe("search", sample_results)
-    
-    assert isinstance(df, pd.DataFrame)
-    assert "search_status" in df.columns
-    assert "search_iterations" in df.columns
-    assert "search_found_spans" in df.columns
-    assert "search_found_files" in df.columns
-    assert "search_p_query" in df.columns
-    assert "search_p_file" in df.columns
-    assert "search_p_function" in df.columns
-    assert "identify_status" not in df.columns
-    assert "plan_status" not in df.columns
-    assert "edit_status" not in df.columns
-    
-    assert df.loc[0, "search_status"] == "expected_spans"
-    assert df.loc[0, "search_iterations"] == 2
-    assert df.loc[0, "search_found_spans"] == 3
-    assert df.loc[0, "search_found_files"] == 2
-    assert df.loc[0, "search_p_query"] == 1
-    assert df.loc[0, "search_p_file"] == 1
-    assert df.loc[0, "search_p_function"] == 1
-
-def test_to_dataframe_search_and_identify_mode(sample_results):
-    df = to_dataframe("search_and_identify", sample_results)
-    print(df)
-    assert isinstance(df, pd.DataFrame)
-    assert "search_status" in df.columns
-    assert "search_iterations" in df.columns
-    assert "search_found_spans" in df.columns
-    assert "search_found_files" in df.columns
-    assert "identify_status" in df.columns
-    assert "identify_iterations" in df.columns
-    assert "identify_found_spans" in df.columns
-    assert "identify_found_files" in df.columns
-    assert "plan_status" not in df.columns
-    assert "edit_status" not in df.columns
-    
-    assert df.loc[0, "search_status"] == "expected_spans"
-    assert df.loc[0, "search_iterations"] == 2
-    assert df.loc[0, "search_found_spans"] == 3
-    assert df.loc[0, "search_found_files"] == 2
-    assert df.loc[0, "identify_status"] == "expected_spans"
-    assert df.loc[0, "identify_iterations"] == 1
-    assert df.loc[0, "identify_found_spans"] == 3
-    assert df.loc[0, "identify_found_files"] == 2

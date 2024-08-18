@@ -59,7 +59,7 @@ def parse_args():
     return parser.parse_args()
 
 search_model = "openrouter/anthropic/claude-3.5-sonnet"
-plan_model = "claude-3-5-sonnet-20240620" # "openrouter/anthropic/claude-3.5-sonnet"
+plan_model = "azure/gpt-4o" # "claude-3-5-sonnet-20240620" # "openrouter/anthropic/claude-3.5-sonnet"
 edit_model = "azure/gpt-4o"
 
 DEFAULT_STATE_PARAMS = {
@@ -86,7 +86,7 @@ DEFAULT_STATE_PARAMS = {
         "finish_on_review": True,
     },
     ExpandContext: {
-        "expand_to_max_tokens": 8000
+        "expand_to_max_tokens": 4000
     },
     ClarifyCodeChange: {
         "model": "azure/gpt-4o",

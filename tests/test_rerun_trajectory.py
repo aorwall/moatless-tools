@@ -19,7 +19,7 @@ from moatless.trajectory import Trajectory
 
 @pytest.mark.skip(reason="Test is not ready")
 def test_expect_failed_edit():
-    instance_id = "django__django-9296"
+    instance_id = "django__django-11095"
     trajectory = Trajectory.load(f"tests/trajectories/{instance_id}/trajectory.json")
     Settings.cheap_model = None
 
