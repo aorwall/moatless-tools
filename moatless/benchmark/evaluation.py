@@ -307,7 +307,7 @@ class Evaluation:
         return results
 
     def _to_csv_report(self, results: list[BenchmarkResult]):
-        df = to_dataframe(self.report_mode, results)
+        df = to_dataframe(results, self.report_mode)
         df.to_csv(
             f"{self.evaluation_dir}/result.csv",
             index=False,

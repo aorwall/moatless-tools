@@ -190,7 +190,6 @@ def search_and_code_transitions(
     return TransitionRules(
         global_params=global_params,
         state_params=state_params,
-        initial_state=SearchCode,
         transition_rules=[
             TransitionRule(source=Pending, dest=SearchCode, trigger="init"),
             TransitionRule(source=SearchCode, dest=IdentifyCode, trigger="did_search"),

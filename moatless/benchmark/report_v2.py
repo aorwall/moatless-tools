@@ -519,7 +519,7 @@ def generate_md_report(trajectory: dict, instance: dict):
     return markdown
 
 
-def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFrame:
+def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None) -> pd.DataFrame:
     state_keys = ["search", "identify", "decide", "plan", "edit"]
     rename_columns = False
     if report_mode == "code":
@@ -548,6 +548,8 @@ def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFra
                 items.append((new_key, json.dumps(v)))
         return dict(items)
 
+    summary_cols = ["instance_id", "duration", "total_cost", "status", "transitions", "expected_spans", "expected_files", "search_status", "search_iterations", "identify_status", "identify_iterations", "decide_status", "decide_iterations", "plan_status", "plan_iterations", "edit_status", "edit_iterations"]
+
     flattened_results = [flatten_dict(result.model_dump()) for result in results]
 
     df = pd.DataFrame(flattened_results)
@@ -559,6 +561,9 @@ def to_dataframe(report_mode: str, results: list[BenchmarkResult]) -> pd.DataFra
             else col
             for col in df.columns
         ]
+
+    if report_mode is None:
+        df = df[summary_cols]
 
     # Reorder columns
     column_order = [
