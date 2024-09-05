@@ -2,7 +2,7 @@ import json
 import logging
 import os
 
-from moatless import FileRepository
+from moatless.repository import FileRepository
 from moatless.benchmark.swebench import (
     found_in_expected_spans,
     found_in_alternative_spans,

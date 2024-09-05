@@ -4,7 +4,7 @@ import re
 import subprocess
 
 from moatless.repository import CodeFile
-from moatless.schema import VerificationError
+from moatless.schema import VerificationIssue
 from moatless.verify.verify import Verifier
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class MavenVerifier(Verifier):
         self.repo_dir = repo_dir
         self.run_tests = run_tests
 
-    def verify(self, file: CodeFile | None = None) -> list[VerificationError]:
+    def verify(self, file: CodeFile | None = None) -> list[VerificationIssue]:
         try:
             # os.environ["JAVA_HOME"] = "/home/albert/.sdkman/candidates/java/17.0.8-tem"
 
@@ -57,7 +57,7 @@ class MavenVerifier(Verifier):
             logger.warning("Error running Maven command:")
             logger.warning(e.stderr)
 
-    def parse_compilation_errors(self, output: str) -> list[VerificationError]:
+    def parse_compilation_errors(self, output: str) -> list[VerificationIssue]:
         error_pattern = re.compile(r"\[ERROR\] (.*?):\[(\d+),(\d+)\] (.*)")
         matches = error_pattern.findall(output)
 
@@ -66,7 +66,7 @@ class MavenVerifier(Verifier):
             file_path, line, column, message = match
 
             file_path = file_path.replace(f"{self.repo_dir}/", "")
-            error = VerificationError(
+            error = VerificationIssue(
                 code="COMPILATION_ERROR",
                 file_path=file_path.strip(),
                 message=message.strip(),
@@ -83,7 +83,7 @@ class MavenVerifier(Verifier):
                     return os.path.relpath(absolute_path, self.repo_dir)
         return ""
 
-    def parse_test_failures(self, output: str) -> list[VerificationError]:
+    def parse_test_failures(self, output: str) -> list[VerificationIssue]:
         failure_pattern = re.compile(r"\[ERROR\]   (.*?):(\d+) (.*)")
         matches = failure_pattern.findall(output)
 
@@ -95,7 +95,7 @@ class MavenVerifier(Verifier):
 
             file_path = self.find_file(class_name)
 
-            error = VerificationError(
+            error = VerificationIssue(
                 code="TEST_FAILURE",
                 file_path=file_path.strip(),
                 message=message.strip(),

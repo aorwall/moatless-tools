@@ -9,7 +9,7 @@ from moatless.file_context import ContextFile
 from moatless.repository.file import remove_duplicate_lines, do_diff, CodeFile
 from moatless.state import AgenticState, ActionRequest, StateOutcome, Content, AssistantMessage, Message, UserMessage
 from moatless.schema import (
-    VerificationError,
+    VerificationIssue, ChangeType,
 )
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ ROLE_PROMPT = "You are autonomous AI assisistant with superior programming skill
 
 MAIN_OBJECTIVE_PROMPT = "The main objective is to solve a bigger task specified by the user, this is wrapped in a <main_objective> tag."
 
-SEARCH_REPLACE_PROMPT = """Your task is to solve a smaller task within the main objective. This task is wrapped in a <task> tag.
+SEARCH_REPLACE_PROMPT = """Your task is to solve a smaller task within the main objective. This task is wrapped in a <instruction> tag with the pseudo code of a proposed solution in a <pseudo_code> tag.
 
 The surrounding code context is wrapped in a <file_context> tag.
 
@@ -85,43 +85,33 @@ class CodeChange(ActionRequest):
 
 class EditCode(AgenticState):
     instructions: str = Field(..., description="The instructions for the code change.")
+    pseudo_code: Optional[str] = Field(default=None, description="The pseudo code for the code change.")
     file_path: str = Field(..., description="The path to the file to be updated.")
-    span_id: Optional[str] = Field(
-        None, description="The ID of the span to be updated."
-    )
     start_line: int = Field(
         ..., description="The start line of the code to be updated."
     )
     end_line: int = Field(..., description="The end line of the code to be updated.")
 
+    change_type: Optional[ChangeType] = Field(
+        None, description="The type of change to be made."
+    )
+
     show_initial_message: bool = Field(
         True, description="Whether to show the initial message."
     )
     show_file_context: bool = Field(
-        True, description="Whether to show the file context."
+        False, description="Whether to show the file context."
     )
-    verify: bool = Field(True, description="Whether to verify the code change.")
     chain_of_thought: bool = Field(
-        False, description="Whether to use chain of thought reasoning."
+        True, description="Whether to use chain of thought reasoning."
     )
-
     max_prompt_file_tokens: int = Field(
-        4000,
+        2000,
         description="The maximum number of tokens in the file context to show in the prompt.",
     )
 
-    _code_to_replace: Optional[str] = PrivateAttr(default=None)
     _retry: int = PrivateAttr(default=0)
     _messages: list[Message] = PrivateAttr(default_factory=list)
-
-    def init(self):
-        file = self.file_context.get_file(self.file_path)
-        if not file:
-            raise ValueError(f"File not found: {self.file_path}")
-
-        code_lines = file.file.content.split("\n")
-        lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
-        self._code_to_replace = "\n".join(lines_to_replace)
 
     def _execute_action(self, content: Content) -> StateOutcome:
         self._messages.append(AssistantMessage(content=content.content))
@@ -134,15 +124,10 @@ class EditCode(AgenticState):
             )[0]
 
         if "<reject>" in content.content:
-            rejection_message = content.content.split("<reject>")[1].split("</reject>")[
-                0
-            ]
-            return StateOutcome.transition(
-                "reject",
-                output={"message": rejection_message},
-            )
+            rejection_message = content.content.split("<reject>")[1].split("</reject>")[0]
+            return StateOutcome.reject(rejection_message)
 
-        msg_split = content.content.split("<replace>")
+        msg_split = content.content.split("<replace>\n")
         if len(msg_split) == 1:
             if not self._add_prepared_response:
                 logger.warning(
@@ -164,153 +149,99 @@ class EditCode(AgenticState):
             else:
                 replacement_code = msg_split[1]
 
-        file = self.file_context.get_file(self.file_path)
+        context_file = self.file_context.get_file(self.file_path)
 
         updated_content = update_content_by_line_numbers(
-            file, self.start_line - 1, self.end_line, replacement_code
+            context_file, self.start_line - 1, self.end_line, replacement_code
         )
 
-        diff = do_diff(file.file_path, file.content, updated_content)
+        diff = do_diff(context_file.file_path, context_file.content, updated_content)
         if not diff:
+            logger.info(f"{self.name}:{self.id}: No changes in {self.file_path}.")
             return self.retry(
                 "The code in the replace tag is the same as in the search. Use the reject function if you "
-                "can't do any changes and want to reject the instructions.",
-                scratch_pad,
+                "can't do any changes and want to reject the instructions."
             )
 
-        updated_file = CodeFile(file_path=self.file_path, content=updated_content)
-
-        invalid_update_str = self.verify_change(file, replacement_code, updated_file)
+        invalid_update_str = self.verify_change(context_file, replacement_code, updated_content)
         if invalid_update_str:
             logger.warning(
                 f"Invalid update in {self.file_path}: {invalid_update_str}.\nDiff:\n{diff}"
             )
-            return self.retry(invalid_update_str, scratch_pad)
+            return self.retry(invalid_update_str)
 
-        file.file.update_content(updated_content)
-        self.file_repo.save_file(file_path=file.file_path, updated_content=file.content)
+        existing_span_ids = context_file.module.get_all_span_ids()
+        file = self.file_repo.save_file(file_path=context_file.file_path, updated_content=updated_content)
+        updated_span_ids = file.module.get_all_span_ids()
 
-        logger.info(f"Updated file {self.file_path} with diff:\n{diff}")
+        new_span_ids = updated_span_ids - existing_span_ids
+        if new_span_ids:
+            logger.info(f"Updated file {self.file_path} with diff:\n{diff}. Add new span ids to context: {new_span_ids}.")
+            self.file_context.add_spans_to_context(self.file_path, span_ids=new_span_ids, pinned=True)
+        else:
+            logger.info(f"Updated file {self.file_path} with diff:\n{diff}.")
 
         message = f"Applied the change to {self.file_path}."
 
         if scratch_pad:
             message += f"\n\n<scratch_pad>\n{scratch_pad}</scratch_pad>"
 
-        original_verification_errors = []
-        if self.verify:
-            logger.info(f"Verifying original code in {self.file_path}.")
-            original_verification_errors = self.workspace.verify(file.file)
-
-        self.file_repo.save_file(file_path=file.file_path)
-
-        verification_errors = []
-        if self.verify:
-            logger.info(f"Verifying updated code in {self.file_path}.")
-            verification_errors_in_update = self.workspace.verify(file.file)
-
-            if len(verification_errors_in_update) > len(original_verification_errors):
-                logger.info(
-                    f"Found {len(verification_errors_in_update)} verification errors in updated code. Which differs from the original {len(original_verification_errors)}."
-                )
-
-                for error in verification_errors_in_update:
-                    logger.info(f"Verification error: {error.code}, {error.message}")
-            else:
-                logger.info(
-                    f"Found {len(verification_errors_in_update)} verification errors in updated code."
-                )
-
-            original_error_set = set(
-                (msg.code, msg.message) for msg in original_verification_errors
-            )
-
-            updated_error_set = set(
-                (msg.code, msg.message) for msg in verification_errors_in_update
-            )
-            added_messages_set = updated_error_set - original_error_set
-
-            verification_errors = [
-                VerificationError(
-                    code=msg.code,
-                    file_path=file.file_path,
-                    message=msg.message,
-                    line=msg.line,
-                )
-                for msg in verification_errors_in_update
-                if (msg.code, msg.message) in added_messages_set
-            ]
-
-            for error in verification_errors:
-                logger.info(f"New verification error: {error.code}, {error.message}")
-
         return StateOutcome.transition(
             "finish",
             output={
-                "message": message,
                 "diff": diff,
-                "verification_errors": verification_errors,
+                "new_span_ids": list(new_span_ids),
             },
         )
 
-    def retry(self, message: str, scratch_pad: str | None) -> StateOutcome:
+    def retry(self, message: str) -> StateOutcome:
         if self._retry > 2:
             logger.warning(f"Failed after {self._retry} retries. Will reject change.")
-            message = ""
-            if scratch_pad:
-                message += f"<scratch_pad>\n{scratch_pad}</scratch_pad>\n\n"
-            message = "Failed to apply changes. Please try again."
-            return StateOutcome.transition("reject", output={"message": message})
+            # TODO: Add more contet to rejection message
+            return StateOutcome.reject("Failed to apply changes. Please try again with a different approach.")
 
         self._retry += 1
         return StateOutcome.retry(message)
 
     def verify_change(
-        self, file: ContextFile, replacement_code: str, updated_file: CodeFile
+        self, file: ContextFile, replacement_code: str, updated_content: str
     ) -> str | None:
-        if not updated_file.module:
+        parser = get_parser_by_path(self.file_path)
+        if not parser:
             return None
 
-        module = updated_file.module
-        error_blocks = module.find_errors()
-        validation_errors = module.find_validation_errors()
+        updated_module = parser.parse(updated_content)
+
+        error_blocks = updated_module.find_errors()
+        validation_errors = updated_module.find_validation_errors()
         existing_placeholders = file.module.find_blocks_with_type(
             CodeBlockType.COMMENTED_OUT_CODE
         )
 
         new_placeholders = (
-            module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
+            updated_module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
             if not existing_placeholders
             else []
         )
 
-        if self.span_id:
-            existing_span = file.module.find_span_by_id(self.span_id)
-            is_full_block = (
-                existing_span.initiating_block.start_line == self.start_line
-                and existing_span.initiating_block.end_line == self.end_line
-            )
+        # Check if the full code block is replaced with a block with another type.
+        # This might indicate that an incomplete replacement was made
+        if self.change_type == ChangeType.modification:
+            existing_block = file.module.find_first_by_start_line(self.start_line)
+            if (existing_block
+                    and existing_block.end_line == self.end_line
+                    and existing_block.type.group == CodeBlockTypeGroup.STRUCTURE):
 
-            # Check if the intended change was for a whole code block
-            if (
-                is_full_block
-                and existing_span.initiating_block.type.group
-                == CodeBlockTypeGroup.STRUCTURE
-            ):
-                # Empty updated_content would indicate a removal of a code block, but otherwise we don't except it to be replaced by another type of block
-                new_block = module.find_first_by_start_line(self.start_line)
+                new_block = updated_module.find_first_by_start_line(self.start_line)
 
-                if (
-                    replacement_code
-                    and existing_span.initiating_block.type != new_block.type
-                ):
+                if existing_block.type != new_block.type:
                     logger.warning(
-                        f"Full block change: {existing_span.initiating_block.type.value} -> {new_block.type.value}"
+                        f"Full block change: {existing_block.type.value} -> {new_block.type.value}"
                     )
                     return (
-                        f"The code block {self.span_id} in the <search> tag with the type {existing_span.initiating_block.type.value} was expected to be replaced. But the code provided in the <replace> tag has the type  {new_block.type.value}."
-                        f"You must provide the full contents of {self.span_id}. "
-                        f"If you shouldn't do any changes to {self.span_id}, reject the request and explain why."
+                        f"The code block {existing_block.identifier} in the <search> tag with the type {existing_block.type.display_name} was expected to be replaced. But the code provided in the <replace> tag has the type {new_block.type.display_name}. "
+                        f"You must provide the full contents of {existing_block.identifier}. "
+                        f"If you shouldn't do any changes to {existing_block.identifier}, reject the request and explain why."
                     )
 
         if error_blocks or validation_errors or new_placeholders:
@@ -321,7 +252,7 @@ class EditCode(AgenticState):
                         CodeBlockTypeGroup.STRUCTURE
                     )
                     if parent_block and parent_block.type != CodeBlockType.MODULE:
-                        logger.info(f"Invalid code {parent_block.to_tree()}")
+                        logger.info(f"Invalid f {parent_block.to_tree()}")
                         error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
                     else:
                         error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
@@ -345,15 +276,9 @@ class EditCode(AgenticState):
 
             return error_response
 
-        new_span_ids = module.get_all_span_ids() - set(file.module.get_all_span_ids())
-
-        logger.info(
-            f"Updated content for {file.file_path} with {len(new_span_ids)} new span ids."
-        )
-
     @classmethod
     def required_fields(cls) -> set[str]:
-        return {"instructions", "file_path", "span_id", "start_line", "end_line"}
+        return {"instructions", "file_path", "start_line", "end_line"}
 
     def system_prompt(self) -> str:
         system_prompt = ROLE_PROMPT
@@ -372,14 +297,21 @@ class EditCode(AgenticState):
         return system_prompt
 
     def messages(self) -> list[Message]:
-        if not self._code_to_replace:
-            self.init()
+        file = self.file_repo.get_file(self.file_path)
+        if not file:
+            raise ValueError(f"File not found: {self.file_path}")
+
+        code_lines = file.content.split("\n")
+        lines_to_replace = code_lines[self.start_line - 1 : self.end_line]
+        code_to_replace = "\n".join(lines_to_replace)
+        if not code_to_replace and self.change_type != ChangeType.addition:
+            raise ValueError(
+                f"No code found to replace in {self.file_path} from line {self.start_line} to {self.end_line}."
+            )
 
         content = ""
         if self.show_initial_message:
             content = f"<main_objective>\n{self.initial_message}\n</main_objective>\n\n"
-
-        content += f"<instructions>\n{self.instructions}\n</instructions>\n"
 
         if self.show_file_context:
             file_context_str = self.file_context.create_prompt(
@@ -391,20 +323,26 @@ class EditCode(AgenticState):
             )
         else:
             file_context = self.create_file_context(max_tokens=self.max_prompt_file_tokens)
-            file_context.add_span_to_context(self.file_path, self.span_id)
-            file_context.expand_context_with_init_spans()
+            file_context.add_line_span_to_context(self.file_path, self.start_line, self.end_line)
             file_context.expand_context_with_related_spans(self.max_prompt_file_tokens)
-            file_context.expand_classes(self.max_prompt_file_tokens)
+
             file_context_str = file_context.create_prompt(
-                show_line_numbers=False,
+                show_line_numbers=True,
                 show_span_ids=False,
                 exclude_comments=False,
                 show_outcommented_code=True,
                 outcomment_code_comment="... other code",
             )
+
         content += f"<file_context>\n{file_context_str}\n</file_context>\n"
 
-        content += f"<search>\n{self._code_to_replace}\n</search>"
+        content += f"<instructions>\n{self.instructions}\n</instructions>\n"
+
+        if self.pseudo_code:
+            content += f"<pseudo_code>\n{self.pseudo_code}\n</pseudo_code>\n"
+
+        content += f"<search>\n{code_to_replace}\n</search>"
+        content += f"\nLine numbers {self.start_line} to {self.end_line} in {self.file_path}:\n"
 
         messages = [UserMessage(content=content)]
 

@@ -66,7 +66,7 @@ class IdentifyCode(AgenticState):
     )
 
     expand_context: bool = Field(
-        default=False,
+        default=True,
         description="Whether to expand the search result with relevant code spans.",
     )
 
@@ -114,8 +114,6 @@ class IdentifyCode(AgenticState):
         file_context.add_ranked_spans(self.ranked_spans)
 
         if file_context.files:
-            file_context.expand_context_with_init_spans()
-
             if self.expand_context:
                 file_context.expand_context_with_related_spans(
                     max_tokens=self.max_prompt_file_tokens, set_tokens=True
@@ -157,6 +155,9 @@ class IdentifyCode(AgenticState):
 {search_result_str}
 </search_results>
 """
+
+        if self.feedback:
+            content += f"\n\n<feedback>\n{self.feedback}\n</feedback>"
 
         messages.append(UserMessage(content=content))
         return messages

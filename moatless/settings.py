@@ -4,14 +4,18 @@ from dataclasses import dataclass
 
 @dataclass
 class _Settings:
+
     # Default model used if not provided in global params
     _default_model: str = os.environ.get("DEFAULT_MODEL", "gpt-4o-2024-05-13")
+
     # Cheaper model used for supporting tasks like creating commit messages
     _cheap_model: str | None = os.environ.get("CHEAP_MODEL", "gpt-4o-mini-2024-07-18")
+
     # Model used for embedding to index and search vector indexes
     _embed_model: str = "text-embedding-3-small"
+
     # Flag to determine if llm completions should be included when trajectories are saved
-    _include_completions_in_trajectories: bool = False
+    _include_completions_in_trajectories: bool = True
 
     @property
     def default_model(self) -> str:

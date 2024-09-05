@@ -13,8 +13,11 @@ class LLMResponseFormat(enum.Enum):
 
 
 def response_format_by_model(model: str) -> LLMResponseFormat | None:
+    if "azure" in model:
+        return LLMResponseFormat.TOOLS
+
     if "gpt" in model:
-        return LLMResponseFormat.TOOLS  # TODO: LLMResponseFormat.STRUCTURED_OUTPUT
+        return LLMResponseFormat.STRUCTURED_OUTPUT
 
     if model.startswith("claude"):
         return LLMResponseFormat.ANTHROPIC_TOOLS

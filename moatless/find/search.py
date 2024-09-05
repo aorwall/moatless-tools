@@ -339,7 +339,7 @@ class SearchCode(AgenticState):
     )
 
     max_search_results: int = Field(
-        25,
+        75,
         description="The maximum number of search results.",
     )
 
@@ -354,8 +354,8 @@ class SearchCode(AgenticState):
     )
 
     provide_initial_context: bool = True
-    initial_context_tokens: int = 4000
-    initial_search_results: int = 50
+    initial_context_tokens: int = 6000
+    initial_search_results: int = 100
     initial_context_spans_per_file: int = 5
 
     support_test_files: bool = False

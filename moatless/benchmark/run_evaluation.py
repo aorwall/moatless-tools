@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument(
         "--mode",
         default="search",
-        choices=["search", "identify", "search_and_identify", "code"],
+        choices=["search", "identify", "search_and_identify", "code", "mcts"],
         help="Evaluation mode",
     )
     parser.add_argument(
@@ -58,55 +58,11 @@ def parse_args():
     )
     return parser.parse_args()
 
-search_model = "openrouter/anthropic/claude-3.5-sonnet"
-plan_model = "azure/gpt-4o" # "claude-3-5-sonnet-20240620" # "openrouter/anthropic/claude-3.5-sonnet"
-edit_model = "azure/gpt-4o"
-
-DEFAULT_STATE_PARAMS = {
-    SearchCode: {
-        "model": "claude-3-5-sonnet-20240620",
-        "temperature": 0.2,
-        "provide_initial_context": True,
-        "max_search_results": 75,
-        "initial_context_tokens": 6000,
-        "initial_search_results": 100,
-        "initial_context_spans_per_file": 5,
-    },
-    IdentifyCode: {"model": "azure/gpt-4o", "temperature": 0.2, "expand_context": True},
-    DecideRelevance: {
-        "model": "azure/gpt-4o",
-        "temperature": 0.2,
-        "finish_after_relevant_count": 1,
-    },
-    PlanToCode: {
-        "model": plan_model,
-        "temperature": 0.2,
-        "max_tokens_in_edit_prompt": 750,
-        "write_code_suggestions": False,
-        "finish_on_review": True,
-    },
-    ExpandContext: {
-        "expand_to_max_tokens": 4000
-    },
-    ClarifyCodeChange: {
-        "model": "azure/gpt-4o",
-        "temperature": 0.0,
-        "max_tokens_in_edit_prompt": 750,
-    },
-    EditCode: {
-        "model": edit_model,
-        "temperature": 0.0,
-        "chain_of_thought": False,
-        "show_file_context": False,
-        "max_prompt_file_tokens": 8000,
-    }
-}
-
 
 def evaluate(
-    model: str,
-    temperature: float,
-    split: str,
+    model: str = "gpt-4o",
+    split: str = "lite",
+    temperature: float = 0.0,
     mode: str | None = None,
     previous_trajectory_dir: Optional[str] = None,
     evaluation_dir: Optional[str] = None,
@@ -118,16 +74,13 @@ def evaluate(
     global_params = {
         "model": model,
         "temperature": temperature,
-        "max_tokens": 2000,
-        "max_prompt_file_tokens": 12000,
+        "max_tokens": 2000
     }
-    state_params = DEFAULT_STATE_PARAMS
     reset_from_state = None
 
     if mode == "search":
         transitions = TransitionRules(
             global_params=global_params,
-            state_params=state_params,
             initial_state=SearchCode,
             transition_rules=[
                 TransitionRule(source=SearchCode, dest=Finished, trigger="did_search"),
@@ -142,7 +95,6 @@ def evaluate(
         reset_from_state = IdentifyCode.name
         transitions = TransitionRules(
             global_params=global_params,
-            state_params=state_params,
             initial_state=SearchCode,
             transition_rules=[
                 TransitionRule(
@@ -154,25 +106,23 @@ def evaluate(
         )
     elif mode == "search_and_identify":
         reset_from_state = DecideRelevance.name
-        state_params[SearchCode]["model"] = (
-            "claude-3-5-sonnet-20240620"  # FIXME: Make configurable
-        )
         transitions = search_transitions(
             global_params=global_params,
-            state_params=state_params,
         )
     elif mode == "code":
         if previous_trajectory_dir:
             reset_from_state = PlanToCode.name
             transitions = search_and_code_transitions(
                 global_params=global_params,
-                state_params=state_params,
             )
         else:
             transitions = code_transitions(
                 global_params=global_params,
-                state_params=state_params,
             )
+    elif mode == "mcts":
+        transitions = search_and_code_transitions(
+            global_params=global_params,
+        )
     else:
         raise ValueError(f"Unsupported mode: {mode}")
 
@@ -188,6 +138,7 @@ def evaluate(
         max_file_context_tokens=16000,
         report_mode=mode,
         num_workers=max_workers,
+        enable_mcts=mode == "mcts"
     )
 
     evaluation.run_evaluation(

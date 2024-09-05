@@ -64,14 +64,15 @@ class Decision(ActionRequest):
 
 
 class DecideRelevance(AgenticState):
-    expand_context: bool = Field(
-        False,
-        description="If true, the file context will be expanded with additional context.",
+    expand_context_when_complete: bool = Field(
+        True,
+        description="If true, the file context will be expanded with additional context after complete.",
     )
     finish_after_relevant_count: int = Field(
         2,
         description="Finish the task after this many relevant decisions have been made but not complete.",
     )
+
     max_prompt_file_tokens: int = Field(
         4000,
         description="The maximum number of tokens to include in the file context prompt.",
@@ -91,6 +92,13 @@ class DecideRelevance(AgenticState):
             "search",
             output={"message": action.search_suggestions},
         )
+
+    def _finish(self):
+        if self.expand_context_when_complete:
+            self.file_context.expand_context_with_related_spans(
+                max_tokens=self.max_prompt_file_tokens
+            )
+        return StateOutcome.finish()
 
     def _relevant_count(self) -> int:
         """
@@ -123,15 +131,6 @@ class DecideRelevance(AgenticState):
     def messages(self) -> list[Message]:
         messages: list[Message] = []
 
-        if self.expand_context:
-            self.file_context.expand_context_with_init_spans()
-            self.file_context.expand_context_with_related_spans(
-                max_tokens=self.max_prompt_file_tokens
-            )
-            self.file_context.expand_classes(
-                max_tokens=self.max_prompt_file_tokens
-            )
-
         file_context_str = self.file_context.create_prompt(
             show_span_ids=False,
             show_line_numbers=False,
@@ -156,6 +155,9 @@ class DecideRelevance(AgenticState):
 {file_context_str}
 </file_context>
 """
+
+        if self.feedback:
+            content += f"\n\n<feedback>\n{self.feedback}\n</feedback>"
 
         messages.append(UserMessage(content=content))
         return messages

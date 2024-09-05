@@ -9,12 +9,12 @@ from moatless.state import (
     Pending,
     Content,
     Rejected,
-    State, ActionRequest
+    State, ActionRequest, Usage
 )
 from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.schema import (
-    Response, Usage
+    Response
 )
 from moatless.utils.llm_utils import response_format_by_model, LLMResponseFormat
 from moatless.workspace import Workspace
@@ -204,7 +204,7 @@ class AgenticLoop:
                 self.log_info(
                     f"Max cost reached ({total_cost} > {self._max_cost}). Exiting."
                 )
-                self.trajectory.save_info({"error": "Max cost reached."})
+                self.trajectory.save_info({"error": f"Max cost reached  ({total_cost} > {self._max_cost})."})
                 raise RuntimeError(
                     "The loop was aborted because the cost exceeded the limit."
                 )
@@ -222,8 +222,8 @@ class AgenticLoop:
                 raise
 
             if self.state.retries() > self._max_retries:
-                self.log_info(f"Max retries reached ({self._max_retries}). Exiting.")
-                self.trajectory.save_info({"error": "Max retries reached."})
+                self.log_info(f"Max retries reached ({self._max_retries}) in {self.state.name}. Exiting.")
+                self.trajectory.save_info({"error": f"Max retries reached in {self.state.name}."})
                 rejected_state = self._create_state(
                     Rejected, {"message": "Max retries reached."}
                 )
@@ -254,15 +254,11 @@ class AgenticLoop:
                 self._verify_state_func(self.state)
 
             if isinstance(self.state, AgenticState):
-                outcome = self.state.execute(mocked_action_request=self._next_mock_action())
+                outcome = self.state.init()
+                if not outcome:
+                    outcome = self.state.execute(mocked_action_request=self._next_mock_action())
             else:
                 outcome = self.state.execute()
-
-            if not outcome.trigger:
-                self.log_info(
-                    f"{self.state.name}: No trigger in action response. Staying in the same state."
-                )
-                return None
 
             self.log_info(f"Received response with trigger {outcome.trigger}")
 

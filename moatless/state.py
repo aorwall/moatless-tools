@@ -11,17 +11,19 @@ import instructor
 import litellm
 import openai
 from anthropic import Anthropic
+from anthropic.types import ToolUseBlock
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
+from instructor.utils import classproperty
 from litellm import token_counter
 from openai import OpenAI
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator, Extra, ValidationError
 
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
 from moatless.schema import (
     Completion,
-    FileWithSpans, Usage
+    FileWithSpans, ValueFunctionResult, Usage
 )
 from moatless.settings import Settings
 from moatless.utils.llm_utils import LLMResponseFormat, generate_call_id, response_format_by_model
@@ -36,6 +38,41 @@ class ActionRequest(OpenAISchema):
     def action_name(self):
         return self.__class__.__name__
 
+    @classproperty
+    def openai_tool_schema(cls):
+        return {
+            "type": "function",
+            "function": cls.openai_schema
+        }
+
+class TakeAction(ActionRequest):
+
+    action: ActionRequest = Field(
+        ...,
+        description="The action to take",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_steps(cls, data: Any):
+        if isinstance(data, dict) and "action_name" in data:
+            for action in cls.available_actions():
+                if action.__name__ == data["action_name"]:
+                    data["action"] = action.model_validate(data["action"])
+                    return data
+
+        return data
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["action_name"] = self.action.action_name
+        data["action"] = self.action.model_dump(**kwargs)
+        return data
+
+    @classmethod
+    def available_actions(cls) -> List[ActionRequest]:
+        return []
+
 
 class StateOutcome(BaseModel):
     trigger: Optional[str] = Field(
@@ -46,7 +83,6 @@ class StateOutcome(BaseModel):
         default=None,
         description="Output data to be passed to the next state.",
     )
-
     retry_message: Optional[str] = Field(
         default=None, description="Message to use in retry."
     )
@@ -70,7 +106,7 @@ class StateOutcome(BaseModel):
         return cls(trigger=trigger, output=output)
 
     @classmethod
-    def no_transition(cls, output: dict[str, Any]):
+    def stay_in_state(cls, output: dict[str, Any]):
         return cls(output=output)
 
 
@@ -102,6 +138,26 @@ class State(ABC, BaseModel):
     )
     next_states: List["State"] = Field(
         default_factory=list, description="The states this state transitioned to"
+    )
+
+    max_iterations: Optional[int] = Field(
+        None, description="The maximum number of transitions to this state."
+    )
+
+    max_expansions: int = Field(
+        default=3, description="The maximum number of times this state can be expanded."
+    )
+
+    visits: List[Visit] = Field(
+        default_factory=list, description="The visits to the state in MCTS backpropagation"
+    )
+    value_function_result: Optional[ValueFunctionResult] = Field(
+        default=None,
+        description="The result of the value function during MCTS"
+    )
+
+    feedback: Optional[str] = Field(
+        default=None, description="Feedback provided the prompt"
     )
 
     _workspace: Optional[Workspace] = PrivateAttr(None)
@@ -250,14 +306,12 @@ class ActionTransaction(BaseModel):
     completion: Optional[Completion] = None
 
     def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
+        data = {}
         data["request"] = self.request.model_dump(**kwargs)
         data["response"] = self.response.model_dump(**kwargs) if self.response else None
 
-        if not Settings.include_completions_in_trajectories:
-            if "exclude" not in kwargs:
-                kwargs["exclude"] = set()
-            kwargs["exclude"].add("completion")
+        if Settings.include_completions_in_trajectories:
+            data["completion"] = self.completion.model_dump(**kwargs) if self.completion else None
 
         return data
 
@@ -283,6 +337,7 @@ class AgenticState(State):
     )
 
     _actions: List[ActionTransaction] = PrivateAttr(default_factory=list)
+    _metadata: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
         if self._executed:
@@ -294,6 +349,9 @@ class AgenticState(State):
         else:
             try:
                 action, completion = self._next_action()
+            except ValidationError as e:
+                return StateOutcome.retry(f"Failed to parse request. Error: {e}")
+
             except InstructorRetryException as e:
                 if e.last_completion:
                     logger.warning(
@@ -317,7 +375,6 @@ class AgenticState(State):
         self._actions.append(
             ActionTransaction(request=action, response=response, completion=completion)
         )
-        logger.info(f"Added action to {self.name}: {len(self._actions)}")
 
         if response.trigger and response.trigger != "retry":
             self._executed = True
@@ -335,6 +392,13 @@ class AgenticState(State):
         If not set a content string is expected.
         """
         raise NotImplementedError
+
+    def init(self) -> Optional[StateOutcome]:
+        """
+        Initalize the state before exectuting with an action provided wby the LLM.
+        Returns a StateOutcome if the state should transition immediately.
+        """
+        pass
 
     def handle_action(
         self, action: ActionRequest, completion: Completion | None
@@ -400,8 +464,9 @@ class AgenticState(State):
         messages = self._to_completion_messages()
 
         metadata = {}
-        # if self._metadata:
-        #    metadata.update(self._metadata)
+        if self._metadata:
+            metadata.update(self._metadata)
+
         metadata["generation_name"] = self.name
 
         tokens = token_counter(messages=messages[-1:])
@@ -419,21 +484,27 @@ class AgenticState(State):
             try:
                 anthropic_client = Anthropic()
 
-                system_prompt = messages[0]["content"]
-                messages = messages[1:]
+                apply_cache_control(messages[0])
+                # apply_cache_control(messages[-1])
+
+                tools = []
+                if hasattr(self.action_type(), "available_actions"):
+                    for action in self.action_type().available_actions():
+                        tools.append(action.anthropic_schema)
+                else:
+                    tools.append(self.action_type().anthropic_schema)
 
                 completion_response = (
                     anthropic_client.beta.prompt_caching.messages.create(
                         model=self.model,
                         max_tokens=self.max_tokens,
                         temperature=self.temperature,
-                        system=system_prompt,
+                        system=messages[0]["content"],
                         tool_choice={
-                            "type": "tool",
-                            "name": self.action_type().__name__,
+                            "type": "any"
                         },
-                        tools=[self.action_type().anthropic_schema],
-                        messages=messages,
+                        tools=tools,
+                        messages=messages[1:],
                     )
                 )
 
@@ -443,15 +514,71 @@ class AgenticState(State):
                     model=self.model,
                 )
 
-                action_request = self.action_type().from_response(
-                    completion_response, mode=instructor.Mode.ANTHROPIC_TOOLS
-                )
+                try:
+                    action_request = None
+                    if hasattr(self.action_type(), "available_actions"):
+                        for block in completion_response.content:
+                            if isinstance(block, ToolUseBlock):
+                                action = None
+                                for available_action in self.action_type().available_actions():
+                                    if available_action.__name__ == block.name:
+                                        action = available_action
+                                        break
+
+                                if not action:
+                                    raise ValueError(f"Unknown action {block.name}")
+
+                                tool_action_request = action.model_validate(block.input)
+
+                                action_request = self.action_type()(action=tool_action_request)
+
+                                # TODO: We only support one action at the moment
+                                break
+                            else:
+                                logger.warning(f"Unexpected block {block}]")
+                    else:
+                        action_request = self.action_type().from_response(
+                            completion_response, mode=instructor.Mode.ANTHROPIC_TOOLS
+                        )
+
+                    if not action_request:
+                        raise ValueError(f"Failed to parse action request from completion response. Completion: {completion_response}")
+                except Exception as e:
+                    logger.exception(f"Failed to parse action request from completion response. Completion: {completion_response}")
+                    raise e
 
                 return action_request, completion
 
             except Exception as e:
                 logger.error(f"Failed to get completion response from anthropic: {e}")
                 raise e
+
+        if self.action_type() is None and self.model.startswith("claude"):
+            anthropic_client = Anthropic()
+
+            apply_cache_control(messages[0])
+            # apply_cache_control(messages[-1])
+
+            completion_response = (
+                anthropic_client.beta.prompt_caching.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    system=messages[0]["content"],
+                    messages=messages[1:],
+                )
+            )
+
+            completion = Completion.from_llm_completion(
+                input_messages=messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
+            action_request = Content(
+                content=completion_response.content[0].text
+            )
+
+            return action_request, completion
 
         if self.action_type() is None:
             completion_response = litellm.completion(
@@ -465,9 +592,22 @@ class AgenticState(State):
             action_request = Content(
                 content=completion_response.choices[0].message.content
             )
-        # TODO: WIP, doesn't work at the moment...
+
+            completion = Completion.from_llm_completion(
+                input_messages=messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
+            return action_request, completion
         elif response_format == LLMResponseFormat.STRUCTURED_OUTPUT:
             client = OpenAI()
+
+            tools = []
+            if hasattr(self.action_type(), "available_actions"):
+                for action in self.action_type().available_actions():
+                    tools.append(openai.pydantic_function_tool(action))
+            else:
+                tools.append(openai.pydantic_function_tool(self.action_type()))
 
             completion_response = client.beta.chat.completions.parse(
                 model=self.model,
@@ -475,16 +615,20 @@ class AgenticState(State):
                 temperature=self.temperature,
                 stop=self.stop_words(),
                 messages=messages,
-                tools=[
-                    openai.pydantic_function_tool(self.action_type()),
-                ],
+                tool_choice="required",
+                tools=tools,
             )
 
-            action_request = (
-                completion_response.choices[0]
-                .message.tool_calls[0]
-                .function.parsed_arguments
-            )
+            tool_call = completion_response.choices[0].message.tool_calls[0]
+            if hasattr(self.action_type(), "available_actions"):
+                tool_action_request = tool_call.function.parsed_arguments
+                action_request = self.action_type()(action=tool_action_request)
+            else:
+                action_request = tool_call.function.parsed_arguments
+
+            if not action_request:
+                raise ValueError(
+                    f"Failed to parse action request from completion response. Completion: {completion_response}")
 
             completion = Completion.from_llm_completion(
                 input_messages=messages,
@@ -494,13 +638,65 @@ class AgenticState(State):
 
             return action_request, completion
 
-        else:
-            instructor_mode = (
-                instructor.Mode.TOOLS
-                if response_format == LLMResponseFormat.TOOLS
-                else instructor.Mode.JSON
+        elif response_format == LLMResponseFormat.TOOLS:
+            tools = []
+            if hasattr(self.action_type(), "available_actions"):
+                for action in self.action_type().available_actions():
+                    tools.append(action.openai_tool_schema)
+            else:
+                tools.append(self.action_type().openai_tool_schema)
+
+            completion_response = litellm.completion(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                stop=self.stop_words(),
+                tools=tools,
+                metadata=metadata,
+                messages=messages,
             )
-            client = instructor.from_litellm(litellm.completion, mode=instructor_mode)
+
+            try:
+                action_request = None
+                # TODO: We only support one action at the moment
+                tool_call = completion_response.choices[0].message.tool_calls[0]
+
+                if hasattr(self.action_type(), "available_actions"):
+                    action = None
+                    for available_action in self.action_type().available_actions():
+                        if available_action.__name__ == tool_call.function.name:
+                            action = available_action
+                            break
+
+                    if not action:
+                        raise ValueError(f"Unknown action {tool_call.function.name}")
+
+                    tool_action_request = action.model_validate_json(tool_call.function.arguments)
+                    action_request = self.action_type()(action=tool_action_request)
+                else:
+                    action_request = self.action_type().model_validate_json(tool_call.function.arguments)
+
+                if not action_request:
+                    raise ValueError(
+                        f"Failed to parse action request from completion response. Completion: {completion_response}")
+            except Exception as e:
+                logger.exception(
+                    f"Failed to parse action request from completion response. Completion: {completion_response}")
+                raise e
+
+            if not action_request:
+                raise ValueError(
+                    f"Failed to parse action request from completion response. Completion: {completion_response}")
+
+            completion = Completion.from_llm_completion(
+                input_messages=messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
+
+            return action_request, completion
+        else:
+            client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON, metadata=metadata)
 
             try:
                 action_request, completion_response = (
@@ -518,13 +714,13 @@ class AgenticState(State):
                 logger.error(f"Failed to get completion response from litellm: {e}")
                 raise e
 
-        completion = Completion.from_llm_completion(
-            input_messages=messages,
-            completion_response=completion_response,
-            model=self.model,
-        )
+            completion = Completion.from_llm_completion(
+                input_messages=messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
 
-        return action_request, completion
+            return action_request, completion
 
     def create_file_context(
         self, files: list[FileWithSpans] = None, **kwargs
@@ -561,7 +757,11 @@ class AgenticState(State):
                     )
                 )
             else:
-                messages.append(AssistantMessage(action=action.request))
+                if hasattr(action.request, "action"):
+                    action_request = action.request.action
+                else:
+                    action_request = action.request
+                messages.append(AssistantMessage(action=action_request))
 
             if action.response.retry_message:
                 messages.append(
@@ -668,18 +868,11 @@ class AgenticState(State):
         return messages
 
     def system_prompt(self) -> str:
+        logger.warning(f"{self.name}:{self.id} System prompt not implemented")
         return ""
 
     def stop_words(self) -> list[str] | None:
         return None
-
-    def total_cost(self):
-        total_cost = 0
-        for action in self._actions:
-            if action.completion and action.completion.usage:
-                total_cost += action.completion.usage.completion_cost
-
-        return total_cost
 
     def total_usage(self) -> Usage:
         total_usage = Usage()
@@ -687,6 +880,13 @@ class AgenticState(State):
             if action.completion and action.completion.usage:
                 total_usage += action.completion.usage
         return total_usage
+
+    def total_cost(self):
+        total_usage = self.total_usage()
+        if total_usage:
+            return total_usage.completion_cost
+        else:
+            return 0
 
     def model_dump(self, **kwargs):
         if "exclude" not in kwargs:
@@ -706,7 +906,6 @@ class AgenticState(State):
         return True
 
 
-
 def get_state_class(name: str) -> type[AgenticState]:
     name = name.split(":")[0] # FIXME: Remove again soon...
 
@@ -722,7 +921,6 @@ def get_state_class(name: str) -> type[AgenticState]:
     # If not a built-in state, try to import dynamically
     possible_modules = [
         "moatless.edit",
-        "moatless.edit.expand",
         "moatless.find",
     ]
 
@@ -744,3 +942,16 @@ def get_state_class(name: str) -> type[AgenticState]:
                 return cls
 
     raise ValueError(f"State {name} not found")
+
+def apply_cache_control(message: dict):
+    content = message["content"]
+    if type(content) is str:
+        content = dict(
+            type="text",
+            text=content,
+        )
+    else:
+        content = message["content"][0]
+
+    content["cache_control"] = {"type": "ephemeral"}
+    message["content"] = [content]

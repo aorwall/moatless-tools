@@ -3,7 +3,8 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -25,28 +26,65 @@ class UpdateResult:
 
 class CodeFile(BaseModel):
     file_path: str = Field(..., description="The path to the file")
-    content: str = Field(..., description="The content of the file")
 
+    _content: str = PrivateAttr("")
+    _repo_path: Optional[str] = PrivateAttr(None)
     _module: Module | None = PrivateAttr(None)
     _dirty: bool = PrivateAttr(False)
+    _last_modified: datetime | None = PrivateAttr(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._content = kwargs.get("_content", "")
+        self._repo_path = kwargs.get("_repo_path", None)
+        self._module = kwargs.get("_module", None)
+        self._last_modified = kwargs.get("_last_modified", None)
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
-        with open(os.path.join(repo_path, file_path)) as f:
-            content = f.read()
-            return cls(file_path=file_path, content=content)
+        return cls(file_path=file_path, _repo_path=repo_path)
 
     @classmethod
     def from_content(cls, file_path: str, content: str):
-        return cls(file_path=file_path, content=content)
+        return cls(file_path=file_path, _content=content)
+
+    def has_been_modified(self) -> bool:
+        if not self._repo_path:
+            raise ValueError("CodeFile must be initialized with a repo path")
+
+        full_file_path = os.path.join(self._repo_path, self.file_path)
+        current_mod_time = datetime.fromtimestamp(os.path.getmtime(full_file_path))
+        is_modified = self._last_modified is None or current_mod_time > self._last_modified
+        if is_modified and self._last_modified:
+            logger.debug(f"File {self.file_path} has been modified: {self._last_modified} -> {current_mod_time}")
+
+        return is_modified
+
+    def save(self, updated_content: str):
+        full_file_path = os.path.join(self._repo_path, self.file_path)
+        with open(full_file_path, "w") as f:
+            f.write(updated_content)
+            self._content = updated_content
+            self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
+            self._module = None
 
     @property
     def supports_codeblocks(self):
         return self.module is not None
 
     @property
+    def content(self):
+        if self.has_been_modified():
+            with open(os.path.join(self._repo_path, self.file_path)) as f:
+                self._content = f.read()
+                self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
+                self._module = None
+
+        return self._content
+
+    @property
     def module(self) -> Module | None:
-        if self._module is None:
+        if self._module is None or self.has_been_modified():
             parser = get_parser_by_path(self.file_path)
             if parser:
                 self._module = parser.parse(self.content)
@@ -54,132 +92,11 @@ class CodeFile(BaseModel):
                 return None
         return self._module
 
-    @property
-    def dirty(self) -> bool:
-        return self._dirty
-
-    def update_content_by_line_numbers(
-        self, start_line_index: int, end_line_index: int, replacement_content: str
-    ) -> UpdateResult:
-        replacement_lines = replacement_content.split("\n")
-
-        # Strip empty lines from the start and end
-        while replacement_lines and replacement_lines[0].strip() == "":
-            replacement_lines.pop(0)
-
-        while replacement_lines and replacement_lines[-1].strip() == "":
-            replacement_lines.pop()
-
-        original_lines = self.content.split("\n")
-
-        replacement_lines = remove_duplicate_lines(
-            replacement_lines, original_lines[end_line_index:]
-        )
-
-        updated_lines = (
-            original_lines[:start_line_index]
-            + replacement_lines
-            + original_lines[end_line_index:]
-        )
-        updated_content = "\n".join(updated_lines)
-        logger.info(
-            f"Updating content for {self.file_path} from line {start_line_index} to {end_line_index} with {len(replacement_lines)} lines. The updated file has {len(updated_lines)} lines."
-        )
-        diff = do_diff(self.file_path, self.content, updated_content)
-        return self.update_content(updated_content)
-
-    def update_content(self, updated_content: str) -> UpdateResult:
-        diff = do_diff(self.file_path, self.content, updated_content)
-        if diff:
-            parser = get_parser_by_path(self.file_path)
-            if parser:
-                module = parser.parse(updated_content)
-                if not module.children:
-                    return UpdateResult(
-                        file_path=self.file_path,
-                        updated=False,
-                        diff=diff,
-                        error="The updated code is invalid.",
-                    )
-
-                # TODO: Move the prompt instructions to the loop
-                error_blocks = module.find_errors()
-                validation_errors = module.find_validation_errors()
-                existing_placeholders = self.module.find_blocks_with_type(
-                    CodeBlockType.COMMENTED_OUT_CODE
-                )
-                new_placeholders = (
-                    module.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
-                    if not existing_placeholders
-                    else []
-                )
-                if error_blocks or validation_errors or new_placeholders:
-                    error_response = ""
-                    if error_blocks:
-                        for error_block in error_blocks:
-                            parent_block = error_block.find_type_group_in_parents(
-                                CodeBlockTypeGroup.STRUCTURE
-                            )
-                            if (
-                                parent_block
-                                and parent_block.type != CodeBlockType.MODULE
-                            ):
-                                error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
-                            else:
-                                error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
-
-                    if new_placeholders:
-                        for new_placeholder in new_placeholders:
-                            parent_block = new_placeholder.find_type_group_in_parents(
-                                CodeBlockTypeGroup.STRUCTURE
-                            )
-                            if parent_block:
-                                error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
-                            else:
-                                error_response += f"There is a placeholder indicating out commented code : \n```{new_placeholder.to_string()}\n```. Do the full implementation or reject the request.\n"
-
-                    for validation_error in validation_errors:
-                        error_response += f"{validation_error}\n"
-
-                    logger.warning(
-                        f"Errors in updated file {self.file_path}:\n{error_response}"
-                    )
-
-                    return UpdateResult(
-                        file_path=self.file_path,
-                        updated=False,
-                        diff=diff,
-                        error=error_response,
-                    )
-
-                new_span_ids = module.get_all_span_ids() - set(
-                    self.module.get_all_span_ids()
-                )
-
-                logger.info(
-                    f"Updated content for {self.file_path} with {len(new_span_ids)} new span ids."
-                )
-                self._module = module
-            else:
-                new_span_ids = []
-            self._module = module
-            self._dirty = True
-            self.content = updated_content
-
-            return UpdateResult(
-                file_path=self.file_path,
-                updated=True,
-                diff=diff,
-                new_span_ids=new_span_ids,
-            )
-
-        return UpdateResult(file_path=self.file_path, updated=False)
-
 
 class FileRepository:
     def __init__(self, repo_path: str):
         self._repo_path = repo_path
-        self._files: dict[str, CodeFile] = {}
+        self._files = {}
 
     @property
     def repo_dir(self):
@@ -194,59 +111,38 @@ class FileRepository:
     def restore_from_snapshot(self, snapshot: dict):
         pass
 
-    def restore_from_disk(self):
-        for file_path in self._files.keys():
-            self.get_file(file_path, refresh=True)
-
     @property
     def path(self):
         return self._repo_path
 
-    def get_file(
-        self, file_path: str, refresh: bool = False, from_origin: bool = False
-    ):
-        """
-        Get a file from the repository.
+    def get_file(self, file_path: str):
+        if file_path in self._files:
+            return self._files[file_path]
 
-        Args:
+        if file_path.startswith(self.repo_dir):
+            file_path = file_path.replace(self.repo_dir, "")
+            if file_path.startswith("/"):
+                file_path = file_path[1:]
 
-        """
-        existing_file = self._files.get(file_path)
-        if not existing_file or refresh or from_origin:
-            full_file_path = os.path.join(self._repo_path, file_path)
-            if not os.path.exists(full_file_path):
-                logger.warning(f"File not found: {full_file_path}")
-                return None
-            if not os.path.isfile(full_file_path):
-                logger.warning(f"{full_file_path} is not a file")
-                return None
-
-            with open(full_file_path) as f:
-                found_file = CodeFile(file_path=file_path, content=f.read())
-
-            if not existing_file:
-                existing_file = found_file
-                self._files[file_path] = existing_file
-            elif refresh or not from_origin:
-                existing_file.content = found_file.content
-                existing_file._module = found_file.module
-                existing_file._dirty = False
-
-        return existing_file
-
-    def save_file(self, file_path: str, updated_content: Optional[str] = None):
-        file = self._files.get(file_path)
         full_file_path = os.path.join(self._repo_path, file_path)
-        with open(full_file_path, "w") as f:
-            updated_content = updated_content or file.module.to_string()
-            f.write(updated_content)
+        if not os.path.exists(full_file_path):
+            logger.debug(f"File not found: {full_file_path}")
+            return None
 
-        file._dirty = False
+        if not os.path.isfile(full_file_path):
+            logger.warning(f"{full_file_path} is not a file")
+            return None
 
-    def save(self):
-        for file in self._files.values():
-            if file._dirty:
-                self.save_file(file.file_path, file.content)
+        file = CodeFile.from_file(file_path=file_path, repo_path=self._repo_path)
+        self._files[file_path] = file
+
+        return file
+
+    def save_file(self, file_path: str, updated_content: str) -> CodeFile:
+        assert updated_content, "Updated content must be provided"
+        file = self.get_file(file_path)
+        file.save(updated_content)
+        return file
 
     def matching_files(self, file_pattern: str):
         matched_files = []
@@ -284,6 +180,12 @@ class FileRepository:
                 match = True
                 break
         return match
+
+    def find_by_pattern(self, patterns: list[str]) -> List[str]:
+        matched_files = []
+        for pattern in patterns:
+            matched_files.extend(glob.iglob(f"**/{pattern}", root_dir=self._repo_path, recursive=True))
+        return matched_files
 
 
 def remove_duplicate_lines(replacement_lines, original_lines):

@@ -1,10 +1,10 @@
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import litellm
 from git import Repo
 
-from moatless.repository.file import FileRepository
+from moatless.repository.file import FileRepository, CodeFile
 from moatless.settings import Settings
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 
@@ -66,8 +66,6 @@ class GitRepository(FileRepository):
 
         # TODO: Check diff and only reset changed files
 
-        self.restore_from_disk()
-
     def dict(self):
         return {
             "type": "git",
@@ -81,13 +79,10 @@ class GitRepository(FileRepository):
             "commit": self._current_commit,
         }
 
-    def save_file(self, file_path: str, updated_content: Optional[str] = None):
-        super().save_file(file_path, updated_content)
+    def save_file(self, file_path: str, updated_content: Optional[str] = None) -> CodeFile:
+        file = super().save_file(file_path, updated_content)
         self.commit(file_path)
-
-    def save(self):
-        super().save()
-        self.commit()
+        return file
 
     def commit(self, file_path: str | None = None):
         commit_message = self.commit_message(file_path)
@@ -130,8 +125,13 @@ class GitRepository(FileRepository):
 
         return "Automated commit by Moatless Tools"
 
-    def diff(self):
+    def diff(self, ignore_paths: Optional[List[str]] = None):
         logger.info(
             f"Get diff between {self._initial_commit} and {self._current_commit}"
         )
-        return self._repo.git.diff(self._initial_commit, self._current_commit)
+        if ignore_paths:
+            exclude_patterns = [f':(exclude){path}' for path in ignore_paths]
+            diff_command = [self._initial_commit, self._current_commit, '--'] + exclude_patterns
+            return self._repo.git.diff(*diff_command)
+        else:
+            return self._repo.git.diff(self._initial_commit, self._current_commit)

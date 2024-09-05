@@ -181,6 +181,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             query_embedding_np, query.similarity_top_k
         )
         dists = list(dists[0])
+
         if len(indices) == 0:
             return VectorStoreQueryResult(similarities=[], ids=[])
 
@@ -207,8 +208,8 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             else:
                 not_found += 1
 
-        if not_found or duplicates:
-            logger.debug(
+        if not_found or duplicates and filtered_out:
+            logger.info(
                 f"Return {len(filtered_node_ids)} nodes ({not_found} not found, {duplicates} duplicates and {filtered_out} nodes)."
             )
 

@@ -36,7 +36,6 @@ class ExpandContext(State):
     )
 
     def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
-        self.file_context.expand_context_with_init_spans()
 
         # TODO: Provide more info to use in the search query?
         results = self.workspace.code_index.semantic_search(query=self.initial_message, max_results=1000)
@@ -67,7 +66,6 @@ class ExpandContext(State):
             # TODO: Check the sum of the tokens in the context and the tokens in the span
             if self.file_context.context_size() > self.expand_to_max_tokens:
                 break
-
 
             added_spans += 1
             self.file_context.add_span_to_context(file_path, span_id)

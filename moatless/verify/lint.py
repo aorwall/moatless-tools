@@ -1,4 +1,5 @@
 import logging
+from typing import List
 
 from astroid import MANAGER, nodes
 from pylint.lint import Run
@@ -6,7 +7,7 @@ from pylint.testutils import MinimalTestReporter
 from astroid.exceptions import AstroidError
 
 from moatless.repository import CodeFile
-from moatless.schema import VerificationError
+from moatless.schema import VerificationIssue, VerificationIssueType
 from moatless.verify.verify import Verifier
 import builtins
 import types
@@ -20,55 +21,58 @@ class PylintVerifier(Verifier):
         self.run_tests = run_tests
 
     def verify(
-        self, file: CodeFile | None = None, retry: bool = False
-    ) -> list[VerificationError]:
-        if not file:
+        self, files: List[str] | None = None, retry: bool = False
+    ) -> list[VerificationIssue]:
+        issues = []
+
+        if not files:
             logger.warning("No file to verify")
-            return []
+            return issues
 
-        try:
-            # So this is some LLM generated code to try to fix unclear pylint errors...
-            MANAGER.astroid_cache.clear()
-            MANAGER.astroid_cache["builtins"] = MANAGER.ast_from_module(builtins)
-            generator_node = nodes.ClassDef(
-                name="generator",
-                lineno=0,
-                col_offset=0,
-                end_lineno=0,
-                end_col_offset=0,
-                parent=MANAGER.astroid_cache["builtins"],
-            )
-            MANAGER.astroid_cache["builtins"].locals["generator"] = [generator_node]
-
-            results = Run(
-                [f"{self.repo_dir}/{file.file_path}"],
-                exit=False,
-                reporter=MinimalTestReporter(),
-            )
-
-            for msg in results.linter.reporter.messages:
-                logger.debug(f"Message: {msg.msg_id} {msg.msg} {msg.line}")
-                if msg.msg_id[0] in ["F"] and not retry:
-                    logger.warning(
-                        f"Lint error: {msg.msg_id} {msg.msg} {msg.line}. Try again"
-                    )
-                    return self.verify(file, retry=True)
-
-            return [
-                VerificationError(
-                    code=msg.msg_id,
-                    file_path=msg.path.replace(f"{self.repo_dir}/", ""),
-                    message=msg.msg,
-                    line=msg.line,
+        for file in files:
+            try:
+                # So this is some LLM generated code to try to fix unclear pylint errors...
+                MANAGER.astroid_cache.clear()
+                MANAGER.astroid_cache["builtins"] = MANAGER.ast_from_module(builtins)
+                generator_node = nodes.ClassDef(
+                    name="generator",
+                    lineno=0,
+                    col_offset=0,
+                    end_lineno=0,
+                    end_col_offset=0,
+                    parent=MANAGER.astroid_cache["builtins"],
                 )
-                for msg in results.linter.reporter.messages
-                if msg.msg_id[0] in ["E"]
-            ]
-        except AstroidError:
-            logger.warning(
-                f"AstroidError occurred while linting {file.file_path}. Skipping this file."
-            )
-            return []
-        except Exception:
-            logger.exception("Error running pylint")
-            return []
+                MANAGER.astroid_cache["builtins"].locals["generator"] = [generator_node]
+
+                results = Run(
+                    [f"{self.repo_dir}/{file}"],
+                    exit=False,
+                    reporter=MinimalTestReporter(),
+                )
+
+                for msg in results.linter.reporter.messages:
+                    logger.debug(f"Message: {msg.msg_id} {msg.msg} {msg.line}")
+                    if msg.msg_id[0] in ["F"] and not retry:
+                        logger.warning(
+                            f"Lint error: {msg.msg_id} {msg.msg} {msg.line}. Try again"
+                        )
+                        return self.verify([file], retry=True)
+
+                issues.extend([
+                    VerificationIssue(
+                        type=VerificationIssueType.LINT,
+                        file_path=msg.path.replace(f"{self.repo_dir}/", ""),
+                        message=msg.msg,
+                        line=msg.line,
+                    )
+                    for msg in results.linter.reporter.messages
+                    if msg.msg_id[0] in ["E"]
+                ])
+            except AstroidError:
+                logger.warning(
+                    f"AstroidError occurred while linting {file.file_path}. Skipping this file."
+                )
+            except Exception:
+                logger.exception("Error running pylint")
+
+        return issues

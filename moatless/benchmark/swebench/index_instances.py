@@ -14,13 +14,9 @@ from moatless.benchmark.swebench import get_repo_dir_name
 import os
 
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
 index_store_dir = "/home/albert/.moatless/index_stores/20240814-voyage-code-2"
 
+logger = logging.getLogger(__name__)
 evaluation_report = "report.jsonl"
 
 
@@ -75,7 +71,7 @@ def ingest(code_index, instance):
     return vectors, indexed_tokens
 
 
-def evaluate(code_index, instance):
+def evaluate_index(code_index, instance):
     results = code_index._vector_search(instance["problem_statement"], top_k=1000)
 
     expected_changes, sum_tokens = calculate_estimated_context_window(instance, results)
@@ -213,7 +209,7 @@ def run_indexing():
                 expected_changes,
                 all_matching_context_window,
                 any_matching_context_window,
-            ) = evaluate(code_index, instance)
+            ) = evaluate_index(code_index, instance)
             write_report(
                 instance,
                 expected_changes,
@@ -225,5 +221,8 @@ def run_indexing():
 
         previous_instances[instance["repo"]] = instance
 
-
-run_indexing()
+if "main" == __name__:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    run_indexing()

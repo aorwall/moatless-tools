@@ -5,7 +5,6 @@ from moatless.edit.clarify import ClarifyCodeChange
 from moatless.edit.edit import EditCode
 from moatless.edit.expand import ExpandContext
 from moatless.edit.plan import PlanToCode
-from moatless.edit.plan_lines import PlanToCodeWithLines
 from moatless.find.decide import DecideRelevance
 from moatless.find.identify import IdentifyCode
 from moatless.find.search import SearchCode
@@ -16,24 +15,10 @@ CODE_TRANSITIONS = [
     TransitionRule(
         source=PlanToCode,
         dest=EditCode,
-        trigger="edit_code",
-        required_fields=EditCode.required_fields(),
-    ),
-    TransitionRule(
-        source=PlanToCode,
-        dest=ClarifyCodeChange,
-        trigger="edit_code",
-        required_fields=ClarifyCodeChange.required_fields(),
+        trigger="edit_code"
     ),
     TransitionRule(source=PlanToCode, dest=Finished, trigger="finish"),
     TransitionRule(source=PlanToCode, dest=Rejected, trigger="reject"),
-    TransitionRule(
-        source=ClarifyCodeChange,
-        dest=EditCode,
-        trigger="edit_code",
-        required_fields=EditCode.required_fields(),
-    ),
-    TransitionRule(source=ClarifyCodeChange, dest=PlanToCode, trigger="reject"),
     TransitionRule(source=EditCode, dest=PlanToCode, trigger="finish"),
     TransitionRule(source=EditCode, dest=PlanToCode, trigger="reject"),
 ]
@@ -63,29 +48,6 @@ def code_transitions(
         initial_state=PlanToCode,
         transition_rules=CODE_TRANSITIONS,
     )
-
-
-def code_transitions_use_line_numbers(
-    global_params: Optional[dict] = None, state_params: Optional[dict] = None
-) -> TransitionRules:
-    return TransitionRules(
-        global_params=global_params or {},
-        state_params=state_params or {},
-        initial_state=PlanToCodeWithLines,
-        transition_rules=[
-            TransitionRule(
-                source=PlanToCodeWithLines,
-                dest=EditCode,
-                trigger="edit_code",
-                required_fields=PlanToCodeWithLines.required_fields(),
-            ),
-            TransitionRule(source=PlanToCodeWithLines, dest=Finished, trigger="finish"),
-            TransitionRule(source=PlanToCodeWithLines, dest=Rejected, trigger="reject"),
-            TransitionRule(source=EditCode, dest=PlanToCodeWithLines, trigger="finish"),
-            TransitionRule(source=EditCode, dest=PlanToCodeWithLines, trigger="reject"),
-        ],
-    )
-
 
 def edit_code_transitions(
     global_params: Optional[dict] = None, state_params: Optional[dict] = None
@@ -197,13 +159,7 @@ def search_and_code_transitions(
             TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
             TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
             TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
-            TransitionRule(source=DecideRelevance, dest=ExpandContext, trigger="finish"),
-            TransitionRule(
-                source=ExpandContext,
-                dest=PlanToCode,
-                trigger="finish",
-                exclude_fields={"added_spans", "original_tokens","expanded_tokens"},
-            ),
+            TransitionRule(source=DecideRelevance, dest=PlanToCode, trigger="finish")
         ]
         + CODE_TRANSITIONS,
     )

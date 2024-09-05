@@ -238,8 +238,9 @@ class CodeParser:
                 if code_block.content:
                     identifier = code_block.content.split("\n")[0].strip()[0:25]
                     identifier = re.sub(r"\W+", "_", identifier)
-                else:
-                    identifier = code_block.type.value.lower()
+
+                if not identifier:
+                    identifier = str(code_block.type).lower()
 
             # Set a unique identifier on each code block
             # TODO: Just count occurrences of the identifier
@@ -248,7 +249,7 @@ class CodeParser:
             ]
             if identifier in existing_identifiers:
                 code_block.identifier = (
-                    f"{code_block.identifier}_{len(existing_identifiers)}"
+                    f"{identifier}_{len(existing_identifiers)}"
                 )
             else:
                 code_block.identifier = identifier

@@ -10,6 +10,8 @@ from moatless.index.types import SearchCodeHit, CodeSnippet
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
 
+IGNORED_SPANS = ["docstring", "imports"]
+
 logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
@@ -116,7 +118,14 @@ def get_diff_lines(diff_input):
             relevant_diff_lines = max(0, old_length - 7)
             adjusted_end = adjusted_start + relevant_diff_lines
 
-            changes.append((current_file, adjusted_start, adjusted_end))
+            if old_length == 0:
+                change_type = "addition"
+            elif new_length == 0:
+                change_type = "deletion"
+            else:
+                change_type = "modification"
+
+            changes.append((current_file, adjusted_start, adjusted_end, change_type))
 
     return changes
 
@@ -130,10 +139,10 @@ def compare_patches(expected_patch, actual_patch):
     line_hits = 0
 
     for patch_diff in expected_diffs:
-        change_file, change_start, change_end = patch_diff
+        change_file, change_start, change_end, change_type = patch_diff
 
         for actual_diff in actual_diffs:
-            actual_change_file, actual_change_start, actual_change_end = actual_diff
+            actual_change_file, actual_change_start, actual_change_end, actual_change_type = actual_diff
             expected_files.add(change_file)
             if change_file == actual_change_file:
                 file_hits.add(change_file)
@@ -167,15 +176,15 @@ def get_file_spans_from_patch(
     expected_files_with_spans = {}
 
     for diff_line in expected_diff_lines:
-        file = repository.get_file(diff_line[0])
+        change_file, change_start, change_end, change_type = diff_line
+        file = repository.get_file(change_file)
 
         if file is None or file.module is None:
             continue
 
         if file.file_path not in expected_files_with_spans:
             expected_files_with_spans[file.file_path] = []
-
-        spans = file.module.find_spans_by_line_numbers(diff_line[1], diff_line[2])
+        spans = file.module.find_spans_by_line_numbers(change_start, change_end)
         for span in spans:
             if span.span_id not in expected_files_with_spans[file.file_path]:
                 expected_files_with_spans[file.file_path].append(span.span_id)
@@ -220,17 +229,17 @@ def get_missing_spans(
     misses = {}
     for expected_file, expected_span_ids in expected_files_with_spans.items():
         if expected_file not in actual_files_with_spans:
-            misses[expected_file] = expected_span_ids
-            continue
+            actual_span_ids = []
+        else:
+            actual_span_ids = actual_files_with_spans[expected_file]
 
-        actual_span_ids = actual_files_with_spans[expected_file]
         missing_span_ids = [
-            span_id for span_id in expected_span_ids if span_id not in actual_span_ids
+            span_id for span_id in expected_span_ids
+            if span_id not in actual_span_ids and span_id not in IGNORED_SPANS
         ]
 
         if missing_span_ids:
             misses[expected_file] = missing_span_ids
-
     return misses
 
 
@@ -287,7 +296,7 @@ def calculate_estimated_context_window(instance, results):
     expected_changes = []
 
     for patch_diff in patch_diffs:
-        change_file, change_start, change_end = patch_diff
+        change_file, change_start, change_end, change_type = patch_diff
         expected_changes.append(
             {
                 "file_path": change_file,

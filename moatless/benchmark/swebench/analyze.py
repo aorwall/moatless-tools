@@ -1,9 +1,8 @@
 import csv
 from moatless.benchmark.report_v2 import read_results_from_json, BenchmarkResult
-from moatless.benchmark.state.expand import ExpandContext
 from moatless.benchmark.swebench import setup_swebench_repo, create_workspace
 from moatless.benchmark.utils import file_spans_to_dict, get_moatless_instance, has_identified_files, has_identified_spans
-
+from moatless.edit import ExpandContext
 
 
 def analyze_identified(instance_id: str, result: BenchmarkResult):

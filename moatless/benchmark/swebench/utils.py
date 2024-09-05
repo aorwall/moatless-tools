@@ -6,6 +6,9 @@ from typing import Optional
 
 from datasets import load_dataset
 
+from moatless.verify.testbed import TestbedVerifier
+from testbed.client.client import TestbedClient
+
 from moatless.benchmark.utils import (
     file_spans_to_dict,
     get_missing_files,
@@ -92,197 +95,6 @@ def sync_file_context_with_search_trajectory(workspace: Workspace, trajectory: d
                     )
 
 
-def verify_search_trajectory(
-    trajectory: dict, instance: dict, workspace: Workspace
-) -> dict:
-    result = {
-        "transitions": len(trajectory["transitions"]),
-        "identifieed": None,
-        "expected_identified": None,
-        "alt_identified": None,
-        "identified": None,
-        "file_identified": None,
-        "found_in_search": None,
-        "tokens": 0,
-        "expanded_imports": False,
-        "expanded_related": False,
-        "expanded_small_classes": False,
-        "expanded_tokens": 0,
-    }
-
-    file_context = workspace.create_file_context()
-    search_file_context = workspace.create_file_context()
-
-    iterations = 0
-    for transition in trajectory["transitions"]:
-        if transition["name"] == "SearchCode":
-            iterations += 1
-
-        for action in transition["actions"]:
-            if (
-                "output" in action
-                and action.get("output")
-                and action["output"].get("ranked_spans")
-            ):
-                for ranked_span in action["output"]["ranked_spans"]:
-                    search_file_context.add_spans_to_context(
-                        ranked_span["file_path"], [ranked_span["span_id"]]
-                    )
-
-            if action["action"].get("identified_spans"):
-                for span in action["action"]["identified_spans"]:
-                    file_context.add_spans_to_context(
-                        span["file_path"], span["span_ids"]
-                    )
-
-            if result["found_in_search"] is None and (
-                found_in_expected_spans(
-                    instance,
-                    file_spans_to_dict(search_file_context.to_files_with_spans()),
-                )
-                or found_in_alternative_spans(
-                    instance, file_spans_to_dict(file_context.to_files_with_spans())
-                )
-            ):
-                result["found_in_search"] = iterations
-
-            if result["file_identified"] is None:
-                missing_files = get_missing_files(
-                    instance["expected_spans"],
-                    file_spans_to_dict(file_context.to_files_with_spans()),
-                )
-                if not missing_files:
-                    result["file_identified"] = iterations
-
-            if result["expected_identified"] is None and found_in_expected_spans(
-                instance, file_spans_to_dict(file_context.to_files_with_spans())
-            ):
-                result["expected_identified"] = iterations
-
-            if result["alt_identified"] is None and found_in_alternative_spans(
-                instance, file_spans_to_dict(file_context.to_files_with_spans())
-            ):
-                result["alt_identified"] = iterations
-
-    if result["expected_identified"] is not None:
-        result["identified"] = result["expected_identified"]
-
-    if result["alt_identified"] is not None and (
-        result["identified"] is None or result["alt_identified"] < result["identified"]
-    ):
-        result["identified"] = result["alt_identified"]
-
-    result["tokens"] = file_context.context_size()
-
-    file_context.expand_context_with_init_spans()
-    actual_span_dicts = file_spans_to_dict(file_context.to_files_with_spans())
-
-    if found_in_expected_spans(
-        instance, actual_span_dicts
-    ) or found_in_alternative_spans(instance, actual_span_dicts):
-        result["expanded_imports"] = True
-
-    file_context.expand_context_with_related_spans(max_tokens=8000)
-    if found_in_expected_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ) or found_in_alternative_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ):
-        result["expanded_related"] = True
-
-    file_context.expand_classes(max_tokens_per_class=500)
-    if found_in_expected_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ) or found_in_alternative_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ):
-        result["expanded_small_classes"] = True
-
-    result["expanded_tokens"] = file_context.context_size()
-
-    result["iterations"] = iterations
-    return result
-
-
-def generate_md_report(trajectory: dict, instance: dict):
-    info = trajectory["info"]
-    markdown = f"# {info['instance_id']}\n"
-
-    markdown += "\n## Problem statement\n"
-    markdown += f"```\n{instance['problem_statement']}\n```\n"
-
-    if "error" in trajectory["info"]:
-        markdown += "\n## Error\n"
-        markdown += f"```\n{trajectory['info']['error']}\n```\n"
-    else:
-        markdown += "\n## Prediction\n"
-        markdown += f"```diff\n{info['submission']}\n```\n"
-
-    markdown += "\n## Golden patch\n"
-    markdown += f"```diff\n{instance['golden_patch']}\n```\n"
-
-    markdown += "\n## Trajectory\n"
-
-    repo_dir = setup_swebench_repo(instance)
-    file_repo = FileRepository(repo_dir)
-
-    for step in trajectory["transitions"]:
-        for i, action in enumerate(step["actions"]):
-            markdown += f"### {step['name']} ({i})\n\n"
-
-            if step["name"] == "PlanToCode":
-                if action.get("action").get("thoughts"):
-                    markdown += "*" + action["action"]["thoughts"] + "*"
-
-                if action.get("action", {}).get("action", {}).get("description"):
-                    markdown += f"\n\n * {action['action']['action']['description']}"
-
-                if action.get("action", {}).get("action", {}).get("file_path"):
-                    markdown += f"\n * {action['action']['action']['file_path']}"
-
-                if action.get("action", {}).get("action", {}).get("span_id"):
-                    markdown += f"\n * {action['action']['action']['span_id']}"
-
-                    markdown += "\n\n#### File context \n\n"
-
-                    file_context = FileContext(file_repo)
-                    file_context.add_span_to_context(
-                        action["action"]["action"]["file_path"],
-                        action["action"]["action"]["span_id"],
-                    )
-
-                    markdown += file_context.create_prompt(show_outcommented_code=True)
-
-            if step["name"] == "EditCode":
-                markdown += "#### LLM Response\n\n"
-                markdown += f"```\n{action['action']['content']}\n```\n"
-
-                if action.get("output", {}).get("message"):
-                    markdown += "#### Output\n\n"
-                    markdown += f"{action['output']['message']}\n\n"
-
-            if step["name"] == "ClarifyCodeChange":
-                if action.get("thoughts"):
-                    markdown += "*" + action["thoughts"] + "*"
-
-                if action.get("output", {}).get("start_line"):
-                    markdown += f"\n* Start Line: {action['output']['start_line']}\n"
-                    markdown += f"\n* End Line: {action['output']['end_line']}\n"
-
-            if step["name"] == "Finished":
-                markdown += f"*{action['properties']['message']}*\n"
-
-            if step["name"] == "Rejected":
-                markdown += f"*{action['properties']['message']}*\n"
-
-    markdown += "## Alternative patches\n"
-    for alternative in instance["resolved_by"]:
-        markdown += f"### {alternative['name']}\n"
-        markdown += f"```diff\n{alternative['patch']}\n```\n"
-
-    return markdown
-
-
 def setup_swebench_repo(
     instance_data: Optional[dict] = None,
     instance_id: str = None,
@@ -295,6 +107,7 @@ def setup_swebench_repo(
         instance_data = load_instance(instance_id)
 
     if not repo_base_dir:
+
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
 
     repo_dir_name = instance_data["repo"].replace("/", "__")
@@ -310,9 +123,13 @@ def create_workspace(
     instance: Optional[dict] = None,
     instance_id: Optional[str] = None,
     repo_base_dir: Optional[str] = None,
+    initiate_index: bool = True,
     index_store_dir: Optional[str] = None,
     create_instance_dir: bool = False,
+    testbed: Optional[TestbedClient] = None,
     max_file_context_tokens: int = 8000,
+    use_perfect_file_context: bool = False,
+    use_expected_test_files: bool = False,
 ):
     """
     Create a workspace for the given SWE-bench instance.
@@ -335,16 +152,79 @@ def create_workspace(
         repo_dir = f"{repo_base_dir}/swe-bench_{instance['instance_id']}_{date_str}"
     else:
         repo_dir = f"{repo_base_dir}/{repo_dir_name}"
+
     repo = GitRepository.from_repo(
         git_repo_url=repo_url, repo_path=repo_dir, commit=instance["base_commit"]
     )
 
-    code_index = CodeIndex.from_index_name(
-        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo
-    )
+    if initiate_index:
+        code_index = CodeIndex.from_index_name(
+            instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo
+        )
+    else:
+        code_index = None
 
-    return Workspace(
+    if testbed:
+        verifier = TestbedVerifier(
+            testbed=testbed, repository=repo
+        )
+    else:
+        verifier = None
+
+    workspace = Workspace(
         file_repo=repo,
+        verifier=verifier,
         code_index=code_index,
         max_file_context_tokens=max_file_context_tokens,
+    )
+
+    if use_perfect_file_context and "expected_spans" in instance:
+        for file_path, span_ids in instance["expected_spans"].items():
+            workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+
+        for resolved_by in instance.get("resolved_by", []):
+            if "alternative_spans" in resolved_by:
+                for file_path, span_ids in resolved_by["alternative_spans"].items():
+                    workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+
+        if "alternative_spans" in instance:
+            for alternative_spans in instance["alternative_spans"]:
+                for file_path, span_ids in alternative_spans["spans"].items():
+                    workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+
+        if use_expected_test_files and "test_file_spans" in instance:
+            for file_path, span_ids in instance["test_file_spans"].items():
+                workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+
+        workspace.file_context.expand_context_with_related_spans(1000)
+        workspace.file_context.expand_classes(500)
+
+    return workspace
+
+def create_index(
+    instance: Optional[dict] = None,
+    instance_id: Optional[str] = None,
+    repo_base_dir: Optional[str] = None,
+    index_store_dir: Optional[str] = None,
+):
+    """
+    Create a workspace for the given SWE-bench instance.
+    """
+    assert instance or instance_id, "Either instance or instance_id must be provided"
+    if not instance:
+        instance = load_instance(instance_id)
+
+    if not index_store_dir:
+        index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+
+    if not repo_base_dir:
+        repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
+
+    repo_dir_name = instance["repo"].replace("/", "__")
+
+    repo_dir = f"{repo_base_dir}/{repo_dir_name}"
+    repo = FileRepository(repo_dir)
+
+    return CodeIndex.from_index_name(
+        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo
     )

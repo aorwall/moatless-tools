@@ -4,20 +4,16 @@ from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
 
-from moatless.repository import FileRepository
-from moatless.benchmark.swebench import (
-    found_in_expected_spans,
-    found_in_alternative_spans,
-    setup_swebench_repo,
-)
+from moatless.edit.plan import Review, RequestCodeChange
+from moatless.index.code_index import is_test
 from moatless.benchmark.utils import (
     has_identified_spans,
-    has_identified_files, count_identified_files, count_identified_spans,
+    has_identified_files, count_identified_files, count_identified_spans, get_missing_files,
 )
 from moatless.file_context import FileContext, RankedFileSpan
 from moatless.trajectory import Trajectory
-from moatless.schema import VerificationError
-from moatless.state import AgenticState, Content
+from moatless.schema import VerificationIssue
+from moatless.state import AgenticState, Content, Rejected
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -43,13 +39,11 @@ class SearchStats(StateStats):
     p_function: int = 0
 
 
-class PlanStats(StateStats):
+class CodingStats(StateStats):
     review: bool = False
-
-
-class EditStats(StateStats):
     retries: int = 0
     edited: bool = False
+
     has_diff: bool = False
     lint: bool = False
     lints: str = ""
@@ -67,14 +61,25 @@ class BenchmarkResult(BaseModel):
     expected_spans: int = 0
     expected_files: int = 0
     expected_spans_details: Dict[str, List[str]] = {}
+
+    expected_test_files: List[str] = []
+    found_test_files: List[str] = []
+    missing_test_files: int = 0
+
+    max_verification_issues: int = 0
+    final_verification_issues: int = 0
+
+    test_count: int = 0
+    fail_to_pass_count: int = 0
+    pass_to_pass_count: int = 0
+
     alternative_solutions: int = 0
     resolved: bool = False
     error: str = ""
     status: str = ""
     search: SearchStats = SearchStats()
     identify: StateStats = StateStats()
-    plan: PlanStats = PlanStats()
-    edit: EditStats = EditStats()
+    coding: CodingStats = CodingStats()
     decide: StateStats = StateStats()
 
 
@@ -83,24 +88,13 @@ def to_result(
 ) -> BenchmarkResult:
     info = trajectory._info
 
-    if (
-        report
-        and "resolved_ids" in report
-        and instance["instance_id"] in report["resolved_ids"]
-    ):
-        result_status = "resolved"
-    else:
-        result_status = info.get("status")
-
-    resolved = result_status == "resolved"
-
     selected_transition_ids = []
     current_state = trajectory.get_current_state()
     while current_state:
         selected_transition_ids.append(current_state.id)
         current_state = current_state.previous_state
 
-    logger.info(f"Selected transitions: {selected_transition_ids}")
+    logger.debug(f"Selected transitions: {selected_transition_ids}")
 
     try:
         expected_spans = instance.get("expected_spans", {})
@@ -115,6 +109,15 @@ def to_result(
             ):
                 alternative_solutions.append(resolved_by["alternative_spans"])
 
+        if info.get("resolved", False):
+            status = "resolved"
+        elif info.get("error"):
+            status = "error"
+        elif isinstance(trajectory.get_current_state(), Rejected):
+            status = "rejected"
+        else:
+            status = "failed"
+
         result = BenchmarkResult(
             instance_id=instance["instance_id"],
             duration=info.get("duration", 0),
@@ -128,20 +131,17 @@ def to_result(
             expected_files=len(expected_files),
             expected_spans_details=expected_spans_details,
             alternative_solutions=len(alternative_solutions),
-            resolved=resolved,
-            status="",  # Initialize status
+            status=status,
             search=SearchStats(),
             identify=StateStats(),
-            plan=PlanStats(),
-            edit=EditStats(),
+            coding=CodingStats(),
             decide=StateStats(),
         )
 
-        lint_codes = set()
         search_results_spans: Dict[str, List[str]] = {}
         identified_spans: Dict[str, List[str]] = {}
-        planned_spans: Dict[str, List[str]] = {}
-        edited_spans: Dict[str, List[str]] = {}
+        pinned_spans: Dict[str, List[str]] = {}
+        test_files: List[str] = []
 
         if expected_spans:
             for transition in trajectory.transitions:
@@ -210,97 +210,88 @@ def to_result(
                     )
 
                 if state_name == "IdentifyCode" and state.action_request:
-                    for span in state.action_request.identified_spans:
-                        result.identify.result_spans += 1
+                    if not state.action_request.identified_spans:
+                        logger.warning(f"No action request found in IdentifyCode state: {state}")
+                    else:
+                        for span in state.action_request.identified_spans:
+                            result.identify.result_spans += 1
 
-                        if span.file_path not in identified_spans:
-                            identified_spans[span.file_path] = []
-                            result.identify.result_files += 1
+                            if span.file_path not in identified_spans:
+                                identified_spans[span.file_path] = []
+                                result.identify.result_files += 1
 
-                        for span_id in span.span_ids:
-                            identified_spans[span.file_path].append(span_id)
+                            for span_id in span.span_ids:
+                                identified_spans[span.file_path].append(span_id)
 
-                    set_found_status(
-                        expected_spans,
-                        alternative_solutions,
-                        identified_spans,
-                        result.identify,
-                    )
+                        set_found_status(
+                            expected_spans,
+                            alternative_solutions,
+                            identified_spans,
+                            result.identify,
+                        )
 
                 if state_name == "PlanToCode" and state.action_request:
-                    if state.action_request.action == "review":
-                        result.plan.review = True
+                    if isinstance(state.action_request.action, Review):
+                        result.coding.review = True
 
-                    if state.action_request.file_path:
-                        file_path = state.action_request.file_path
-                        if file_path not in planned_spans:
-                            planned_spans[file_path] = []
-                        planned_spans[file_path].append(state.action_request.span_id)
+                    if state.verification_issues and len(state.verification_issues) > result.max_verification_issues:
+                        result.max_verification_issues = len(state.verification_issues)
 
-                    set_found_status(
-                        expected_spans,
-                        alternative_solutions,
-                        planned_spans,
-                        result.plan,
-                    )
+                    result.final_verification_issues = len(state.verification_issues) if state.verification_issues else 0
 
                 if state_name == "EditCode" and state.action_request:
-                    result.edit.retries = len(state._actions) - 1
-
-                    edited = state.response and state.response.trigger == "finish"
-
-                    if edited and hasattr(state, "file_path"):
-                        file_path = state.file_path
-                        if file_path not in edited_spans:
-                            edited_spans[file_path] = []
-                        edited_spans[file_path].append(state.span_id)
-
-                    if not result.edit.edited and (
-                        found_in_expected_spans(instance, edited_spans)
-                        or found_in_alternative_spans(instance, edited_spans)
-                    ):
-                        result.edit.edited = True
+                    if len(state._actions) > 1:
+                        result.coding.retries += 1
 
                     if state.response and state.response.output:
                         output = state.response.output
-                        if edited:
-                            result.edit.has_diff = True
+                        if output.get("diff"):
+                            result.coding.has_diff = True
 
-                        try:
-                            if output.get("verification_errors"):
-                                result.edit.lint = True
-                                for lint in output.get("verification_errors", []):
-                                    if isinstance(lint, VerificationError):
-                                        lint_codes.add(lint.code)
-                                    else:
-                                        lint_codes.add(lint["code"])
-                                result.edit.lints = ",".join(lint_codes)
-                        except Exception as e:
-                            logger.exception(f"Failed to parse lint code from {output}")
+                if state_name in ["Finished", "Rejected"]:
+                    for file in transition.snapshot["file_context"]["files"]:
+                        if is_test(file["file_path"]):
+                            test_files.append(file["file_path"])
+                            continue
 
-                    set_found_status(
-                        expected_spans, alternative_solutions, edited_spans, result.edit
-                    )
+                        pinned_spans = {}
+                        for span in file["spans"]:
+                            if not span.get("pinned", False):
+                                continue
+
+                            if file["file_path"] not in pinned_spans:
+                                pinned_spans[file["file_path"]] = []
+
+                            pinned_spans[file["file_path"]].append(span["span_id"])
+
+        missing_tests = get_missing_files(
+            instance["test_file_spans"], test_files
+        )
+        result.missing_test_files = len(missing_tests)
+        result.expected_test_files = list(instance["test_file_spans"].keys())
+
+        result.found_test_files = test_files
+
+        if "evaluation_result" in info:
+            test_status = info["evaluation_result"]["tests_status"]
+            result.fail_to_pass_count = len(test_status["fail_to_pass"]["failure"])
+            result.pass_to_pass_count = len(test_status["pass_to_pass"]["failure"])
+            result.test_count = (len(test_status["fail_to_pass"]["failure"])
+                                 + len(test_status["pass_to_pass"]["failure"])
+                                 + len(test_status["fail_to_pass"]["success"])
+                                 + len(test_status["pass_to_pass"]["success"]))
+
+        set_found_status(
+            expected_spans,
+            alternative_solutions,
+            pinned_spans,
+            result.coding,
+        )
 
         if "error" in info:
             result.error = info["error"].split("\n")[0]
         else:
             result.error = ""
-
-        if result.resolved:
-            result.status = "resolved"
-        elif result.edit.status in ["expected_spans", "alternative_spans"]:
-            result.status = "edited"
-        elif result.plan.status in ["expected_spans", "alternative_spans"]:
-            result.status = "planned"
-        elif result.identify.status in ["expected_spans", "alternative_spans"]:
-            result.status = "identified"
-        elif result.search.status in ["expected_spans", "alternative_spans"]:
-            result.status = "searched"
-        elif "error" in info:
-            result.status = "error"
-        else:
-            result.status = "failed"
 
     except Exception as e:
         raise e
@@ -332,198 +323,11 @@ def set_found_status(
         result_stats.status = "missing_spans"
 
 
-def generate_md_report(trajectory: Trajectory, instance: Dict) -> str:
-    info = trajectory._info
-    markdown = f"# {instance['instance_id']}\n"
-
-    markdown += "\n## Problem statement\n"
-    markdown += f"```\n{instance['problem_statement']}\n```\n"
-
-    if "error" in trajectory._info:
-        markdown += "\n## Error\n"
-        markdown += f"```\n{trajectory._info['error']}\n```\n"
-    else:
-        markdown += "\n## Prediction\n"
-        markdown += f"```diff\n{info['submission']}\n```\n"
-
-    markdown += "\n## Golden patch\n"
-    markdown += f"```diff\n{instance['golden_patch']}\n```\n"
-
-    markdown += "\n## Trajectory\n"
-
-    repo_dir = setup_swebench_repo(instance)
-    file_repo = FileRepository(repo_dir)
-
-    for j, transition in enumerate(trajectory.transitions):
-        state = transition.state
-        for i, action in enumerate(state._actions):
-            markdown += f"### {j+1} {state.name} ({i+1})\n\n"
-
-            if state.name == "PlanToCode":
-                if action.request.file_path:
-                    if action.request.instructions:
-                        markdown += f"\n\n * {action.request.instructions}"
-                    markdown += f"\n * {action.request.file_path}"
-                    markdown += f"\n * {action.request.span_id}"
-
-                    markdown += "\n\n#### File context \n\n"
-                    try:
-                        file_context = FileContext(file_repo)
-                        file_context.add_span_to_context(
-                            action.request.file_path,
-                            action.request.span_id,
-                        )
-                        markdown += file_context.create_prompt(
-                            show_outcommented_code=True
-                        )
-                    except Exception as e:
-                        logger.error(e)
-
-            if state.name == "EditCode":
-                markdown += "#### LLM Response\n\n"
-                markdown += f"```\n{action.request.content if isinstance(action.request, Content) else ''}\n```\n"
-
-                if action.response and action.response.output:
-                    output = action.response.output
-                    if output.get("diff"):
-                        markdown += "#### Diff\n\n"
-                        markdown += f"```diff\n{output['diff']}\n```\n"
-
-                    if output.get("errors"):
-                        markdown += "#### Errors\n\n"
-                        markdown += f"{output['errors']}\n\n"
-
-                    if output.get("message"):
-                        markdown += "#### Message\n\n"
-                        markdown += f"{output['message']}\n\n"
-
-            if state.name == "ClarifyCodeChange":
-                if action.request.scratch_pad:
-                    markdown += f"*{action.request.scratch_pad}*"
-
-                if action.response and action.response.output:
-                    output = action.response.output
-                    if output.get("start_line"):
-                        markdown += f"\n* Start Line: {output['start_line']}\n"
-                        markdown += f"\n* End Line: {output['end_line']}\n"
-
-            if state.name == "Finished":
-                markdown += f"*{action.request.thoughts}*\n"
-
-            if state.name == "Rejected":
-                markdown += f"*{action.request.thoughts}*\n"
-
-    markdown += "## Alternative patches\n"
-    for alternative in instance["resolved_by"]:
-        markdown += f"### {alternative['name']}\n"
-        markdown += f"```diff\n{alternative['patch']}\n```\n"
-
-    return markdown
-
-
-def generate_md_report(trajectory: dict, instance: dict):
-    info = trajectory["info"]
-    markdown = f"# {instance['instance_id']}\n"
-
-    markdown += "\n## Problem statement\n"
-    markdown += f"```\n{instance['problem_statement']}\n```\n"
-
-    if "error" in trajectory["info"]:
-        markdown += "\n## Error\n"
-        markdown += f"```\n{trajectory['info']['error']}\n```\n"
-    else:
-        markdown += "\n## Prediction\n"
-        markdown += f"```diff\n{info['submission']}\n```\n"
-
-    markdown += "\n## Golden patch\n"
-    markdown += f"```diff\n{instance['golden_patch']}\n```\n"
-
-    markdown += "\n## Trajectory\n"
-
-    repo_dir = setup_swebench_repo(instance)
-    file_repo = FileRepository(repo_dir)
-
-    for j, step in enumerate(trajectory["transitions"]):
-        for i, traj_action in enumerate(step["actions"]):
-            state_name = step["state"]
-            markdown += f"### {j+1} {state_name} ({i+1})\n\n"
-
-            if not traj_action.get("action"):
-                continue
-            action = traj_action["action"]
-
-            if state_name == "PlanToCode":
-                if action.get("scratch_pad"):
-                    markdown += "*" + action["scratch_pad"] + "*"
-
-                if action.get("instructions"):
-                    markdown += f"\n\n * {action['instructions']}"
-
-                if action.get("file_path"):
-                    markdown += f"\n * {action['file_path']}"
-
-                if action.get("span_id"):
-                    markdown += f"\n * {action['span_id']}"
-
-                if action.get("file_path") and action.get("span_id"):
-                    markdown += "\n\n#### File context \n\n"
-                    try:
-                        file_context = FileContext(file_repo)
-                        file_context.add_span_to_context(
-                            action.get("file_path"),
-                            action.get("span_id"),
-                        )
-                        markdown += file_context.create_prompt(
-                            show_outcommented_code=True
-                        )
-                    except Exception as e:
-                        logger.error(e)
-
-            if state_name == "EditCode":
-                markdown += "#### LLM Response\n\n"
-                markdown += f"```\n{action.get('content', '')}\n```\n"
-
-                output = traj_action.get("output")
-                if output:
-                    if output.get("diff"):
-                        markdown += "#### Diff\n\n"
-                        markdown += f"```diff\n{output['diff']}\n```\n"
-
-                    if output.get("errors"):
-                        markdown += "#### Errors\n\n"
-                        markdown += f"{output['errors']}\n\n"
-
-                    if output.get("message"):
-                        markdown += "#### Message\n\n"
-                        markdown += f"{output['message']}\n\n"
-
-            if state_name == "ClarifyCodeChange":
-                if action.get("thoughts"):
-                    markdown += "*" + action["thoughts"] + "*"
-
-                if action.get("output") and action.get("output").get("start_line"):
-                    markdown += f"\n* Start Line: {action['output']['start_line']}\n"
-                    markdown += f"\n* End Line: {action['output']['end_line']}\n"
-
-            if state_name == "Finished":
-                markdown += f"*{action['properties']['message']}*\n"
-
-            if state_name == "Rejected":
-                markdown += f"*{action['properties']['message']}*\n"
-
-    markdown += "## Alternative patches\n"
-    for alternative in instance["resolved_by"]:
-        markdown += f"### {alternative['name']}\n"
-        markdown += f"```diff\n{alternative['patch']}\n```\n"
-
-    return markdown
-
-
 def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None) -> pd.DataFrame:
-    state_keys = ["search", "identify", "decide", "plan", "edit"]
+    state_keys = ["search", "identify", "decide", "coding"]
     rename_columns = False
     if report_mode == "code":
-        state_keys = ["plan", "edit"]
+        state_keys = ["coding"]
     elif report_mode == "search_and_identify":
         state_keys = ["search", "identify"]
     elif report_mode in state_keys:

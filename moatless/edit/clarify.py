@@ -31,7 +31,7 @@ class LineNumberClarification(ActionRequest):
 class ClarifyCodeChange(AgenticState):
     instructions: str = Field(..., description="The instructions for the code change.")
     file_path: str = Field(..., description="The path to the file to be updated.")
-    span_id: str = Field(..., description="The ID of the span to be updated.")
+    span_id: Optional[str] = Field(default=None, description="The ID of the span to be updated.")
 
     start_line: Optional[int] = Field(
         None, description="The start line of the code to be updated."
@@ -41,7 +41,7 @@ class ClarifyCodeChange(AgenticState):
     )
 
     max_tokens_in_edit_prompt: int = Field(
-        500,
+        1000,
         description="The maximum number of tokens in a span to show the edit prompt.",
     )
 
@@ -51,11 +51,21 @@ class ClarifyCodeChange(AgenticState):
 
     def init(self):
         self._file = self.file_repo.get_file(self.file_path)
-        self._span = self._file.module.find_span_by_id(self.span_id)
 
-        file_context = self.create_file_context(
-            [FileWithSpans(file_path=self.file_path, span_ids=[self.span.span_id])]
-        )
+        if self.span_id:
+            self._span = self._file.module.find_span_by_id(self.span_id)
+            if not self._span:
+                raise ValueError(f"Span with ID {self.span_id} not found in {self.file_path}")
+            file_context = self.create_file_context(
+                [FileWithSpans(file_path=self.file_path, span_ids=[self.span.span_id])]
+            )
+        else:
+            # Set spans in context if no span id provided
+            context_file = self.file_context.get_file(self.file_path)
+            span_ids = [span.span_id for span in context_file.spans]
+            file_context = self.create_file_context(
+                [FileWithSpans(file_path=self.file_path, span_ids=span_ids)]
+            )
 
         # Include all function/class signatures if the block is a class
         if self.span.initiating_block.type == CodeBlockType.CLASS:
@@ -78,7 +88,6 @@ class ClarifyCodeChange(AgenticState):
                             tokens=1  # TODO: THis is set to 1 to not show the contents Change so 0 can be set and mean "only signature"
                         )
 
-
         self._file_context_str = file_context.create_prompt(
             show_line_numbers=True,
             show_span_ids=False,
@@ -89,7 +98,7 @@ class ClarifyCodeChange(AgenticState):
 
     def _execute_action(self, request: LineNumberClarification) -> StateOutcome:
         logger.info(
-            f"{self}: Got line number clarification: {request.start_line} - {request.end_line}"
+            f"{self.id}:{self.name}:  Got line number clarification: {request.start_line} - {request.end_line}"
         )
 
         if request.reject:
@@ -107,9 +116,6 @@ class ClarifyCodeChange(AgenticState):
             )
         else:
             start_line, end_line = request.start_line, request.end_line
-
-        if request.scratch_pad:
-            self.instructions += "\n\n" + request.scratch_pad
 
         return StateOutcome.transition(
             trigger="edit_code",
@@ -143,7 +149,7 @@ class ClarifyCodeChange(AgenticState):
         self, line_numbers: LineNumberClarification
     ) -> Optional[str]:
         logger.info(
-            f"{self}: Verifying line numbers: {line_numbers.start_line} - {line_numbers.end_line}. "
+            f"{self.id}:{self.name}:  Verifying line numbers: {line_numbers.start_line} - {line_numbers.end_line}. "
             f"To span with line numbers: {self.span.start_line} - {self.span.end_line}"
         )
 
@@ -151,7 +157,9 @@ class ClarifyCodeChange(AgenticState):
             line_numbers.start_line <= self.span.start_line
             and line_numbers.end_line >= self.span.end_line
         ):
-            return f"The provided line numbers {line_numbers.start_line} - {line_numbers.end_line} covers the whole code span. You must specify line numbers of only lines you want to change."
+            return (f"The provided line numbers {line_numbers.start_line} - {line_numbers.end_line} covers the whole code span. "
+                    f"You must specify line numbers of only lines you want to change. "
+                    f"If the instructions cover a too large part of the code, you should reject the request.")
 
         span_block = self.span.initiating_block
 
@@ -160,7 +168,7 @@ class ClarifyCodeChange(AgenticState):
             last_block_content_line = span_block.children[0].start_line - 1
 
             logger.info(
-                f"{self}: Checking if the line numbers only covers a class/function signature to "
+                f"{self.id}:{self.name}:  Checking if the line numbers only covers a class/function signature to "
                 f"{self.span.initiating_block.path_string()} ({span_block.start_line} - {last_block_content_line})"
             )
             if (
@@ -170,7 +178,7 @@ class ClarifyCodeChange(AgenticState):
                 > self.max_tokens_in_edit_prompt
             ):
                 clarify_msg = f"The line numbers {line_numbers.start_line} - {line_numbers.end_line} only covers to the signature of the {self.span.initiating_block.type.value}."
-                logger.info(f"{self}: {clarify_msg}. Ask for clarification.")
+                logger.info(f"{self.id}:{self.name}:  {clarify_msg}. Ask for clarification.")
                 # TODO: Ask if this was intentional instead instructing the LLM
                 return f"{clarify_msg}. You need to specify the exact part of the code that needs to be updated to fulfill the change."
 
@@ -194,7 +202,7 @@ class ClarifyCodeChange(AgenticState):
 
     def messages(self) -> list[Message]:
         if not self._file_context_str:
-            self.init()
+            raise RuntimeError("File context has not been set")
 
         content = f"<instructions>\n{self.instructions}\n</instructions>\n<code>\n{self._file_context_str}\n</code>"
 
@@ -218,7 +226,16 @@ class ClarifyCodeChange(AgenticState):
             f"Get span to change in {self.file_path} from {start_line} to {end_line}"
         )
 
-        start_block = self.file.module.find_first_by_start_line(start_line)
+        if self.span_id:
+            parent_block = self.file.module.find_span_by_id(self.span_id).initiating_block
+        else:
+            parent_block = self.file.module
+
+        # Expect to add code to the end of the block
+        if start_line == parent_block.end_line + 1:
+            start_line = parent_block.end_line
+
+        start_block = parent_block.find_first_by_start_line(start_line)
         assert (
             start_block is not None
         ), f"No block found in {self.file_path} that starts at line {start_line}"
@@ -306,7 +323,7 @@ class ClarifyCodeChange(AgenticState):
 
 
 def _get_pre_start_line(
-    start_line: int, min_start_line: int, content_lines: list[str], max_lines: int = 4
+    start_line: int, min_start_line: int, content_lines: list[str], max_lines: int = 6
 ) -> int:
     if start_line > len(content_lines):
         raise ValueError(
@@ -339,7 +356,7 @@ def _get_pre_start_line(
 
 
 def _get_post_end_line_index(
-    end_line: int, max_end_line: int, content_lines: list[str], max_lines: int = 4
+    end_line: int, max_end_line: int, content_lines: list[str], max_lines: int = 6
 ) -> int:
     if end_line < 1 or end_line > len(content_lines):
         raise IndexError("end_line is out of range.")

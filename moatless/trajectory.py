@@ -202,8 +202,13 @@ class Trajectory:
     def transitions(self) -> List[TrajectoryState]:
         return sorted(self._transitions.values(), key=lambda x: x.id)
 
-    def set_current_state(self, state: State):
-        self._current_transition_id = state.id
+    def set_current_state(self, state: State | None = None, state_id: int | None = None):
+        if state_id is not None:
+            self._current_transition_id = state_id
+        elif state is not None:
+            self._current_transition_id = state.id
+        else:
+            raise ValueError("Either state or state_id must be provided")
         self._maybe_persist()
 
     def get_current_state(self) -> State:
@@ -272,6 +277,9 @@ class Trajectory:
         Return a list of expected states in the trajectory to use for verification when rerunning the trajectory.
         """
         return [transition.state.name for transition in self.transitions[1:]]
+
+    def get_states_by_name(self, state_name: str) -> List[State]:
+        return [t.state for t in self.transitions if t.state.name == state_name]
 
     def to_dict(self):
         return {

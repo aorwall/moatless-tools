@@ -6,39 +6,6 @@ from moatless.benchmark.swebench import setup_swebench_repo, sorted_instances
 from moatless.benchmark.utils import get_file_spans_from_patch
 from moatless.repository import FileRepository
 
-experiments_runs = [
-    "20240402_sweagent_claude3opus",
-    "20240402_sweagent_gpt4",
-    "20240509_amazon-q-developer-agent-20240430-dev",
-    "20240523_aider",
-    "20240524_opencsg_starship_gpt4",
-    "20240530_autocoderover-v20240408",
-    "20240604_CodeR",
-    "20240612_IBM_Research_Agent101",
-    "20240612_marscode-agent-dev",
-    "20240612_MASAI_gpt4o",
-    "20240615_appmap-navie_gpt4o",
-    "20240617_factory_code_droid",
-    "20240617_moatless_gpt4o",
-]
-
-experiment_verified_runs = [
-    "20231010_rag_claude2",
-    "20231010_rag_gpt35",
-    "20231010_rag_swellama13b",
-    "20231010_rag_swellama7b",
-    "20240402_rag_claude3opus",
-    "20240402_rag_gpt4",
-    "20240402_sweagent_claude3opus",
-    "20240402_sweagent_gpt4",
-    "20240509_amazon-q-developer-agent-20240430-dev",
-    "20240615_appmap-navie_gpt4o",
-    "20240617_factory_code_droid",
-    "20240620_sweagent_claude3.5sonnet",
-    "20240628_autocoderover-v20240620",
-    "20240721_amazon-q-developer-agent-20240719-dev",
-]
-
 # dataset_path = "/home/albert/repos/albert/moatless/datasets/swebench_lite_all_evaluations.json"
 dataset_path = (
     "/home/albert/repos/albert/moatless/datasets/swebench_verified_all_evaluations.json"
@@ -57,10 +24,14 @@ def read_predictions(pred_path: str):
 def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
     results = {}
 
-    experiments_dir = "/home/albert/repos/stuffs/experiments/evaluation/verified"
+    experiments_dir = "/home/albert/repos/stuffs/experiments/evaluation/lite"
 
     runs = []
-    for run_name in experiment_verified_runs:
+    for run_name in os.listdir(experiments_dir):
+        if not os.path.exists(f"{experiments_dir}/{run_name}/all_preds.jsonl"):
+            print(f"Missing {experiments_dir}/{run_name}/all_preds.jsonl")
+            continue
+
         runs.append(
             (
                 run_name,
@@ -69,7 +40,10 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
             )
         )
 
+    print(f"Found {len(runs)} runs")
+
     for run_name, prediction_file, result_file in runs:
+
         with open(result_file) as file:
             final_report = json.load(file)
 
@@ -86,13 +60,14 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
     report = []
 
     instances = sorted_instances(split="test", dataset_name=dataset_name)
-    for instance in instances:
+    for i, instance in enumerate(instances):
         instance_id = instance["instance_id"]
-        expected_patch = instance["patch"]
+        print(f"Processing {instance_id} ({i}/{len(instances)})")
         repo_dir = setup_swebench_repo(instance, repo_base_dir="/tmp/repos_2")
         file_repo = FileRepository(repo_dir)
 
-        expected_file_spans = get_file_spans_from_patch(file_repo, expected_patch)
+        expected_file_spans = get_file_spans_from_patch(file_repo, instance["patch"])
+        test_file_spans = get_file_spans_from_patch(file_repo, instance["test_patch"])
 
         evaluation_instance = {
             "instance_id": instance_id,
@@ -100,7 +75,11 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
             "base_commit": instance["base_commit"],
             "problem_statement": instance["problem_statement"],
             "golden_patch": instance["patch"],
+            "test_patch": instance["test_patch"],
+            "fail_to_pass": instance["FAIL_TO_PASS"],
+            "pass_to_pass": instance["PASS_TO_PASS"],
             "expected_spans": expected_file_spans,
+            "test_file_spans": test_file_spans,
             "resolved_by": [],
             "alternative_spans": [],
         }
@@ -129,7 +108,6 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
 
             resolved = {
                 "name": run_name,
-                "patch": prediction,
                 "updated_spans": file_spans,
                 "alternative_spans": alternative_spans,
             }
@@ -152,4 +130,4 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
 
 
 if __name__ == "__main__":
-    df = generate_report("princeton-nlp/SWE-bench_Verified")
+    df = generate_report("princeton-nlp/SWE-bench_Lite")

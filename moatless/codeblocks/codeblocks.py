@@ -28,6 +28,8 @@ class CodeBlockTypeGroup(str, Enum):
 
     ERROR = "Error"
 
+    def __str__(self):
+        return self.value
 
 class CodeBlockType(Enum):
     MODULE = (
@@ -69,8 +71,15 @@ class CodeBlockType(Enum):
     ERROR = ("Error", CodeBlockTypeGroup.ERROR)
 
     def __init__(self, value: str, group: CodeBlockTypeGroup):
-        self._value_ = value
+        self._value = value
         self.group = group
+
+    @property
+    def display_name(self):
+        return self._value
+
+    def __str__(self):
+        return self._value
 
     @classmethod
     def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
@@ -404,7 +413,7 @@ class CodeBlock:
                     child.replace_by_path(path[1:], new_block)
 
     def __str__(self):
-        return self.to_string()
+        return f"{self.display_name} ({self.type.display_name} {self.start_line} - {self.end_line})"
 
     def to_string(self):
         return self._to_string()
@@ -625,7 +634,7 @@ class CodeBlock:
         self,
         show_span_id: bool = False,
         span_marker: SpanMarker = SpanMarker.COMMENT,
-        show_line_numbers: bool = False,
+        show_line_numbers: bool = False
     ) -> str:
         contents = ""
 
@@ -642,13 +651,18 @@ class CodeBlock:
             if not self.pre_lines:
                 contents += "\n"
 
-        def print_line(line_number):
+        def print_line(line_number: int):
             if not show_line_numbers:
                 return ""
+
+            # Don't print out line numbers on out commented code to make it harder for the LLM to select it
+            if line_number == self.start_line and self.type == CodeBlockType.COMMENTED_OUT_CODE:
+                return " " * 6
+
             return str(line_number).ljust(6)
 
         # Just to write out the first line number when there are no pre_lines on first block
-        if self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
+        if not self.pre_lines and self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
             contents += print_line(self.start_line)
 
         if self.pre_lines:
@@ -657,7 +671,6 @@ class CodeBlock:
                 contents += print_line(self.start_line - self.pre_lines + i + 1)
 
         contents += self.indentation + self.content_lines[0]
-
         for i, line in enumerate(self.content_lines[1:]):
             contents += "\n"
             contents += print_line(self.start_line + i + 1)
@@ -820,6 +833,10 @@ class CodeBlock:
                 continue
 
             if child.start_line > end_line:
+                if not spans:
+                    last_block = self.find_last_by_end_line(end_line)
+                    if last_block:
+                        spans.append(last_block.belongs_to_span)
                 return spans
 
             if (
@@ -827,8 +844,8 @@ class CodeBlock:
                 and child.belongs_to_span.span_id not in spans
                 and (
                     not child.children
-                    or child.start_line >= start_line
-                    and child.end_line <= end_line
+                    or child.children[0].start_line > end_line
+                    or (child.start_line >= start_line and child.end_line <= end_line)
                     or child.start_line == start_line
                     or child.end_line == end_line
                 )
@@ -845,6 +862,13 @@ class CodeBlock:
     def dict(self, **kwargs):
         # TODO: Add **kwargs to dict call
         return super().dict(exclude={"parent", "merge_history"})
+
+    @property
+    def display_name(self):
+        if self.full_path():
+            return self.path_string()
+        else:
+            return "<module>"
 
     def path_string(self):
         return ".".join(self.full_path())
@@ -953,11 +977,12 @@ class CodeBlock:
         return errors
 
     def create_commented_out_block(self, comment_out_str: str = "..."):
+        pre_lines = self.start_line - self.previous.end_line if self.previous else 1
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
             indentation=self.indentation,
             parent=self,
-            pre_lines=1,
+            pre_lines=pre_lines,
             content=self.create_comment(comment_out_str),
         )
 
@@ -1128,19 +1153,34 @@ class CodeBlock:
         return self.find_blocks_with_types([block_type])
 
     def find_first_by_start_line(self, start_line: int) -> Optional["CodeBlock"]:
+        if self.start_line > start_line:
+            return None
+
         for child in self.children:
-            if child.start_line >= start_line:
+            if child.start_line == start_line:
                 return child
 
-            if child.end_line >= start_line:
-                if not child.children:
+            if child.start_line <= start_line <= child.end_line:
+                if child.children:
+                    found = child.find_first_by_start_line(start_line)
+                    if found:
+                        return found
+                else:
                     return child
 
-                found = child.find_first_by_start_line(start_line)
-                if found:
-                    return found
-
         return None
+
+    def find_blocks_by_line_numbers(self, start_line: int, end_line: int, include_parents: bool = False) -> List["CodeBlock"]:
+        blocks = []
+        block = self
+        while block.next and block.start_line <= end_line:
+            if include_parents and block.has_lines(start_line, end_line):
+                blocks.append(block)
+            elif block.start_line >= start_line:
+                blocks.append(block)
+            block = block.next
+
+        return blocks
 
     def find_last_by_end_line(
         self, end_line: int, tokens: Optional[int] = None
@@ -1161,33 +1201,6 @@ class CodeBlock:
                     return found
 
         return None
-
-    def find_closest_indexed_parent(self) -> Optional["CodeBlock"]:
-        if self.is_indexed:
-            return self
-
-        if self.parent:
-            return self.parent.find_closest_indexed_parent()
-
-        return None
-
-    def find_indexed_blocks(self):
-        indexed_blocks = []
-        for child in self.children:
-            if child.is_indexed:
-                indexed_blocks.append(child)
-            indexed_blocks.extend(child.find_indexed_blocks())
-        return indexed_blocks
-
-    def get_indexed_blocks(self) -> list["CodeBlock"]:
-        blocks = []
-        for child in self.children:
-            if child.is_indexed:
-                blocks.append(child)
-
-            blocks.extend(child.get_indexed_blocks())
-
-        return blocks
 
     def line_witin_token_context(self, line_number: int, tokens: int) -> bool:
         if tokens <= 0:
@@ -1272,6 +1285,10 @@ class CodeBlock:
             span_ids.update(child.get_all_span_ids())
 
         return span_ids
+
+    def get_all_spans(self, include_self: bool = True) -> list[BlockSpan]:
+        span_ids = self.get_all_span_ids(include_self=include_self)
+        return [self.module.find_span_by_id(span_id) for span_id in span_ids]
 
     def has_span(self, span_id: str):
         return self.has_any_span({span_id})

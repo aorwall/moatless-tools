@@ -30,6 +30,10 @@ class TransitionRule(BaseModel):
     excluded_fields: Optional[set[str]] = Field(
         default=None, description="The fields that are excluded from the transition."
     )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters to set on destination state.",
+    )
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
@@ -55,9 +59,6 @@ class TransitionRule(BaseModel):
                 data["source"] = get_state_class(data["source"])
             if isinstance(data.get("dest"), str):
                 data["dest"] = get_state_class(data["dest"])
-
-        if data["source"] == data["dest"]:
-            raise ValueError("Source and destination states cannot be the same.")
 
         return data
 
@@ -140,10 +141,11 @@ class TransitionRules(BaseModel):
         params = {}
         params.update(self.global_params)
         params.update(self.state_params.get(rule.dest, {}))
+        params.update(rule.params)
         return params
 
     def get_next_rule(
-        self, source: State, trigger: str, data: dict[str, Any]
+        self, source: State, trigger: str | None = None, data: dict[str, Any] = {}
     ) -> TransitionRule | None:
         if trigger == "init" and self.initial_state:
             logger.warning(
@@ -153,6 +155,13 @@ class TransitionRules(BaseModel):
                 trigger="init",
                 source=source.__class__,
                 dest=self.initial_state,
+            )
+
+        if trigger is None:
+            return TransitionRule(
+                trigger="continue",
+                source=source.__class__,
+                dest=source.__class__,
             )
 
         transition_rules = self.find_transition_rule_by_source_and_trigger(

@@ -4,11 +4,12 @@ from typing import Any, Optional, Dict
 from moatless.codeblocks.parser.python import PythonParser
 from moatless.file_context import FileContext
 from moatless.index import IndexSettings
-from moatless.index.code_index import CodeIndex
+from moatless.index.code_index import CodeIndex, is_test
 from moatless.repository import CodeFile, FileRepository, GitRepository
-from moatless.schema import FileWithSpans, VerificationError
+from moatless.schema import FileWithSpans, VerificationIssue
 from moatless.verify.lint import PylintVerifier
 from moatless.verify.maven import MavenVerifier
+from moatless.verify.verify import Verifier
 
 _parser = PythonParser()
 
@@ -26,6 +27,7 @@ class Workspace:
         verification_job: Optional[str] = "pylint",
         max_file_context_tokens: int = 4000,
         file_context: FileContext | None = None,
+        verifier: Verifier | None = None,
     ):
         self.file_repo = file_repo
 
@@ -49,7 +51,9 @@ class Workspace:
         else:
             self.code_index = None
 
-        if verification_job == "maven" and self.file_repo:
+        if verifier:
+            self.verifier = verifier
+        elif verification_job == "maven" and self.file_repo:
             self.verifier = MavenVerifier(self.file_repo.path)
         elif verification_job == "pylint" and self.file_repo:
             self.verifier = PylintVerifier(self.file_repo.path)
@@ -157,17 +161,11 @@ class Workspace:
     def file_context(self):
         return self._file_context
 
-    def get_file(self, file_path, refresh: bool = False, from_origin: bool = False):
-        return self.file_repo.get_file(
-            file_path, refresh=refresh, from_origin=from_origin
-        )
+    def get_file(self, file_path):
+        return self.file_repo.get_file(file_path)
 
-    def save(self):
-        self.file_repo.save()
-
-    def verify(self, file: CodeFile | None = None) -> list[VerificationError]:
+    def run_tests(self, test_files: list[str]) -> list[VerificationIssue]:
         if self.verifier:
-            return self.verifier.verify(file)
+            return self.verifier.verify(test_files)
 
-        logger.info("No verifier configured.")
         return []
