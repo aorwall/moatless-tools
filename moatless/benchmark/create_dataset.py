@@ -1,4 +1,5 @@
 import json
+import os
 
 import pandas as pd
 
@@ -6,10 +7,8 @@ from moatless.benchmark.swebench import setup_swebench_repo, sorted_instances
 from moatless.benchmark.utils import get_file_spans_from_patch
 from moatless.repository import FileRepository
 
-# dataset_path = "/home/albert/repos/albert/moatless/datasets/swebench_lite_all_evaluations.json"
-dataset_path = (
-    "/home/albert/repos/albert/moatless/datasets/swebench_verified_all_evaluations.json"
-)
+dataset_path = "/home/albert/repos/albert/swe-planner/moatless/benchmark/swebench_lite_all_evaluations.json"
+#dataset_path = "/home/albert/repos/albert/swe-planner/moatless/benchmark/swebench_verified_all_evaluations.json"
 
 
 def read_predictions(pred_path: str):

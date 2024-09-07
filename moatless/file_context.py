@@ -43,6 +43,10 @@ class ContextFile(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
 
+        if not self.file.module:
+            logger.warning(f"File {self.file.file_path} has no module")
+            return
+
         # Always include init spans like 'imports' to context file
         for child in self.file.module.children:
             if (
@@ -742,6 +746,9 @@ class FileContext(BaseModel):
 
         return spans
 
+    def has_file(self, file_path: str):
+        return file_path in self._file_context
+
     def get_file(
         self, file_path: str, add_if_not_found: bool = False
     ) -> Optional[ContextFile]:
@@ -754,6 +761,7 @@ class FileContext(BaseModel):
             if add_if_not_found:
                 file = self._repo.get_file(file_path)
                 if not file:
+                    logger.warning(f"get_context_file({file_path}) File not found")
                     return None
 
                 context_file = ContextFile(file=file, spans=[])

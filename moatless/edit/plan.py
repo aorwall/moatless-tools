@@ -6,8 +6,7 @@ from typing import Optional, List, Any
 from pydantic import ConfigDict, Field, PrivateAttr, BaseModel, model_validator
 
 from moatless.codeblocks import CodeBlockType
-from moatless.codeblocks.codeblocks import CodeBlockTypeGroup
-from moatless.edit.clarify import _get_post_end_line_index, _get_pre_start_line
+from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlock
 from moatless.edit.prompt import PLAN_TO_CODE_SYSTEM_PROMPT
 from moatless.index.code_index import is_test
 from moatless.repository import CodeFile
@@ -49,15 +48,13 @@ class RequestCodeChange(ActionRequest):
         description="Planned steps that should be executed after the current step."
     )
 
-    #@model_validator(mode="before")
-    #@classmethod
+    @model_validator(mode="before")
+    @classmethod
     def validate_steps(cls, data: Any):
-        # The Antrophic API sometimes returns steps as a string instead of a list
-        logger.info(f"validate_steps {isinstance(data, dict) and 'steps' in data} {isinstance(data['steps'], str)}")
-        if isinstance(data, dict) and "steps" in data and isinstance(data["steps"], str):
-            logger.info(f"validate_steps: Converting steps to list: {data['steps']}")
-            data["steps"] = json.loads(data["steps"])
-            logger.info(f"validate_steps: Converted steps to list: {data['steps']}")
+        # Claude sometimes returns steps as a string instead of a list
+        if isinstance(data, dict) and "planned_steps" in data and isinstance(data["planned_steps"], str):
+            logger.info(f"validate_steps: Converting planned_steps to list: {data['planned_steps']}")
+            data["planned_steps"] = data["planned_steps"].split("\n")
         return data
 
 
@@ -144,7 +141,7 @@ class PlanToCode(AgenticState):
     )
 
     max_repeated_test_failures: int = Field(
-        3,
+        5,
         description="The maximum number of repeated test failures before rejecting the task.",
     )
 
@@ -153,12 +150,20 @@ class PlanToCode(AgenticState):
         description="The maximum number of repeated git diffs before rejecting the task.",
     )
 
+    max_repeated_instructions: int = Field(
+        2,
+        description="The maximum number of repeated instructions before rejecting the task.",
+    )
+
     include_message_history: bool = Field(
         True,
         description="Whether to include the message history in the prompt.",
     )
 
-    verify: bool = Field(True, description="Whether to run verification job before executing the next action.")
+    run_tests: bool = Field(
+        False,
+        description="Whether to run tests after the code change."
+    )
 
     verification_issues: list[VerificationIssue] | None = Field(
         None,
@@ -206,12 +211,20 @@ class PlanToCode(AgenticState):
         diff_counts = {}
         verification_issue_counts = {}
         for state in previous_states:
-            if state.diff:
-                diff_counts[state.diff] = diff_counts.get(state.diff, 0) + 1
-            if state.verification_issues:
-                for issue in state.verification_issues:
-                    issue_key = f"{issue.file_path}:{issue.span_id}:{issue.message}"
+            if not state.diff:
+                diff = "rejected"
+            else:
+                diff = state.diff
+
+                if state.verification_issues:
+                    issue_keys = []
+                    for issue in state.verification_issues:
+                        issue_keys.append(f"{issue.file_path}:{issue.span_id}:{issue.message}")
+
+                    issue_key = "\n".join(issue_keys)
                     verification_issue_counts[issue_key] = verification_issue_counts.get(issue_key, 0) + 1
+
+            diff_counts[diff] = diff_counts.get(diff, 0) + 1
 
         # Check if any diff exceeds the maximum allowed repetitions
         for diff, count in diff_counts.items():
@@ -223,7 +236,7 @@ class PlanToCode(AgenticState):
             if count > self.max_repeated_test_failures:
                 return StateOutcome.reject(f"The following verification issue has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{issue_key}")
 
-        if self.verify:
+        if self.run_tests:
             # Run all test files that are in context
             test_files = [file for file in self.file_context.files if is_test(file.file_path)]
             if not test_files:
@@ -356,6 +369,22 @@ class PlanToCode(AgenticState):
             logger.info(f"{self.name}:{self.id}:RequestCodeChange: End line not set, set to start line {rfc.start_line}")
             rfc.end_line = rfc.start_line
 
+        previous_states = self.get_previous_states(self)
+        instruction_counts = {}
+        code_location = f"{rfc.file_path}:{rfc.start_line}-{rfc.end_line}"
+        instruction_counts[code_location] = instruction_counts.get(code_location, 0) + 1
+
+        for state in previous_states:
+            if state.action_request and isinstance(state.action_request.action, RequestCodeChange):
+                code_location = f"{state.action_request.action.file_path}:{state.action_request.action.start_line}-{state.action_request.action.end_line}"
+                instruction_counts[code_location] = instruction_counts.get(code_location, 0) + 1
+
+            # Check if any RFC exceeds the maximum allowed repetitions
+            for code_location, count in instruction_counts.items():
+                if count > self.max_repeated_instructions:
+                    return StateOutcome.reject(
+                        f"The same code was requested {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{code_location}")
+
         context_file = self.file_context.get_file(rfc.file_path)
         if not context_file:
             logger.warning(
@@ -398,14 +427,17 @@ class PlanToCode(AgenticState):
         span_to_update = context_file.file.module.find_spans_by_line_numbers(start_line, end_line)
         if span_to_update:
             # Pin the spans that are planned to be updated to context
-            span_ids = [span.span_id for span in span_to_update]
+            for span in span_to_update:
+                if span.span_id not in span_ids:
+                    span_ids.append(span.span_id)
             self.file_context.add_spans_to_context(rfc.file_path, span_ids=set(span_ids), pinned=True)
 
-        # Add the two most relevant test files to file context if there are none to trigger tests on next iteration
-        has_test_files = any(file for file in self.file_context.files if is_test(file.file_path))
-        if not has_test_files:
+        if self.run_tests:
+            # Add the two most relevant test files to file context
             test_files_with_spans = self.workspace.code_index.find_test_files(rfc.file_path, query=code_to_edit, max_results=2, max_spans=1)
-            self.file_context.add_files_with_spans(test_files_with_spans)
+            for test_file_with_spans in test_files_with_spans:
+                if not self.file_context.has_file(test_file_with_spans.file_path):
+                    self.file_context.add_files_with_spans(test_files_with_spans)
 
         return StateOutcome.transition(
             trigger="edit_code",
@@ -431,22 +463,13 @@ class PlanToCode(AgenticState):
         start_block = file.module.find_first_by_start_line(start_line)
 
         # Set just one line on additions which doesn't point to a specific code block
-        if not start_block:
+        if start_block.start_line > start_line:
             if change_type == ChangeType.addition and end_line != start_line:
                 logger.info(f"{self.name}:{self.id} Change type is addition, set end line to start line {start_line}, endline was {end_line}")
                 return start_line, start_line, change_type.addition
             elif start_line == end_line:
                 logger.info(f"{self.name}:{self.id} Start line {start_line} is equal to end line, expect addition ")
                 return start_line, start_line, change_type.addition
-
-        if (start_block and start_block.start_line == start_line
-            and start_block.type.group == CodeBlockTypeGroup.STRUCTURE
-            and not self.file_context.has_span(file.file_path, start_block.belongs_to_span.span_id)
-            and change_type == ChangeType.addition
-            and not file.module.find_first_by_start_line(start_line - 1)):
-            logger.info(f"{self.name}:{self.id} Start block {start_block.display_name} at line {start_line} isn't "
-                        f"in context, expect this to be an addition on line {start_line - 1} before the block")
-            return start_line - 1, start_line - 1, change_type.addition
 
         if not start_block:
             structure_block = file.module
@@ -511,16 +534,13 @@ class PlanToCode(AgenticState):
         if not end_line:
             end_line = start_line
 
-        original_lines = file.content.split("\n")
         if structure_block.end_line - end_line < 5:
             logger.info(
                 f"{self.name}:{self.id} Set structure block [{structure_block.display_name}] end line {structure_block.end_line} as it's {structure_block.end_line - end_line} lines from the end of the file"
             )
             end_line = structure_block.end_line
         else:
-            end_line = _get_post_end_line_index(
-                end_line, structure_block.end_line, original_lines
-            )
+            end_line = _get_post_end_line_index(end_line, structure_block)
             logger.info(f"{self.name}:{self.id} Set end line to {end_line}, structure block {structure_block.display_name} ends at line {structure_block.end_line}")
 
         if start_line - structure_block.start_line < 5:
@@ -529,9 +549,8 @@ class PlanToCode(AgenticState):
             )
             start_line = structure_block.start_line
         else:
-            start_line = _get_pre_start_line(
-                start_line, structure_block.start_line, original_lines
-            )
+            start_line = _get_pre_start_line(start_line, structure_block)
+
             logger.info(
                 f"{self.name}:{self.id} Set start line to {start_line}, structure block {structure_block.display_name} starts at line {structure_block.start_line}"
             )
@@ -539,7 +558,10 @@ class PlanToCode(AgenticState):
         return start_line, end_line, change_type.modification
 
     def system_prompt(self) -> str:
-        return PLAN_TO_CODE_SYSTEM_PROMPT
+        if self.run_tests:
+            return PLAN_TO_CODE_SYSTEM_PROMPT + "\n8. Always write tests to verify the changes you made."
+        else:
+            return PLAN_TO_CODE_SYSTEM_PROMPT + "\n8. Tests are not in scope. Do not search for tests or suggest writing tests."
 
     def to_message(self, verbose: bool = True) -> str:
         response_msg = ""
@@ -616,3 +638,35 @@ class PlanToCode(AgenticState):
         messages.extend(self.retry_messages())
 
         return messages
+
+
+def _get_pre_start_line(
+    start_line: int, structure_block: CodeBlock, max_lines: int = 6
+) -> int:
+    min_start_line = start_line - max_lines
+
+    line_block = structure_block.find_last_by_end_line(start_line)
+
+    if line_block.end_line < start_line and line_block.type.group == CodeBlockTypeGroup.STRUCTURE:
+        return line_block.next.start_line
+
+    while line_block.previous and line_block.previous.type.group != CodeBlockTypeGroup.STRUCTURE and line_block.previous.start_line > min_start_line:
+        line_block = line_block.previous
+
+    return line_block.start_line
+
+
+def _get_post_end_line_index(
+    end_line: int, structure_block: CodeBlock, max_lines: int = 6
+) -> int:
+    max_end_line = end_line + max_lines
+
+    line_block = structure_block.find_first_by_start_line(end_line)
+    if line_block.start_line > end_line and line_block.type.group == CodeBlockTypeGroup.STRUCTURE:
+        return line_block.previous.end_line
+
+    while line_block.next and line_block.next.type.group != CodeBlockTypeGroup.STRUCTURE and line_block.next.end_line < max_end_line:
+        line_block = line_block.next
+
+    return line_block.end_line
+

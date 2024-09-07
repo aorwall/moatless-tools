@@ -19,7 +19,7 @@ def response_format_by_model(model: str) -> LLMResponseFormat | None:
     if "gpt" in model:
         return LLMResponseFormat.STRUCTURED_OUTPUT
 
-    if model.startswith("claude"):
+    if model.startswith("claude") or model.startswith("anthropic.claude"):
         return LLMResponseFormat.ANTHROPIC_TOOLS
 
     if "claude" in model:

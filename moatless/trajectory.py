@@ -78,7 +78,7 @@ class Trajectory:
         self._info: dict[str, Any] = {}
 
     @classmethod
-    def load(cls, file_path: str, skip_workspace: bool = False):
+    def load(cls, file_path: str, skip_workspace: bool = False, base_repo_dir: str | None = None):
         logger.info(f"Loading trajectory from {file_path}")
         with open(file_path, "r") as f:
             data = json.load(f)
@@ -95,7 +95,8 @@ class Trajectory:
         if skip_workspace:
             workspace = Workspace(file_repo=None, file_context=None)
         else:
-            workspace = Workspace.from_dict(data["workspace"])
+            workspace = Workspace.from_dict(data["workspace"], base_repo_dir=base_repo_dir)
+
         trajectory = cls(
             name=data["name"],
             initial_message=data["initial_message"],
@@ -112,6 +113,10 @@ class Trajectory:
             try:
                 trajectory_state = Trajectory._map_state(t, trajectory)
                 trajectory._transitions[t["id"]] = trajectory_state
+
+                if t["id"] == trajectory._current_transition_id and not skip_workspace:
+                    workspace.file_context.restore_from_snapshot(t["snapshot"]["file_context"])
+
             except Exception as e:
                 logger.exception(f"Error loading state {t.get('name')} {t.get('id')}: {e}")
                 raise e
@@ -129,6 +134,7 @@ class Trajectory:
                     f"Missing key {e}, existing keys: {trajectory._transitions.keys()}"
                 )
                 raise
+
 
         trajectory._info = data.get("info", {})
         logger.info(

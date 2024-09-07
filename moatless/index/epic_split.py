@@ -207,13 +207,6 @@ class EpicSplitter(NodeParser):
             logger.debug(f"Skipping file {file_path} because it has no tokens.")
             return []
 
-        if codeblock.find_errors():
-            logger.warning(
-                f"Failed to use spic splitter to split {file_path}. {len(codeblock.find_errors())} codeblocks with type ERROR. Fallback to treesitter_split()"
-            )
-            # TODO: Fall back to treesitter or text split
-            return []
-
         if tokens > self.hard_token_limit:
             for child in codeblock.children:
                 if (

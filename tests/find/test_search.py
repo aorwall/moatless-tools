@@ -8,6 +8,7 @@ from moatless.workspace import Workspace
 from unittest.mock import Mock, MagicMock
 from pydantic import ValidationError
 
+
 class TestSearchCode:
     @pytest.fixture
     def search_code(self):
@@ -15,17 +16,17 @@ class TestSearchCode:
         mock_workspace = Workspace(file_repo=mock_file_repo)
         mock_code_index = MagicMock()
         mock_workspace.code_index = mock_code_index
-        
-        return SearchCode(id=1, _workspace=mock_workspace, _initial_message="Test initial message")
+
+        return SearchCode(
+            id=1, _workspace=mock_workspace, _initial_message="Test initial message"
+        )
 
     def test_action_type(self, search_code):
         assert search_code.action_type() == Search
 
     def test_execute_action_complete(self, search_code):
         action = Search(
-            scratch_pad="Search complete",
-            search_requests=[],
-            complete=True
+            scratch_pad="Search complete", search_requests=[], complete=True
         )
 
         response = search_code._execute_action(action)
@@ -36,23 +37,23 @@ class TestSearchCode:
 
     def test_validate_search_without_search_attributes(self):
         with pytest.raises(ValidationError) as excinfo:
-            Search(
-                scratch_pad="Invalid search",
-                search_requests=[]
-            )
-        
+            Search(scratch_pad="Invalid search", search_requests=[])
+
         assert "At least one search request must exist." in str(excinfo.value)
 
     def test_execute_action_with_search_results(self, search_code):
         mock_code_index = MagicMock()
         mock_code_index.search.return_value.hits = [
-            MagicMock(file_path="test.py", spans=[MagicMock(span_id="span1", rank=1, tokens=10)])
+            MagicMock(
+                file_path="test.py",
+                spans=[MagicMock(span_id="span1", rank=1, tokens=10)],
+            )
         ]
         search_code.workspace.code_index = mock_code_index
 
         action = Search(
             scratch_pad="Valid search",
-            search_requests=[SearchRequest(query="test query")]
+            search_requests=[SearchRequest(query="test query")],
         )
 
         response = search_code._execute_action(action)
@@ -78,7 +79,7 @@ class TestSearchCode:
             query="test query",
             code_snippet="def test_function():",
             class_names=["TestClass"],
-            function_names=["test_method"]
+            function_names=["test_method"],
         )
 
         assert len(search.search_requests) == 1
@@ -95,10 +96,9 @@ class TestSearchCode:
             query="test query",
             search_requests=[
                 SearchRequest(
-                    class_names=["AnotherClass"],
-                    function_names=["another_method"]
+                    class_names=["AnotherClass"], function_names=["another_method"]
                 )
-            ]
+            ],
         )
 
         assert len(search.search_requests) == 2
@@ -111,11 +111,8 @@ class TestSearchCode:
         search = Search(
             scratch_pad="Test search",
             search_requests=[
-                SearchRequest(
-                    file_pattern="*.js",
-                    query="javascript query"
-                )
-            ]
+                SearchRequest(file_pattern="*.js", query="javascript query")
+            ],
         )
 
         assert len(search.search_requests) == 1
@@ -124,12 +121,12 @@ class TestSearchCode:
 
 
 def test_find_impl_span():
-
     instances = get_moatless_instances(split="verified")
 
     # Filter and sort instances
     filtered_instances = {
-        k: v for k, v in instances.items()
+        k: v
+        for k, v in instances.items()
         if "django__django-" in k and "12273" <= k.split("-")[-1] <= "12419"
     }
     sorted_instances = dict(sorted(filtered_instances.items()))
@@ -138,13 +135,18 @@ def test_find_impl_span():
         print(f"Instance: {instance_id}")
         workspace = create_workspace(instance)
 
-        search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+        search_code = SearchCode(
+            id=0, _workspace=workspace, initial_message="Test initial message"
+        )
 
         mocked_action = Search(
             scratch_pad="Applying change",
             search_requests=[
-                SearchRequest(file_pattern="**/global_settings.py", query="SECURE_REFERRER_POLICY setting")
-            ]
+                SearchRequest(
+                    file_pattern="**/global_settings.py",
+                    query="SECURE_REFERRER_POLICY setting",
+                )
+            ],
         )
 
         outcome = search_code.execute(mocked_action)
@@ -153,19 +155,25 @@ def test_find_impl_span():
         workspace.file_context.add_ranked_spans(outcome.output["ranked_spans"])
         assert "SECURE_REFERRER_POLICY" in workspace.file_context.create_prompt()
 
+
 def test_find():
-    instance_id = "django__django-12419" #
+    instance_id = "django__django-12419"  #
     instance = get_moatless_instance(instance_id, split="verified")
     print(f"Instance: {instance_id}")
     workspace = create_workspace(instance)
 
-    search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+    search_code = SearchCode(
+        id=0, _workspace=workspace, initial_message="Test initial message"
+    )
 
     mocked_action = Search(
         scratch_pad="Applying change",
         search_requests=[
-            SearchRequest(file_pattern="**/global_settings.py", query="SECURE_REFERRER_POLICY setting")
-        ]
+            SearchRequest(
+                file_pattern="**/global_settings.py",
+                query="SECURE_REFERRER_POLICY setting",
+            )
+        ],
     )
 
     outcome = search_code.execute(mocked_action)
@@ -183,7 +191,9 @@ def test_find_2():
     instance = get_moatless_instance(instance_id, split="verified")
     workspace = create_workspace(instance)
 
-    search_code = SearchCode(id=0, _workspace=workspace, initial_message="Test initial message")
+    search_code = SearchCode(
+        id=0, _workspace=workspace, initial_message="Test initial message"
+    )
 
     print(instance["expected_spans"])
 
@@ -191,8 +201,11 @@ def test_find_2():
         scratch_pad="Applying change",
         max_search_results=250,
         search_requests=[
-            SearchRequest(file_pattern="**/migrations/*.py", query="MigrationAutodetector class with generate_renamed_models method")
-        ]
+            SearchRequest(
+                file_pattern="**/migrations/*.py",
+                query="MigrationAutodetector class with generate_renamed_models method",
+            )
+        ],
     )
 
     outcome = search_code.execute(mocked_action)

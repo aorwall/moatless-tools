@@ -591,12 +591,15 @@ class CodeIndex:
             # Try to find the most similar test file by file name if no exact match on file name
             files = self.find_test_files(file_path, max_results=1, max_spans=max_spans)
 
-        for result in search_results:
-            file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
+        logger.info(f"result: {files}")
 
-            if not file_with_spans:
+        for result in search_results:
+            existing_file = next((f for f in files if f.file_path == result.file_path), None)
+
+            if not existing_file:
                 file_with_spans = FileWithSpans(file_path=result.file_path, span_ids=[])
-                files.append(file_with_spans)
+            else:
+                file_with_spans = existing_file
 
             file = self._file_repo.get_file(result.file_path)
 
@@ -610,6 +613,9 @@ class CodeIndex:
                         and span_id not in file_with_spans.span_ids
                         and (not max_spans or len(file_with_spans.span_ids) < max_spans)):
                     file_with_spans.span_ids.append(span_id)
+
+                    if not existing_file and len(files) < max_results:
+                        files.append(file_with_spans)
 
             if max_spans and len([f for f in files if len(f.span_ids) >= max_spans]) >= max_results:
                 break

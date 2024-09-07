@@ -156,8 +156,5 @@ class DecideRelevance(AgenticState):
 </file_context>
 """
 
-        if self.feedback:
-            content += f"\n\n<feedback>\n{self.feedback}\n</feedback>"
-
         messages.append(UserMessage(content=content))
         return messages

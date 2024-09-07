@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import CodeBlockType
-from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup, SpanType
+from moatless.codeblocks.codeblocks import BlockSpan, CodeBlockTypeGroup, SpanType, CodeBlock
 from moatless.edit.prompt import CLARIFY_CHANGE_SYSTEM_PROMPT
 from moatless.repository import CodeFile
 from moatless.state import AgenticState, ActionRequest, Message, StateOutcome
@@ -301,9 +301,7 @@ class ClarifyCodeChange(AgenticState):
             )
             end_line = struture_block.end_line
         else:
-            end_line = _get_post_end_line_index(
-                end_line, struture_block.end_line, original_lines
-            )
+            end_line = _get_post_end_line_index(end_line, struture_block)
             logger.info(f"Set end line to {end_line} from the end of the parent block")
 
         if start_line - struture_block.start_line < 5:
@@ -356,31 +354,12 @@ def _get_pre_start_line(
 
 
 def _get_post_end_line_index(
-    end_line: int, max_end_line: int, content_lines: list[str], max_lines: int = 6
+    end_line: int, structure_block: CodeBlock, max_lines: int = 6
 ) -> int:
-    if end_line < 1 or end_line > len(content_lines):
-        raise IndexError("end_line is out of range.")
+    max_end_line = end_line + max_lines
 
-    if max_end_line - end_line < max_lines:
-        return max_end_line
+    line_block = structure_block.find_first_by_start_line(end_line)
+    while line_block and line_block.end_line < max_end_line:
+        line_block = line_block.next
 
-    end_line_index = end_line - 1
-    start_search_index = min(len(content_lines) - 1, end_line_index + 1)
-    end_search_index = min(max_end_line - 1, end_line_index + max_lines)
-
-    non_empty_indices = []
-
-    for idx in range(start_search_index, end_search_index + 1):
-        if content_lines[idx].strip() != "":
-            non_empty_indices.append(idx)
-
-    # Check if any non-empty line was found within the search range
-    if non_empty_indices:
-        return non_empty_indices[-1] + 1
-
-    # If no non-empty lines were found, check the end_line itself
-    if content_lines[end_line_index].strip() != "":
-        return end_line_index + 1
-
-    # If the end_line is also empty, raise an exception
-    raise ValueError("No non-empty line found within 3 lines after the end_line.")
+    return line_block.end_line

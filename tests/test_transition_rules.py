@@ -2,13 +2,22 @@ import json
 
 import pytest
 from moatless.transition_rules import TransitionRules, TransitionRule
-from moatless.state import Finished, Rejected, Pending, State, ActionRequest, StateOutcome
+from moatless.state import (
+    Finished,
+    Rejected,
+    Pending,
+    State,
+    ActionRequest,
+    StateOutcome,
+)
 
 
 class MockStateA(State):
     value: int = 0
 
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
         return StateOutcome(output={"value": self.value})
 
 
@@ -18,8 +27,12 @@ class MockStateB(State):
     @property
     def name(self):
         return self.default_name or super().name
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
         return StateOutcome()
+
 
 def test_transition_rules_serialization_deserialization():
     rules = TransitionRules(
@@ -82,39 +95,21 @@ def test_transition_rules_serialization_deserialization():
 
     data = rules.model_dump(exclude_none=True, exclude_unset=True)
 
-    assert (
-        data
-        == {
-  "global_params": {
-    "model": "gpt-4o"
-  },
-  "state_params": {
-    "MockStateB": {
-      "model": "claude-3.5-sonnet"
+    assert data == {
+        "global_params": {"model": "gpt-4o"},
+        "state_params": {"MockStateB": {"model": "claude-3.5-sonnet"}},
+        "initial_state": "MockStateA",
+        "transition_rules": [
+            {
+                "trigger": "to_b",
+                "source": "MockStateA",
+                "dest": "MockStateB",
+                "required_fields": ["foo"],
+            },
+            {"trigger": "finish", "source": "MockStateB", "dest": "Finished"},
+            {"trigger": "reject", "source": "MockStateB", "dest": "Rejected"},
+        ],
     }
-  },
-  "initial_state": "MockStateA",
-  "transition_rules": [
-    {
-      "trigger": "to_b",
-      "source": "MockStateA",
-      "dest": "MockStateB",
-      "required_fields": [
-        "foo"
-      ]
-    },
-    {
-      "trigger": "finish",
-      "source": "MockStateB",
-      "dest": "Finished"
-    },
-    {
-      "trigger": "reject",
-      "source": "MockStateB",
-      "dest": "Rejected"
-    }
-  ]
-})
 
 
 def test_find_transition_rule():
@@ -189,9 +184,7 @@ def test_next_transition_rule():
     assert next_transition_rule.trigger == "finish"
 
     # Test transition to Rejected state
-    next_transition_rule = rules.get_next_rule(
-        source_state, "reject", {}
-    )   
+    next_transition_rule = rules.get_next_rule(source_state, "reject", {})
     assert next_transition_rule is not None
     assert next_transition_rule.source == MockStateB
     assert next_transition_rule.dest == Rejected

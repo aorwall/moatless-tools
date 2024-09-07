@@ -16,7 +16,8 @@ from moatless.transition_rules import TransitionRule, TransitionRules
 from moatless.transitions import (
     search_transitions,
     code_transitions,
-    search_and_code_transitions, edit_code_transitions,
+    search_and_code_transitions,
+    edit_code_transitions,
 )
 from moatless.utils.llm_utils import response_format_by_model
 
@@ -24,8 +25,8 @@ load_dotenv()
 moatless_dir = os.getenv("MOATLESS_DIR", "/tmp/moatless")
 
 global_params = {
-    "model": "gpt-4o-mini-2024-07-18",  # "azure/gpt-4o",
-    "temperature": 0.5,
+    "model": "claude-3-5-sonnet-20240620",
+    "temperature": 0.2,
     "max_tokens": 2000,
     "max_prompt_file_tokens": 8000,
 }
@@ -36,20 +37,20 @@ pytest.mark.llm_integration = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("model", [
-    "claude-3-5-sonnet-20240620",
-    "gpt-4o-mini",
-    "gpt-4o",
-    "deepseek/deepseek-coder",
-    "openrouter/anthropic/claude-3.5-sonnet"
-])
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-3-5-sonnet-20240620",
+        "gpt-4o-mini",
+        "gpt-4o",
+        "deepseek/deepseek-coder",
+        "openrouter/anthropic/claude-3.5-sonnet",
+    ],
+)
 @pytest.mark.llm_integration
 def test_simple_search(model):
-    global_params = {
-        "model": model,
-        "temperature": 0.0
-    }
-    
+    global_params = {"model": model, "temperature": 0.0}
+
     transitions = TransitionRules(
         global_params=global_params,
         initial_state=SearchCode,
@@ -70,7 +71,6 @@ def test_simple_search(model):
 
     response = loop.run(message=instance["problem_statement"])
     assert response.status == "finished"
-
 
 
 @pytest.mark.llm_integration
@@ -181,6 +181,7 @@ def test_different_edit_models():
 
     assert loop.workspace.file_repo._current_commit != first_commit
 
+
 @pytest.mark.llm_integration
 def test_plan_and_code_add_method():
     model = "deepseek/deepseek-coder"
@@ -253,7 +254,10 @@ def test_deepseek_coder_django_12286_edit_code():
     instance = load_instance(instance_id)
     workspace = create_workspace(instance)
 
-    workspace.file_context.add_spans_to_context("django/core/checks/translation.py", ["imports", "check_language_settings_consistent"])
+    workspace.file_context.add_spans_to_context(
+        "django/core/checks/translation.py",
+        ["imports", "check_language_settings_consistent"],
+    )
 
     datestr = datetime.now().strftime("%Y%m%d-%H%M%S")
     dir = f"{moatless_dir}/{datestr}_test_django_12286_deepseek_coder"
@@ -279,5 +283,3 @@ def test_deepseek_coder_django_12286_edit_code():
     print("Diff")
     print(diff)
     assert diff
-
-

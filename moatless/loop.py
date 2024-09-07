@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 from typing import Any, Optional, Type
+
 from moatless.state import (
     AgenticState,
     Finished,
@@ -37,6 +38,8 @@ class AgenticLoop:
         verify_state_func: Optional[Callable] = None,
         max_cost: float = 0.25,
         max_transitions: int = 25,
+        num_iterations: int = 40,
+        max_expansions: int = 3,
         max_retries: int = 2,
         max_rejections: int = 2,
         metadata: dict[str, Any] | None = None,
@@ -112,15 +115,23 @@ class AgenticLoop:
         self._max_retries = max_retries
         self._max_rejections = max_rejections
 
+        # MCTS
+        self._num_iterations = num_iterations
+        self._max_expansions = max_expansions
+
         self._transition_count = 0
         self._rejections = 0
 
         self._transition_rules = transition_rules
         self._metadata = metadata
 
+        self.kwargs = kwargs
+
+
+
     @classmethod
     def from_trajectory_file(cls, trajectory_path: str, **kwargs):
-        trajectory = Trajectory.load(trajectory_path)
+        trajectory = Trajectory.load(trajectory_path, **kwargs)
         return cls(
             transition_rules=trajectory.transitions,
             trajectory=trajectory,
@@ -205,9 +216,10 @@ class AgenticLoop:
                     f"Max cost reached ({total_cost} > {self._max_cost}). Exiting."
                 )
                 self.trajectory.save_info({"error": f"Max cost reached  ({total_cost} > {self._max_cost})."})
-                raise RuntimeError(
-                    "The loop was aborted because the cost exceeded the limit."
+                rejected_state = self._create_state(
+                    Rejected, {"message": "Max retries reached."}
                 )
+                return self.transition_to(rejected_state)
 
             self.log_info(
                 f"Running transition {len(self._trajectory.states)}. Current total cost: {total_cost}"
@@ -231,7 +243,7 @@ class AgenticLoop:
 
         raise RuntimeError("Loop exited without a transition.")
 
-    def _execute_state(self) -> State | None:
+    def _execute_state(self) -> AgenticState | None:
         """
         Execute one iteration of the current state and handle potential transitions.
 

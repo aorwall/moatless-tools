@@ -64,6 +64,7 @@ pytest.mark.llm_integration = pytest.mark.skipif(
     reason="need --run-llm-integration option to run tests that call LLMs",
 )
 
+
 def test_pickle_search_and_code_transitions():
     global_params = {
         "model": "gpt-4o-mini-2024-07-18",
@@ -119,7 +120,6 @@ def test_pickle_search_and_code_transitions():
 
     # Check if the unpickled object is an instance of TransitionRules
     assert isinstance(unpickled_evaluation, type(evaluation))
-
 
 
 @pytest.mark.llm_integration

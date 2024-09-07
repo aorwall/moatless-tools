@@ -290,6 +290,7 @@ class CodeBlock:
     relationships: List["Relationship"] = field(default_factory=list)
     span_ids: Set[str] = field(default_factory=set)
     belongs_to_span: Optional["BlockSpan"] = None
+    has_error: bool = False
     start_line: int = 0
     end_line: int = 0
     properties: Dict = field(default_factory=dict)
@@ -967,14 +968,6 @@ class CodeBlock:
 
         return errors
 
-    def find_validation_errors(self) -> list[ValidationError]:
-        errors = []
-        errors.extend(self.validation_errors)
-
-        for child in self.children:
-            errors.extend(child.find_validation_errors())
-
-        return errors
 
     def create_commented_out_block(self, comment_out_str: str = "..."):
         pre_lines = self.start_line - self.previous.end_line if self.previous else 1
@@ -1153,20 +1146,20 @@ class CodeBlock:
         return self.find_blocks_with_types([block_type])
 
     def find_first_by_start_line(self, start_line: int) -> Optional["CodeBlock"]:
-        if self.start_line > start_line:
-            return None
-
+        """
+        Find the first block at or after the provided start line
+        """
         for child in self.children:
-            if child.start_line == start_line:
+            if child.start_line >= start_line:
                 return child
 
-            if child.start_line <= start_line <= child.end_line:
-                if child.children:
-                    found = child.find_first_by_start_line(start_line)
-                    if found:
-                        return found
-                else:
+            if child.end_line >= start_line:
+                if not child.children:
                     return child
+
+                found = child.find_first_by_start_line(start_line)
+                if found:
+                    return found
 
         return None
 

@@ -158,13 +158,12 @@ class CodeParser:
         parent_block: CodeBlock | None = None,
         current_span: BlockSpan | None = None,
     ) -> tuple[CodeBlock, Node, BlockSpan]:
-        if node.type == "ERROR" or any(
-            child.type == "ERROR" for child in node.children
-        ):
-            node_match = NodeMatch(block_type=CodeBlockType.ERROR)
-            self.debug_log(f"Found error node {node.type}")
-        else:
-            node_match = self.find_in_tree(node)
+        node_match = self.find_in_tree(node)
+
+        if not parent_block and node.children:
+            node_match.first_child = node.children[0]
+        elif node.type == "ERROR":
+            node_match.block_type = CodeBlockType.ERROR
 
         pre_code = content_bytes[start_byte : node.start_byte].decode(self.encoding)
         end_line = node.end_point[0]
@@ -335,6 +334,11 @@ class CodeParser:
                 next_node.children and next_node.type == "block"
             ):  # TODO: This should be handled in get_block_definition
                 next_node = next_node.children[0]
+            elif (
+                next_node.children and next_node.type == "ERROR"
+            ):
+                next_node = next_node.children[0]
+                code_block.type = CodeBlockType.ERROR
 
             self.debug_log(
                 f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}"
@@ -423,6 +427,9 @@ class CodeParser:
                     f"find_in_tree() GPT match: {match.block_type} on {node}"
                 )
                 return match
+
+        if not node.parent:
+            return NodeMatch(block_type=CodeBlockType.MODULE, first_child=node.children[0])
 
         match = self.find_match(node)
         if match:
@@ -715,8 +722,12 @@ class CodeParser:
             self._graph = nx.DiGraph()
 
         tree = self.tree_parser.parse(content_in_bytes)
+        root_node = tree.walk().node
+        if root_node.type == "ERROR":
+            raise ValueError("Could not parse code")
+
         module, _, _ = self.parse_code(
-            content_in_bytes, tree.walk().node, file_path=file_path
+            content_in_bytes, root_node, file_path=file_path
         )
         module.spans_by_id = self.spans_by_id
         module.file_path = file_path
@@ -882,6 +893,9 @@ class CodeParser:
             structure_block = block.find_type_group_in_parents(
                 CodeBlockTypeGroup.STRUCTURE
             )
+
+        if not structure_block:
+            return "unknown"
 
         span_id = structure_block.path_string()
         if label and span_id:

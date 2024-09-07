@@ -9,6 +9,7 @@ from moatless.codeblocks.module import Module
 from moatless.index.types import SearchCodeHit, CodeSnippet
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
+from moatless.trajectory import Trajectory
 
 IGNORED_SPANS = ["docstring", "imports"]
 
@@ -374,3 +375,16 @@ def trace_metadata(instance_id: str, session_id: str, trace_name: str):
         "trace_id": trace_id,
         "tags": [instance_id],
     }
+
+
+def get_trajectories(dir: str, skip_workspace: bool = False) -> List[Trajectory]:
+    trajectories = []
+    for root, _, files in os.walk(dir):
+        if "trajectory.json" in files:
+            trajectory_path = os.path.join(root, "trajectory.json")
+            try:
+                trajectory = Trajectory.load(trajectory_path, skip_workspace=skip_workspace)
+                trajectories.append(trajectory)
+            except Exception as e:
+                logger.error(f"Failed to load trajectory from {trajectory_path}: {e}")
+    return trajectories

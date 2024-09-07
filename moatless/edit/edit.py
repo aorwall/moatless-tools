@@ -18,7 +18,11 @@ ROLE_PROMPT = "You are autonomous AI assisistant with superior programming skill
 
 MAIN_OBJECTIVE_PROMPT = "The main objective is to solve a bigger task specified by the user, this is wrapped in a <main_objective> tag."
 
-SEARCH_REPLACE_PROMPT = """Your task is to solve a smaller task within the main objective. This task is wrapped in a <instruction> tag with the pseudo code of a proposed solution in a <pseudo_code> tag.
+SEARCH_REPLACE_PROMPT = """Your task is to solve a smaller task within the main objective. 
+
+This task is wrapped in a <instruction> tag with the pseudo code of a proposed solution in a <pseudo_code> tag.
+YOU MUST follow the instructions and update the code as suggested in the <pseudo_code> tag.
+If you can't do any changes or believe that the suggested code is incorrent and want to reject the instructions, use the <reject> tag.
 
 The surrounding code context is wrapped in a <file_context> tag.
 
@@ -30,7 +34,7 @@ The code to that should be modified is wrapped in a <search> tag, like this:
 Your task is to update the code inside the <search> tags based on the current task.
 
 When updating the code, please adhere to the following important rules:
-- Fully implement the requested change, but do not make any other changes that were not directly asked for
+- Fully implement the requested change as suggested in <pseudo_code>, but do not make any other changes that were not directly asked for
 - Do not add any comments describing your changes 
 - Indentation and formatting should be the same in the replace code as in the search code
 - Ensure the modified code is complete - do not leave any TODOs, placeholder, or missing pieces
@@ -68,7 +72,7 @@ from flask import Flask
 </replace>
 
 Remember, only put the updated version of the code from inside the <search> tags in your response, wrapped in <replace>
-tags. DO NOT include any other surrounding code than the code in the <search> tag! DO NOT leave out any code that was inside the <search> tag!
+tags. DO NOT include any other surrounding code than the code in the <search> tag! DO NOT leave out any code that was inside the <search> tag! 
 """
 
 
@@ -213,7 +217,11 @@ class EditCode(AgenticState):
         updated_module = parser.parse(updated_content)
 
         error_blocks = updated_module.find_errors()
-        validation_errors = updated_module.find_validation_errors()
+        if error_blocks:
+            logger.info(updated_module.to_tree())
+            code = updated_module.to_prompt(show_outcommented_code=True, include_block_types=[CodeBlockType.ERROR])
+            return f"After the code was replaces replacement this code is invalid: \n```{code}\n```\n\nMake sure to replace the full implementation in the search block or reject the request."
+
         existing_placeholders = file.module.find_blocks_with_type(
             CodeBlockType.COMMENTED_OUT_CODE
         )
@@ -223,6 +231,20 @@ class EditCode(AgenticState):
             if not existing_placeholders
             else []
         )
+
+        if new_placeholders:
+            error_response = ""
+
+            for new_placeholder in new_placeholders:
+                parent_block = new_placeholder.find_type_group_in_parents(
+                    CodeBlockTypeGroup.STRUCTURE
+                )
+                if parent_block:
+                    error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
+                else:
+                    error_response += f"There is a placeholder indicating out commented code : \n```{new_placeholder.to_string()}\n```. Do the full implementation or reject the request.\n"
+
+            return error_response
 
         # Check if the full code block is replaced with a block with another type.
         # This might indicate that an incomplete replacement was made
@@ -243,38 +265,6 @@ class EditCode(AgenticState):
                         f"You must provide the full contents of {existing_block.identifier}. "
                         f"If you shouldn't do any changes to {existing_block.identifier}, reject the request and explain why."
                     )
-
-        if error_blocks or validation_errors or new_placeholders:
-            error_response = ""
-            if error_blocks:
-                for error_block in error_blocks:
-                    parent_block = error_block.find_type_group_in_parents(
-                        CodeBlockTypeGroup.STRUCTURE
-                    )
-                    if parent_block and parent_block.type != CodeBlockType.MODULE:
-                        logger.info(f"Invalid f {parent_block.to_tree()}")
-                        error_response += f"{parent_block.type.name} has invalid code:\n\n```{parent_block.to_string()}\n```.\n"
-                    else:
-                        error_response += f"This code is invalid: \n```{error_block.to_string()}\n```.\n"
-
-            if new_placeholders:
-                for new_placeholder in new_placeholders:
-                    parent_block = new_placeholder.find_type_group_in_parents(
-                        CodeBlockTypeGroup.STRUCTURE
-                    )
-                    if parent_block:
-                        error_response += f"{parent_block.identifier} has a placeholder `{new_placeholder.content}` indicating that it's not fully implemented. Implement the full {parent_block.type.name} or reject the request.: \n\n```{parent_block.to_string()}```\n\n"
-                    else:
-                        error_response += f"There is a placeholder indicating out commented code : \n```{new_placeholder.to_string()}\n```. Do the full implementation or reject the request.\n"
-
-            for validation_error in validation_errors:
-                error_response += f"{validation_error}\n"
-
-            logger.warning(
-                f"Errors in updated file {file.file_path}:\n{error_response}"
-            )
-
-            return error_response
 
     @classmethod
     def required_fields(cls) -> set[str]:
@@ -324,7 +314,7 @@ class EditCode(AgenticState):
         else:
             file_context = self.create_file_context(max_tokens=self.max_prompt_file_tokens)
             file_context.add_line_span_to_context(self.file_path, self.start_line, self.end_line)
-            file_context.expand_context_with_related_spans(self.max_prompt_file_tokens)
+            # file_context.expand_context_with_related_spans(self.max_prompt_file_tokens)
 
             file_context_str = file_context.create_prompt(
                 show_line_numbers=True,

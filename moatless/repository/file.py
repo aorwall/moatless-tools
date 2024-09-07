@@ -84,12 +84,15 @@ class CodeFile(BaseModel):
 
     @property
     def module(self) -> Module | None:
-        if self._module is None or self.has_been_modified():
+        if self._module is None or self.has_been_modified() and self.content.strip():
             parser = get_parser_by_path(self.file_path)
             if parser:
                 self._module = parser.parse(self.content)
+                if len(self._module.children) == 0:
+                    raise ValueError(f"No code blocks found in module for {self.file_path}")
             else:
                 return None
+
         return self._module
 
 

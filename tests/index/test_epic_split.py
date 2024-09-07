@@ -48,9 +48,10 @@ def test_epic_split():
     stats = pstats.Stats(profiler).sort_stats(pstats.SortKey.CUMULATIVE)
     stats.print_stats(40)
 
-
     for node in prepared_nodes:
-        print(f"{node.id_} {node.metadata['tokens']} {node.metadata['start_line']}-{node.metadata['end_line']} {node.metadata['span_ids']}")
+        print(
+            f"{node.id_} {node.metadata['tokens']} {node.metadata['start_line']}-{node.metadata['end_line']} {node.metadata['span_ids']}"
+        )
 
 
 def test_impl_spans():
@@ -92,6 +93,7 @@ def test_impl_spans():
     stats = pstats.Stats(profiler).sort_stats(pstats.SortKey.CUMULATIVE)
     stats.print_stats(40)
 
-
     for node in prepared_nodes:
-        print(f"{node.id_} {node.metadata['tokens']} {node.metadata['start_line']}-{node.metadata['end_line']} {node.metadata['span_ids']}")
+        print(
+            f"{node.id_} {node.metadata['tokens']} {node.metadata['start_line']}-{node.metadata['end_line']} {node.metadata['span_ids']}"
+        )

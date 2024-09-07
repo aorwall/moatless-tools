@@ -54,7 +54,6 @@ class Evaluation:
         previous_trajectory_dir: Optional[str] = None,
         retry_state: Optional[str] = None,
         num_workers: int = 1,
-        enable_mcts: bool = False,
         use_testbed: bool = False,
         eval_func: Callable[[dict, Trajectory], bool] = None,
         **kwargs
@@ -79,14 +78,10 @@ class Evaluation:
         self.reward_threshold = reward_threshold
         self.transitions = transitions
 
-        self.enable_mcts = enable_mcts
-
         litellm.drop_params = True
 
         self.evaluation_dir = f"{evaluations_dir}/{evaluation_name}"
-        self.repo_base_dir = f"{self.evaluation_dir}/repos"
-        if not os.path.exists(self.repo_base_dir):
-            os.makedirs(self.repo_base_dir)
+        self.repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
         self.predictions_path = f"{self.evaluation_dir}/all_preds.jsonl"
         logger.info(f"Evaluation directory: {self.evaluation_dir}")
 
@@ -112,6 +107,7 @@ class Evaluation:
         split: str = "lite",
         resolved_by: Optional[int] = None,
         instance_ids: list[str] | None = None,
+        ignore_repos: list[str] | None = None
     ):
         file_path = os.path.join(
             os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
@@ -121,6 +117,8 @@ class Evaluation:
 
         instances = sorted(instances, key=lambda x: len(x["resolved_by"]), reverse=True)
         logger.info(f"Loaded {len(instances)} instances from {file_path}")
+
+        instances = [instance for instance in instances if "sympy" not in instance["instance_id"]]
 
         if instance_ids:
             instances = [
@@ -143,6 +141,17 @@ class Evaluation:
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by resolved_by >= {resolved_by}"
             )
+
+        if ignore_repos:
+            instances = [
+                instance
+                for instance in instances
+                if instance["repo"] not in ignore_repos
+            ]
+
+        if instances:
+            logger.info(
+                f"Running evaluation for {len(instances)} instances after filtering by ignore_repos")
 
         return self._run_evaluation(instances)
 
@@ -186,6 +195,7 @@ class Evaluation:
         workspace = create_workspace(
             instance,
             repo_base_dir=self.repo_base_dir,
+            create_instance_dir=True,
             testbed=testbed,
             use_perfect_file_context=self.use_perfect_file_context,
             max_file_context_tokens=self.max_file_context_tokens
@@ -238,24 +248,26 @@ class Evaluation:
 
         start_time = time.time()
         try:
-            if self.enable_mcts:
-                response = loop.run_search(problem_statement, reward_threshold=self.reward_threshold)
-            else:
-                response = loop.run()
+            response = loop.run()
 
             info["status"] = response.status
-
-            if self.eval_func:
-                try:
-                    info["eval_func"] = self.eval_func(instance, loop.trajectory)
-                except Exception:
-                    logging.exception(f"Error in evaluation of {instance['instance_id']} ")
+        except Exception:
+            info["error"] = traceback.format_exc()
+            info["status"] = "error"
+            logging.exception(f"Error in evaluation of {instance['instance_id']} ")
+        finally:
 
             info["duration"] = time.time() - start_time
             usage = loop.total_usage()
             info["total_cost"] = usage.completion_cost
             info["prompt_tokens"] = usage.prompt_tokens
             info["completion_tokens"] = usage.completion_tokens
+
+            if self.eval_func:
+                try:
+                    info["eval_func"] = self.eval_func(instance, loop.trajectory)
+                except Exception:
+                    logging.exception(f"Error in evaluation of {instance['instance_id']} ")
 
             if isinstance(workspace.file_repo, GitRepository):
                 test_patch_files = instance.get("test_file_spans", {}).keys()
@@ -286,45 +298,13 @@ class Evaluation:
             if testbed:
                 testbed.close()
 
-        except Exception:
-            info["error"] = traceback.format_exc()
-            info["status"] = "error"
-            logging.exception(f"Error in evaluation of {instance['instance_id']} ")
-
-        finally:
             loop.trajectory.save_info(info)
             if testbed:
                 testbed.close()
 
+            shutil.rmtree(workspace.file_repo.repo_dir)
+
         return loop.trajectory
-
-    def _process_repo_group(self, repo: str, instances: list[dict]):
-        logger.info(f"Processing {len(instances)} instances in {repo}")
-
-        results = []
-        for i, instance in enumerate(instances):
-            logger.info(
-                f"Processing {instance['instance_id']} ({i+1}/{len(instances)} in {repo})"
-            )
-
-            trajectory = self._evaluate_instance(instance)
-            if not trajectory:
-                return None, None
-
-            result = to_result(instance, trajectory, self.report)
-            results.append(result)
-
-            prediction = {
-                "model_name_or_path": self.evaluation_name,
-                "instance_id": instance["instance_id"],
-                "model_patch": trajectory.info.get("submission", ""),
-            }
-
-            with open(self.predictions_path, "a") as file:
-                json_string = json.dumps(prediction)
-                file.write(json_string + "\n")
-
-        return results
 
     def _to_csv_report(self, results: list[BenchmarkResult]):
         df = to_dataframe(results, self.report_mode)
@@ -348,53 +328,91 @@ class Evaluation:
         if self.repo_base_dir in self.evaluations_dir:
             shutil.rmtree(self.repo_base_dir)
 
+    def process_instance(self, instance):
+        try:
+            trajectory = self._evaluate_instance(instance)
+            if not trajectory:
+                return None
+
+            result = to_result(instance, trajectory, self.report)
+
+            prediction = {
+                "model_name_or_path": self.evaluation_name,
+                "instance_id": instance["instance_id"],
+                "model_patch": trajectory.info.get("submission", ""),
+            }
+
+            with open(self.predictions_path, "a") as file:
+                json_string = json.dumps(prediction)
+                file.write(json_string + "\n")
+
+            return result
+        except Exception:
+            logger.exception(f"Error in processing instance {instance['instance_id']}")
+            return None
+
     def _run_evaluation_threads(self, instances: list[dict]):
         error = 0
 
         with open(self.predictions_path, "w") as file:
             file.write("")
 
-        repo_groups = defaultdict(list)
-        for instance in instances:
-            repo_groups[instance.get("repo")].append(instance)
-
         results = []
 
-        logger.info(
-            f"Processing {len(instances)} instances with {len(repo_groups)} repos with {self.num_workers} workers"
-        )
+        logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers")
         logger.info(self.transitions)
 
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=self.num_workers
-        ) as executor:
-            futures = []
-            for repo, group in repo_groups.items():
-                futures.append(executor.submit(self._process_repo_group, repo, group))
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = [executor.submit(self.process_instance, instance) for instance in instances]
 
             pbar = tqdm(concurrent.futures.as_completed(futures), total=len(futures))
 
             for future in pbar:
                 try:
-                    group_results = future.result()
-                    if not group_results:
-                        logger.warning("Error in processing repo group")
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                        self._to_csv_report(results)
+                        self._save_json_report(results)
+                    else:
                         error += 1
-                        continue
+
+                    stats = self._create_stats(results)
+                    pbar.set_postfix(stats)
                 except Exception:
                     error += 1
-                    logger.exception(f"Error in processing repo group.")
-                    continue
+                    logger.exception("Error in processing instance")
 
-                results.extend(group_results)
-                self._to_csv_report(results)
+        logger.info(f"Completed processing with {error} errors")
+
+    def _create_stats(self, results):
+        stats = {}
+        if results:
+            stats["avg_duration"] = sum(r.duration for r in results) / len(results)
+            stats["avg_cost"] = sum(r.total_cost for r in results) / len(results)
+            stats["total_cost"] = sum(r.total_cost for r in results)
+
+            identified = sum(
+                1
+                for r in results
+                if r.status in ["identified", "planned", "edited", "resolved"]
+            )
+            resolved = sum(1 for r in results if r.status in ["resolved"])
+            error = sum(1 for r in results if r.status == "error")
+
+            if identified > 0:
+                stats["identified"] = f"{(identified / len(results)) * 100:.2f}%"
+            if resolved > 0:
+                stats["resolved"] = f"{(resolved / len(results)) * 100:.2f}%"
+            stats["error"] = error
+
+        return stats
 
     def _run_evaluation_simple(self, instances: list[dict]):
         with open(self.predictions_path, "w") as file:
             file.write("")
 
         results = []
-        stats = {}
         pbar = tqdm(instances)
         for instance in pbar:
             trajectory = self._evaluate_instance(instance)
@@ -409,25 +427,7 @@ class Evaluation:
             except Exception:
                 logging.exception(f"Error when generating report for instance {instance['instance_id']}")
 
-            if results:
-                stats["avg_duration"] = sum(r.duration for r in results) / len(results)
-                stats["avg_cost"] = sum(r.total_cost for r in results) / len(results)
-                stats["total_cost"] = sum(r.total_cost for r in results)
-
-                identified = sum(
-                    1
-                    for r in results
-                    if r.status in ["identified", "planned", "edited", "resolved"]
-                )
-                resolved = sum(1 for r in results if r.status in ["resolved"])
-                error = sum(1 for r in results if r.status == "error")
-
-                if identified > 0:
-                    stats["identified"] = f"{(identified / len(results)) * 100:.2f}%"
-                if resolved > 0:
-                    stats["resolved"] = f"{(resolved / len(results)) * 100:.2f}%"
-                stats["error"] = error
-
+            stats = self._create_stats(results)
             pbar.set_postfix(stats)
 
             prediction = {

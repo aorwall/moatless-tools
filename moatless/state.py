@@ -1,5 +1,6 @@
 import enum
 import logging
+import os
 import sys
 import importlib
 from abc import ABC, abstractmethod
@@ -10,7 +11,7 @@ import json
 import instructor
 import litellm
 import openai
-from anthropic import Anthropic
+from anthropic import Anthropic, AnthropicBedrock
 from anthropic.types import ToolUseBlock
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
@@ -20,10 +21,10 @@ from openai import OpenAI
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator, Extra, ValidationError
 
 from moatless.file_context import FileContext
-from moatless.repository import FileRepository
+from moatless.repository.file import FileRepository
 from moatless.schema import (
     Completion,
-    FileWithSpans, ValueFunctionResult, Usage
+    FileWithSpans, Usage
 )
 from moatless.settings import Settings
 from moatless.utils.llm_utils import LLMResponseFormat, generate_call_id, response_format_by_model
@@ -138,26 +139,6 @@ class State(ABC, BaseModel):
     )
     next_states: List["State"] = Field(
         default_factory=list, description="The states this state transitioned to"
-    )
-
-    max_iterations: Optional[int] = Field(
-        None, description="The maximum number of transitions to this state."
-    )
-
-    max_expansions: int = Field(
-        default=3, description="The maximum number of times this state can be expanded."
-    )
-
-    visits: List[Visit] = Field(
-        default_factory=list, description="The visits to the state in MCTS backpropagation"
-    )
-    value_function_result: Optional[ValueFunctionResult] = Field(
-        default=None,
-        description="The result of the value function during MCTS"
-    )
-
-    feedback: Optional[str] = Field(
-        default=None, description="Feedback provided the prompt"
     )
 
     _workspace: Optional[Workspace] = PrivateAttr(None)
@@ -439,7 +420,7 @@ class AgenticState(State):
         return self._actions[-1].response if self._actions else None
 
     @property
-    def outcome(self) -> StateOutcome | None:
+    def outcome(self) -> dict | None:
         return (
             self._actions[-1].response.output
             if self._actions and self._actions[-1].response
@@ -482,10 +463,6 @@ class AgenticState(State):
             and self.action_type()
         ):
             try:
-                anthropic_client = Anthropic()
-
-                apply_cache_control(messages[0])
-                # apply_cache_control(messages[-1])
 
                 tools = []
                 if hasattr(self.action_type(), "available_actions"):
@@ -494,19 +471,40 @@ class AgenticState(State):
                 else:
                     tools.append(self.action_type().anthropic_schema)
 
-                completion_response = (
-                    anthropic_client.beta.prompt_caching.messages.create(
-                        model=self.model,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        system=messages[0]["content"],
-                        tool_choice={
-                            "type": "any"
-                        },
-                        tools=tools,
-                        messages=messages[1:],
+                if self.model == "anthropic.claude-3-5-sonnet-20240620-v1:0":
+                    anthropic_client = AnthropicBedrock()
+                    completion_response = (
+                        anthropic_client.messages.create(
+                            model=self.model,
+                            max_tokens=self.max_tokens,
+                            temperature=self.temperature,
+                            system=messages[0]["content"],
+                            tool_choice={
+                                "type": "any"
+                            },
+                            tools=tools,
+                            messages=messages[1:],
+                        )
                     )
-                )
+                else:
+                    anthropic_client = Anthropic()
+
+                    apply_cache_control(messages[0])
+                    # apply_cache_control(messages[-1])
+
+                    completion_response = (
+                        anthropic_client.beta.prompt_caching.messages.create(
+                            model=self.model,
+                            max_tokens=self.max_tokens,
+                            temperature=self.temperature,
+                            system=messages[0]["content"],
+                            tool_choice={
+                                "type": "any"
+                            },
+                            tools=tools,
+                            messages=messages[1:],
+                        )
+                    )
 
                 completion = Completion.from_llm_completion(
                     input_messages=messages,
@@ -553,21 +551,34 @@ class AgenticState(State):
                 logger.error(f"Failed to get completion response from anthropic: {e}")
                 raise e
 
-        if self.action_type() is None and self.model.startswith("claude"):
-            anthropic_client = Anthropic()
+        if self.action_type() is None and self.model.startswith("claude") or self.model.startswith("anthropic.claude"):
 
-            apply_cache_control(messages[0])
-            # apply_cache_control(messages[-1])
-
-            completion_response = (
-                anthropic_client.beta.prompt_caching.messages.create(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    system=messages[0]["content"],
-                    messages=messages[1:],
+            if self.model == "anthropic.claude-3-5-sonnet-20240620-v1:0":
+                anthropic_client = AnthropicBedrock()
+                completion_response = (
+                    anthropic_client.messages.create(
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                        system=messages[0]["content"],
+                        messages=messages[1:],
+                    )
                 )
-            )
+            else:
+                anthropic_client = Anthropic()
+
+                apply_cache_control(messages[0])
+                # apply_cache_control(messages[-1])
+
+                completion_response = (
+                    anthropic_client.beta.prompt_caching.messages.create(
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                        system=messages[0]["content"],
+                        messages=messages[1:],
+                    )
+                )
 
             completion = Completion.from_llm_completion(
                 input_messages=messages,

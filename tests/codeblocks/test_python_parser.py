@@ -798,10 +798,10 @@ def test_ignored_spans():
     with open(file_path, "r") as file:
         content = file.read()
 
-    #def assertion(codeblock):
+    # def assertion(codeblock):
     #    print(codeblock.to_tree(show_spans=True))
 
-    #_verify_parsing(content, assertion, debug=False)
+    # _verify_parsing(content, assertion, debug=False)
 
     file_path = f"{repo_dir}/requests/sessions.py"
     with open(file_path, "r") as file:
@@ -810,5 +810,32 @@ def test_ignored_spans():
     def assertion(codeblock):
         print(codeblock.to_tree(show_spans=True))
         assert "imports" in codeblock.span_ids
+
+    _verify_parsing(content, assertion, debug=False)
+
+
+def test_invalid_extra_comment():
+    content = """import threading
+
+class Signal:
+    \"""
+    Base class for all signals
+
+    Internal attributes:
+
+        receivers
+            { receiverkey (id) : weakref(receiver) }
+    \"""
+    logger = logging.getLogger('django.dispatch')
+    \"""
+    def __init__(self, providing_args=None, use_caching=False):
+        \"""
+        Create a new signal.
+        \"""
+        self.receivers = []
+"""
+
+    def assertion(codeblock):
+        print(codeblock.to_prompt(include_block_types=[CodeBlockType.ERROR]))
 
     _verify_parsing(content, assertion, debug=False)

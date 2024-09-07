@@ -44,6 +44,9 @@ class CodingStats(StateStats):
     retries: int = 0
     edited: bool = False
 
+    rejected: int = 0
+    largest_span: Optional[int] = None
+    smallest_span: Optional[int] = None
     has_diff: bool = False
     lint: bool = False
     lints: str = ""
@@ -77,6 +80,9 @@ class BenchmarkResult(BaseModel):
     resolved: bool = False
     error: str = ""
     status: str = ""
+
+    possible_issues: List[str] = []
+
     search: SearchStats = SearchStats()
     identify: StateStats = StateStats()
     coding: CodingStats = CodingStats()
@@ -115,8 +121,10 @@ def to_result(
             status = "error"
         elif isinstance(trajectory.get_current_state(), Rejected):
             status = "rejected"
-        else:
+        elif info.get("status") == "finished":
             status = "failed"
+        else:
+            status = "running"
 
         result = BenchmarkResult(
             instance_id=instance["instance_id"],
@@ -243,6 +251,15 @@ def to_result(
                     if len(state._actions) > 1:
                         result.coding.retries += 1
 
+                    if not result.coding.largest_span or state.end_line - state.start_line > result.coding.largest_span:
+                        result.coding.largest_span = state.end_line - state.start_line
+
+                    if not result.coding.smallest_span or state.end_line - state.start_line < result.coding.smallest_span:
+                        result.coding.smallest_span = state.end_line - state.start_line
+
+                    if transition.state.response.trigger == "reject":
+                        result.coding.rejected += 1
+
                     if state.response and state.response.output:
                         output = state.response.output
                         if output.get("diff"):
@@ -295,8 +312,6 @@ def to_result(
 
     except Exception as e:
         raise e
-
-    logger.info(f"Result: {result}")
 
     return result
 

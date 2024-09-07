@@ -149,7 +149,7 @@ def create_workspace(
 
     if create_instance_dir:
         date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-        repo_dir = f"{repo_base_dir}/swe-bench_{instance['instance_id']}_{date_str}"
+        repo_dir = f"{repo_base_dir}/swe-bench_{instance['instance_id']}" #_{date_str}"
     else:
         repo_dir = f"{repo_base_dir}/{repo_dir_name}"
 

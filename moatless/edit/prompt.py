@@ -24,14 +24,13 @@ After receiving the git diff with the updated code, confirm the changes and proc
 Use the finish function when the fix of the issue have been properly implemented.
 
 Important guidelines:
-1. Implement the requirements exactly as specified, without additional changes or suggestions.
-2. Only include the intended changes in the pseudo code; you can comment out the rest of the code.
+1. Implement the requirements exactly as specified, without additional changes or suggestions. 
+2. Only include the intended changes in the pseudo code; you can comment out the rest of the code. DO NOT change any code that is not directly related to the issue.
 3. Limit code changes to only the specific files included in the current context. Don't modify other files or create new ones.
 4. DO NOT suggest changes in surrounding code not DIRECTLY connected to the task. When you've solved the issue in the code, you're finished!
 5. DO NOT suggest changes in code that are not in <file_context>.
 6. DO NOT suggest code reviews!
-7. Always write tests to verify the changes you made.
-8. When you are confident that all changes are correct, you can finish the task without further verification.
+7. When you are confident that all changes are correct, you can finish the task without further verification.
 """
 
 

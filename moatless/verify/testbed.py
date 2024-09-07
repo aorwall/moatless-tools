@@ -7,10 +7,10 @@ from typing import List
 from moatless.file_context import RankedFileSpan
 from moatless.verify.verify import Verifier
 from testbed.client.client import TestbedClient
+from testbed.schema import TestStatus, TestResult, TraceItem
 
 from moatless.repository import GitRepository, CodeFile
 from moatless.schema import VerificationIssue, VerificationIssueType, FileWithSpans
-from testbed.schema import TestStatus, TestResult, TraceItem
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,6 @@ class TestbedVerifier(Verifier):
         
         filtered_out_lines = [line for line in lines if line.startswith("E ") or line.startswith("> ")]
         return hashlib.sha256("\n".join(filtered_out_lines).encode()).hexdigest()
-
 
     def _map_test_results_to_issues(self, test_results: List[TestResult]) -> List[VerificationIssue]:
         failures = [result for result in test_results if result.status in [TestStatus.FAILED, TestStatus.ERROR]]

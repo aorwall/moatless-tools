@@ -92,18 +92,25 @@ class Workspace:
         )
 
     @classmethod
-    def from_dict(cls, data: dict, **kwargs):
+    def from_dict(cls, data: dict, base_repo_dir: str | None = None, **kwargs):
         if "repository" not in data:
             raise ValueError("Missing repository key")
+
+        if base_repo_dir:
+            # last dir in data["repository"].get("repo_path")
+            repo_dir_name = data["repository"].get("repo_path").split("/")[-1]
+            repo_path = f"{base_repo_dir}/{repo_dir_name}"
+        else:
+            repo_path = data["repository"].get("repo_path")
 
         if data["repository"].get("git_repo_url"):
             file_repo = GitRepository.from_repo(
                 git_repo_url=data["repository"].get("git_repo_url"),
-                repo_path=data["repository"].get("repo_path"),
+                repo_path=repo_path,
                 commit=data["repository"].get("commit"),
             )
         elif data["repository"].get("path"):
-            file_repo = FileRepository(data["repository"].get("path"))
+            file_repo = FileRepository(repo_path)
         else:
             raise ValueError("Either git_repo_url or path must be provided.")
 
