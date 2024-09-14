@@ -558,6 +558,7 @@ class CodeBlock(BaseModel):
         include_block_delimiters: bool = False,
         include_references: bool = False,
         include_merge_history: bool = False,
+        use_colors: bool = True,
     ):
         if not include_merge_history and self.type == CodeBlockType.BLOCK_DELIMITER:
             return ""
@@ -579,8 +580,9 @@ class CodeBlock(BaseModel):
                 )
 
                 if show_spans:
-                    color = Colors.WHITE if highlighted else Colors.GRAY
-                    child_tree += f"{indent_str} {indent} {color}Span: {current_span}{Colors.RESET}\n"
+                    color = Colors.WHITE if highlighted and use_colors else Colors.GRAY if use_colors else ""
+                    reset = Colors.RESET if use_colors else ""
+                    child_tree += f"{indent_str} {indent} {color}Span: {current_span}{reset}\n"
 
             if (
                 exclude_not_highlighted
@@ -605,6 +607,7 @@ class CodeBlock(BaseModel):
                 include_block_delimiters=include_block_delimiters,
                 include_references=include_references,
                 include_merge_history=include_merge_history,
+                use_colors=use_colors,
             )
 
         is_visible = not highlight_spans or self.belongs_to_any_span(highlight_spans)
@@ -618,17 +621,13 @@ class CodeBlock(BaseModel):
             )
 
         content = (
-            Colors.YELLOW
-            if is_visible
-            else Colors.GRAY
-            + (self.content.strip().replace("\n", "\\n") or "")
-            + Colors.RESET
-        )
+            (Colors.YELLOW if is_visible else Colors.GRAY) if use_colors else ""
+        ) + (self.content.strip().replace("\n", "\\n") or "") + (Colors.RESET if use_colors else "")
 
         if self.identifier:
             if only_identifiers:
                 content = ""
-            content += Colors.GREEN if is_visible else Colors.GRAY
+            content += (Colors.GREEN if is_visible else Colors.GRAY) if use_colors else ""
             if include_parameters and self.parameters:
                 content += f"{self.identifier}({', '.join([param.identifier for param in self.parameters])})"
             elif show_full_path:
@@ -636,7 +635,7 @@ class CodeBlock(BaseModel):
             else:
                 content += f" ({self.identifier})"
 
-            content += Colors.RESET
+            content += Colors.RESET if use_colors else ""
 
         if include_line_numbers:
             extra += f" {self.start_line}-{self.end_line}"
@@ -649,8 +648,9 @@ class CodeBlock(BaseModel):
                 [str(action) for action in self.merge_history]
             )
 
-        type_color = Colors.BLUE if is_visible else Colors.GRAY
-        return f"{indent_str} {indent} {type_color}{self.type.value}{Colors.RESET} `{content}`{extra}{Colors.RESET}\n{child_tree}"
+        type_color = (Colors.BLUE if is_visible else Colors.GRAY) if use_colors else ""
+        reset = Colors.RESET if use_colors else ""
+        return f"{indent_str} {indent} {type_color}{self.type.value}{reset} `{content}`{extra}{reset}\n{child_tree}"
 
     def _to_prompt_string(
         self,

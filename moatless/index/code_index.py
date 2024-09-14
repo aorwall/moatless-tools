@@ -698,8 +698,19 @@ class CodeIndex:
                 "category": category,
             }
 
-        if self._settings and self._settings.language == "java":
-            required_exts = [".java"]
+        if self._settings:
+            if self._settings.language == "python":
+                required_exts = [".py"]
+            elif self._settings.language == "java":
+                required_exts = [".java"]
+            elif self._settings.language == "javascript":
+                required_exts = [".js", ".jsx"]
+            elif self._settings.language == "typescript":
+                required_exts = [".ts", ".tsx"]
+            else:
+                raise ValueError(
+                    f"Language {self._settings.language} not supported for ingestion."
+                )
         else:
             required_exts = [".py"]
 
