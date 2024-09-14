@@ -24,8 +24,6 @@ from moatless.workspace import Workspace
 logger = logging.getLogger(__name__)
 
 
-
-
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
 ):
@@ -107,7 +105,6 @@ def setup_swebench_repo(
         instance_data = load_instance(instance_id)
 
     if not repo_base_dir:
-
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
 
     repo_dir_name = instance_data["repo"].replace("/", "__")
@@ -149,7 +146,9 @@ def create_workspace(
 
     if create_instance_dir:
         date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-        repo_dir = f"{repo_base_dir}/swe-bench_{instance['instance_id']}" #_{date_str}"
+        repo_dir = (
+            f"{repo_base_dir}/swe-bench_{instance['instance_id']}"  # _{date_str}"
+        )
     else:
         repo_dir = f"{repo_base_dir}/{repo_dir_name}"
 
@@ -165,9 +164,7 @@ def create_workspace(
         code_index = None
 
     if testbed:
-        verifier = TestbedVerifier(
-            testbed=testbed, repository=repo
-        )
+        verifier = TestbedVerifier(testbed=testbed, repository=repo)
     else:
         verifier = None
 
@@ -185,12 +182,16 @@ def create_workspace(
         for resolved_by in instance.get("resolved_by", []):
             if "alternative_spans" in resolved_by:
                 for file_path, span_ids in resolved_by["alternative_spans"].items():
-                    workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+                    workspace.file_context.add_spans_to_context(
+                        file_path, set(span_ids)
+                    )
 
         if "alternative_spans" in instance:
             for alternative_spans in instance["alternative_spans"]:
                 for file_path, span_ids in alternative_spans["spans"].items():
-                    workspace.file_context.add_spans_to_context(file_path, set(span_ids))
+                    workspace.file_context.add_spans_to_context(
+                        file_path, set(span_ids)
+                    )
 
         if use_expected_test_files and "test_file_spans" in instance:
             for file_path, span_ids in instance["test_file_spans"].items():
@@ -200,6 +201,7 @@ def create_workspace(
         workspace.file_context.expand_classes(500)
 
     return workspace
+
 
 def create_index(
     instance: Optional[dict] = None,

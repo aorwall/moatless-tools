@@ -353,6 +353,48 @@ def test_verify_get_start_and_end_lines():
     }
 
 
+def test_modify_two_functions():
+    instance_id = "matplotlib__matplotlib-26011"
+    instance = get_moatless_instance(instance_id, split="lite")
+    workspace = create_workspace(instance)
+    workspace.file_context.add_spans_to_context(
+        "lib/matplotlib/axes/_base.py", ["twinx", "twiny"]
+    )
+
+    request = RequestCodeChange(
+        scratch_pad="Applying change",
+        planned_steps=[],
+        instructions="Fix",
+        pseudo_code="",
+        change_type=ChangeType.modification,
+        file_path="lib/matplotlib/axes/_base.py",
+        start_line=2800,
+        end_line=2850,
+    )
+
+    plan_to_code = PlanToCode(
+        id=0,
+        _workspace=workspace,
+        max_tokens_in_edit_prompt=1000,
+        initial_message="Test initial message",
+    )
+    outcome = plan_to_code.execute(PlanRequest(action=request))
+
+    assert outcome.trigger == "edit_code"
+    assert outcome.output == {
+        "instructions": "Fix",
+        "pseudo_code": "",
+        "end_line": 753,
+        "change_type": "modification",
+        "file_path": "src/_pytest/assertion/rewrite.py",
+        "span_ids": [
+            "AssertionRewriter.is_rewrite_disabled",
+            "AssertionRewriter.variable",
+        ],
+        "start_line": 744,
+    }
+
+
 def test_action_dump():
     take_action = PlanRequest(
         action=Finish(scratch_pad="", reason="Task completed successfully")

@@ -42,6 +42,17 @@ class TestEditCode:
         }
 
     @patch("moatless.edit.edit.EditCode.file_context")
+    def test_init(self, mock_file_context, edit_code: EditCode):
+        mock_file = Mock(spec=CodeFile)
+        mock_file.content = "line1\nline2\nline3\nline4\nline5"
+        mock_file_wrapper = Mock(file=mock_file)
+        mock_file_context.get_file.return_value = mock_file_wrapper
+
+        edit_code.init()
+
+        assert edit_code._code_to_replace == "line1\nline2\nline3\nline4\nline5"
+
+    @patch("moatless.edit.edit.EditCode.file_context")
     def test_execute_action_reject(self, mock_file_context, edit_code: EditCode):
         content = Content(content="<reject>Cannot complete the task</reject>")
 
@@ -103,11 +114,48 @@ class TestEditCode:
             in system_prompt
         )
 
+    @patch("moatless.edit.edit.EditCode.file_context")
+    def test_messages(self, mock_file_context, edit_code: EditCode):
+        mock_file_context.create_prompt.return_value = "Mock file context"
+        edit_code._code_to_replace = "code to replace"
+
+        messages = edit_code.messages()
+
+        assert len(messages) == 1
+        assert "<instructions>" in messages[0].content
+        assert "Update function" in messages[0].content
+        assert "<file_context>" in messages[0].content
+        assert "Mock file context" in messages[0].content
+        assert "<search>" in messages[0].content
+        assert "code to replace" in messages[0].content
+
     def test_action_type(self, edit_code: EditCode):
         assert edit_code.action_type() is None
 
     def test_stop_words(self, edit_code: EditCode):
         assert edit_code.stop_words() == ["</replace>"]
+
+
+@pytest.mark.skip
+def test_expect_failed_edit():
+    trajectory = Trajectory.load("tests/trajectories/django__django-9296.json")
+    Settings.cheap_model = None
+
+    instance = load_instance(
+        "django__django-9296", dataset_name="princeton-nlp/SWE-bench_Verified"
+    )
+    workspace = create_workspace(instance)
+    assert isinstance(workspace.file_repo, GitRepository)
+    mocked_actions = trajectory.get_mocked_actions()
+    expected_states = trajectory.get_expected_states()
+
+    loop = AgenticLoop(
+        trajectory.transition_rules,
+        workspace=workspace,
+        mocked_actions=mocked_actions,
+        expected_states=expected_states,
+    )
+    response = loop.run(message=trajectory.initial_message)
 
 
 def test_expect_failed_edit():

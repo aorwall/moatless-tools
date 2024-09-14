@@ -7,7 +7,14 @@ from pydantic_core import to_jsonable_python
 
 from moatless.workspace import Workspace
 from moatless.transition_rules import TransitionRules
-from moatless.state import AgenticState, get_state_class, State, Content, StateOutcome, ActionTransaction
+from moatless.state import (
+    AgenticState,
+    get_state_class,
+    State,
+    Content,
+    StateOutcome,
+    ActionTransaction,
+)
 from moatless.schema import (
     Completion,
 )
@@ -78,16 +85,25 @@ class Trajectory:
         self._info: dict[str, Any] = {}
 
     @classmethod
-    def load(cls, file_path: str, skip_workspace: bool = False, base_repo_dir: str | None = None):
+    def load(
+        cls,
+        file_path: str,
+        skip_workspace: bool = False,
+        base_repo_dir: str | None = None,
+    ):
         logger.info(f"Loading trajectory from {file_path}")
         with open(file_path, "r") as f:
             data = json.load(f)
 
         if "transition_rules" in data:
             try:
-                transition_rules = TransitionRules.model_validate(data["transition_rules"])
+                transition_rules = TransitionRules.model_validate(
+                    data["transition_rules"]
+                )
             except Exception as e:
-                logger.exception(f"Error loading transition rules. Will still load trajectory.")
+                logger.exception(
+                    f"Error loading transition rules. Will still load trajectory."
+                )
                 transition_rules = None
         else:
             transition_rules = None
@@ -95,7 +111,18 @@ class Trajectory:
         if skip_workspace:
             workspace = Workspace(file_repo=None, file_context=None)
         else:
-            workspace = Workspace.from_dict(data["workspace"], base_repo_dir=base_repo_dir)
+            if (
+                data.get("workspace", {}).get("code_index")
+                and not data["workspace"]["code_index"].get("index_name")
+                and data["info"].get("instance_id")
+            ):
+                data["workspace"]["code_index"] = {
+                    "index_name": data["info"]["instance_id"]
+                }
+
+            workspace = Workspace.from_dict(
+                data["workspace"], base_repo_dir=base_repo_dir
+            )
 
         trajectory = cls(
             name=data["name"],
@@ -115,10 +142,14 @@ class Trajectory:
                 trajectory._transitions[t["id"]] = trajectory_state
 
                 if t["id"] == trajectory._current_transition_id and not skip_workspace:
-                    workspace.file_context.restore_from_snapshot(t["snapshot"]["file_context"])
+                    workspace.file_context.restore_from_snapshot(
+                        t["snapshot"]["file_context"]
+                    )
 
             except Exception as e:
-                logger.exception(f"Error loading state {t.get('name')} {t.get('id')}: {e}")
+                logger.exception(
+                    f"Error loading state {t.get('name')} {t.get('id')}: {e}"
+                )
                 raise e
 
         # Set previous_state and next_states
@@ -134,7 +165,6 @@ class Trajectory:
                     f"Missing key {e}, existing keys: {trajectory._transitions.keys()}"
                 )
                 raise
-
 
         trajectory._info = data.get("info", {})
         logger.info(
@@ -208,7 +238,9 @@ class Trajectory:
     def transitions(self) -> List[TrajectoryState]:
         return sorted(self._transitions.values(), key=lambda x: x.id)
 
-    def set_current_state(self, state: State | None = None, state_id: int | None = None):
+    def set_current_state(
+        self, state: State | None = None, state_id: int | None = None
+    ):
         if state_id is not None:
             self._current_transition_id = state_id
         elif state is not None:

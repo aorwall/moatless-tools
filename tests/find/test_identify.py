@@ -41,6 +41,25 @@ class TestIdentifyCode:
         assert isinstance(identify_code.system_prompt(), str)
         assert "You are an autonomous AI assistant" in identify_code.system_prompt()
 
+    def test_execute_action_with_identified_spans(self, identify_code):
+        action = Identify(
+            scratch_pad="Test scratch pad",
+            identified_spans=[
+                FileWithSpans(file_path="test.py", span_ids=["span1", "span2"])
+            ],
+        )
+
+        response = identify_code._execute_action(action)
+
+        assert isinstance(response, StateOutcome)
+        assert response.trigger == "finish"
+
+        # Verify that the file was added to the file context
+        assert "test.py" in identify_code.file_context._file_context
+        context_file = identify_code.file_context._file_context["test.py"]
+        assert context_file.file_path == "test.py"
+        assert set(context_file.span_ids) == {"span1", "span2"}
+
     def test_execute_action_without_identified_spans(self, identify_code):
         identify_code.ranked_spans = [
             RankedFileSpan(file_path="test.py", span_id="span1", rank=1)
@@ -52,6 +71,15 @@ class TestIdentifyCode:
         assert isinstance(response, StateOutcome)
         assert response.trigger == "search"
         assert "The search returned 1 results" in response.output["message"]
+
+    def test_messages(self, identify_code):
+        messages = identify_code.messages()
+
+        assert len(messages) == 1
+        assert "<issue>" in messages[0].content
+        assert "Test initial message" in messages[0].content
+        assert "<file_context>" in messages[0].content
+        assert "<search_results>" in messages[0].content
 
     def test_initial_message(self, identify_code):
         assert identify_code.initial_message == "Test initial message"

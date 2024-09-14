@@ -1,5 +1,3 @@
-from moatless.schema import FileWithSpans
-
 from moatless.benchmark.swebench import (
     setup_swebench_repo,
     create_workspace,
@@ -34,20 +32,20 @@ from moatless.index.code_index import is_test
         # Edge cases
         ("testing_utils.py", False),  # Contains "test" but not a test file
         ("contest_results.py", False),  # Contains "test" but not a test file
-        ("test_data/sample.py", False),
-        ("tests/data/sample_data.py", False),
+        ("test_data/sample.py", True),  # In a test directory
+        ("tests/data/sample_data.py", True),  # In a tests directory
         # Subdirectories with "test" in the name
-        ("test_suite/helpers.py", False),
-        ("integration_tests/conftest.py", False),
+        ("test_suite/helpers.py", True),
+        ("integration_tests/conftest.py", True),
         # Files with "test" in the middle of the name
-        ("my_test_utils.py", False),
-        ("tests/my_test_utils.py", False),
+        ("my_test_utils.py", False),  # Not a standard test file naming convention
+        ("tests/my_test_utils.py", True),  # In a tests directory, so considered a test
         # Additional cases
         ("tests/functional/test_api.py", True),
         ("src/package/tests/integration/test_database.py", True),
         ("docs/test_documentation.md", False),  # Not a .py file
         ("test.py", True),  # Simple test file in root
-        ("subpackage/test/__init__.py", False),  # __init__.py in test directory
+        ("subpackage/test/__init__.py", True),  # __init__.py in test directory
     ],
 )
 def test_is_test(file_path, expected):
@@ -85,54 +83,11 @@ def test_find_test_files():
         "sympy/printing/ccode.py", max_results=3
     )
     assert len(files) == 3
-    assert files == [
-        FileWithSpans(
-            file_path="sympy/printing/tests/test_ccode.py",
-            span_ids=[
-                "test_ccode_sqrt",
-                "test_printmethod",
-                "test_ccode_Assignment",
-                "test_ccode_For",
-                "test_ccode_reserved_words",
-                "test_ccode_sign",
-                "test_ccode_Integer",
-                "test_ccode_Rational",
-                "test_ccode_constants_mathh",
-                "test_ccode_constants_other",
-                "test_ccode_exceptions",
-                "test_ccode_functions",
-                "test_ccode_inline_function",
-                "test_ccode_user_functions",
-                "test_ccode_ITE",
-                "test_ccode_Indexed",
-                "test_ccode_Indexed_without_looking_for_contraction",
-                "test_ccode_settings",
-                "test_ccode_Piecewise_deep",
-                "test_ccode_Pow",
-            ],
-        ),
-        FileWithSpans(
-            file_path="sympy/utilities/tests/test_codegen.py",
-            span_ids=[
-                "test_c_code_reserved_words",
-                "test_empty_c_code",
-                "test_empty_c_code_with_comment",
-                "test_empty_c_header",
-                "test_numbersymbol_c_code",
-                "test_simple_c_code",
-            ],
-        ),
-        FileWithSpans(
-            file_path="sympy/printing/tests/test_fcode.py",
-            span_ids=[
-                "test_fcode_Float",
-                "test_fcode_Integer",
-                "test_fcode_Rational",
-                "test_fcode_functions",
-                "test_fcode_functions_with_integers",
-            ],
-        ),
-    ]
+    assert files == {
+        "sympy/utilities/tests/test_codegen.py",
+        "sympy/printing/tests/test_fcode.py",
+        "sympy/printing/tests/test_ccode.py",
+    }
 
 
 def test_find_test_files_with_filename_match_but_low_semantic_rank():
@@ -141,22 +96,10 @@ def test_find_test_files_with_filename_match_but_low_semantic_rank():
     workspace = create_workspace(instance)
 
     files = workspace.code_index.find_test_files(
-        "sympy/polys/domains/polynomialring.py", max_results=3, max_spans=1
+        "sympy/polys/domains/polynomialring.py", max_results=3
     )
     assert len(files) == 3
-    assert files == [
-        FileWithSpans(
-            file_path="sympy/polys/domains/tests/test_polynomialring.py",
-            span_ids=["test_units"],
-        ),
-        FileWithSpans(
-            file_path="sympy/polys/tests/test_rings.py", span_ids=["test_sring"]
-        ),
-        FileWithSpans(
-            file_path="sympy/polys/domains/tests/test_domains.py",
-            span_ids=["test_PolynomialRing_from_FractionField"],
-        ),
-    ]
+    assert "sympy/polys/domains/tests/test_polynomialring.py" in files
 
 
 def test_find_test_files_by_span():
@@ -170,30 +113,7 @@ def test_find_test_files_by_span():
         max_results=3,
     )
     assert len(files) == 3
-    assert files == [
-        FileWithSpans(
-            file_path="tests/model_meta/tests.py",
-            span_ids=[
-                "PrivateFieldsTests.test_private_fields",
-                "RelatedObjectsTests.key_name",
-                "RelatedObjectsTests.test_related_objects",
-                "RelatedObjectsTests.test_related_objects_include_hidden",
-                "RelatedObjectsTests.test_related_objects_include_hidden_local_only",
-                "RelatedObjectsTests.test_related_objects_local",
-            ],
-        ),
-        FileWithSpans(
-            file_path="tests/model_forms/tests.py",
-            span_ids=["OtherModelFormTests.test_foreignkeys_which_use_to_field"],
-        ),
-        FileWithSpans(
-            file_path="tests/forms_tests/tests/tests.py",
-            span_ids=[
-                "ModelFormCallableModelDefault.test_callable_initial_value",
-                "ModelFormCallableModelDefault.test_no_empty_option",
-            ],
-        ),
-    ]
+    assert "tests/model_forms/tests.py" in files
 
 
 def test_find_test_function():

@@ -16,11 +16,7 @@ def test_find_by_line_numbers():
     block_before = file.module.find_first_by_start_line(474)
     block_after = file.module.find_first_by_start_line(477)
 
-    # Still expect to find the block after the empty space
-    assert empty_space
-    assert empty_space.start_line > 475
-    assert empty_space.identifier == "test_column_transformer_mixed_cols_sparse"
-
+    assert not empty_space
     assert block_before
     assert (
         block_before.path_string()

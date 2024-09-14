@@ -58,16 +58,18 @@ class PylintVerifier(Verifier):
                         )
                         return self.verify([file], retry=True)
 
-                issues.extend([
-                    VerificationIssue(
-                        type=VerificationIssueType.LINT,
-                        file_path=msg.path.replace(f"{self.repo_dir}/", ""),
-                        message=msg.msg,
-                        line=msg.line,
-                    )
-                    for msg in results.linter.reporter.messages
-                    if msg.msg_id[0] in ["E"]
-                ])
+                issues.extend(
+                    [
+                        VerificationIssue(
+                            type=VerificationIssueType.LINT,
+                            file_path=msg.path.replace(f"{self.repo_dir}/", ""),
+                            message=msg.msg,
+                            line=msg.line,
+                        )
+                        for msg in results.linter.reporter.messages
+                        if msg.msg_id[0] in ["E"]
+                    ]
+                )
             except AstroidError:
                 logger.warning(
                     f"AstroidError occurred while linting {file.file_path}. Skipping this file."

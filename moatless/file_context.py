@@ -26,7 +26,10 @@ class ContextSpan(BaseModel):
     start_line: Optional[int] = None
     end_line: Optional[int] = None
     tokens: Optional[int] = None
-    pinned: bool = Field(default=False, description="Whether the span is pinned and cannot be removed from context")
+    pinned: bool = Field(
+        default=False,
+        description="Whether the span is pinned and cannot be removed from context",
+    )
 
 
 @dataclass
@@ -49,9 +52,7 @@ class ContextFile(BaseModel):
 
         # Always include init spans like 'imports' to context file
         for child in self.file.module.children:
-            if (
-                child.type == CodeBlockType.IMPORT
-            ) and child.belongs_to_span.span_id:
+            if (child.type == CodeBlockType.IMPORT) and child.belongs_to_span.span_id:
                 self.add_span(child.belongs_to_span.span_id, pinned=True)
 
     def model_dump(self, **kwargs):
@@ -298,7 +299,9 @@ class ContextFile(BaseModel):
         else:
             span = self.module.find_span_by_id(span_id)
             if span:
-                self.spans.append(ContextSpan(span_id=span_id, tokens=tokens, pinned=pinned))
+                self.spans.append(
+                    ContextSpan(span_id=span_id, tokens=tokens, pinned=pinned)
+                )
                 self._add_class_span(span)
             else:
                 logger.warning(
@@ -307,7 +310,9 @@ class ContextFile(BaseModel):
 
     def _add_class_span(self, span: BlockSpan):
         if span.initiating_block.type != CodeBlockType.CLASS:
-            class_block = span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
+            class_block = span.initiating_block.find_type_in_parents(
+                CodeBlockType.CLASS
+            )
         elif span.initiating_block.type == CodeBlockType.CLASS:
             class_block = span.initiating_block
         else:
@@ -318,12 +323,15 @@ class ContextFile(BaseModel):
 
         # Always add init spans like constructors to context
         for child in class_block.children:
-            if (child.belongs_to_span.span_type == SpanType.INITATION
-                    and child.belongs_to_span.span_id
-                    and not self.has_span(child.belongs_to_span.span_id)
+            if (
+                child.belongs_to_span.span_type == SpanType.INITATION
+                and child.belongs_to_span.span_id
+                and not self.has_span(child.belongs_to_span.span_id)
             ):
                 if child.belongs_to_span.span_id not in self.span_ids:
-                    self.spans.append(ContextSpan(span_id=child.belongs_to_span.span_id))
+                    self.spans.append(
+                        ContextSpan(span_id=child.belongs_to_span.span_id)
+                    )
 
         if class_block.belongs_to_span.span_id not in self.span_ids:
             self.spans.append(ContextSpan(span_id=class_block.belongs_to_span.span_id))
@@ -334,7 +342,9 @@ class ContextFile(BaseModel):
             return
 
         logger.debug(f"Adding line span {start_line} - {end_line} to {self.file_path}")
-        blocks = self.file.module.find_blocks_by_line_numbers(start_line, end_line, include_parents=True)
+        blocks = self.file.module.find_blocks_by_line_numbers(
+            start_line, end_line, include_parents=True
+        )
 
         added_spans = []
         for block in blocks:
@@ -343,7 +353,9 @@ class ContextFile(BaseModel):
                     added_spans.append(block.belongs_to_span.span_id)
                     self.add_span(block.belongs_to_span.span_id)
 
-        logger.info(f"Added {added_spans} spans on lines {start_line} - {end_line} to {self.file_path} to context")
+        logger.info(
+            f"Added {added_spans} spans on lines {start_line} - {end_line} to {self.file_path} to context"
+        )
 
     def remove_span(self, span_id: str):
         self.spans = [span for span in self.spans if span.span_id != span_id]
@@ -381,7 +393,6 @@ class ContextFile(BaseModel):
             if span.span_id == span_id:
                 return span
         return None
-
 
 
 class FileContext(BaseModel):
@@ -501,7 +512,7 @@ class FileContext(BaseModel):
         file_path: str,
         span_ids: Set[str],
         tokens: Optional[int] = None,
-        pinned: bool = False
+        pinned: bool = False,
     ):
         context_file = self.get_context_file(file_path, add_if_not_found=True)
         if context_file:
@@ -514,7 +525,7 @@ class FileContext(BaseModel):
         file_path: str,
         span_id: str,
         tokens: Optional[int] = None,
-        pinned: bool = False
+        pinned: bool = False,
     ):
         context_file = self.get_context_file(file_path, add_if_not_found=True)
         if context_file:
@@ -637,7 +648,9 @@ class FileContext(BaseModel):
         expanded_classes = set()
 
         # Sort files by the number of spans, prioritizing files with more spans
-        sorted_files = sorted(self._file_context.values(), key=lambda f: len(f.spans), reverse=True)
+        sorted_files = sorted(
+            self._file_context.values(), key=lambda f: len(f.spans), reverse=True
+        )
 
         all_classes = []
         for file in sorted_files:
@@ -651,26 +664,32 @@ class FileContext(BaseModel):
                     continue
 
                 if block_span.initiating_block.type != CodeBlockType.CLASS:
-                    class_block = block_span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
+                    class_block = block_span.initiating_block.find_type_in_parents(
+                        CodeBlockType.CLASS
+                    )
                 elif block_span.initiating_block.type == CodeBlockType.CLASS:
                     class_block = block_span.initiating_block
                 else:
                     continue
 
-                if class_block and not any(c.full_path() == class_block.full_path() for c in class_blocks):
+                if class_block and not any(
+                    c.full_path() == class_block.full_path() for c in class_blocks
+                ):
                     class_blocks.append(class_block)
 
             all_classes.extend((file, class_block) for class_block in class_blocks)
 
         # Sort all classes by the number of spans they contain that are already in context
-        all_classes.sort(key=lambda x: len(set(x[1].get_all_span_ids()) & x[0].span_ids), reverse=True)
+        all_classes.sort(
+            key=lambda x: len(set(x[1].get_all_span_ids()) & x[0].span_ids),
+            reverse=True,
+        )
 
         for file, class_block in all_classes:
-
             logger.debug(f"Checking class {class_block.full_path()} ")
 
             # Skip if the class is already expanded
-            if (class_block.belongs_to_span.span_id in expanded_classes):
+            if class_block.belongs_to_span.span_id in expanded_classes:
                 logger.debug(f"Skipping class {class_block.full_path()}")
                 continue
 
@@ -684,7 +703,8 @@ class FileContext(BaseModel):
                 # Check if adding this class would exceed the total token limit
                 if total_added_tokens + class_tokens > self._max_tokens:
                     logger.info(
-                        f"Exceeded total token limit, stopping. Total added tokens: {total_added_tokens}, class tokens: {class_tokens}, max tokens: {self._max_tokens}")
+                        f"Exceeded total token limit, stopping. Total added tokens: {total_added_tokens}, class tokens: {class_tokens}, max tokens: {self._max_tokens}"
+                    )
                     break
 
                 file.add_span(span.span_id)
@@ -693,9 +713,13 @@ class FileContext(BaseModel):
             total_added_tokens += class_tokens
             expanded_classes.add(class_block.belongs_to_span.span_id)
 
-            logger.debug(f"Expanded class {class_block.full_path()} with {class_tokens} tokens, total added tokens: {total_added_tokens}")
+            logger.debug(
+                f"Expanded class {class_block.full_path()} with {class_tokens} tokens, total added tokens: {total_added_tokens}"
+            )
 
-        logger.info(f"Expanded {len(expanded_classes)} classes, total added tokens: {total_added_tokens}")
+        logger.info(
+            f"Expanded {len(expanded_classes)} classes, total added tokens: {total_added_tokens}"
+        )
 
     def expand_context_with_related_spans(
         self, max_tokens: int, set_tokens: bool = False
@@ -741,7 +765,12 @@ class FileContext(BaseModel):
                 if relation not in relations:
                     relations.append(relation)
 
-        relation_str = "\n".join([f"{file_path}: {span_id} -> {related_span_id}" for file_path, span_id, related_span_id in relations])
+        relation_str = "\n".join(
+            [
+                f"{file_path}: {span_id} -> {related_span_id}"
+                for file_path, span_id, related_span_id in relations
+            ]
+        )
         logger.info(f"Expanded context with related spans:\n{relation_str}")
 
         return spans
@@ -754,7 +783,9 @@ class FileContext(BaseModel):
     ) -> Optional[ContextFile]:
         return self.get_context_file(file_path, add_if_not_found)
 
-    def get_context_file(self, file_path: str, add_if_not_found: bool = False) -> Optional[ContextFile]:
+    def get_context_file(
+        self, file_path: str, add_if_not_found: bool = False
+    ) -> Optional[ContextFile]:
         context_file = self._file_context.get(file_path)
 
         if not context_file:

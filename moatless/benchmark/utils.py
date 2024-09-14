@@ -16,6 +16,7 @@ IGNORED_SPANS = ["docstring", "imports"]
 logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
+
 def load_moatless_datasets(split: str):
     global _moatless_instances
 
@@ -43,7 +44,6 @@ def get_moatless_instance(instance_id: str, split: str = "lite"):
         raise ValueError(f"Instance {instance_id} not found in {split} split.")
 
     return instance
-
 
 
 def find_relevant_spans(original_block: Module, updated_block: Module):
@@ -143,7 +143,12 @@ def compare_patches(expected_patch, actual_patch):
         change_file, change_start, change_end, change_type = patch_diff
 
         for actual_diff in actual_diffs:
-            actual_change_file, actual_change_start, actual_change_end, actual_change_type = actual_diff
+            (
+                actual_change_file,
+                actual_change_start,
+                actual_change_end,
+                actual_change_type,
+            ) = actual_diff
             expected_files.add(change_file)
             if change_file == actual_change_file:
                 file_hits.add(change_file)
@@ -235,7 +240,8 @@ def get_missing_spans(
             actual_span_ids = actual_files_with_spans[expected_file]
 
         missing_span_ids = [
-            span_id for span_id in expected_span_ids
+            span_id
+            for span_id in expected_span_ids
             if span_id not in actual_span_ids and span_id not in IGNORED_SPANS
         ]
 
@@ -273,7 +279,9 @@ def has_identified_spans(
     actual_files_with_spans: dict[str, list[str]],
 ) -> bool:
     for expected_file_with_spans in expected_solutions:
-        missing_spans = get_missing_spans(expected_file_with_spans, actual_files_with_spans)
+        missing_spans = get_missing_spans(
+            expected_file_with_spans, actual_files_with_spans
+        )
         if not missing_spans or missing_spans == ["docstring"]:
             return True
     return False
@@ -383,7 +391,9 @@ def get_trajectories(dir: str, skip_workspace: bool = False) -> List[Trajectory]
         if "trajectory.json" in files:
             trajectory_path = os.path.join(root, "trajectory.json")
             try:
-                trajectory = Trajectory.load(trajectory_path, skip_workspace=skip_workspace)
+                trajectory = Trajectory.load(
+                    trajectory_path, skip_workspace=skip_workspace
+                )
                 trajectories.append(trajectory)
             except Exception as e:
                 logger.error(f"Failed to load trajectory from {trajectory_path}: {e}")

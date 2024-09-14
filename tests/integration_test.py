@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from moatless import AgenticLoop
 from moatless.benchmark.swebench import load_instance, create_workspace
 from moatless.benchmark.utils import trace_metadata, get_moatless_instance
-from moatless.edit import EditCode, PlanToCode, ClarifyCodeChange
+from moatless.edit import EditCode, PlanToCode
 from moatless.edit.expand import ExpandContext
 from moatless.find import SearchCode, IdentifyCode, DecideRelevance
 from moatless.state import Finished, Pending
@@ -25,8 +25,8 @@ load_dotenv()
 moatless_dir = os.getenv("MOATLESS_DIR", "/tmp/moatless")
 
 global_params = {
-    "model": "claude-3-5-sonnet-20240620",
-    "temperature": 0.2,
+    "model": "gpt-4o-mini-2024-07-18",  # "azure/gpt-4o",
+    "temperature": 0.5,
     "max_tokens": 2000,
     "max_prompt_file_tokens": 8000,
 }

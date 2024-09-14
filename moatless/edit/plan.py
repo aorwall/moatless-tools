@@ -5,28 +5,42 @@ from typing import Optional, List, Any
 
 from pydantic import ConfigDict, Field, PrivateAttr, BaseModel, model_validator
 
-from moatless.codeblocks import CodeBlockType
+from moatless.codeblocks import CodeBlockType, PythonParser
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlock
 from moatless.edit.prompt import PLAN_TO_CODE_SYSTEM_PROMPT
+from moatless.file_context import ContextFile
 from moatless.index.code_index import is_test
 from moatless.repository import CodeFile
 from moatless.schema import VerificationIssueType, FileWithSpans, ChangeType
-from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage, TakeAction
+from moatless.state import (
+    AgenticState,
+    ActionRequest,
+    StateOutcome,
+    AssistantMessage,
+    Message,
+    UserMessage,
+    TakeAction,
+)
 from moatless.utils.tokenizer import count_tokens
 
 from moatless.verify.lint import VerificationIssue
 
 logger = logging.getLogger("PlanToCode")
 
+
 class RequestCodeChange(ActionRequest):
     """
     Request for the next code change.
     """
 
-    scratch_pad: str = Field(..., description="Your step by step reasoning on how to do the code change and whats the next step is.")
+    scratch_pad: str = Field(
+        ...,
+        description="Your step by step reasoning on how to do the code change and whats the next step is.",
+    )
 
     change_type: ChangeType = Field(
-        ..., description="A string that can be set to 'addition', 'modification', or 'deletion'. 'Addition' refers to adding a new function or class, 'modification' refers to changing existing code, and 'deletion' refers to removing a function or class."
+        ...,
+        description="A string that can be set to 'addition', 'modification', or 'deletion'. 'Addition' refers to adding a new function or class, 'modification' refers to changing existing code, and 'deletion' refers to removing a function or class.",
     )
     instructions: str = Field(
         ..., description="Instructions about the next step to do the code change."
@@ -34,35 +48,40 @@ class RequestCodeChange(ActionRequest):
     start_line: int = Field(
         ..., description="The start line of the existing code to be updated."
     )
-    end_line: int = Field(..., description="The end line of the code to be updated when modifying existing code.")
+    end_line: int = Field(
+        ...,
+        description="The end line of the code to be updated when modifying existing code.",
+    )
 
-    pseudo_code: str = Field(
-        ..., description="Pseudo code for the code change."
-    )
-    file_path: str = Field(
-        ..., description="The file path of the code to be updated."
-    )
+    pseudo_code: str = Field(..., description="Pseudo code for the code change.")
+    file_path: str = Field(..., description="The file path of the code to be updated.")
 
     planned_steps: List[str] = Field(
         default_factory=list,
-        description="Planned steps that should be executed after the current step."
+        description="Planned steps that should be executed after the current step.",
     )
 
     @model_validator(mode="before")
     @classmethod
     def validate_steps(cls, data: Any):
         # Claude sometimes returns steps as a string instead of a list
-        if isinstance(data, dict) and "planned_steps" in data and isinstance(data["planned_steps"], str):
-            logger.info(f"validate_steps: Converting planned_steps to list: {data['planned_steps']}")
+        if (
+            isinstance(data, dict)
+            and "planned_steps" in data
+            and isinstance(data["planned_steps"], str)
+        ):
+            logger.info(
+                f"validate_steps: Converting planned_steps to list: {data['planned_steps']}"
+            )
             data["planned_steps"] = data["planned_steps"].split("\n")
         return data
-
 
 
 class RequestMoreContext(ActionRequest):
     """
     Request to see code that is not in the current context.
     """
+
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
 
     files: List[FileWithSpans] = Field(
@@ -71,28 +90,21 @@ class RequestMoreContext(ActionRequest):
 
 
 class Review(ActionRequest):
-
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
 
-    instructions: str = Field(
-        ..., description="Review instructions."
-    )
+    instructions: str = Field(..., description="Review instructions.")
+
 
 class Finish(ActionRequest):
-
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
 
-    reason: str = Field(
-        ..., description="Finish the request and explain why"
-    )
+    reason: str = Field(..., description="Finish the request and explain why")
+
 
 class Reject(ActionRequest):
-
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
 
-    reason: str = Field(
-        ..., description="Reject the request and explain why."
-    )
+    reason: str = Field(..., description="Reject the request and explain why.")
 
 
 class PlanRequest(TakeAction):
@@ -109,6 +121,7 @@ class PlanRequest(TakeAction):
             Finish,
             Reject,
         ]
+
 
 class PlanToCode(AgenticState):
     message: Optional[str] = Field(
@@ -160,9 +173,9 @@ class PlanToCode(AgenticState):
         description="Whether to include the message history in the prompt.",
     )
 
-    run_tests: bool = Field(
-        False,
-        description="Whether to run tests after the code change."
+    verify: bool = Field(
+        True,
+        description="Whether to run verification job before executing the next action.",
     )
 
     verification_issues: list[VerificationIssue] | None = Field(
@@ -219,28 +232,40 @@ class PlanToCode(AgenticState):
                 if state.verification_issues:
                     issue_keys = []
                     for issue in state.verification_issues:
-                        issue_keys.append(f"{issue.file_path}:{issue.span_id}:{issue.message}")
+                        issue_keys.append(
+                            f"{issue.file_path}:{issue.span_id}:{issue.message}"
+                        )
 
                     issue_key = "\n".join(issue_keys)
-                    verification_issue_counts[issue_key] = verification_issue_counts.get(issue_key, 0) + 1
+                    verification_issue_counts[issue_key] = (
+                        verification_issue_counts.get(issue_key, 0) + 1
+                    )
 
             diff_counts[diff] = diff_counts.get(diff, 0) + 1
 
         # Check if any diff exceeds the maximum allowed repetitions
         for diff, count in diff_counts.items():
             if count > self.max_repated_git_diffs:
-                return StateOutcome.reject(f"The following diff has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repated_git_diffs}:\n\n{diff}")
+                return StateOutcome.reject(
+                    f"The following diff has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repated_git_diffs}:\n\n{diff}"
+                )
 
         # Check if any verification issue exceeds the maximum allowed repetitions
         for issue_key, count in verification_issue_counts.items():
             if count > self.max_repeated_test_failures:
-                return StateOutcome.reject(f"The following verification issue has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{issue_key}")
+                return StateOutcome.reject(
+                    f"The following verification issue has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{issue_key}"
+                )
 
-        if self.run_tests:
+        if self.verify:
             # Run all test files that are in context
-            test_files = [file for file in self.file_context.files if is_test(file.file_path)]
+            test_files = [
+                file for file in self.file_context.files if is_test(file.file_path)
+            ]
             if not test_files:
-                logger.info(f"{self.name}:{self.id} No test files in the file context, will not run tests.")
+                logger.info(
+                    f"{self.name}:{self.id} No test files in the file context, will not run tests."
+                )
             else:
                 test_file_paths = [file.file_path for file in test_files]
                 self.verification_issues = self.workspace.run_tests(test_file_paths)
@@ -250,31 +275,46 @@ class PlanToCode(AgenticState):
                     )
 
                     all_transitions_issues = [self.verification_issues]
-                    all_transitions_issues.extend([state.verification_issues for state in previous_states if state.verification_issues])
+                    all_transitions_issues.extend(
+                        [
+                            state.verification_issues
+                            for state in previous_states
+                            if state.verification_issues
+                        ]
+                    )
 
                     for issues in all_transitions_issues:
                         issue_keys = []
                         for issue in issues:
-                            issue_keys.append(f"{issue.file_path}:{issue.span_id}:{issue.message}")
+                            issue_keys.append(
+                                f"{issue.file_path}:{issue.span_id}:{issue.message}"
+                            )
 
                         issue_key = "\n".join(issue_keys)
-                        verification_issue_counts[issue_key] = verification_issue_counts.get(issue_key, 0) + 1
+                        verification_issue_counts[issue_key] = (
+                            verification_issue_counts.get(issue_key, 0) + 1
+                        )
 
                     # Check if any verification issue exceeds the maximum allowed repetitions
                     for issue_key, count in verification_issue_counts.items():
                         if count > self.max_repeated_test_failures:
                             return StateOutcome.reject(
-                                f"The following verification issue has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{issue_key}")
+                                f"The following verification issue has been repeated {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{issue_key}"
+                            )
 
                     # Keep file context size down by replacing spans with failing spans
                     failed_test_spans_by_file_path: dict = {}
                     for issue in self.verification_issues:
-                        failed_test_spans_by_file_path.setdefault(issue.file_path, []).append(issue.span_id)
+                        failed_test_spans_by_file_path.setdefault(
+                            issue.file_path, []
+                        ).append(issue.span_id)
 
                     for test_file in test_files:
                         # TODO: Find a way to rank spans to keep the most relevant ones
                         test_file.remove_all_spans()
-                        failed_span_ids = failed_test_spans_by_file_path.get(test_file.file_path)
+                        failed_span_ids = failed_test_spans_by_file_path.get(
+                            test_file.file_path
+                        )
                         if failed_span_ids:
                             test_file.add_spans(failed_span_ids)
 
@@ -288,7 +328,9 @@ class PlanToCode(AgenticState):
         for file_with_spans in action.files:
             file = self.file_repo.get_file(file_with_spans.file_path)
             if not file:
-                logger.info(f"{self.name}:{self.id}:RequestMoreContext: {file_with_spans.file_path} is not found in the file repository.")
+                logger.info(
+                    f"{self.name}:{self.id}:RequestMoreContext: {file_with_spans.file_path} is not found in the file repository."
+                )
                 return StateOutcome.retry(
                     f"File {file.file_path} is not found in the file repository."
                 )
@@ -314,24 +356,33 @@ class PlanToCode(AgenticState):
 
                 if block_span:
                     if block_span.initiating_block.type == CodeBlockType.CLASS:
-                        if block_span.initiating_block.sum_tokens() < self.max_tokens_in_edit_prompt:
+                        if (
+                            block_span.initiating_block.sum_tokens()
+                            < self.max_tokens_in_edit_prompt
+                        ):
                             found_span_ids.add(block_span.span_id)
                             for child_span_id in block_span.initiating_block.span_ids:
                                 found_span_ids.add(child_span_id)
                         else:
                             retry_message += f"Class {block_span.initiating_block.identifier} has too many tokens. Specify which functions to include..\n"
-                            suggested_span_ids.update(block_span.initiating_block.span_ids)
+                            suggested_span_ids.update(
+                                block_span.initiating_block.span_ids
+                            )
                     else:
                         found_span_ids.add(block_span.span_id)
 
             if missing_span_ids:
-                logger.info(f"{self.name}:{self.id}:RequestMoreContext: Spans not found in {file_with_spans.file_path}: {', '.join(missing_span_ids)}")
+                logger.info(
+                    f"{self.name}:{self.id}:RequestMoreContext: Spans not found in {file_with_spans.file_path}: {', '.join(missing_span_ids)}"
+                )
                 retry_message += f"Spans not found in {file_with_spans.file_path}: {', '.join(missing_span_ids)}\n"
             else:
                 self.file_context.add_spans_to_context(file.file_path, found_span_ids)
 
             if retry_message and suggested_span_ids:
-                logger.info(f"{self.name}:{self.id}:RequestMoreContext: Suggested spans: {', '.join(suggested_span_ids)}")
+                logger.info(
+                    f"{self.name}:{self.id}:RequestMoreContext: Suggested spans: {', '.join(suggested_span_ids)}"
+                )
                 retry_message += f"Did you mean one of these spans: {', '.join(suggested_span_ids)}\n"
 
         if retry_message:
@@ -350,42 +401,61 @@ class PlanToCode(AgenticState):
             f"{self.name}:{self.id}:RequestCodeChange: file_path={rfc.file_path}, start_line={rfc.start_line}, end_line={rfc.end_line}, change_type={rfc.change_type}"
         )
 
-        if not rfc.instructions:
-            return StateOutcome.retry(
-                f"Please provide instructions for the code change."
-            )
-
-        if not rfc.start_line:
-            return StateOutcome.retry(
-                f"Please provide the start line for the code change."
-            )
-
-        if not rfc.end_line:
-            if rfc.change_type != ChangeType.addition:
-                return StateOutcome.retry(
-                    f"If the intention is to modify an existing code span you must provide the end line for the code change."
-                )
-
-            logger.info(f"{self.name}:{self.id}:RequestCodeChange: End line not set, set to start line {rfc.start_line}")
-            rfc.end_line = rfc.start_line
-
-        previous_states = self.get_previous_states(self)
-        instruction_counts = {}
-        code_location = f"{rfc.file_path}:{rfc.start_line}-{rfc.end_line}"
-        instruction_counts[code_location] = instruction_counts.get(code_location, 0) + 1
-
-        for state in previous_states:
-            if state.action_request and isinstance(state.action_request.action, RequestCodeChange):
-                code_location = f"{state.action_request.action.file_path}:{state.action_request.action.start_line}-{state.action_request.action.end_line}"
-                instruction_counts[code_location] = instruction_counts.get(code_location, 0) + 1
-
-            # Check if any RFC exceeds the maximum allowed repetitions
-            for code_location, count in instruction_counts.items():
-                if count > self.max_repeated_instructions:
-                    return StateOutcome.reject(
-                        f"The same code was requested {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{code_location}")
-
         context_file = self.file_context.get_file(rfc.file_path)
+
+        retry_message = self.verify_request(rfc, context_file)
+        if retry_message:
+            return retry_message
+
+        start_line, end_line, change_type = self.get_line_span(
+            rfc.change_type,
+            context_file.file,
+            rfc.start_line,
+            rfc.end_line,
+            self.max_tokens_in_edit_prompt,
+        )
+
+        logger.info(
+            f"{self.name}:{self.id} Requesting code change in {rfc.file_path} from {start_line} to {end_line}"
+        )
+
+        span_ids = []
+        span_to_update = context_file.file.module.find_spans_by_line_numbers(
+            start_line, end_line
+        )
+        if span_to_update:
+            # Pin the spans that are planned to be updated to context
+            for span in span_to_update:
+                if span.span_id not in span_ids:
+                    span_ids.append(span.span_id)
+            self.file_context.add_spans_to_context(
+                rfc.file_path, span_ids=set(span_ids), pinned=True
+            )
+
+        # Add the two most relevant test files to file context
+        test_files_with_spans = self.workspace.code_index.find_test_files(
+            rfc.file_path, query=rfc.pseudo_code, max_results=2, max_spans=1
+        )
+        for test_file_with_spans in test_files_with_spans:
+            if not self.file_context.has_file(test_file_with_spans.file_path):
+                self.file_context.add_files_with_spans(test_files_with_spans)
+
+        return StateOutcome.transition(
+            trigger="edit_code",
+            output={
+                "instructions": rfc.instructions,
+                "pseudo_code": rfc.pseudo_code,
+                "file_path": rfc.file_path,
+                "change_type": change_type.value,
+                "start_line": start_line,
+                "end_line": end_line,
+                "span_ids": span_ids,
+            },
+        )
+
+    def verify_request(
+        self, rfc: RequestCodeChange, context_file: ContextFile
+    ) -> Optional[StateOutcome]:
         if not context_file:
             logger.warning(
                 f"{self.name}:{self.id}:RequestCodeChange:  File {rfc.file_path} is not found in the file context."
@@ -400,57 +470,132 @@ class PlanToCode(AgenticState):
                 f"You can only request changes to files that are in file context:\n{files_str}"
             )
 
+        if not rfc.instructions:
+            return StateOutcome.retry(
+                f"Please provide instructions for the code change."
+            )
+
+        if not rfc.start_line:
+            return StateOutcome.retry(
+                f"Please provide the start line for the code change."
+            )
+
+        if not rfc.pseudo_code:
+            return StateOutcome.retry(
+                f"Please provide pseudo code for the code change."
+            )
+
+        module = None
+        try:
+            parser = PythonParser(apply_gpt_tweaks=True)
+            module = parser.parse(rfc.pseudo_code, file_path=rfc.file_path)
+        except Exception as e:
+            return StateOutcome.retry(f"The pseude code syntax is invalid.")
+
+        existing_hallucinated_spans = self.find_hallucinated_spans(
+            rfc, module, context_file
+        )
+        if existing_hallucinated_spans:
+            context_file.add_spans(existing_hallucinated_spans)
+            return StateOutcome.retry(
+                f"There where code in the pseudo code that wasn't present in the file context. "
+                f"The following code spans where added to file context: {', '.join(existing_hallucinated_spans)}. "
+                f"Please provide instructions for the code change again."
+            )
+
+        if not rfc.end_line:
+            if rfc.change_type != ChangeType.addition:
+                return StateOutcome.retry(
+                    f"If the intention is to modify an existing code span you must provide the end line for the code change."
+                )
+
+            logger.info(
+                f"{self.name}:{self.id}:RequestCodeChange: End line not set, set to start line {rfc.start_line}"
+            )
+            rfc.end_line = rfc.start_line
+
+        previous_states = self.get_previous_states(self)
+        instruction_counts = {}
+        code_location = f"{rfc.file_path}:{rfc.start_line}-{rfc.end_line}"
+        instruction_counts[code_location] = instruction_counts.get(code_location, 0) + 1
+
+        for state in previous_states:
+            if state.action_request and isinstance(
+                state.action_request.action, RequestCodeChange
+            ):
+                code_location = f"{state.action_request.action.file_path}:{state.action_request.action.start_line}-{state.action_request.action.end_line}"
+                instruction_counts[code_location] = (
+                    instruction_counts.get(code_location, 0) + 1
+                )
+
+            # Check if any RFC exceeds the maximum allowed repetitions
+            for code_location, count in instruction_counts.items():
+                if count > self.max_repeated_instructions:
+                    return StateOutcome.reject(
+                        f"The same code was requested {count} times, which exceeds the maximum allowed repetitions of {self.max_repeated_test_failures}:\n\n{code_location}"
+                    )
+
         code_lines = context_file.file.content.split("\n")
-        lines_to_edit = code_lines[
-            rfc.start_line - 1: rfc.end_line
-        ]
+        lines_to_edit = code_lines[rfc.start_line - 1 : rfc.end_line]
         code_to_edit = "\n".join(lines_to_edit)
 
         tokens = count_tokens(code_to_edit)
         if tokens > self.max_tokens_in_edit_prompt:
-            clarify_msg = (f"Lines {rfc.start_line} - {rfc.end_line} has {tokens} tokens, which is higher than the "
-                           f"maximum allowed {self.max_tokens_in_edit_prompt} tokens.")
+            clarify_msg = (
+                f"Lines {rfc.start_line} - {rfc.end_line} has {tokens} tokens, which is higher than the "
+                f"maximum allowed {self.max_tokens_in_edit_prompt} tokens."
+            )
             logger.info(f"{self.name}:{self.id} {clarify_msg}. Ask for clarification.")
             return StateOutcome.retry(
                 f"{clarify_msg}. Narrow down the instructions and specify the exact part of the code that needs to be "
-                f"updated to fulfill the change. ")
+                f"updated to fulfill the change. "
+            )
 
-        start_line, end_line, change_type = self.get_line_span(
-            rfc.change_type, context_file.file, rfc.start_line, rfc.end_line, self.max_tokens_in_edit_prompt
-        )
+        return None
 
-        logger.info(
-            f"{self.name}:{self.id} Requesting code change in {rfc.file_path} from {start_line} to {end_line}"
-        )
+    def find_hallucinated_spans(
+        self, rfc: RequestCodeChange, code_block: CodeBlock, context_file: ContextFile
+    ) -> set[str]:
+        existing_hallucinated_spans = set()
+        for child_block in code_block.children:
+            if child_block.type.group != CodeBlockTypeGroup.STRUCTURE:
+                continue
 
-        span_ids = []
-        span_to_update = context_file.file.module.find_spans_by_line_numbers(start_line, end_line)
-        if span_to_update:
-            # Pin the spans that are planned to be updated to context
-            for span in span_to_update:
-                if span.span_id not in span_ids:
-                    span_ids.append(span.span_id)
-            self.file_context.add_spans_to_context(rfc.file_path, span_ids=set(span_ids), pinned=True)
+            if child_block.type == CodeBlockType.CLASS:
+                existing_hallucinated_spans.update(
+                    self.find_hallucinated_spans(rfc, child_block, context_file)
+                )
 
-        if self.run_tests:
-            # Add the two most relevant test files to file context
-            test_files_with_spans = self.workspace.code_index.find_test_files(rfc.file_path, query=code_to_edit, max_results=2, max_spans=1)
-            for test_file_with_spans in test_files_with_spans:
-                if not self.file_context.has_file(test_file_with_spans.file_path):
-                    self.file_context.add_files_with_spans(test_files_with_spans)
+            span_id = child_block.belongs_to_span.span_id
+            if context_file.has_span(span_id):
+                continue
 
-        return StateOutcome.transition(
-            trigger="edit_code",
-            output={
-                "instructions": rfc.instructions,
-                "pseudo_code": rfc.pseudo_code,
-                "file_path": rfc.file_path,
-                "change_type": change_type.value,
-                "start_line": start_line,
-                "end_line": end_line,
-                "span_ids": span_ids
-            }
-        )
+            existing_block = context_file.module.find_first_by_span_id(span_id)
+            if existing_block:
+                existing_hallucinated_spans.add(span_id)
+            else:
+                if "." not in span_id:
+                    # Check if there is child blocks with the span_id as identifier
+                    child_blocks = context_file.module.find_blocks_with_identifier(
+                        span_id
+                    )
+
+                    for child_block in child_blocks:
+                        if context_file.has_span(child_block.belongs_to_span.span_id):
+                            continue
+
+                        parent_block = child_block.find_type_group_in_parents(
+                            CodeBlockTypeGroup.STRUCTURE
+                        )
+                        if (
+                            parent_block
+                            and parent_block.has_lines(rfc.start_line, rfc.end_line)
+                        ) or child_block.is_within_lines(rfc.start_line, rfc.end_line):
+                            existing_hallucinated_spans.add(
+                                child_block.belongs_to_span.span_id
+                            )
+
+        return existing_hallucinated_spans
 
     def get_line_span(
         self,
@@ -465,28 +610,41 @@ class PlanToCode(AgenticState):
         # Set just one line on additions which doesn't point to a specific code block
         if start_block.start_line > start_line:
             if change_type == ChangeType.addition and end_line != start_line:
-                logger.info(f"{self.name}:{self.id} Change type is addition, set end line to start line {start_line}, endline was {end_line}")
+                logger.info(
+                    f"{self.name}:{self.id} Change type is addition, set end line to start line {start_line}, endline was {end_line}"
+                )
                 return start_line, start_line, change_type.addition
             elif start_line == end_line:
-                logger.info(f"{self.name}:{self.id} Start line {start_line} is equal to end line, expect addition ")
+                logger.info(
+                    f"{self.name}:{self.id} Start line {start_line} is equal to end line, expect addition "
+                )
                 return start_line, start_line, change_type.addition
 
         if not start_block:
             structure_block = file.module
-            logger.info(f"{self.name}:{self.id} Start block not found, set module as structure block")
+            logger.info(
+                f"{self.name}:{self.id} Start block not found, set module as structure block"
+            )
         elif start_block.type.group == CodeBlockTypeGroup.STRUCTURE and (
             not end_line or start_block.end_line >= end_line
         ):
             structure_block = start_block
-            logger.info(f"{self.name}:{self.id} Start block {start_block.display_name} is a structure block")
+            logger.info(
+                f"{self.name}:{self.id} Start block {start_block.display_name} is a structure block"
+            )
         else:
             structure_block = start_block.find_type_group_in_parents(
                 CodeBlockTypeGroup.STRUCTURE
             )
-            logger.info(f"{self.name}:{self.id} Set parent {structure_block.display_name} as structure block")
+            logger.info(
+                f"{self.name}:{self.id} Set parent {structure_block.display_name} as structure block"
+            )
 
         structure_block_tokens = structure_block.sum_tokens()
-        if structure_block_tokens > self.min_tokens_in_edit_prompt and structure_block_tokens < max_tokens:
+        if (
+            structure_block_tokens > self.min_tokens_in_edit_prompt
+            and structure_block_tokens < max_tokens
+        ):
             logger.info(
                 f"{self.name}:{self.id} Return start and endline for block {structure_block.display_name} "
                 f"{structure_block.start_line} - {structure_block.end_line} ({self.min_tokens_in_edit_prompt} "
@@ -541,7 +699,9 @@ class PlanToCode(AgenticState):
             end_line = structure_block.end_line
         else:
             end_line = _get_post_end_line_index(end_line, structure_block)
-            logger.info(f"{self.name}:{self.id} Set end line to {end_line}, structure block {structure_block.display_name} ends at line {structure_block.end_line}")
+            logger.info(
+                f"{self.name}:{self.id} Set end line to {end_line}, structure block {structure_block.display_name} ends at line {structure_block.end_line}"
+            )
 
         if start_line - structure_block.start_line < 5:
             logger.info(
@@ -558,10 +718,7 @@ class PlanToCode(AgenticState):
         return start_line, end_line, change_type.modification
 
     def system_prompt(self) -> str:
-        if self.run_tests:
-            return PLAN_TO_CODE_SYSTEM_PROMPT + "\n8. Always write tests to verify the changes you made."
-        else:
-            return PLAN_TO_CODE_SYSTEM_PROMPT + "\n8. Tests are not in scope. Do not search for tests or suggest writing tests."
+        return PLAN_TO_CODE_SYSTEM_PROMPT
 
     def to_message(self, verbose: bool = True) -> str:
         response_msg = ""
@@ -576,7 +733,10 @@ class PlanToCode(AgenticState):
             response_msg += "\n\nVerification issues:"
 
             for issue in self.verification_issues:
-                if issue.type in [VerificationIssueType.RUNTIME_ERROR, VerificationIssueType.SYNTAX_ERROR]:
+                if issue.type in [
+                    VerificationIssueType.RUNTIME_ERROR,
+                    VerificationIssueType.SYNTAX_ERROR,
+                ]:
                     if verbose:
                         response_msg += f"\n\n<error>\n{issue.message}\n</error>"
                     else:
@@ -584,7 +744,9 @@ class PlanToCode(AgenticState):
                         response_msg += f"\n\n{last_line}"
 
                 elif issue.type == VerificationIssueType.TEST_FAILURE:
-                    response_msg += f"\n\nThe test {issue.span_id} in {issue.file_path} failed."
+                    response_msg += (
+                        f"\n\nThe test {issue.span_id} in {issue.file_path} failed."
+                    )
 
                     if verbose:
                         response_msg += f"Output:\n``` \n{issue.message}\n```\n\n"
@@ -615,11 +777,7 @@ class PlanToCode(AgenticState):
             else:
                 action = previous_state.last_action.request
 
-            messages.append(
-                AssistantMessage(
-                    action=action
-                )
-            )
+            messages.append(AssistantMessage(action=action))
             content = ""
 
         content += self.to_message()
@@ -647,10 +805,17 @@ def _get_pre_start_line(
 
     line_block = structure_block.find_last_by_end_line(start_line)
 
-    if line_block.end_line < start_line and line_block.type.group == CodeBlockTypeGroup.STRUCTURE:
+    if (
+        line_block.end_line < start_line
+        and line_block.type.group == CodeBlockTypeGroup.STRUCTURE
+    ):
         return line_block.next.start_line
 
-    while line_block.previous and line_block.previous.type.group != CodeBlockTypeGroup.STRUCTURE and line_block.previous.start_line > min_start_line:
+    while (
+        line_block.previous
+        and line_block.previous.type.group != CodeBlockTypeGroup.STRUCTURE
+        and line_block.previous.start_line > min_start_line
+    ):
         line_block = line_block.previous
 
     return line_block.start_line
@@ -662,11 +827,17 @@ def _get_post_end_line_index(
     max_end_line = end_line + max_lines
 
     line_block = structure_block.find_first_by_start_line(end_line)
-    if line_block.start_line > end_line and line_block.type.group == CodeBlockTypeGroup.STRUCTURE:
+    if (
+        line_block.start_line > end_line
+        and line_block.type.group == CodeBlockTypeGroup.STRUCTURE
+    ):
         return line_block.previous.end_line
 
-    while line_block.next and line_block.next.type.group != CodeBlockTypeGroup.STRUCTURE and line_block.next.end_line < max_end_line:
+    while (
+        line_block.next
+        and line_block.next.type.group != CodeBlockTypeGroup.STRUCTURE
+        and line_block.next.end_line < max_end_line
+    ):
         line_block = line_block.next
 
     return line_block.end_line
-

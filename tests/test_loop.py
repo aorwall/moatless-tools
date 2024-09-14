@@ -100,8 +100,7 @@ def test_loop_initialization(mock_workspace, test_transition_rules):
 
 @pytest.mark.api_keys_required
 def test_rerun_save_and_load_trajectory():
-    file_path = "tests/trajectories/django__django_16379.json"
-    trajectory = Trajectory.load(file_path)
+    trajectory = Trajectory.load("tests/trajectories/django__django_16379.json")
     Settings.cheap_model = None  # To not use an LLM when generating commit messages
 
     # Start by running the trajectory again with mocked action requests

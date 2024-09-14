@@ -221,8 +221,10 @@ def run_indexing():
 
         previous_instances[instance["repo"]] = instance
 
+
 if "main" == __name__:
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     run_indexing()

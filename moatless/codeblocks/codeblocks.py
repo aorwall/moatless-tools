@@ -31,6 +31,7 @@ class CodeBlockTypeGroup(str, Enum):
     def __str__(self):
         return self.value
 
+
 class CodeBlockType(Enum):
     MODULE = (
         "Module",
@@ -299,7 +300,7 @@ class CodeBlock:
     indentation: str = ""
     tokens: int = 0
     children: List["CodeBlock"] = field(default_factory=list)
-    validation_errors: List["ValidationError"] = field(default_factory=list)
+    validation_errors: List[str] = field(default_factory=list)
     parent: Optional["CodeBlock"] = None
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
@@ -635,7 +636,7 @@ class CodeBlock:
         self,
         show_span_id: bool = False,
         span_marker: SpanMarker = SpanMarker.COMMENT,
-        show_line_numbers: bool = False
+        show_line_numbers: bool = False,
     ) -> str:
         contents = ""
 
@@ -657,13 +658,20 @@ class CodeBlock:
                 return ""
 
             # Don't print out line numbers on out commented code to make it harder for the LLM to select it
-            if line_number == self.start_line and self.type == CodeBlockType.COMMENTED_OUT_CODE:
+            if (
+                line_number == self.start_line
+                and self.type == CodeBlockType.COMMENTED_OUT_CODE
+            ):
                 return " " * 6
 
             return str(line_number).ljust(6)
 
         # Just to write out the first line number when there are no pre_lines on first block
-        if not self.pre_lines and self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
+        if (
+            not self.pre_lines
+            and self.parent.type == CodeBlockType.MODULE
+            and self.parent.children[0] == self
+        ):
             contents += print_line(self.start_line)
 
         if self.pre_lines:
@@ -956,7 +964,7 @@ class CodeBlock:
             return False
         return all(child.is_complete() for child in self.children)
 
-    def find_errors(self) -> list["CodeBlock"]:
+    def find_errors(self) -> list[str]:
         errors = []
 
         if self.children:
@@ -964,10 +972,12 @@ class CodeBlock:
                 errors.extend(child.find_errors())
 
         if self.type == CodeBlockType.ERROR:
-            errors.append(self)
+            if self.validation_errors:
+                errors.extend(self.validation_errors)
+            else:
+                errors.append(f"Found validation errors in {self.path_string()}")
 
         return errors
-
 
     def create_commented_out_block(self, comment_out_str: str = "..."):
         pre_lines = self.start_line - self.previous.end_line if self.previous else 1
@@ -1142,13 +1152,13 @@ class CodeBlock:
                 return True
         return False
 
+    def has_placeholders(self):
+        return self.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
+
     def find_blocks_with_type(self, block_type: CodeBlockType) -> list["CodeBlock"]:
         return self.find_blocks_with_types([block_type])
 
     def find_first_by_start_line(self, start_line: int) -> Optional["CodeBlock"]:
-        """
-        Find the first block at or after the provided start line
-        """
         for child in self.children:
             if child.start_line >= start_line:
                 return child
@@ -1163,7 +1173,9 @@ class CodeBlock:
 
         return None
 
-    def find_blocks_by_line_numbers(self, start_line: int, end_line: int, include_parents: bool = False) -> List["CodeBlock"]:
+    def find_blocks_by_line_numbers(
+        self, start_line: int, end_line: int, include_parents: bool = False
+    ) -> List["CodeBlock"]:
         blocks = []
         block = self
         while block.next and block.start_line <= end_line:

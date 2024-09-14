@@ -17,37 +17,57 @@ from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from instructor.utils import classproperty
 from litellm import token_counter
+from litellm.types.utils import ModelResponse
 from openai import OpenAI
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, model_validator, Extra, ValidationError
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    ConfigDict,
+    model_validator,
+    Extra,
+    ValidationError,
+)
 
 from moatless.file_context import FileContext
-from moatless.repository.file import FileRepository
-from moatless.schema import (
-    Completion,
-    FileWithSpans, Usage
-)
+from moatless.repository import FileRepository
+from moatless.schema import Completion, FileWithSpans, Usage
 from moatless.settings import Settings
-from moatless.utils.llm_utils import LLMResponseFormat, generate_call_id, response_format_by_model
+from moatless.utils.llm_utils import (
+    LLMResponseFormat,
+    generate_call_id,
+    response_format_by_model,
+)
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
-class ActionRequest(OpenAISchema):
+class Visit(BaseModel):
+    """
+    Represent a visit to a state in Monte Carlo Tree Search.
+    """
 
+    source_state_id: int = Field(
+        ..., description="The future state from which the visit was initaited"
+    )
+    value: float = Field(0.0, description="The reward value for the current state")
+    explanation: Optional[str] = Field(
+        default=None, description="Explanation for the reward value"
+    )
+
+
+class ActionRequest(OpenAISchema):
     @property
     def action_name(self):
         return self.__class__.__name__
 
     @classproperty
     def openai_tool_schema(cls):
-        return {
-            "type": "function",
-            "function": cls.openai_schema
-        }
+        return {"type": "function", "function": cls.openai_schema}
+
 
 class TakeAction(ActionRequest):
-
     action: ActionRequest = Field(
         ...,
         description="The action to take",
@@ -131,7 +151,6 @@ class UserMessage(Message):
     content: Optional[str] = None
 
 
-
 class State(ABC, BaseModel):
     id: int = Field(..., description="The unique identifier of the state")
     previous_state: Optional["State"] = Field(
@@ -156,7 +175,9 @@ class State(ABC, BaseModel):
         self._initial_message = data.get("_initial_message")
 
     @abstractmethod
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
         raise NotImplementedError
 
     @property
@@ -198,9 +219,7 @@ class State(ABC, BaseModel):
     def required_fields(cls) -> set[str]:
         return set()
 
-    def get_previous_states(
-        self, state: Optional["State"] = None
-    ) -> list["State"]:
+    def get_previous_states(self, state: Optional["State"] = None) -> list["State"]:
         """
         Retrieves previous states of the same type as the given state.
         If no state is provided, it returns all previous states.
@@ -260,9 +279,12 @@ class State(ABC, BaseModel):
 
 
 class NoopState(State):
-
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
-        raise RuntimeError(f"{self.trace_name} is a NoopState that should not be executed")
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
+        raise RuntimeError(
+            f"{self.trace_name} is a NoopState that should not be executed"
+        )
 
 
 class Finished(NoopState):
@@ -292,7 +314,9 @@ class ActionTransaction(BaseModel):
         data["response"] = self.response.model_dump(**kwargs) if self.response else None
 
         if Settings.include_completions_in_trajectories:
-            data["completion"] = self.completion.model_dump(**kwargs) if self.completion else None
+            data["completion"] = (
+                self.completion.model_dump(**kwargs) if self.completion else None
+            )
 
         return data
 
@@ -302,11 +326,15 @@ class AgenticState(State):
         default=None, description="The model to use for completion"
     )
     temperature: float = Field(0.0, description="The temperature to use for completion")
+    response_format: LLMResponseFormat = Field(
+        LLMResponseFormat.TOOLS, description="The response format to expect"
+    )
     max_tokens: int = Field(
         2000, description="The maximum number of tokens to generate"
     )
     max_message_tokens: Optional[int] = Field(
-        None, description="The maximum number of tokens in a single message, can be used as a sanity check"
+        None,
+        description="The maximum number of tokens in a single message, can be used as a sanity check",
     )
 
     include_message_history: bool = Field(
@@ -320,7 +348,9 @@ class AgenticState(State):
     _actions: List[ActionTransaction] = PrivateAttr(default_factory=list)
     _metadata: dict[str, Any] = PrivateAttr(default_factory=dict)
 
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
         if self._executed:
             raise ValueError(f"State has already been executed")
 
@@ -339,7 +369,9 @@ class AgenticState(State):
                         f"{self.trace_name}: Failed to get a valid complection response from the LLM for action request {self.action_type()}. Will set state as rejected. Error {e}. Last completion: {e.last_completion}."
                     )
                     # TODO: Throw an error to abort the flow?
-                    return StateOutcome.reject(f"Failed to get a valid response from {self.__class__.__name__}.")
+                    return StateOutcome.reject(
+                        f"Failed to get a valid response from {self.__class__.__name__}."
+                    )
                 else:
                     logger.error(
                         f"{self.trace_name}: Failed to get a valid completion response from the LLM for action request {self.action_type()}. Error {e}."
@@ -444,294 +476,89 @@ class AgenticState(State):
     ) -> Tuple[ActionRequest, Completion | None]:
         messages = self._to_completion_messages()
 
-        metadata = {}
-        if self._metadata:
-            metadata.update(self._metadata)
-
-        metadata["generation_name"] = self.name
-
         tokens = token_counter(messages=messages[-1:])
         if self.max_message_tokens and tokens > self.max_message_tokens:
             raise ValueError(f"Too many tokens in the new message: {tokens}")
 
-        logger.info(f"{self.trace_name}: Create completion with {len(messages)} messages to {self.model}")
+        logger.info(
+            f"{self.trace_name}: Create completion with {len(messages)} messages to {self.model}"
+        )
 
         response_format = response_format_by_model(self.model)
 
-        if (
-            response_format == LLMResponseFormat.ANTHROPIC_TOOLS
-            and self.action_type()
-        ):
-            try:
-
-                tools = []
-                if hasattr(self.action_type(), "available_actions"):
-                    for action in self.action_type().available_actions():
-                        tools.append(action.anthropic_schema)
-                else:
-                    tools.append(self.action_type().anthropic_schema)
-
-                if self.model == "anthropic.claude-3-5-sonnet-20240620-v1:0":
-                    anthropic_client = AnthropicBedrock()
-                    completion_response = (
-                        anthropic_client.messages.create(
-                            model=self.model,
-                            max_tokens=self.max_tokens,
-                            temperature=self.temperature,
-                            system=messages[0]["content"],
-                            tool_choice={
-                                "type": "any"
-                            },
-                            tools=tools,
-                            messages=messages[1:],
-                        )
-                    )
-                else:
-                    anthropic_client = Anthropic()
-
-                    apply_cache_control(messages[0])
-                    # apply_cache_control(messages[-1])
-
-                    completion_response = (
-                        anthropic_client.beta.prompt_caching.messages.create(
-                            model=self.model,
-                            max_tokens=self.max_tokens,
-                            temperature=self.temperature,
-                            system=messages[0]["content"],
-                            tool_choice={
-                                "type": "any"
-                            },
-                            tools=tools,
-                            messages=messages[1:],
-                        )
-                    )
-
-                completion = Completion.from_llm_completion(
-                    input_messages=messages,
-                    completion_response=completion_response,
-                    model=self.model,
-                )
-
-                try:
-                    action_request = None
-                    if hasattr(self.action_type(), "available_actions"):
-                        for block in completion_response.content:
-                            if isinstance(block, ToolUseBlock):
-                                action = None
-                                for available_action in self.action_type().available_actions():
-                                    if available_action.__name__ == block.name:
-                                        action = available_action
-                                        break
-
-                                if not action:
-                                    raise ValueError(f"Unknown action {block.name}")
-
-                                tool_action_request = action.model_validate(block.input)
-
-                                action_request = self.action_type()(action=tool_action_request)
-
-                                # TODO: We only support one action at the moment
-                                break
-                            else:
-                                logger.warning(f"Unexpected block {block}]")
-                    else:
-                        action_request = self.action_type().from_response(
-                            completion_response, mode=instructor.Mode.ANTHROPIC_TOOLS
-                        )
-
-                    if not action_request:
-                        raise ValueError(f"Failed to parse action request from completion response. Completion: {completion_response}")
-                except Exception as e:
-                    logger.exception(f"Failed to parse action request from completion response. Completion: {completion_response}")
-                    raise e
-
-                return action_request, completion
-
-            except Exception as e:
-                logger.error(f"Failed to get completion response from anthropic: {e}")
-                raise e
-
-        if self.action_type() is None and self.model.startswith("claude") or self.model.startswith("anthropic.claude"):
-
-            if self.model == "anthropic.claude-3-5-sonnet-20240620-v1:0":
-                anthropic_client = AnthropicBedrock()
-                completion_response = (
-                    anthropic_client.messages.create(
-                        model=self.model,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        system=messages[0]["content"],
-                        messages=messages[1:],
-                    )
-                )
-            else:
-                anthropic_client = Anthropic()
-
-                apply_cache_control(messages[0])
-                # apply_cache_control(messages[-1])
-
-                completion_response = (
-                    anthropic_client.beta.prompt_caching.messages.create(
-                        model=self.model,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        system=messages[0]["content"],
-                        messages=messages[1:],
-                    )
-                )
-
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-            action_request = Content(
-                content=completion_response.content[0].text
-            )
-
-            return action_request, completion
-
-        if self.action_type() is None:
-            completion_response = litellm.completion(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=self.stop_words(),
-                metadata=metadata,
-                messages=messages,
-            )
-            action_request = Content(
-                content=completion_response.choices[0].message.content
-            )
-
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-            return action_request, completion
-        elif response_format == LLMResponseFormat.STRUCTURED_OUTPUT:
-            client = OpenAI()
-
-            tools = []
-            if hasattr(self.action_type(), "available_actions"):
-                for action in self.action_type().available_actions():
-                    tools.append(openai.pydantic_function_tool(action))
-            else:
-                tools.append(openai.pydantic_function_tool(self.action_type()))
-
-            completion_response = client.beta.chat.completions.parse(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=self.stop_words(),
-                messages=messages,
-                tool_choice="required",
-                tools=tools,
-            )
-
-            tool_call = completion_response.choices[0].message.tool_calls[0]
-            if hasattr(self.action_type(), "available_actions"):
-                tool_action_request = tool_call.function.parsed_arguments
-                action_request = self.action_type()(action=tool_action_request)
-            else:
-                action_request = tool_call.function.parsed_arguments
-
-            if not action_request:
-                raise ValueError(
-                    f"Failed to parse action request from completion response. Completion: {completion_response}")
-
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-
-            return action_request, completion
-
-        elif response_format == LLMResponseFormat.TOOLS:
-            tools = []
-            if hasattr(self.action_type(), "available_actions"):
-                for action in self.action_type().available_actions():
-                    tools.append(action.openai_tool_schema)
-            else:
-                tools.append(self.action_type().openai_tool_schema)
-
-            completion_response = litellm.completion(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=self.stop_words(),
-                tools=tools,
-                metadata=metadata,
-                messages=messages,
-            )
-
-            try:
-                action_request = None
-                # TODO: We only support one action at the moment
-                tool_call = completion_response.choices[0].message.tool_calls[0]
-
-                if hasattr(self.action_type(), "available_actions"):
-                    action = None
-                    for available_action in self.action_type().available_actions():
-                        if available_action.__name__ == tool_call.function.name:
-                            action = available_action
-                            break
-
-                    if not action:
-                        raise ValueError(f"Unknown action {tool_call.function.name}")
-
-                    tool_action_request = action.model_validate_json(tool_call.function.arguments)
-                    action_request = self.action_type()(action=tool_action_request)
-                else:
-                    action_request = self.action_type().model_validate_json(tool_call.function.arguments)
-
-                if not action_request:
-                    raise ValueError(
-                        f"Failed to parse action request from completion response. Completion: {completion_response}")
-            except Exception as e:
-                logger.exception(
-                    f"Failed to parse action request from completion response. Completion: {completion_response}")
-                raise e
-
-            if not action_request:
-                raise ValueError(
-                    f"Failed to parse action request from completion response. Completion: {completion_response}")
-
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-
-            return action_request, completion
+        if not self.action_type():
+            action_request, completion_response = self._litellm_text_completion(messages)
+        elif response_format == LLMResponseFormat.TOOLS and hasattr(self.action_type(), "available_actions"):
+            action_request, completion_response = self._litellm_tool_completion(messages)
         else:
-            client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON, metadata=metadata)
+            action_request, completion_response = self._instructor_completion(messages)
 
-            try:
-                action_request, completion_response = (
-                    client.chat.completions.create_with_completion(
-                        model=self.model,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        stop=self.stop_words(),
-                        response_model=self.action_type(),
-                        metadata=metadata,
-                        messages=messages,
-                    )
-                )
-            except Exception as e:
-                logger.error(f"Failed to get completion response from litellm: {e}")
-                raise e
+        completion = Completion.from_llm_completion(
+            input_messages=messages,
+            completion_response=completion_response,
+            model=self.model,
+        )
 
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
+        return action_request, completion
+
+    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[Content, ModelResponse]:
+        completion_response = litellm.completion(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            stop=self.stop_words(),
+            metadata=self._metadata,
+            messages=messages,
+        )
+        return Content(
+            content=completion_response.choices[0].message.content
+        ), completion_response
+
+    def _litellm_tool_completion(self, messages: list[dict]) -> Tuple[ActionRequest, ModelResponse]:
+        tools = []
+        for action in self.action_type().available_actions():
+            tools.append(openai.pydantic_function_tool(action))
+
+        completion_response = litellm.completion(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            stop=self.stop_words(),
+            metadata=self._metadata,
+            tools=tools,
+            tool_choice="auto",
+            messages=messages,
+        )
+
+        tool_call = completion_response.choices[0].message.tool_calls[0]
+        tool_action_request = tool_call.function.parsed_arguments
+        action_request = self.action_type()(action=tool_action_request)
+
+        if not action_request:
+            raise ValueError(
+                f"Failed to parse action request from completion response. Completion: {completion_response}"
             )
 
-            return action_request, completion
+        return action_request, completion_response
+
+    def _instructor_completion(self, messages: list[dict]) -> Tuple[ActionRequest, ModelResponse]:
+        client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON)
+
+        try:
+            return client.chat.completions.create_with_completion(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                stop=self.stop_words(),
+                response_model=self.action_type(),
+                metadata=self._metadata,
+                messages=messages,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get completion response from litellm: {e}")
+            raise e
+
 
     def create_file_context(
         self, files: list[FileWithSpans] = None, **kwargs
@@ -784,7 +611,11 @@ class AgenticState(State):
         return messages
 
     def _to_completion_messages(self) -> list[dict]:
-        messages = [{"role": "system", "content": self.system_prompt()}]
+        messages = []
+
+        system_message = {"role": "system", "content": self.system_prompt()}
+        self.apply_cache_control(system_message)
+        messages.append(system_message)
 
         response_format = response_format_by_model(self.model)
 
@@ -838,6 +669,8 @@ class AgenticState(State):
                                 ],
                             }
                         )
+
+                        self.apply_cache_control(messages[-1])
                     elif response_format in [
                         LLMResponseFormat.TOOLS,
                         LLMResponseFormat.STRUCTURED_OUTPUT,
@@ -916,9 +749,25 @@ class AgenticState(State):
             return False
         return True
 
+    def apply_cache_control(self, message: dict):
+        if not self.model.startswith("claude"):
+            return
+
+        content = message["content"]
+        if type(content) is str:
+            content = dict(
+                type="text",
+                text=content,
+            )
+        else:
+            content = message["content"][0]
+
+        content["cache_control"] = {"type": "ephemeral"}
+        message["content"] = [content]
+
 
 def get_state_class(name: str) -> type[AgenticState]:
-    name = name.split(":")[0] # FIXME: Remove again soon...
+    name = name.split(":")[0]  # FIXME: Remove again soon...
 
     builtin_states = {
         "NoopState": NoopState,
@@ -954,15 +803,3 @@ def get_state_class(name: str) -> type[AgenticState]:
 
     raise ValueError(f"State {name} not found")
 
-def apply_cache_control(message: dict):
-    content = message["content"]
-    if type(content) is str:
-        content = dict(
-            type="text",
-            text=content,
-        )
-    else:
-        content = message["content"][0]
-
-    content["cache_control"] = {"type": "ephemeral"}
-    message["content"] = [content]

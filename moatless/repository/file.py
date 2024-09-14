@@ -54,9 +54,13 @@ class CodeFile(BaseModel):
 
         full_file_path = os.path.join(self._repo_path, self.file_path)
         current_mod_time = datetime.fromtimestamp(os.path.getmtime(full_file_path))
-        is_modified = self._last_modified is None or current_mod_time > self._last_modified
+        is_modified = (
+            self._last_modified is None or current_mod_time > self._last_modified
+        )
         if is_modified and self._last_modified:
-            logger.debug(f"File {self.file_path} has been modified: {self._last_modified} -> {current_mod_time}")
+            logger.debug(
+                f"File {self.file_path} has been modified: {self._last_modified} -> {current_mod_time}"
+            )
 
         return is_modified
 
@@ -89,7 +93,9 @@ class CodeFile(BaseModel):
             if parser:
                 self._module = parser.parse(self.content)
                 if len(self._module.children) == 0:
-                    raise ValueError(f"No code blocks found in module for {self.file_path}")
+                    raise ValueError(
+                        f"No code blocks found in module for {self.file_path}"
+                    )
             else:
                 return None
 
@@ -187,7 +193,9 @@ class FileRepository:
     def find_by_pattern(self, patterns: list[str]) -> List[str]:
         matched_files = []
         for pattern in patterns:
-            matched_files.extend(glob.iglob(f"**/{pattern}", root_dir=self._repo_path, recursive=True))
+            matched_files.extend(
+                glob.iglob(f"**/{pattern}", root_dir=self._repo_path, recursive=True)
+            )
         return matched_files
 
 

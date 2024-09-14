@@ -34,7 +34,6 @@ from moatless.repository import GitRepository
 logger = logging.getLogger(__name__)
 
 
-
 class Evaluation:
     def __init__(
         self,
@@ -53,16 +52,18 @@ class Evaluation:
         litellm_callback: Optional[str] = None,
         previous_trajectory_dir: Optional[str] = None,
         retry_state: Optional[str] = None,
+        retry_trajectory: bool = False,
         num_workers: int = 1,
         use_testbed: bool = False,
         eval_func: Callable[[dict, Trajectory], bool] = None,
-        **kwargs
+        **kwargs,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
         self.report_mode = report_mode
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
+        self.retry_trajectory = retry_trajectory
 
         self.eval_func = eval_func
 
@@ -107,7 +108,7 @@ class Evaluation:
         split: str = "lite",
         resolved_by: Optional[int] = None,
         instance_ids: list[str] | None = None,
-        ignore_repos: list[str] | None = None
+        ignore_repos: list[str] | None = None,
     ):
         file_path = os.path.join(
             os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
@@ -118,7 +119,9 @@ class Evaluation:
         instances = sorted(instances, key=lambda x: len(x["resolved_by"]), reverse=True)
         logger.info(f"Loaded {len(instances)} instances from {file_path}")
 
-        instances = [instance for instance in instances if "sympy" not in instance["instance_id"]]
+        instances = [
+            instance for instance in instances if "sympy" not in instance["instance_id"]
+        ]
 
         if instance_ids:
             instances = [
@@ -151,7 +154,8 @@ class Evaluation:
 
         if instances:
             logger.info(
-                f"Running evaluation for {len(instances)} instances after filtering by ignore_repos")
+                f"Running evaluation for {len(instances)} instances after filtering by ignore_repos"
+            )
 
         return self._run_evaluation(instances)
 
@@ -165,7 +169,7 @@ class Evaluation:
         trajectory = self._evaluate_instance(instance)
         return to_result(instance, trajectory, self.report)
 
-    def _evaluate_instance(self, instance: dict, retry: bool = False) -> Trajectory:
+    def _evaluate_instance(self, instance: dict) -> Trajectory:
         instance_id = instance["instance_id"]
 
         trajectory_path = os.path.join(
@@ -174,7 +178,7 @@ class Evaluation:
         if not os.path.exists(self.evaluation_dir):
             os.makedirs(trajectory_path)
 
-        if os.path.exists(trajectory_path) and not retry:
+        if os.path.exists(trajectory_path) and not self.retry_trajectory:
             # TODO: Retry when failed or not finished?
             trajectory = Trajectory.load(trajectory_path, skip_workspace=True)
             status = trajectory.info.get("status")
@@ -189,8 +193,15 @@ class Evaluation:
         testbed = None
         if self.use_testbed:
             from testbed.client.manager import TestbedManager
-            manager = TestbedManager(namespace="testbed-dev", dataset_name=self.dataset_name)
-            testbed = manager.get_or_create_testbed(instance_id, timeout=1200, log_dir=f"{self.evaluation_dir}/{instance_id}")
+
+            manager = TestbedManager(
+                namespace="testbed-dev", dataset_name=self.dataset_name
+            )
+            testbed = manager.get_or_create_testbed(
+                instance_id,
+                timeout=1200,
+                log_dir=f"{self.evaluation_dir}/{instance_id}",
+            )
 
         workspace = create_workspace(
             instance,
@@ -198,7 +209,7 @@ class Evaluation:
             create_instance_dir=True,
             testbed=testbed,
             use_perfect_file_context=self.use_perfect_file_context,
-            max_file_context_tokens=self.max_file_context_tokens
+            max_file_context_tokens=self.max_file_context_tokens,
         )
 
         previous_actions = None
@@ -256,7 +267,6 @@ class Evaluation:
             info["status"] = "error"
             logging.exception(f"Error in evaluation of {instance['instance_id']} ")
         finally:
-
             info["duration"] = time.time() - start_time
             usage = loop.total_usage()
             info["total_cost"] = usage.completion_cost
@@ -267,7 +277,9 @@ class Evaluation:
                 try:
                     info["eval_func"] = self.eval_func(instance, loop.trajectory)
                 except Exception:
-                    logging.exception(f"Error in evaluation of {instance['instance_id']} ")
+                    logging.exception(
+                        f"Error in evaluation of {instance['instance_id']} "
+                    )
 
             if isinstance(workspace.file_repo, GitRepository):
                 test_patch_files = instance.get("test_file_spans", {}).keys()
@@ -359,11 +371,18 @@ class Evaluation:
 
         results = []
 
-        logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers")
+        logger.info(
+            f"Processing {len(instances)} instances with {self.num_workers} workers"
+        )
         logger.info(self.transitions)
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-            futures = [executor.submit(self.process_instance, instance) for instance in instances]
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=self.num_workers
+        ) as executor:
+            futures = [
+                executor.submit(self.process_instance, instance)
+                for instance in instances
+            ]
 
             pbar = tqdm(concurrent.futures.as_completed(futures), total=len(futures))
 
@@ -425,7 +444,9 @@ class Evaluation:
                 self._to_csv_report(results)
                 self._save_json_report(results)
             except Exception:
-                logging.exception(f"Error when generating report for instance {instance['instance_id']}")
+                logging.exception(
+                    f"Error when generating report for instance {instance['instance_id']}"
+                )
 
             stats = self._create_stats(results)
             pbar.set_postfix(stats)

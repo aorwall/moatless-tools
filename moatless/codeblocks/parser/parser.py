@@ -19,6 +19,7 @@ from moatless.codeblocks.codeblocks import (
     Relationship,
     RelationshipType,
     SpanType,
+    ValidationError,
 )
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.comment import get_comment_symbol
@@ -247,9 +248,8 @@ class CodeParser:
                 b.identifier for b in parent_block.children if b.type == code_block.type
             ]
             if identifier in existing_identifiers:
-                code_block.identifier = (
-                    f"{identifier}_{len(existing_identifiers)}"
-                )
+                code_block.identifier = f"{identifier}_{len(existing_identifiers)}"
+
             else:
                 code_block.identifier = identifier
 
@@ -334,9 +334,7 @@ class CodeParser:
                 next_node.children and next_node.type == "block"
             ):  # TODO: This should be handled in get_block_definition
                 next_node = next_node.children[0]
-            elif (
-                next_node.children and next_node.type == "ERROR"
-            ):
+            elif next_node.children and next_node.type == "ERROR":
                 next_node = next_node.children[0]
                 code_block.type = CodeBlockType.ERROR
 
@@ -429,7 +427,9 @@ class CodeParser:
                 return match
 
         if not node.parent:
-            return NodeMatch(block_type=CodeBlockType.MODULE, first_child=node.children[0])
+            return NodeMatch(
+                block_type=CodeBlockType.MODULE, first_child=node.children[0]
+            )
 
         match = self.find_match(node)
         if match:
@@ -726,9 +726,7 @@ class CodeParser:
         if root_node.type == "ERROR":
             raise ValueError("Could not parse code")
 
-        module, _, _ = self.parse_code(
-            content_in_bytes, root_node, file_path=file_path
-        )
+        module, _, _ = self.parse_code(content_in_bytes, root_node, file_path=file_path)
         module.spans_by_id = self.spans_by_id
         module.file_path = file_path
         module.language = self.language

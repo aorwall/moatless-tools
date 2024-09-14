@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExpandContext(State):
-    """
-
-    """
+    """ """
 
     expand_to_max_tokens: int = Field(
         12000,
@@ -35,10 +33,13 @@ class ExpandContext(State):
         description="Whether to expand with related spans.",
     )
 
-    def execute(self, mocked_action_request: ActionRequest | None = None) -> StateOutcome:
-
+    def execute(
+        self, mocked_action_request: ActionRequest | None = None
+    ) -> StateOutcome:
         # TODO: Provide more info to use in the search query?
-        results = self.workspace.code_index.semantic_search(query=self.initial_message, max_results=1000)
+        results = self.workspace.code_index.semantic_search(
+            query=self.initial_message, max_results=1000
+        )
 
         # Flatten and sort the search results by rank
         flattened_results = []
@@ -79,9 +80,17 @@ class ExpandContext(State):
                 added_spans += 1
                 self.file_context.add_span_to_context(file_path, span_id)
 
-        logger.debug(f"Expanded context with {added_spans} spans. Original tokens: {original_tokens}, Expanded tokens: {self.file_context.context_size()}")
+        logger.debug(
+            f"Expanded context with {added_spans} spans. Original tokens: {original_tokens}, Expanded tokens: {self.file_context.context_size()}"
+        )
 
-        return StateOutcome.finish({"added_spans": added_spans, "original_tokens": original_tokens, "expanded_tokens": self.file_context.context_size()})
+        return StateOutcome.finish(
+            {
+                "added_spans": added_spans,
+                "original_tokens": original_tokens,
+                "expanded_tokens": self.file_context.context_size(),
+            }
+        )
 
     def get_class_spans(self) -> set[str]:
         expanded_classes = set()
@@ -97,7 +106,9 @@ class ExpandContext(State):
                     continue
 
                 if block_span.initiating_block.type != CodeBlockType.CLASS:
-                    class_block = block_span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
+                    class_block = block_span.initiating_block.find_type_in_parents(
+                        CodeBlockType.CLASS
+                    )
                 elif block_span.initiating_block.type == CodeBlockType.CLASS:
                     class_block = block_span.initiating_block
                 else:

@@ -71,11 +71,7 @@ def evaluate(
     max_workers: int = 1,
     evaluation_name: Optional[str] = None,
 ):
-    global_params = {
-        "model": model,
-        "temperature": temperature,
-        "max_tokens": 2000
-    }
+    global_params = {"model": model, "temperature": temperature, "max_tokens": 2000}
     reset_from_state = None
 
     if mode == "search":
@@ -131,14 +127,15 @@ def evaluate(
 
     evaluation = Evaluation(
         transitions=transitions,
-        evaluations_dir=evaluation_dir or os.path.join(os.getenv("MOATLESS_DIR"), "evaluations"),
+        evaluations_dir=evaluation_dir
+        or os.path.join(os.getenv("MOATLESS_DIR"), "evaluations"),
         previous_trajectory_dir=previous_trajectory_dir,
         evaluation_name=evaluation_name,
         retry_state=reset_from_state,
         max_file_context_tokens=16000,
         report_mode=mode,
         num_workers=max_workers,
-        enable_mcts=mode == "mcts"
+        enable_mcts=mode == "mcts",
     )
 
     evaluation.run_evaluation(
@@ -162,7 +159,9 @@ if __name__ == "__main__":
     args = parse_args()
 
     if not args.evaluation_dir and not os.getenv("MOATLESS_DIR"):
-        raise ValueError("Evaluation directory ot the MOATLESS_DIR env var must be provided")
+        raise ValueError(
+            "Evaluation directory ot the MOATLESS_DIR env var must be provided"
+        )
 
     evaluate(
         mode=args.mode,

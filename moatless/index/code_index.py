@@ -223,7 +223,7 @@ class CodeIndex:
                 function_names=function_names,
                 file_pattern=file_pattern,
                 max_results=max_results,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
 
         return result or SearchCodeResponse(message="No results found.")
@@ -272,7 +272,10 @@ class CodeIndex:
                 file_pattern = None
 
         search_results = self._vector_search(
-            query, file_pattern=file_pattern, exact_content_match=code_snippet, category=category
+            query,
+            file_pattern=file_pattern,
+            exact_content_match=code_snippet,
+            category=category,
         )
 
         files_with_spans: dict[str, SearchCodeHit] = {}
@@ -398,7 +401,6 @@ class CodeIndex:
                 f"semantic_search() Found {span_count} code spans in {len(files_with_spans.values())} files."
             )
             message = f"Found {span_count} code spans."
-
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
 
@@ -566,12 +568,14 @@ class CodeIndex:
             hits=search_hits,
         )
 
-    def find_test_files(self,
-                        file_path: str,
-                        span_id: str | None = None,
-                        query: str | None = None,
-                        max_results: int = 5,
-                        max_spans: int | None = None) -> list[FileWithSpans]:
+    def find_test_files(
+        self,
+        file_path: str,
+        span_id: str | None = None,
+        query: str | None = None,
+        max_results: int = 5,
+        max_spans: int | None = None,
+    ) -> list[FileWithSpans]:
         if span_id:
             query = f"{file_path} {span_id}"
         elif query:
@@ -579,9 +583,7 @@ class CodeIndex:
         else:
             query = file_path
 
-        search_results = self._vector_search(
-            query, category="test"
-        )
+        search_results = self._vector_search(query, category="test")
 
         files = []
         matching_file = self._find_by_test_pattern(file_path)
@@ -591,33 +593,39 @@ class CodeIndex:
             # Try to find the most similar test file by file name if no exact match on file name
             files = self.find_test_files(file_path, max_results=1, max_spans=max_spans)
 
-        logger.info(f"result: {files}")
-
         for result in search_results:
-            existing_file = next((f for f in files if f.file_path == result.file_path), None)
+            file_with_spans = next(
+                (f for f in files if f.file_path == result.file_path), None
+            )
 
-            if not existing_file:
+            if not file_with_spans:
                 file_with_spans = FileWithSpans(file_path=result.file_path, span_ids=[])
-            else:
-                file_with_spans = existing_file
+                files.append(file_with_spans)
 
             file = self._file_repo.get_file(result.file_path)
 
             # expect to find methods with the name test in the span id if there are any
-            has_test_names = any(span_id for span_id in file.module.span_ids if "test" in span_id.lower())
+            has_test_names = any(
+                span_id for span_id in file.module.span_ids if "test" in span_id.lower()
+            )
 
             for span_id in result.span_ids:
                 span = file.module.find_span_by_id(span_id)
-                if (span and span.initiating_block.type in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
-                        and (not has_test_names or "test" in span_id.lower())
-                        and span_id not in file_with_spans.span_ids
-                        and (not max_spans or len(file_with_spans.span_ids) < max_spans)):
+                if (
+                    span
+                    and span.initiating_block.type
+                    in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
+                    and (not has_test_names or "test" in span_id.lower())
+                    and span_id not in file_with_spans.span_ids
+                    and (not max_spans or len(file_with_spans.span_ids) < max_spans)
+                ):
                     file_with_spans.span_ids.append(span_id)
 
-                    if not existing_file and len(files) < max_results:
-                        files.append(file_with_spans)
-
-            if max_spans and len([f for f in files if len(f.span_ids) >= max_spans]) >= max_results:
+            if (
+                max_spans
+                and len([f for f in files if len(f.span_ids) >= max_spans])
+                >= max_results
+            ):
                 break
 
             if not max_spans and len(files) >= max_results:
@@ -648,7 +656,7 @@ class CodeIndex:
 
         # Find the test file with the most similar directory path
         best_match = None
-        best_match_score = float('inf')
+        best_match_score = float("inf")
         for test_file in matched_files:
             test_dirname = os.path.dirname(test_file)
             common_prefix = os.path.commonprefix([dirname, test_dirname])
@@ -700,15 +708,15 @@ class CodeIndex:
         query_embedding = self._embed_model.get_query_embedding(query)
 
         # FIXME: Filters can't be used ATM. Category isn't set in some instance vector stores
-        #filters = MetadataFilters(filters=[], condition=FilterCondition.AND)
-        #if category:
+        # filters = MetadataFilters(filters=[], condition=FilterCondition.AND)
+        # if category:
         #    filters.filters.append(MetadataFilter(key="category", value=category))
 
         query_bundle = VectorStoreQuery(
             query_str=query,
             query_embedding=query_embedding,
             similarity_top_k=top_k,  # TODO: Fix paging?
-        #    filters=filters,
+            #    filters=filters,
         )
 
         result = self._vector_store.query(query_bundle)
@@ -739,7 +747,6 @@ class CodeIndex:
         search_results = []
 
         for node_id, distance in zip(result.ids, result.similarities, strict=False):
-
             node_doc = self._docstore.get_document(node_id, raise_error=False)
             if not node_doc:
                 if "autodetector" in node_id:
@@ -836,7 +843,11 @@ class CodeIndex:
             required_exts = [".py"]
 
         if input_files:
-            input_files = [os.path.join(repo_path, file) for file in input_files if not file.startswith(repo_path)]
+            input_files = [
+                os.path.join(repo_path, file)
+                for file in input_files
+                if not file.startswith(repo_path)
+            ]
 
         try:
             reader = SimpleDirectoryReader(
@@ -939,7 +950,7 @@ def is_test(file_path: str) -> bool:
     path = Path(file_path)
 
     # All files in test directories are considered test files
-    if any(part in ['testing'] for part in path.parts):
+    if any(part in ["testing"] for part in path.parts):
         return True
 
     test_file_patterns = [
@@ -947,9 +958,10 @@ def is_test(file_path: str) -> bool:
         "test_*.py",
         "*_test.py",
         "test.py",
-        "tests.py"
+        "tests.py",
     ]
     return any(fnmatch.fnmatch(path.name, pattern) for pattern in test_file_patterns)
+
 
 def _rerank_files(file_paths: list[str], file_pattern: str):
     if len(file_paths) < 2:

@@ -8,7 +8,7 @@ from moatless.benchmark.utils import get_file_spans_from_patch
 from moatless.repository import FileRepository
 
 dataset_path = "/home/albert/repos/albert/swe-planner/moatless/benchmark/swebench_lite_all_evaluations.json"
-#dataset_path = "/home/albert/repos/albert/swe-planner/moatless/benchmark/swebench_verified_all_evaluations.json"
+# dataset_path = "/home/albert/repos/albert/swe-planner/moatless/benchmark/swebench_verified_all_evaluations.json"
 
 
 def read_predictions(pred_path: str):
@@ -42,7 +42,6 @@ def generate_report(dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
     print(f"Found {len(runs)} runs")
 
     for run_name, prediction_file, result_file in runs:
-
         with open(result_file) as file:
             final_report = json.load(file)
 

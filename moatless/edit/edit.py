@@ -7,9 +7,18 @@ from moatless.codeblocks import get_parser_by_path, CodeBlockType
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup
 from moatless.file_context import ContextFile
 from moatless.repository.file import remove_duplicate_lines, do_diff, CodeFile
-from moatless.state import AgenticState, ActionRequest, StateOutcome, Content, AssistantMessage, Message, UserMessage
+from moatless.state import (
+    AgenticState,
+    ActionRequest,
+    StateOutcome,
+    Content,
+    AssistantMessage,
+    Message,
+    UserMessage,
+)
 from moatless.schema import (
-    VerificationIssue, ChangeType,
+    VerificationIssue,
+    ChangeType,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,7 +98,9 @@ class CodeChange(ActionRequest):
 
 class EditCode(AgenticState):
     instructions: str = Field(..., description="The instructions for the code change.")
-    pseudo_code: Optional[str] = Field(default=None, description="The pseudo code for the code change.")
+    pseudo_code: Optional[str] = Field(
+        default=None, description="The pseudo code for the code change."
+    )
     file_path: str = Field(..., description="The path to the file to be updated.")
     start_line: int = Field(
         ..., description="The start line of the code to be updated."
@@ -128,7 +139,9 @@ class EditCode(AgenticState):
             )[0]
 
         if "<reject>" in content.content:
-            rejection_message = content.content.split("<reject>")[1].split("</reject>")[0]
+            rejection_message = content.content.split("<reject>")[1].split("</reject>")[
+                0
+            ]
             return StateOutcome.reject(rejection_message)
 
         msg_split = content.content.split("<replace>\n")
@@ -167,7 +180,9 @@ class EditCode(AgenticState):
                 "can't do any changes and want to reject the instructions."
             )
 
-        invalid_update_str = self.verify_change(context_file, replacement_code, updated_content)
+        invalid_update_str = self.verify_change(
+            context_file, replacement_code, updated_content
+        )
         if invalid_update_str:
             logger.warning(
                 f"Invalid update in {self.file_path}: {invalid_update_str}.\nDiff:\n{diff}"
@@ -175,13 +190,19 @@ class EditCode(AgenticState):
             return self.retry(invalid_update_str)
 
         existing_span_ids = context_file.module.get_all_span_ids()
-        file = self.file_repo.save_file(file_path=context_file.file_path, updated_content=updated_content)
+        file = self.file_repo.save_file(
+            file_path=context_file.file_path, updated_content=updated_content
+        )
         updated_span_ids = file.module.get_all_span_ids()
 
         new_span_ids = updated_span_ids - existing_span_ids
         if new_span_ids:
-            logger.info(f"Updated file {self.file_path} with diff:\n{diff}. Add new span ids to context: {new_span_ids}.")
-            self.file_context.add_spans_to_context(self.file_path, span_ids=new_span_ids, pinned=True)
+            logger.info(
+                f"Updated file {self.file_path} with diff:\n{diff}. Add new span ids to context: {new_span_ids}."
+            )
+            self.file_context.add_spans_to_context(
+                self.file_path, span_ids=new_span_ids, pinned=True
+            )
         else:
             logger.info(f"Updated file {self.file_path} with diff:\n{diff}.")
 
@@ -202,7 +223,9 @@ class EditCode(AgenticState):
         if self._retry > 2:
             logger.warning(f"Failed after {self._retry} retries. Will reject change.")
             # TODO: Add more contet to rejection message
-            return StateOutcome.reject("Failed to apply changes. Please try again with a different approach.")
+            return StateOutcome.reject(
+                "Failed to apply changes. Please try again with a different approach."
+            )
 
         self._retry += 1
         return StateOutcome.retry(message)
@@ -216,11 +239,20 @@ class EditCode(AgenticState):
 
         updated_module = parser.parse(updated_content)
 
-        error_blocks = updated_module.find_errors()
-        if error_blocks:
+        validation_errors = updated_module.find_errors()
+        if validation_errors:
             logger.info(updated_module.to_tree())
-            code = updated_module.to_prompt(show_outcommented_code=True, include_block_types=[CodeBlockType.ERROR])
-            return f"After the code was replaces replacement this code is invalid: \n```{code}\n```\n\nMake sure to replace the full implementation in the search block or reject the request."
+
+            validation_errors_str = "\n".join(validation_errors)
+
+            code = updated_module.to_prompt(
+                show_outcommented_code=True, include_block_types=[CodeBlockType.ERROR]
+            )
+            return (
+                f"After the code was replaced it has the following validation errors:\n{validation_errors_str}. "
+                f"This code is invalid: \n```{code}\n```\n\n"
+                f"Make sure to replace the full implementation in the search block or reject the request if it's not correct."
+            )
 
         existing_placeholders = file.module.find_blocks_with_type(
             CodeBlockType.COMMENTED_OUT_CODE
@@ -250,13 +282,20 @@ class EditCode(AgenticState):
         # This might indicate that an incomplete replacement was made
         if self.change_type == ChangeType.modification:
             existing_block = file.module.find_first_by_start_line(self.start_line)
-            if (existing_block
-                    and existing_block.end_line == self.end_line
-                    and existing_block.type.group == CodeBlockTypeGroup.STRUCTURE):
-
+            if (
+                existing_block
+                and existing_block.end_line == self.end_line
+                and existing_block.type.group == CodeBlockTypeGroup.STRUCTURE
+            ):
                 new_block = updated_module.find_first_by_start_line(self.start_line)
+                block_in_updated_code = file.module.find_by_path(
+                    existing_block.full_path()
+                )
 
-                if existing_block.type != new_block.type:
+                if existing_block.type != new_block.type and not (
+                    block_in_updated_code
+                    or block_in_updated_code.type != existing_block.type
+                ):
                     logger.warning(
                         f"Full block change: {existing_block.type.value} -> {new_block.type.value}"
                     )
@@ -312,8 +351,12 @@ class EditCode(AgenticState):
                 outcomment_code_comment="... other code",
             )
         else:
-            file_context = self.create_file_context(max_tokens=self.max_prompt_file_tokens)
-            file_context.add_line_span_to_context(self.file_path, self.start_line, self.end_line)
+            file_context = self.create_file_context(
+                max_tokens=self.max_prompt_file_tokens
+            )
+            file_context.add_line_span_to_context(
+                self.file_path, self.start_line, self.end_line
+            )
             # file_context.expand_context_with_related_spans(self.max_prompt_file_tokens)
 
             file_context_str = file_context.create_prompt(

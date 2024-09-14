@@ -10,7 +10,14 @@ from moatless.edit.prompt import (
     CODER_SYSTEM_PROMPT,
     SELECT_LINES_SYSTEM_PROMPT,
 )
-from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
+from moatless.state import (
+    AgenticState,
+    ActionRequest,
+    StateOutcome,
+    AssistantMessage,
+    Message,
+    UserMessage,
+)
 from moatless.utils.tokenizer import count_tokens
 from moatless.verify.lint import VerificationError
 

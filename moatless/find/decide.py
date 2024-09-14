@@ -4,7 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from moatless.find import SearchCode
-from moatless.state import AgenticState, ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
+from moatless.state import (
+    AgenticState,
+    ActionRequest,
+    StateOutcome,
+    AssistantMessage,
+    Message,
+    UserMessage,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -155,6 +162,9 @@ class DecideRelevance(AgenticState):
 {file_context_str}
 </file_context>
 """
+
+        if self.feedback:
+            content += f"\n\n<feedback>\n{self.feedback}\n</feedback>"
 
         messages.append(UserMessage(content=content))
         return messages

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 @dataclass
 class _Settings:
-
     # Default model used if not provided in global params
     _default_model: str = os.environ.get("DEFAULT_MODEL", "gpt-4o-2024-05-13")
 

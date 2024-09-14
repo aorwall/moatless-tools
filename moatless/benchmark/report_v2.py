@@ -8,15 +8,24 @@ from moatless.edit.plan import Review, RequestCodeChange
 from moatless.index.code_index import is_test
 from moatless.benchmark.utils import (
     has_identified_spans,
-    has_identified_files, count_identified_files, count_identified_spans, get_missing_files,
+    has_identified_files,
+    count_identified_files,
+    count_identified_spans,
+    get_missing_files,
 )
 from moatless.file_context import FileContext, RankedFileSpan
 from moatless.trajectory import Trajectory
 from moatless.schema import VerificationIssue
 from moatless.state import AgenticState, Content, Rejected
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+class Flag(BaseModel):
+    state_name: Optional[str] = Field(None)
+    state_id: Optional[int] = Field(None)
+    message: str
 
 
 class StateStats(BaseModel):
@@ -41,7 +50,8 @@ class SearchStats(StateStats):
 
 class CodingStats(StateStats):
     review: bool = False
-    retries: int = 0
+    edit_retries: int = 0
+    plan_retries: int = 0
     edited: bool = False
 
     rejected: int = 0
@@ -81,7 +91,7 @@ class BenchmarkResult(BaseModel):
     error: str = ""
     status: str = ""
 
-    possible_issues: List[str] = []
+    flags: List[Flag] = []
 
     search: SearchStats = SearchStats()
     identify: StateStats = StateStats()
@@ -207,7 +217,9 @@ def to_result(
                                 ranked_span["span_id"]
                             )
 
-                    result.search.found_spans = sum(len(spans) for spans in search_results_spans.values())
+                    result.search.found_spans = sum(
+                        len(spans) for spans in search_results_spans.values()
+                    )
                     result.search.found_files = len(search_results_spans)
                     result.search.found_spans_details = search_results_spans
                     set_found_status(
@@ -219,7 +231,9 @@ def to_result(
 
                 if state_name == "IdentifyCode" and state.action_request:
                     if not state.action_request.identified_spans:
-                        logger.warning(f"No action request found in IdentifyCode state: {state}")
+                        logger.warning(
+                            f"No action request found in IdentifyCode state: {state}"
+                        )
                     else:
                         for span in state.action_request.identified_spans:
                             result.identify.result_spans += 1
@@ -242,23 +256,49 @@ def to_result(
                     if isinstance(state.action_request.action, Review):
                         result.coding.review = True
 
-                    if state.verification_issues and len(state.verification_issues) > result.max_verification_issues:
+                    if len(state._actions) > 1:
+                        result.coding.plan_retries += 1
+
+                    if (
+                        state.verification_issues
+                        and len(state.verification_issues)
+                        > result.max_verification_issues
+                    ):
                         result.max_verification_issues = len(state.verification_issues)
 
-                    result.final_verification_issues = len(state.verification_issues) if state.verification_issues else 0
+                    result.final_verification_issues = (
+                        len(state.verification_issues)
+                        if state.verification_issues
+                        else 0
+                    )
 
                 if state_name == "EditCode" and state.action_request:
                     if len(state._actions) > 1:
-                        result.coding.retries += 1
+                        result.coding.edit_retries += 1
 
-                    if not result.coding.largest_span or state.end_line - state.start_line > result.coding.largest_span:
+                    if (
+                        not result.coding.largest_span
+                        or state.end_line - state.start_line
+                        > result.coding.largest_span
+                    ):
                         result.coding.largest_span = state.end_line - state.start_line
 
-                    if not result.coding.smallest_span or state.end_line - state.start_line < result.coding.smallest_span:
+                    if (
+                        not result.coding.smallest_span
+                        or state.end_line - state.start_line
+                        < result.coding.smallest_span
+                    ):
                         result.coding.smallest_span = state.end_line - state.start_line
 
                     if transition.state.response.trigger == "reject":
                         result.coding.rejected += 1
+                        result.flags.append(
+                            Flag(
+                                state_name=state_name,
+                                state_id=state.id,
+                                message=f"Change rejected with reason: {state.response.output.get('message')}",
+                            )
+                        )
 
                     if state.response and state.response.output:
                         output = state.response.output
@@ -281,11 +321,18 @@ def to_result(
 
                             pinned_spans[file["file_path"]].append(span["span_id"])
 
-        missing_tests = get_missing_files(
-            instance["test_file_spans"], test_files
-        )
+        missing_tests = get_missing_files(instance["test_file_spans"], test_files)
         result.missing_test_files = len(missing_tests)
         result.expected_test_files = list(instance["test_file_spans"].keys())
+
+        if missing_tests:
+            found_tests_str = ", ".join(test_files)
+            expected_tests_str = ", ".join(instance["test_file_spans"].keys())
+            result.flags.append(
+                Flag(
+                    message=f"Missing tests. Found {found_tests_str}. Expected {expected_tests_str}."
+                )
+            )
 
         result.found_test_files = test_files
 
@@ -293,10 +340,15 @@ def to_result(
             test_status = info["evaluation_result"]["tests_status"]
             result.fail_to_pass_count = len(test_status["fail_to_pass"]["failure"])
             result.pass_to_pass_count = len(test_status["pass_to_pass"]["failure"])
-            result.test_count = (len(test_status["fail_to_pass"]["failure"])
-                                 + len(test_status["pass_to_pass"]["failure"])
-                                 + len(test_status["fail_to_pass"]["success"])
-                                 + len(test_status["pass_to_pass"]["success"]))
+            result.test_count = (
+                len(test_status["fail_to_pass"]["failure"])
+                + len(test_status["pass_to_pass"]["failure"])
+                + len(test_status["fail_to_pass"]["success"])
+                + len(test_status["pass_to_pass"]["success"])
+            )
+
+        if result.pass_to_pass_count > 0 and result.final_verification_issues == 0:
+            result.flags.append(Flag(message="Missed failing Pass to pass tests."))
 
         set_found_status(
             expected_spans,
@@ -338,7 +390,9 @@ def set_found_status(
         result_stats.status = "missing_spans"
 
 
-def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None) -> pd.DataFrame:
+def to_dataframe(
+    results: list[BenchmarkResult], report_mode: str | None = None
+) -> pd.DataFrame:
     state_keys = ["search", "identify", "decide", "coding"]
     rename_columns = False
     if report_mode == "code":
@@ -351,9 +405,22 @@ def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None)
 
     def flatten_dict(d, parent_key="", sep="_"):
         items = []
-        general_keys = ["instance_id", "duration", "total_cost", "prompt_tokens", "completion_tokens", "resolved_by", "status",
-                        "transitions", "all_transitions", "alternative_solutions", "resolved",
-                        "expected_spans", "expected_files", "error"]
+        general_keys = [
+            "instance_id",
+            "duration",
+            "total_cost",
+            "prompt_tokens",
+            "completion_tokens",
+            "resolved_by",
+            "status",
+            "transitions",
+            "all_transitions",
+            "alternative_solutions",
+            "resolved",
+            "expected_spans",
+            "expected_files",
+            "error",
+        ]
 
         for k, v in d.items():
             new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -363,11 +430,29 @@ def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None)
                 else:
                     items.append((new_key, v))
 
-            if k.endswith('_spans_details'):
+            if k.endswith("_spans_details"):
                 items.append((new_key, json.dumps(v)))
         return dict(items)
 
-    summary_cols = ["instance_id", "duration", "total_cost", "status", "transitions", "expected_spans", "expected_files", "search_status", "search_iterations", "identify_status", "identify_iterations", "decide_status", "decide_iterations", "plan_status", "plan_iterations", "edit_status", "edit_iterations"]
+    summary_cols = [
+        "instance_id",
+        "duration",
+        "total_cost",
+        "status",
+        "transitions",
+        "expected_spans",
+        "expected_files",
+        "search_status",
+        "search_iterations",
+        "identify_status",
+        "identify_iterations",
+        "decide_status",
+        "decide_iterations",
+        "plan_status",
+        "plan_iterations",
+        "edit_status",
+        "edit_iterations",
+    ]
 
     flattened_results = [flatten_dict(result.model_dump()) for result in results]
 
@@ -386,13 +471,34 @@ def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None)
 
     # Reorder columns
     column_order = [
-        "instance_id", "duration", "total_cost", "prompt_tokens", "completion_tokens", "resolved_by", "status", "resolved",
-        "transitions", "all_transitions", "expected_spans", "expected_files", "alternative_solutions",
-        "expected_spans_details", "error"
+        "instance_id",
+        "duration",
+        "total_cost",
+        "prompt_tokens",
+        "completion_tokens",
+        "resolved_by",
+        "status",
+        "resolved",
+        "transitions",
+        "all_transitions",
+        "expected_spans",
+        "expected_files",
+        "alternative_solutions",
+        "expected_spans_details",
+        "error",
     ]
 
-    state_columns = ["status", "iterations", "rejected", "cost", "found_spans", "found_files",
-                     "result_spans", "result_files", "found_spans_details"]
+    state_columns = [
+        "status",
+        "iterations",
+        "rejected",
+        "cost",
+        "found_spans",
+        "found_files",
+        "result_spans",
+        "result_files",
+        "found_spans_details",
+    ]
 
     for state in state_keys:
         column_order.extend([f"{state}_{col}" for col in state_columns])
@@ -404,6 +510,7 @@ def to_dataframe(results: list[BenchmarkResult], report_mode: str | None = None)
     # Reorder the dataframe columns
     df = df.reindex(columns=[col for col in column_order if col in df.columns])
     return df
+
 
 def read_results_from_json(file_path: str) -> List[BenchmarkResult]:
     with open(file_path, "r") as f:

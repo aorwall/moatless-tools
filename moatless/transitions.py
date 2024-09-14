@@ -12,11 +12,7 @@ from moatless.state import Finished, Rejected, Pending
 from moatless.transition_rules import TransitionRule, TransitionRules
 
 CODE_TRANSITIONS = [
-    TransitionRule(
-        source=PlanToCode,
-        dest=EditCode,
-        trigger="edit_code"
-    ),
+    TransitionRule(source=PlanToCode, dest=EditCode, trigger="edit_code"),
     TransitionRule(source=PlanToCode, dest=Finished, trigger="finish"),
     TransitionRule(source=PlanToCode, dest=Rejected, trigger="reject"),
     TransitionRule(source=EditCode, dest=PlanToCode, trigger="finish"),
@@ -48,6 +44,7 @@ def code_transitions(
         initial_state=PlanToCode,
         transition_rules=CODE_TRANSITIONS,
     )
+
 
 def edit_code_transitions(
     global_params: Optional[dict] = None, state_params: Optional[dict] = None
@@ -159,7 +156,7 @@ def search_and_code_transitions(
             TransitionRule(source=IdentifyCode, dest=SearchCode, trigger="search"),
             TransitionRule(source=IdentifyCode, dest=DecideRelevance, trigger="finish"),
             TransitionRule(source=DecideRelevance, dest=SearchCode, trigger="search"),
-            TransitionRule(source=DecideRelevance, dest=PlanToCode, trigger="finish")
+            TransitionRule(source=DecideRelevance, dest=PlanToCode, trigger="finish"),
         ]
         + CODE_TRANSITIONS,
     )

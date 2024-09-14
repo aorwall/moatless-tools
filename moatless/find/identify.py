@@ -5,7 +5,14 @@ from typing import Optional, Any, Set
 from pydantic import BaseModel, Field
 
 from moatless.file_context import RankedFileSpan
-from moatless.state import AgenticState,ActionRequest, StateOutcome, AssistantMessage, Message, UserMessage
+from moatless.state import (
+    AgenticState,
+    ActionRequest,
+    StateOutcome,
+    AssistantMessage,
+    Message,
+    UserMessage,
+)
 from moatless.schema import (
     FileWithSpans,
 )
@@ -155,6 +162,9 @@ class IdentifyCode(AgenticState):
 {search_result_str}
 </search_results>
 """
+
+        if self.feedback:
+            content += f"\n\n<feedback>\n{self.feedback}\n</feedback>"
 
         messages.append(UserMessage(content=content))
         return messages

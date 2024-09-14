@@ -30,13 +30,6 @@ Important guidelines:
 4. DO NOT suggest changes in surrounding code not DIRECTLY connected to the task. When you've solved the issue in the code, you're finished!
 5. DO NOT suggest changes in code that are not in <file_context>.
 6. DO NOT suggest code reviews!
-7. When you are confident that all changes are correct, you can finish the task without further verification.
-"""
-
-
-CLARIFY_CHANGE_SYSTEM_PROMPT = """You are autonomous AI assisistant with superior programming skills.
-
-Please read the instruction and code carefully. Identify the specific lines in the code that need to be modified to fulfill the instruction.
-
-You should specify the start and end line numbers using this function `specify_lines`.  You can only specify one contiguous range of lines.
+7. Always write tests to verify the changes you made.
+8. When you are confident that all changes are correct, you can finish the task without further verification.
 """

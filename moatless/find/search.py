@@ -7,7 +7,14 @@ from pydantic import BaseModel, Field, model_validator, ValidationError
 
 from moatless.file_context import RankedFileSpan
 from moatless.index.types import SearchCodeHit
-from moatless.state import StateOutcome, AgenticState, ActionRequest, AssistantMessage, Message, UserMessage
+from moatless.state import (
+    StateOutcome,
+    AgenticState,
+    ActionRequest,
+    AssistantMessage,
+    Message,
+    UserMessage,
+)
 
 from moatless.utils.llm_utils import response_format_by_model, LLMResponseFormat
 

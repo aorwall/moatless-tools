@@ -13,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 class GitRepository(FileRepository):
     def __init__(
-        self, repo_path: str, git_repo_url: Optional[str], commit: Optional[str] = None, generate_commit_message: bool = False
+        self,
+        repo_path: str,
+        git_repo_url: Optional[str],
+        commit: Optional[str] = None,
+        generate_commit_message: bool = False,
     ):
         super().__init__(repo_path)
         self._repo_path = repo_path
@@ -61,7 +65,6 @@ class GitRepository(FileRepository):
 
     def restore_from_snapshot(self, snapshot: dict):
         self._current_commit = snapshot["commit"]
-
         self._repo.git.checkout(self._current_commit)
 
         # TODO: Check diff and only reset changed files
@@ -79,7 +82,9 @@ class GitRepository(FileRepository):
             "commit": self._current_commit,
         }
 
-    def save_file(self, file_path: str, updated_content: Optional[str] = None) -> CodeFile:
+    def save_file(
+        self, file_path: str, updated_content: Optional[str] = None
+    ) -> CodeFile:
         file = super().save_file(file_path, updated_content)
         self.commit(file_path)
         return file
@@ -130,8 +135,12 @@ class GitRepository(FileRepository):
             f"Get diff between {self._initial_commit} and {self._current_commit}"
         )
         if ignore_paths:
-            exclude_patterns = [f':(exclude){path}' for path in ignore_paths]
-            diff_command = [self._initial_commit, self._current_commit, '--'] + exclude_patterns
+            exclude_patterns = [f":(exclude){path}" for path in ignore_paths]
+            diff_command = [
+                self._initial_commit,
+                self._current_commit,
+                "--",
+            ] + exclude_patterns
             return self._repo.git.diff(*diff_command)
         else:
             return self._repo.git.diff(self._initial_commit, self._current_commit)

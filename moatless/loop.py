@@ -10,13 +10,13 @@ from moatless.state import (
     Pending,
     Content,
     Rejected,
-    State, ActionRequest, Usage
+    State,
+    ActionRequest,
+    Usage,
 )
 from moatless.trajectory import Trajectory
 from moatless.transition_rules import TransitionRule, TransitionRules
-from moatless.schema import (
-    Response
-)
+from moatless.schema import Response
 from moatless.utils.llm_utils import response_format_by_model, LLMResponseFormat
 from moatless.workspace import Workspace
 
@@ -36,10 +36,7 @@ class AgenticLoop:
         expected_states: list[Type[State]] | None = None,
         reset_mocks_at_state: Optional[str] = None,
         verify_state_func: Optional[Callable] = None,
-        max_cost: float = 0.25,
-        max_transitions: int = 25,
-        num_iterations: int = 40,
-        max_expansions: int = 3,
+        max_cost: float = 0.5,
         max_retries: int = 2,
         max_rejections: int = 2,
         metadata: dict[str, Any] | None = None,
@@ -111,13 +108,8 @@ class AgenticLoop:
         self._reset_mocks_at_state = reset_mocks_at_state
 
         self._max_cost = max_cost
-        self._max_transitions = max_transitions
         self._max_retries = max_retries
         self._max_rejections = max_rejections
-
-        # MCTS
-        self._num_iterations = num_iterations
-        self._max_expansions = max_expansions
 
         self._transition_count = 0
         self._rejections = 0
@@ -126,8 +118,6 @@ class AgenticLoop:
         self._metadata = metadata
 
         self.kwargs = kwargs
-
-
 
     @classmethod
     def from_trajectory_file(cls, trajectory_path: str, **kwargs):
@@ -215,7 +205,9 @@ class AgenticLoop:
                 self.log_info(
                     f"Max cost reached ({total_cost} > {self._max_cost}). Exiting."
                 )
-                self.trajectory.save_info({"error": f"Max cost reached  ({total_cost} > {self._max_cost})."})
+                self.trajectory.save_info(
+                    {"error": f"Max cost reached  ({total_cost} > {self._max_cost})."}
+                )
                 rejected_state = self._create_state(
                     Rejected, {"message": "Max retries reached."}
                 )
@@ -234,8 +226,12 @@ class AgenticLoop:
                 raise
 
             if self.state.retries() > self._max_retries:
-                self.log_info(f"Max retries reached ({self._max_retries}) in {self.state.name}. Exiting.")
-                self.trajectory.save_info({"error": f"Max retries reached in {self.state.name}."})
+                self.log_info(
+                    f"Max retries reached ({self._max_retries}) in {self.state.name}. Exiting."
+                )
+                self.trajectory.save_info(
+                    {"error": f"Max retries reached in {self.state.name}."}
+                )
                 rejected_state = self._create_state(
                     Rejected, {"message": "Max retries reached."}
                 )
@@ -268,7 +264,9 @@ class AgenticLoop:
             if isinstance(self.state, AgenticState):
                 outcome = self.state.init()
                 if not outcome:
-                    outcome = self.state.execute(mocked_action_request=self._next_mock_action())
+                    outcome = self.state.execute(
+                        mocked_action_request=self._next_mock_action()
+                    )
             else:
                 outcome = self.state.execute()
 
@@ -308,9 +306,7 @@ class AgenticLoop:
 
         return self._create_state(transition_rule.dest, params)
 
-    def _create_state(
-        self, next_state_type: Type[State], params: dict
-    ) -> State:
+    def _create_state(self, next_state_type: Type[State], params: dict) -> State:
         if next_state_type not in [Finished, Rejected]:
             if len(self.state.get_previous_states()) >= self._max_transitions:
                 self.log_info(
@@ -399,9 +395,12 @@ class AgenticLoop:
     def transition_count(self):
         return len(self._trajectory.transitions)
 
-    def revert_to_state(self, state: State):
+    def revert_to_state(self, state: State | None = None, state_id: int | None = None):
+        if state_id:
+            state = self._trajectory.get_state(state_id)
         self._set_current_state(state)
         self._trajectory.update_workspace_to_current_state()
+        return state
 
     def clone_current_state(self):
         cloned_state = self.clone_state(self.state)

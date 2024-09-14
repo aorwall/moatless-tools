@@ -90,6 +90,38 @@ class TestDecideRelevance:
         assert len(decide_relevance.get_previous_states(decide_relevance)) == 3
         assert decide_relevance._relevant_count() == 2
 
+    @patch("moatless.file_context.FileContext.create_prompt")
+    def test_messages(self, mock_create_prompt, decide_relevance):
+        mock_create_prompt.return_value = "Mock file context"
+
+        messages = decide_relevance.messages()
+
+        assert len(messages) == 1
+        assert "<issue>" in messages[0].content
+        assert "Test initial message" in messages[0].content
+        assert "<file_context>" in messages[0].content
+        assert "Mock file context" in messages[0].content
+
+        mock_create_prompt.assert_called_once()
+
+    @patch("moatless.file_context.FileContext.create_prompt")
+    def test_messages_with_last_scratch_pad(self, mock_create_prompt, decide_relevance):
+        mock_create_prompt.return_value = "Mock file context"
+
+        previous_state = IdentifyCode(id=3)
+        previous_state._actions = [
+            ActionTransaction(
+                request=Identify(scratch_pad="Previous scratch pad", relevant=True)
+            )
+        ]
+        decide_relevance.previous_state = previous_state
+
+        messages = decide_relevance.messages()
+
+        assert len(messages) == 1
+        assert "<scratch_pad>" in messages[0].content
+        assert "Previous scratch pad" in messages[0].content
+
     def test_system_prompt(self, decide_relevance):
         system_prompt = decide_relevance.system_prompt()
 

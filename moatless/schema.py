@@ -29,6 +29,7 @@ class FileWithSpans(BaseModel):
         for span_id in span_ids:
             self.add_span_id(span_id)
 
+
 class Usage(BaseModel):
     completion_cost: float = 0
     completion_tokens: int = 0
@@ -135,7 +136,6 @@ class ChangeType(str, Enum):
     deletion = "deletion"
 
 
-
 class RankedFileSpan(BaseModel):
     file_path: str
     span_id: str
@@ -159,4 +159,3 @@ class CodeChange(BaseModel):
     instructions: str = Field(..., description="Instructions to do the code change.")
     file_path: str = Field(..., description="The file path of the code to be updated.")
     span_id: str = Field(..., description="The span id of the code to be updated.")
-

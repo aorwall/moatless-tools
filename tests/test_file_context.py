@@ -21,24 +21,31 @@ def test_file_context_to_dict():
             {
                 "file_path": "requests/models.py",
                 "show_all_spans": False,
-                "spans": [
-                    {"pinned": True, "span_id": "imports"},
-                    {
-                        "pinned": False,
-                        "span_id": "Request.register_hook",
-                        "tokens": 500,
-                    },
-                    {"pinned": False, "span_id": "Request"},
-                    {"pinned": False, "span_id": "Request.__init__"},
-                ],
+                "spans": [{"span_id": "Request.register_hook", "tokens": 500}],
             }
         ],
         "max_tokens": 5000,
     }
 
     prompt = file_context.create_prompt(show_outcommented_code=True)
-    assert "class Request(object):" in prompt
-    assert "def register_hook(self, event, hook):" in prompt
+    assert (
+        prompt
+        == """requests/models.py
+```
+
+# ...
+
+
+class Request(object):
+    # ...
+
+    def register_hook(self, event, hook):
+        \"""Properly register a hook.\"""
+
+        self.hooks[event].append(hook)
+    # ...
+```"""
+    )
 
     file_context = FileContext.from_dict(repo_dir, dump)
     assert file_context.model_dump() == dump
