@@ -1,12 +1,26 @@
 # Moatless Tools
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
-_Right now I'm focusing on moatless-tree-search, an extended version of moatless-tools. The code in moatless-tools is now a simplified version of that code base_.
+_Right now I'm focusing on [moatless-tree-search](https://github.com/aorwall/moatless-tree-search), an extended version of moatless-tools that builds a tree structure of nodes with parallel solutions and uses tree search to find the optimal trajectory. The code in moatless-tools has been simplified and is now a streamlined version of this expanded codebase.
 
 ## SWE-Bench
 I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas and am currently sharing the sixth place on the SWE-Bench Lite Leaderboard. 
 
 ### Version 0.0.3: Claude 3.5 Sonnet v20241022
+With version 0.0.3 I get 38.3% solve rate with Claude 3.5 Sonnet v20241022. Average cost per instance is $0.30.
+
+The three main reasons I’ve been able to go from 27% to 38% solved instances in this version:
+
+- **Claude 3.5 Sonnet and Computer Use**  
+  The solution has been adjusted to use the `text_editor_20241022` tool introduced in the new version of Claude 3.5 Sonnet. This provides more stable results when editing existing code.  
+
+- **[moatless-testbeds](https://github.com/aorwall/moatless-testbeds)s**  
+  I set up a Kubernetes-based solution to run tests and provide feedback on test results to the agent. It’s worth noting that the agent has to independently identify the tests and can’t rely on the PASS_TO_PASS or FAIL_TO_PASS data for each instance.  
+
+- **More flexible model**  
+  In the earlier version of Moatless Tools, the agent followed a rigid flow where it first retrieved content and then edited the code. Now, it can dynamically choose between actions for code retrieval or editing, depending on the situation.
+
+[Try the Claude 3.5 Sonnet v20241022 evaluation set up on Google Colab](https://colab.research.google.com/drive/1pKecc3pumsrOGzTOOCEqjRKzeCWLWQpj?usp=sharing)
 
 
 ### Version 0.0.2: Claude 3.5 Sonnet
@@ -53,8 +67,6 @@ You can configure these settings by either:
    # Required: At least one LLM provider API key
    export OPENAI_API_KEY="<your-key>"
    export ANTHROPIC_API_KEY="<your-key>"
-   export HUGGINGFACE_API_KEY="<your-key>"
-   export DEEPSEEK_API_KEY="<your-key>"
 
    # ...or Base URL for custom LLM API service (optional)
    export CUSTOM_LLM_API_BASE="<your-base-url>"
