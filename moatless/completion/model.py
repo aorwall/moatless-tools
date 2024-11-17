@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-from typing import Optional, Any, Union, Self
+from typing import Optional, Any, Union
 
 import litellm
 from instructor import OpenAISchema
@@ -185,7 +185,7 @@ class StructuredOutput(OpenAISchema):
         cls,
         json_data: str | bytes | bytearray,
         **kwarg,
-    ) -> Self:
+    ):
         if not json_data:
             raise ValidationError("Message is empty")
 
