@@ -753,7 +753,7 @@ def _append_ascii_node(
     node_str = f"Node{node.node_id} [-]"
 
     tree_lines.append(
-        f"{prefix}{'└── ' if is_last else '├── '}{node_str} {state_info} (expansions: {node.expanded_count()}, reward: {reward_str}, visits: {node.visits})"
+        f"{prefix}{'└── ' if is_last else '├── '}{node_str} {state_info}"
     )
 
     child_prefix = prefix + ("    " if is_last else "│   ")
