@@ -1,8 +1,8 @@
 import re
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from typing_extensions import deprecated
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
@@ -27,6 +27,9 @@ class CodeBlockTypeGroup(str, Enum):
     COMMENT = "Comment"
 
     ERROR = "Error"
+
+    def __str__(self):
+        return self.value
 
 
 class CodeBlockType(Enum):
@@ -69,8 +72,15 @@ class CodeBlockType(Enum):
     ERROR = ("Error", CodeBlockTypeGroup.ERROR)
 
     def __init__(self, value: str, group: CodeBlockTypeGroup):
-        self._value_ = value
+        self._value = value
         self.group = group
+
+    @property
+    def display_name(self):
+        return self._value
+
+    def __str__(self):
+        return self._value
 
     @classmethod
     def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
@@ -118,9 +128,10 @@ INDEXED_BLOCKS = [
 
 
 @deprecated("Use BlockSpans to define code block visibility instead")
-class PathTree(BaseModel):
-    show: bool = Field(default=False, description="Show the block and all sub blocks.")
-    tree: dict[str, "PathTree"] = Field(default_factory=dict)
+@dataclass
+class PathTree:
+    show: bool = False
+    tree: dict[str, "PathTree"] = field(default_factory=dict)
 
     @staticmethod
     def from_block_paths(block_paths: list[BlockPath]) -> "PathTree":
@@ -190,30 +201,18 @@ class RelationshipType(str, Enum):
     TYPE = "type"
 
 
-class Relationship(BaseModel):
-    scope: ReferenceScope = Field(description="The scope of the reference.")
-    identifier: Optional[str] = Field(default=None, description="ID")
-    type: RelationshipType = Field(
-        default=RelationshipType.USES, description="The type of the reference."
-    )
-    external_path: list[str] = Field(
-        default=[], description="The path to the referenced parent code block."
-    )
-    resolved_path: list[str] = Field(
-        default=[], description="The path to the file with the referenced code block."
-    )
-    path: list[str] = Field(
-        default=[], description="The path to the referenced code block."
-    )
+@dataclass
+class Relationship:
+    scope: ReferenceScope
+    external_path: list[str] = field(default_factory=list)
+    resolved_path: list[str] = field(default_factory=list)
+    path: list[str] = field(default_factory=list)
+    type: RelationshipType = RelationshipType.USES
+    identifier: Optional[str] = None
 
-    @classmethod
-    @model_validator(mode="before")
-    def validate_path(cls, values):
-        external_path = values.get("external_path")
-        path = values.get("path")
-        if not external_path and not path:
+    def __post_init__(self):
+        if not self.external_path and not self.path:
             raise ValueError("Cannot create Reference without external_path or path.")
-        return values
 
     def __hash__(self):
         return hash((self.scope, tuple(self.path)))
@@ -238,9 +237,10 @@ class Relationship(BaseModel):
         return f"({start_node})-[:{self.type.name} {{scope: {self.scope.value}}}]->({end_node})"
 
 
-class Parameter(BaseModel):
-    identifier: str = Field(description="The identifier of the parameter.")
-    type: Optional[str] = Field(description="The type of the parameter.")
+@dataclass
+class Parameter:
+    identifier: str
+    type: Optional[str] = None
 
 
 class SpanType(str, Enum):
@@ -249,42 +249,23 @@ class SpanType(str, Enum):
     IMPLEMENTATION = "impl"
 
 
-class BlockSpan(BaseModel):
-    span_id: str = Field()
-    span_type: SpanType = Field(description="Type of span.")
-    start_line: int = Field(description="Start line of the span.")
-    end_line: int = Field(description="End line of the span.")
-
-    initiating_block: "CodeBlock" = Field(
-        default=None,
-        description="The block that initiated the span.",
-    )
+@dataclass
+class BlockSpan:
+    span_id: str
+    span_type: SpanType
+    start_line: int
+    end_line: int
+    block_paths: list[BlockPath] = field(default_factory=list)
+    initiating_block: Optional["CodeBlock"] = None
+    visible: bool = True
+    index: int = 0
+    parent_block_path: Optional[BlockPath] = None
+    is_partial: bool = False
+    tokens: int = 0
 
     @property
     def block_type(self):
-        return self.initiating_block.type
-
-    # TODO: Remove
-    visible: bool = Field(default=True, description="If the span should be visible.")
-
-    index: int = 0
-
-    parent_block_path: BlockPath = Field(
-        default=None,
-        description="Path to the parent block of the span.",
-    )
-
-    is_partial: bool = Field(
-        default=False,
-        description="If the span is covering a partial part of the parent block.",
-    )
-
-    block_paths: list[BlockPath] = Field(
-        default=[],
-        description="Block paths that should be shown when the span is shown.",
-    )
-
-    tokens: int = Field(default=0, description="Number of tokens in the span.")
+        return self.initiating_block.type if self.initiating_block else None
 
     def __str__(self):
         return f"{self.span_id} ({self.span_type.value}, {self.tokens} tokens)"
@@ -296,63 +277,62 @@ class BlockSpan(BaseModel):
             return block_path
 
 
-class ValidationError(BaseModel):
+@dataclass
+class ValidationError:
     error: str
 
 
-class CodeBlock(BaseModel):
-    content: str
+@dataclass(eq=False, repr=False, slots=True)
+class CodeBlock:
     type: CodeBlockType
+    content: str
     identifier: Optional[str] = None
-    parameters: list[Parameter] = []  # TODO: Move to Function sub class
-    relationships: list[Relationship] = []
-    span_ids: set[str] = set()
-    belongs_to_span: BlockSpan | None = None
-    content_lines: list[str] = []
+    parameters: List["Parameter"] = field(default_factory=list)
+    relationships: List["Relationship"] = field(default_factory=list)
+    span_ids: Set[str] = field(default_factory=set)
+    belongs_to_span: Optional["BlockSpan"] = None
+    has_error: bool = False
     start_line: int = 0
     end_line: int = 0
-    properties: dict = {}
+    properties: Dict = field(default_factory=dict)
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    children: list["CodeBlock"] = []
-    validation_errors: list[ValidationError] = []
+    children: List["CodeBlock"] = field(default_factory=list)
+    validation_errors: List[str] = field(default_factory=list)
     parent: Optional["CodeBlock"] = None
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    _content_lines: Optional[List[str]] = field(default=None, init=False)
 
-    @classmethod
-    @field_validator("type", mode="before")
-    def validate_type(cls, v):
-        if v is None:
-            raise ValueError("Cannot create CodeBlock without type.")
-        return v
+    def __post_init__(self):
+        self._content_lines = None
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        for child in self.children:
-            child.parent = self
+        if self.children:
+            for child in self.children:
+                child.parent = self
 
+        if self.pre_code and not self.indentation and not self.pre_lines:
+            pre_code_lines = self.pre_code.split("\n")
+            self.pre_lines = len(pre_code_lines) - 1
+            self.indentation = (
+                pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
+            )
+
+    @property
+    def content_lines(self):
+        if self._content_lines is None:
+            self._content_lines = self.content.split("\n")
+        return self._content_lines
+
+    def validate_pre_code(self):
         if self.pre_code and not re.match(r"^[ \n\\]*$", self.pre_code):
             raise ValueError(
                 f"Failed to parse code block with type {self.type} and content `{self.content}`. "
                 f"Expected pre_code to only contain spaces and line breaks. Got `{self.pre_code}`"
             )
-
-        if self.pre_code and not self.indentation and not self.pre_lines:
-            pre_code_lines = self.pre_code.split("\n")
-            self.pre_lines = len(pre_code_lines) - 1
-            if self.pre_lines > 0:
-                self.indentation = pre_code_lines[-1]
-            else:
-                self.indentation = self.pre_code
-
-        self.content_lines = self.content.split("\n")
-        # if self.indentation and self.pre_lines:
-        #    self.content_lines[1:] = [line[len(self.indentation):] for line in self.content_lines[1:]]
 
     def last(self):
         if self.next:
@@ -435,7 +415,7 @@ class CodeBlock(BaseModel):
                     child.replace_by_path(path[1:], new_block)
 
     def __str__(self):
-        return self.to_string()
+        return f"{self.display_name} ({self.type.display_name} {self.start_line} - {self.end_line})"
 
     def to_string(self):
         return self._to_string()
@@ -673,13 +653,25 @@ class CodeBlock(BaseModel):
             if not self.pre_lines:
                 contents += "\n"
 
-        def print_line(line_number):
+        def print_line(line_number: int):
             if not show_line_numbers:
                 return ""
-            return str(line_number).ljust(6)
+
+            # Don't print out line numbers on out commented code to make it harder for the LLM to select it
+            if (
+                line_number == self.start_line
+                and self.type == CodeBlockType.COMMENTED_OUT_CODE
+            ):
+                return " " * 6
+            return f"{line_number:6}\t"
 
         # Just to write out the first line number when there are no pre_lines on first block
-        if self.parent.type == CodeBlockType.MODULE and self.parent.children[0] == self:
+        if (
+            not self.pre_lines
+            and self.parent
+            and self.parent.type == CodeBlockType.MODULE
+            and self.parent.children[0] == self
+        ):
             contents += print_line(self.start_line)
 
         if self.pre_lines:
@@ -688,7 +680,6 @@ class CodeBlock(BaseModel):
                 contents += print_line(self.start_line - self.pre_lines + i + 1)
 
         contents += self.indentation + self.content_lines[0]
-
         for i, line in enumerate(self.content_lines[1:]):
             contents += "\n"
             contents += print_line(self.start_line + i + 1)
@@ -710,6 +701,14 @@ class CodeBlock(BaseModel):
         include_block_types: list[CodeBlockType] | None = None,
     ):
         contents = ""
+        show_new_span_id = (
+            show_span_id
+            and self.belongs_to_span
+            and (not current_span_id or current_span_id != self.belongs_to_span.span_id)
+        )
+        contents += self._to_prompt_string(
+            show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
+        )
 
         has_outcommented_code = False
         for _i, child in enumerate(self.children):
@@ -737,20 +736,9 @@ class CodeBlock(BaseModel):
 
                 has_outcommented_code = False
 
-                show_new_span_id = (
-                    show_span_id
-                    and child.belongs_to_span
-                    and (
-                        not current_span_id
-                        or current_span_id != child.belongs_to_span.span_id
-                    )
-                )
                 if child.belongs_to_span:
                     current_span_id = child.belongs_to_span.span_id
 
-                contents += child._to_prompt_string(
-                    show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
-                )
                 contents += child.to_prompt(
                     span_ids=span_ids,
                     start_line=start_line,
@@ -792,6 +780,11 @@ class CodeBlock(BaseModel):
             return False
 
         return self.full_path() == other.full_path()
+
+    def compare_indentation(self, other_block: "CodeBlock"):
+        existing_indentation = len(self.indentation)
+        new_indentation = len(other_block.indentation)
+        return existing_indentation - new_indentation
 
     def find_block_by_type(self, block_type: CodeBlockType) -> Optional["CodeBlock"]:
         if self.type == block_type:
@@ -840,7 +833,7 @@ class CodeBlock(BaseModel):
         return None
 
     def find_spans_by_line_numbers(
-        self, start_line: int, end_line: int = None
+        self, start_line: int, end_line: int | None = None
     ) -> list[BlockSpan]:
         spans = []
         for child in self.children:
@@ -851,6 +844,10 @@ class CodeBlock(BaseModel):
                 continue
 
             if child.start_line > end_line:
+                if not spans:
+                    last_block = self.find_last_by_end_line(end_line)
+                    if last_block:
+                        spans.append(last_block.belongs_to_span)
                 return spans
 
             if (
@@ -858,8 +855,8 @@ class CodeBlock(BaseModel):
                 and child.belongs_to_span.span_id not in spans
                 and (
                     not child.children
-                    or child.start_line >= start_line
-                    and child.end_line <= end_line
+                    or child.children[0].start_line > end_line
+                    or (child.start_line >= start_line and child.end_line <= end_line)
                     or child.start_line == start_line
                     or child.end_line == end_line
                 )
@@ -876,6 +873,13 @@ class CodeBlock(BaseModel):
     def dict(self, **kwargs):
         # TODO: Add **kwargs to dict call
         return super().dict(exclude={"parent", "merge_history"})
+
+    @property
+    def display_name(self):
+        if self.full_path():
+            return self.path_string()
+        else:
+            return "<module>"
 
     def path_string(self):
         return ".".join(self.full_path())
@@ -894,7 +898,7 @@ class CodeBlock(BaseModel):
     def module(self) -> "Module":  # noqa: F821
         if self.parent:
             return self.parent.module
-        return self
+        return None
 
     @deprecated("Use codeblock.module")
     def root(self) -> "Module":  # noqa: F821
@@ -962,7 +966,7 @@ class CodeBlock(BaseModel):
             return False
         return all(child.is_complete() for child in self.children)
 
-    def find_errors(self) -> list["CodeBlock"]:
+    def find_errors(self) -> list[str]:
         errors = []
 
         if self.children:
@@ -970,16 +974,10 @@ class CodeBlock(BaseModel):
                 errors.extend(child.find_errors())
 
         if self.type == CodeBlockType.ERROR:
-            errors.append(self)
-
-        return errors
-
-    def find_validation_errors(self) -> list[ValidationError]:
-        errors = []
-        errors.extend(self.validation_errors)
-
-        for child in self.children:
-            errors.extend(child.find_validation_errors())
+            if self.validation_errors:
+                errors.extend(self.validation_errors)
+            else:
+                errors.append(f"Found validation errors in {self.path_string()}")
 
         return errors
 
@@ -1155,6 +1153,9 @@ class CodeBlock(BaseModel):
                 return True
         return False
 
+    def has_placeholders(self):
+        return self.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
+
     def find_blocks_with_type(self, block_type: CodeBlockType) -> list["CodeBlock"]:
         return self.find_blocks_with_types([block_type])
 
@@ -1172,6 +1173,23 @@ class CodeBlock(BaseModel):
                     return found
 
         return None
+
+    def find_blocks_by_line_numbers(
+        self,
+        start_line: int,
+        end_line: int | None = None,
+        include_parents: bool = False,
+    ) -> List["CodeBlock"]:
+        blocks = []
+        block = self
+        while block.next and (end_line is None or block.start_line <= end_line):
+            if include_parents and block.has_lines(start_line, end_line):
+                blocks.append(block)
+            elif block.start_line >= start_line:
+                blocks.append(block)
+            block = block.next
+
+        return blocks
 
     def find_last_by_end_line(
         self, end_line: int, tokens: Optional[int] = None
@@ -1193,34 +1211,7 @@ class CodeBlock(BaseModel):
 
         return None
 
-    def find_closest_indexed_parent(self) -> Optional["CodeBlock"]:
-        if self.is_indexed:
-            return self
-
-        if self.parent:
-            return self.parent.find_closest_indexed_parent()
-
-        return None
-
-    def find_indexed_blocks(self):
-        indexed_blocks = []
-        for child in self.children:
-            if child.is_indexed:
-                indexed_blocks.append(child)
-            indexed_blocks.extend(child.find_indexed_blocks())
-        return indexed_blocks
-
-    def get_indexed_blocks(self) -> list["CodeBlock"]:
-        blocks = []
-        for child in self.children:
-            if child.is_indexed:
-                blocks.append(child)
-
-            blocks.extend(child.get_indexed_blocks())
-
-        return blocks
-
-    def line_witin_token_context(self, line_number: int, tokens: int) -> bool:
+    def line_within_token_context(self, line_number: int, tokens: int) -> bool:
         if tokens <= 0:
             return False
 
@@ -1230,7 +1221,7 @@ class CodeBlock(BaseModel):
             if self.next.start_line > line_number:
                 return True
             else:
-                return self.next.line_witin_token_context(
+                return self.next.line_within_token_context(
                     line_number, tokens - self.tokens
                 )
         else:
@@ -1239,9 +1230,29 @@ class CodeBlock(BaseModel):
             elif self.previous.end_line < line_number:
                 return True
             else:
-                return self.previous.line_witin_token_context(
+                return self.previous.line_within_token_context(
                     line_number, tokens - self.tokens
                 )
+
+    def find_last_previous_block_with_block_group(
+        self, block_group: CodeBlockTypeGroup
+    ):
+        if not self.previous:
+            return None
+
+        if self.previous.type.group == block_group:
+            return self.previous
+
+        return self.previous.find_last_previous_block_with_block_group(block_group)
+
+    def find_next_block_with_block_group(self, block_group: CodeBlockTypeGroup):
+        if not self.next:
+            return None
+
+        if self.next.type.group == block_group:
+            return self.next
+
+        return self.next.find_next_block_with_block_group(block_group)
 
     def tokens_from_line(self, line_number: int) -> Optional[int]:
         if not self.previous or self.previous.end_line < line_number:
@@ -1284,6 +1295,10 @@ class CodeBlock(BaseModel):
 
         return span_ids
 
+    def get_all_spans(self, include_self: bool = True) -> list[BlockSpan]:
+        span_ids = self.get_all_span_ids(include_self=include_self)
+        return [self.module.find_span_by_id(span_id) for span_id in span_ids]
+
     def has_span(self, span_id: str):
         return self.has_any_span({span_id})
 
@@ -1294,8 +1309,10 @@ class CodeBlock(BaseModel):
     def belongs_to_any_span(self, span_ids: set[str]):
         return self.belongs_to_span and self.belongs_to_span.span_id in span_ids
 
-    def has_lines(self, start_line: int, end_line: int):
+    def has_lines(self, start_line: int, end_line: int | None = None):
         # Returns True if any part of the block is within the provided line range
+        if end_line is None:
+            return self.end_line >= start_line
         return not (self.end_line < start_line or self.start_line > end_line)
 
     def is_within_lines(self, start_line: int, end_line: int):

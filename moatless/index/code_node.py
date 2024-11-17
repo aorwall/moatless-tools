@@ -10,5 +10,13 @@ class CodeNode(TextNode):
         metadata = self.metadata.copy()
         metadata.pop("start_line", None)
         metadata.pop("end_line", None)
-        doc_identity = str(self.text) + str(metadata)
+        metadata.pop("tokens", None)
+        cleaned_text = self._clean_text(self.text)
+        doc_identity = cleaned_text + str(metadata)
         return str(sha256(doc_identity.encode("utf-8", "surrogatepass")).hexdigest())
+
+    def _clean_text(self, text):
+        """
+        Remove all whitespace and convert to lowercase to reduce the number of changes in hashes.
+        """
+        return "".join(text.split()).lower()

@@ -52,6 +52,9 @@ class SearchCodeHit(BaseModel):
         for span_id in span_ids:
             self.add_span(span_id, rank)
 
+    def __str__(self):
+        return f"{self.file_path}: {', '.join([span.span_id for span in self.spans])}"
+
 
 class SearchCodeResponse(BaseModel):
     message: Optional[str] = Field(
@@ -62,3 +65,6 @@ class SearchCodeResponse(BaseModel):
         default_factory=list,
         description="Search results.",
     )
+
+    def sum_tokens(self):
+        return sum([sum([span.tokens for span in hit.spans]) for hit in self.hits])

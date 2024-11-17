@@ -1,6 +1,6 @@
+from moatless.codeblocks.parser.java import JavaParser
 from moatless.codeblocks.parser.parser import CodeParser
 from moatless.codeblocks.parser.python import PythonParser
-from moatless.codeblocks.parser.java import JavaParser
 
 
 def is_supported(language: str) -> bool:

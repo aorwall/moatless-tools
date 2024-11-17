@@ -1,12 +1,49 @@
+import json
 import logging
+import os
 import re
 import time
 
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
-from moatless.types import FileWithSpans
+from moatless.schema import FileWithSpans
+
+IGNORED_SPANS = ["docstring", "imports"]
 
 logger = logging.getLogger(__name__)
+_moatless_instances = {}
+
+
+def load_moatless_datasets(split: str):
+    global _moatless_instances
+
+    file_path = os.path.join(
+        os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
+    )
+    with open(file_path) as f:
+        dataset = json.load(f)
+        _moatless_instances[split] = {d["instance_id"]: d for d in dataset}
+
+
+def get_moatless_instances(split: str = "lite"):
+    global _moatless_instances
+    if split not in _moatless_instances:
+        load_moatless_datasets(split)
+    return _moatless_instances.get(split)
+
+
+def get_moatless_instance(instance_id: str, split: str = "lite"):
+    global _moatless_instances
+    if split not in _moatless_instances:
+        load_moatless_datasets(split)
+    instance = _moatless_instances.get(split).get(instance_id)
+    if not instance and split == "lite":
+        # FIXME:
+        return get_moatless_instance(instance_id, "verified")
+    if not instance:
+        raise ValueError(f"Instance {instance_id} not found in {split} split.")
+
+    return instance
 
 
 def find_relevant_spans(original_block: Module, updated_block: Module):
@@ -82,7 +119,14 @@ def get_diff_lines(diff_input):
             relevant_diff_lines = max(0, old_length - 7)
             adjusted_end = adjusted_start + relevant_diff_lines
 
-            changes.append((current_file, adjusted_start, adjusted_end))
+            if old_length == 0:
+                change_type = "addition"
+            elif new_length == 0:
+                change_type = "deletion"
+            else:
+                change_type = "modification"
+
+            changes.append((current_file, adjusted_start, adjusted_end, change_type))
 
     return changes
 
@@ -96,10 +140,15 @@ def compare_patches(expected_patch, actual_patch):
     line_hits = 0
 
     for patch_diff in expected_diffs:
-        change_file, change_start, change_end = patch_diff
+        change_file, change_start, change_end, change_type = patch_diff
 
         for actual_diff in actual_diffs:
-            actual_change_file, actual_change_start, actual_change_end = actual_diff
+            (
+                actual_change_file,
+                actual_change_start,
+                actual_change_end,
+                actual_change_type,
+            ) = actual_diff
             expected_files.add(change_file)
             if change_file == actual_change_file:
                 file_hits.add(change_file)
@@ -133,15 +182,15 @@ def get_file_spans_from_patch(
     expected_files_with_spans = {}
 
     for diff_line in expected_diff_lines:
-        file = repository.get_file(diff_line[0])
+        change_file, change_start, change_end, change_type = diff_line
+        file = repository.get_file(change_file)
 
         if file is None or file.module is None:
             continue
 
         if file.file_path not in expected_files_with_spans:
             expected_files_with_spans[file.file_path] = []
-
-        spans = file.module.find_spans_by_line_numbers(diff_line[1], diff_line[2])
+        spans = file.module.find_spans_by_line_numbers(change_start, change_end)
         for span in spans:
             if span.span_id not in expected_files_with_spans[file.file_path]:
                 expected_files_with_spans[file.file_path].append(span.span_id)
@@ -170,10 +219,10 @@ def file_spans_to_dict(files_with_spans: list[FileWithSpans]) -> dict[str, list[
 
 def get_missing_files(
     expected_files_with_spans: dict[str, list[str]],
-    actual_files_with_spans: dict[str, list[str]],
+    files: list[str],
 ) -> list[str]:
     misses = list(expected_files_with_spans.keys())
-    for actual_file in actual_files_with_spans:
+    for actual_file in files:
         if actual_file in misses:
             misses.remove(actual_file)
     return misses
@@ -184,26 +233,82 @@ def get_missing_spans(
     actual_files_with_spans: dict[str, list[str]],
 ) -> dict[str, list[str]]:
     misses = {}
-    for expected_file, span_ids in expected_files_with_spans.items():
+    for expected_file, expected_span_ids in expected_files_with_spans.items():
         if expected_file not in actual_files_with_spans:
-            misses[expected_file] = span_ids
-            continue
+            actual_span_ids = []
+        else:
+            actual_span_ids = actual_files_with_spans[expected_file]
 
-        for span_id in span_ids:
-            if span_id not in actual_files_with_spans[expected_file]:
-                if expected_file not in misses:
-                    misses[expected_file] = []
-                misses[expected_file].append(span_id)
+        missing_span_ids = [
+            span_id
+            for span_id in expected_span_ids
+            if span_id not in actual_span_ids and span_id not in IGNORED_SPANS
+        ]
 
+        if missing_span_ids:
+            misses[expected_file] = missing_span_ids
     return misses
 
 
+def count_identified_spans(
+    expected_files_with_spans: dict[str, list[str]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> int:
+    count = 0
+    for actual_file, actual_span_ids in actual_files_with_spans.items():
+        if expected_files_with_spans.get(actual_file, []):
+            for actual_span_id in actual_span_ids:
+                if actual_span_id in expected_files_with_spans[actual_file]:
+                    count += 1
+    return count
+
+
+def count_identified_files(
+    expected_files_with_spans: dict[str, list[str]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> int:
+    count = 0
+    for actual_file, actual_span_ids in actual_files_with_spans.items():
+        if expected_files_with_spans.get(actual_file, []):
+            count += 1
+    return count
+
+
+def has_identified_spans(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> bool:
+    for expected_file_with_spans in expected_solutions:
+        missing_spans = get_missing_spans(
+            expected_file_with_spans, actual_files_with_spans
+        )
+        if not missing_spans or missing_spans == ["docstring"]:
+            return True
+    return False
+
+
+def has_identified_files(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]] | list[str],
+) -> bool:
+    if isinstance(actual_files_with_spans, dict):
+        actual_files = list(actual_files_with_spans.keys())
+    else:
+        actual_files = actual_files_with_spans
+
+    for expected_file_with_spans in expected_solutions:
+        if not get_missing_files(expected_file_with_spans, actual_files):
+            return True
+    return False
+
+
 def calculate_estimated_context_window(instance, results):
-    patch_diffs = get_diff_lines(instance["patch"])
+    patch = instance.get("patch") or instance.get("golden_patch")
+    patch_diffs = get_diff_lines(patch)
     expected_changes = []
 
     for patch_diff in patch_diffs:
-        change_file, change_start, change_end = patch_diff
+        change_file, change_start, change_end, change_type = patch_diff
         expected_changes.append(
             {
                 "file_path": change_file,
@@ -223,6 +328,9 @@ def calculate_estimated_context_window(instance, results):
         sum_tokens += result.tokens
         for change in expected_changes:
             if result.file_path == change["file_path"]:
+                logger.info(
+                    f"Found result for {change['file_path']} ({change['start_line']}-{change['end_line']}) at {result.start_line}-{result.end_line} with distance {result.distance}"
+                )
                 if (
                     result.start_line - 1 <= change["start_line"]
                     and result.end_line + 1 >= change["end_line"]
@@ -254,18 +362,6 @@ def calculate_estimated_context_window(instance, results):
 
     return expected_changes, sum_tokens
 
-
-def get_total_cost(trace_id):
-    try:
-        import langfuse
-    except ImportError:
-        logger.info("Langfuse not installed, can't get total cost")
-        return 0
-
-    langfuse = langfuse.Langfuse()
-    trace = langfuse.get_trace(trace_id)
-
-    return trace.total_cost
 
 
 def trace_metadata(instance_id: str, session_id: str, trace_name: str):

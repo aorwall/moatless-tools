@@ -6,6 +6,13 @@ import pytest
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+TEST_MODELS = [
+    "claude-3-5-sonnet-20240620",
+    "gpt-4o-mini-2024-07-18",
+    "gpt-4o-2024-08-06",
+    "deepseek/deepseek-chat",
+]
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -19,12 +26,6 @@ def pytest_addoption(parser):
         action="store",
         default=os.getenv("REPO_DIR", "/tmp/repo"),
         help="Path for REPO_DIR",
-    )
-    parser.addoption(
-        "--moatless-dir",
-        action="store",
-        default=os.getenv("MOATLESS_DIR", "/tmp/moatless"),
-        help="Path for MOATLESS_DIR",
     )
     parser.addoption(
         "--run-llm-integration",
@@ -44,11 +45,9 @@ def pytest_addoption(parser):
 def set_env_vars(monkeypatch, request):
     index_store_dir = request.config.getoption("--index-store-dir")
     repo_dir = request.config.getoption("--repo-dir")
-    moatless_dir = request.config.getoption("--moatless-dir")
 
     logger.debug(f"Setting INDEX_STORE_DIR={index_store_dir}")
     logger.debug(f"Setting REPO_DIR={repo_dir}")
-    logger.debug(f"Setting MOATLESS_DIR={moatless_dir}")
 
     if not os.path.exists(index_store_dir):
         os.makedirs(index_store_dir)
@@ -56,9 +55,12 @@ def set_env_vars(monkeypatch, request):
     if not os.path.exists(repo_dir):
         os.makedirs(repo_dir)
 
-    if not os.path.exists(moatless_dir):
-        os.makedirs(moatless_dir)
-
     monkeypatch.setenv("INDEX_STORE_DIR", index_store_dir)
     monkeypatch.setenv("REPO_DIR", repo_dir)
-    monkeypatch.setenv("MOATLESS_DIR", moatless_dir)
+
+
+# Add the llm_integration marker
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "llm_integration: mark test as requiring LLM integration"
+    )

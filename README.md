@@ -1,49 +1,127 @@
 # Moatless Tools
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
+_Right now I'm focusing on moatless-tree-search, an extended version of moatless-tools. The code in moatless-tools is now a simplified version of that code base_.
+
 ## SWE-Bench
 I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas and am currently sharing the sixth place on the SWE-Bench Lite Leaderboard. 
 
-### GPT-4o
-Moatless Tools 0.0.1 has a solve rate of 24%, with each benchmark instance costing an average of $0.13 to solve with GPT-4o. Running the SWE Bench Lite dataset with 300 instances costs approx 40 dollars. 
+### Version 0.0.3: Claude 3.5 Sonnet v20241022
 
-[Try it out in Google Colab](https://colab.research.google.com/drive/15RpSjdprf9lcaP0oqKsuYfZl1c3kVB_t?usp=sharing)
 
-### Claude 3.5 Sonnet
+### Version 0.0.2: Claude 3.5 Sonnet
 With version 0.0.2 I get 26.7% solve rate with Claude 3.5 Sonnet, with a bit higher cost of $0.17 per instance. 
 
 [Try the Claude 3.5 evaluation set up on Google Colab](https://colab.research.google.com/drive/1pKecc3pumsrOGzTOOCEqjRKzeCWLWQpj?usp=sharing)
 
-## Try it out
+### Version 0.0.1: GPT-4o
+Moatless Tools 0.0.1 has a solve rate of 24%, with each benchmark instance costing an average of $0.13 to solve with GPT-4o. Running the SWE Bench Lite dataset with 300 instances costs approx 40 dollars. 
+
+[Try it out in Google Colab](https://colab.research.google.com/drive/15RpSjdprf9lcaP0oqKsuYfZl1c3kVB_t?usp=sharing)
+
+
+# Try it out
 I have focused on testing my ideas, and the project is currently a bit messy. My plan is to organize it in the coming period. However, feel free to clone the repo and try running this notebook:
 
 1. [Run Moatless Tools on any repository](notebooks/00_index_and_run.ipynb)
 
+## Environment Setup
 
-## How it works
-The solution is based on an agentic loop that functions as a finite state machine, transitioning between states. Each state can have its own prompts and response handling.
+Before running the evaluation, you'll need:
+1. At least one LLM provider API key (e.g., OpenAI, Anthropic, etc.)
+2. A Voyage AI API key from [voyageai.com](https://voyageai.com) to use the pre-embedded vector stores for SWE-Bench instances.
+3. (Optional) Access to a testbed environment - see [moatless-testbeds](https://github.com/aorwall/moatless-testbeds) for setup instructions
 
-The following states are used in the usual workflow and code flow.
+You can configure these settings by either:
 
-### Search
-The Search Loop uses function calling to find relevant code using the following parameters:
+1. Create a `.env` file in the project root (copy from `.env.example`):
 
- * `query` - A query using natural language to describe the desired code.
- * `code_snippet` - A specific code snippet that should be exactly matched.
- * `class_name` - A specific class name to include in the search.
- * `function_name` - A specific function name to include in the search.
- * `file_pattern` - A glob pattern to filter search results to specific file types or directories.
+   ```bash
+   cp .env.example .env
+   # Edit .env with your values
+   ```
 
-For semantic search, a vector index is used, which is based on the llama index. This is a classic RAG solution where all code in the repository is chunked into relevant parts, such as at the method level, embedded, and indexed in a  vector store. For class and function name search, a simple index is used where all function and class names are indexed.
+2. Or export the variables directly:
+   
+   ```bash
+   # Directory for storing vector index store files  
+   export INDEX_STORE_DIR="/tmp/index_store"    
 
-### Identify
-Identifies the code relevant to the task. If not all relevant code is found, it transitions back to Search. Once all relevant code is found, it transitions to PlanToCode.
+   # Directory for storing clonedrepositories 
+   export REPO_DIR="/tmp/repos"
 
-### PlanToCode
-Breaks down the request for code changes into smaller changes to specific parts (code spans) of the codebase.
+   # Required: At least one LLM provider API key
+   export OPENAI_API_KEY="<your-key>"
+   export ANTHROPIC_API_KEY="<your-key>"
+   export HUGGINGFACE_API_KEY="<your-key>"
+   export DEEPSEEK_API_KEY="<your-key>"
 
-### ClarifyChange
-If the proposed changes affect too large a portion of the code, the change needs to be clarified to affect a smaller number of code lines.
+   # ...or Base URL for custom LLM API service (optional)
+   export CUSTOM_LLM_API_BASE="<your-base-url>"
+   export CUSTOM_LLM_API_KEY="<your-key>"
 
-### EditCode
-Code is edited in search/replace blocks inspired by the edit block concept in [Aider](https://aider.chat/docs/benchmarks.html). In this concept, the LLM specifies the code to be changed in a search block and the code it will be changed to in a replace block. However, since the code to be changed is already known to the Code Loop, the search section is pre-filled, and the LLM only needs to respond with the replace section. The idea is that this reduces the risk of changing the wrong code by having an agreement on what to change before making the change.
+   # Required: API Key for Voyage Embeddings
+   export VOYAGE_API_KEY="<your-key>"
+
+   # Optional: Configuration for testbed environment (https://github.com/aorwall/moatless-testbeds)
+   export TESTBED_API_KEY="<your-key>"
+   export TESTBED_BASE_URL="<your-base-url>"
+   ```
+
+## Example
+
+Basic setup using the `AgenticLoop` to solve a SWE-Bench instance.
+
+```python
+from moatless.agent import ActionAgent
+from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT
+from moatless.benchmark.swebench import create_repository
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.completion import CompletionModel
+from moatless.file_context import FileContext
+from moatless.index import CodeIndex
+from moatless.loop import AgenticLoop
+from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject
+
+index_store_dir = "/tmp/index_store"
+repo_base_dir = "/tmp/repos"
+persist_path = "trajectory.json"
+
+instance = get_moatless_instance("django__django-16379")
+
+completion_model = CompletionModel(model="gpt-4o", temperature=0.0)
+
+repository = create_repository(instance)
+
+code_index = CodeIndex.from_index_name(
+    instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
+)
+
+actions = [
+    FindClass(code_index=code_index, repository=repository),
+    FindFunction(code_index=code_index, repository=repository),
+    FindCodeSnippet(code_index=code_index, repository=repository),
+    SemanticSearch(code_index=code_index, repository=repository),
+    RequestMoreContext(repository=repository),
+    RequestCodeChange(repository=repository, completion_model=completion_model),
+    Finish(),
+    Reject()
+]
+
+file_context = FileContext(repo=repository)
+agent = ActionAgent(actions=actions, completion=completion_model, system_prompt=SIMPLE_CODE_PROMPT)
+
+loop = AgenticLoop.create(
+    message=instance["problem_statement"],
+    agent=agent,
+    file_context=file_context,
+    repository=repository,
+    persist_path=persist_path,
+    max_iterations=50,
+    max_cost=2.0  # Optional: Set maximum cost in dollars
+)
+
+final_node = loop.run()
+if final_node:
+    print(final_node.observation.message)
+```
