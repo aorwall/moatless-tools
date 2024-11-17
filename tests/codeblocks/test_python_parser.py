@@ -574,16 +574,14 @@ def foo():
 """
 
     def assertion(codeblock):
-        print("Tree:\n", codeblock.to_tree())
-
         prompt = codeblock.to_prompt()
-        print("Prompt:\n", prompt)
+        print("Prompt:\n" + prompt)
 
         prompt_with_line_numbers = codeblock.to_prompt(show_line_numbers=True)
-        print("Prompt with line numbers:\n", prompt_with_line_numbers)
+        print("Prompt with line numbers:\n" + prompt_with_line_numbers)
 
         for line in prompt_with_line_numbers.split("\n"):
-            assert line[0].isdigit()
+            assert line.strip()[0].isdigit()
 
         prompt_with_line_10_11 = codeblock.to_prompt(
             start_line=10,
@@ -666,7 +664,7 @@ def test_find_nested_blocks_by_line_numbers():
         print(prompt_with_line_numbers)
 
         for line in prompt_with_line_numbers.split("\n"):
-            assert line[0].isdigit()
+            assert line.strip()[0].isdigit()
 
         prompt_with_line_numbers = codeblock.to_prompt(
             start_line=7,
@@ -798,7 +796,44 @@ def test_ignored_spans():
     with open(file_path, "r") as file:
         content = file.read()
 
+    # def assertion(codeblock):
+    #    print(codeblock.to_tree(show_spans=True))
+
+    # _verify_parsing(content, assertion, debug=False)
+
+    file_path = f"{repo_dir}/requests/sessions.py"
+    with open(file_path, "r") as file:
+        content = file.read()
+
     def assertion(codeblock):
         print(codeblock.to_tree(show_spans=True))
+        assert "imports" in codeblock.span_ids
+
+    _verify_parsing(content, assertion, debug=False)
+
+
+def test_invalid_extra_comment():
+    content = """import threading
+
+class Signal:
+    \"""
+    Base class for all signals
+
+    Internal attributes:
+
+        receivers
+            { receiverkey (id) : weakref(receiver) }
+    \"""
+    logger = logging.getLogger('django.dispatch')
+    \"""
+    def __init__(self, providing_args=None, use_caching=False):
+        \"""
+        Create a new signal.
+        \"""
+        self.receivers = []
+"""
+
+    def assertion(codeblock):
+        print(codeblock.to_prompt(include_block_types=[CodeBlockType.ERROR]))
 
     _verify_parsing(content, assertion, debug=False)

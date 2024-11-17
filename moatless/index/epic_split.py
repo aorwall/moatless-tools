@@ -3,16 +3,15 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, Optional
 
-from llama_index.core.bridge.pydantic import Field
+from llama_index.core.bridge.pydantic import Field, PrivateAttr
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSplitter
 from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode
 from llama_index.core.utils import get_tokenizer, get_tqdm_iterable
 
-from moatless.codeblocks import create_parser
+from moatless.codeblocks import create_parser, CodeParser
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, PathTree
-from moatless.codeblocks.parser.python import PythonParser
 from moatless.index.code_node import CodeNode
 from moatless.index.settings import CommentStrategy
 
@@ -83,6 +82,7 @@ class EpicSplitter(NodeParser):
         default=None, description="Callback to call when indexing a code block."
     )
 
+    _parser: CodeParser = PrivateAttr()
     # _fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
 
     def __init__(
@@ -99,6 +99,7 @@ class EpicSplitter(NodeParser):
         index_callback: Optional[Callable[[CodeBlock], None]] = None,
         repo_path: Optional[str] = None,
         comment_strategy: CommentStrategy = CommentStrategy.ASSOCIATE,
+        min_lines_to_parse_block: int = 25,
         # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
         tokenizer: Optional[Callable] = None,
@@ -109,9 +110,16 @@ class EpicSplitter(NodeParser):
             non_code_file_extensions = ["md", "txt"]
         callback_manager = callback_manager or CallbackManager([])
 
+        self._parser = create_parser(
+            language=language,
+            index_callback=index_callback,
+            min_lines_to_parse_block=min_lines_to_parse_block,
+            enable_code_graph=False,
+        )
         # self._fallback_code_splitter = fallback_code_splitter
 
         super().__init__(
+            # _parser=parser,
             language=language,
             chunk_size=chunk_size,
             chunk_overlap=0,
@@ -146,14 +154,13 @@ class EpicSplitter(NodeParser):
 
         for node in nodes_with_progress:
             file_path = node.metadata.get("file_path")
-            content = node.get_content()
+            content = node.content()
 
             try:
                 starttime = time.time_ns()
 
                 # TODO: Derive language from file extension
-                parser = create_parser(language=self.language, index_callback=self.index_callback)
-                codeblock = parser.parse(content, file_path=file_path)
+                codeblock = self._parser.parse(content, file_path=file_path)
 
                 parse_time = time.time_ns() - starttime
                 if parse_time > 1e9:
@@ -198,13 +205,6 @@ class EpicSplitter(NodeParser):
         tokens = codeblock.sum_tokens()
         if tokens == 0:
             logger.debug(f"Skipping file {file_path} because it has no tokens.")
-            return []
-
-        if codeblock.find_errors():
-            logger.warning(
-                f"Failed to use spic splitter to split {file_path}. {len(codeblock.find_errors())} codeblocks with type ERROR. Fallback to treesitter_split()"
-            )
-            # TODO: Fall back to treesitter or text split
             return []
 
         if tokens > self.hard_token_limit:
@@ -252,14 +252,6 @@ class EpicSplitter(NodeParser):
                     comment_chunk.append(child)
                     continue
             else:
-                if child.tokens > self.max_chunk_size:
-                    start_content = child.content[:100]
-                    logger.warning(
-                        f"Skipping code block {child.path_string()} in {file_path} as it has {child.tokens} tokens which is"
-                        f" more than chunk size {self.chunk_size}. Content: {start_content}..."
-                    )
-                    continue
-
                 ignoring_comment = False
 
             if (
@@ -488,14 +480,23 @@ class EpicSplitter(NodeParser):
                     if block.belongs_to_span
                 ]
             )
-            metadata["span_ids"] = list(span_ids)
+            metadata["span_ids"] = list(sorted(span_ids))
 
             node_id += f"_{chunk[0].path_string()}_{chunk[-1].path_string()}"
 
         content = content.strip("\n")
 
-        tokens = get_tokenizer()(content)
-        metadata["tokens"] = len(tokens)
+        tokens = count_chunk_tokens(chunk)
+
+        # Truncate large chunks
+        if tokens > self.hard_token_limit:
+            content = content[: self.hard_token_limit]
+            logger.debug(
+                f"Truncating chunk {node_id} in {metadata['file_path']} as it has {tokens} tokens which is"
+                f" more than chunk size {self.chunk_size}."
+            )
+
+        metadata["tokens"] = tokens
 
         excluded_embed_metadata_keys = node.excluded_embed_metadata_keys.copy()
         excluded_embed_metadata_keys.extend(["start_line", "end_line", "tokens"])

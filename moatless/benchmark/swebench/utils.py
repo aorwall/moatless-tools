@@ -1,20 +1,20 @@
+import fcntl
 import logging
 import os
 from typing import Optional
 
-from datasets import load_dataset
-
 from moatless.benchmark.utils import (
-    file_spans_to_dict,
     get_missing_files,
     get_missing_spans,
 )
-from moatless.file_context import FileContext
 from moatless.index import CodeIndex
-from moatless.repository import FileRepository, GitRepository
-from moatless.utils.repo import setup_github_repo
-from moatless.workspace import Workspace
-
+from moatless.repository import GitRepository
+from moatless.repository.repository import Repository
+from moatless.utils.repo import (
+    setup_github_repo,
+    get_repo_dir_name,
+    retry_clone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
 ):
+    from datasets import load_dataset
+
     data = load_dataset(dataset_name, split=split)
     return {d["instance_id"]: d for d in data}
 
@@ -40,6 +42,8 @@ def sorted_instances(
     split: str = "test",
     sort_by: str = "created_at",
 ):
+    from datasets import load_dataset
+
     data = load_dataset(dataset_name, split=split)
     instances = list(data)
     instances = sorted(instances, key=lambda x: x[sort_by])
@@ -47,7 +51,7 @@ def sorted_instances(
 
 
 def get_repo_dir_name(repo: str):
-    return repo.replace("/", "_")
+    return repo.replace("/", "__")
 
 
 def found_in_expected_spans(instance: dict, spans: dict):
@@ -56,6 +60,7 @@ def found_in_expected_spans(instance: dict, spans: dict):
             logging.warning(
                 f"{instance['instance_id']} Expected spans for {file_path} is empty"
             )
+
     missing_spans = get_missing_spans(instance["expected_spans"], spans)
     return not missing_spans
 
@@ -66,7 +71,7 @@ def found_in_alternative_spans(instance: dict, spans: dict):
     for alternative_spans in instance["alternative_spans"]:
         for file_path, span_ids in alternative_spans["spans"].items():
             if not span_ids:
-                logging.warning(
+                logging.info(
                     f"{instance['instance_id']} Alternative spans for {file_path} is empty"
                 )
 
@@ -77,205 +82,21 @@ def found_in_alternative_spans(instance: dict, spans: dict):
     return False
 
 
-def sync_file_context_with_search_trajectory(workspace: Workspace, trajectory: dict):
-    for transition in trajectory["transitions"]:
-        for action in transition["actions"]:
-            if action["action"].get("identified_spans"):
-                for span in action["action"]["identified_spans"]:
-                    workspace.file_context.add_spans_to_context(
-                        span["file_path"], span["span_ids"]
-                    )
-
-
-def verify_search_trajectory(
-    trajectory: dict, instance: dict, workspace: Workspace
-) -> dict:
-    result = {
-        "transitions": len(trajectory["transitions"]),
-        "identifieed": None,
-        "expected_identified": None,
-        "alt_identified": None,
-        "identified": None,
-        "file_identified": None,
-        "found_in_search": None,
-        "tokens": 0,
-        "expanded_imports": False,
-        "expanded_related": False,
-        "expanded_small_classes": False,
-        "expanded_tokens": 0,
-    }
-
-    file_context = workspace.create_file_context()
-    search_file_context = workspace.create_file_context()
-
-    iterations = 0
-    for transition in trajectory["transitions"]:
-        if transition["name"] == "SearchCode":
-            iterations += 1
-
-        for action in transition["actions"]:
-            if (
-                "output" in action
-                and action.get("output")
-                and action["output"].get("ranked_spans")
-            ):
-                for ranked_span in action["output"]["ranked_spans"]:
-                    search_file_context.add_spans_to_context(
-                        ranked_span["file_path"], [ranked_span["span_id"]]
-                    )
-
-            if action["action"].get("identified_spans"):
-                for span in action["action"]["identified_spans"]:
-                    file_context.add_spans_to_context(
-                        span["file_path"], span["span_ids"]
-                    )
-
-            if result["found_in_search"] is None and (
-                found_in_expected_spans(
-                    instance,
-                    file_spans_to_dict(search_file_context.to_files_with_spans()),
+def found_in_alternative_files(instance: dict, files: list):
+    if "alternative_spans" not in instance:
+        return False
+    for alternative_spans in instance["alternative_spans"]:
+        for file_path, span_ids in alternative_spans["spans"].items():
+            if not span_ids:
+                logging.info(
+                    f"{instance['instance_id']} Alternative spans for {file_path} is empty"
                 )
-                or found_in_alternative_spans(
-                    instance, file_spans_to_dict(file_context.to_files_with_spans())
-                )
-            ):
-                result["found_in_search"] = iterations
 
-            if result["file_identified"] is None:
-                missing_files = get_missing_files(
-                    instance["expected_spans"],
-                    file_spans_to_dict(file_context.to_files_with_spans()),
-                )
-                if not missing_files:
-                    result["file_identified"] = iterations
+        missing_spans = get_missing_files(alternative_spans["spans"], files)
+        if not missing_spans:
+            return True
 
-            if result["expected_identified"] is None and found_in_expected_spans(
-                instance, file_spans_to_dict(file_context.to_files_with_spans())
-            ):
-                result["expected_identified"] = iterations
-
-            if result["alt_identified"] is None and found_in_alternative_spans(
-                instance, file_spans_to_dict(file_context.to_files_with_spans())
-            ):
-                result["alt_identified"] = iterations
-
-    if result["expected_identified"] is not None:
-        result["identified"] = result["expected_identified"]
-
-    if result["alt_identified"] is not None and (
-        result["identified"] is None or result["alt_identified"] < result["identified"]
-    ):
-        result["identified"] = result["alt_identified"]
-
-    result["tokens"] = file_context.context_size()
-
-    file_context.expand_context_with_init_spans()
-    actual_span_dicts = file_spans_to_dict(file_context.to_files_with_spans())
-
-    if found_in_expected_spans(
-        instance, actual_span_dicts
-    ) or found_in_alternative_spans(instance, actual_span_dicts):
-        result["expanded_imports"] = True
-
-    file_context.expand_context_with_related_spans(max_tokens=8000)
-    if found_in_expected_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ) or found_in_alternative_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ):
-        result["expanded_related"] = True
-
-    file_context.expand_small_classes(max_tokens=500)
-    if found_in_expected_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ) or found_in_alternative_spans(
-        instance, file_spans_to_dict(file_context.to_files_with_spans())
-    ):
-        result["expanded_small_classes"] = True
-
-    result["expanded_tokens"] = file_context.context_size()
-
-    result["iterations"] = iterations
-    return result
-
-
-def generate_md_report(trajectory: dict, instance: dict):
-    info = trajectory["info"]
-    markdown = f"# {info['instance_id']}\n"
-
-    markdown += "\n## Problem statement\n"
-    markdown += f"```\n{instance['problem_statement']}\n```\n"
-
-    if "error" in trajectory["info"]:
-        markdown += "\n## Error\n"
-        markdown += f"```\n{trajectory['info']['error']}\n```\n"
-    else:
-        markdown += "\n## Prediction\n"
-        markdown += f"```diff\n{info['submission']}\n```\n"
-
-    markdown += "\n## Golden patch\n"
-    markdown += f"```diff\n{instance['golden_patch']}\n```\n"
-
-    markdown += "\n## Trajectory\n"
-
-    repo_dir = setup_swebench_repo(instance)
-    file_repo = FileRepository(repo_dir)
-
-    for step in trajectory["transitions"]:
-        for i, action in enumerate(step["actions"]):
-            markdown += f"### {step['name']} ({i})\n\n"
-
-            if step["name"] == "PlanToCode":
-                if action.get("action").get("thoughts"):
-                    markdown += "*" + action["action"]["thoughts"] + "*"
-
-                if action.get("action", {}).get("action", {}).get("description"):
-                    markdown += f"\n\n * {action['action']['action']['description']}"
-
-                if action.get("action", {}).get("action", {}).get("file_path"):
-                    markdown += f"\n * {action['action']['action']['file_path']}"
-
-                if action.get("action", {}).get("action", {}).get("span_id"):
-                    markdown += f"\n * {action['action']['action']['span_id']}"
-
-                    markdown += "\n\n#### File context \n\n"
-
-                    file_context = FileContext(file_repo)
-                    file_context.add_span_to_context(
-                        action["action"]["action"]["file_path"],
-                        action["action"]["action"]["span_id"],
-                    )
-
-                    markdown += file_context.create_prompt(show_outcommented_code=True)
-
-            if step["name"] == "EditCode":
-                markdown += "#### LLM Response\n\n"
-                markdown += f"```\n{action['action']['content']}\n```\n"
-
-                if action.get("output", {}).get("message"):
-                    markdown += "#### Output\n\n"
-                    markdown += f"{action['output']['message']}\n\n"
-
-            if step["name"] == "ClarifyCodeChange":
-                if action.get("thoughts"):
-                    markdown += "*" + action["thoughts"] + "*"
-
-                if action.get("output", {}).get("start_line"):
-                    markdown += f"\n* Start Line: {action['output']['start_line']}\n"
-                    markdown += f"\n* End Line: {action['output']['end_line']}\n"
-
-            if step["name"] == "Finished":
-                markdown += f"*{action['properties']['message']}*\n"
-
-            if step["name"] == "Rejected":
-                markdown += f"*{action['properties']['message']}*\n"
-
-    markdown += "## Alternative patches\n"
-    for alternative in instance["resolved_by"]:
-        markdown += f"### {alternative['name']}\n"
-        markdown += f"```diff\n{alternative['patch']}\n```\n"
-
-    return markdown
+    return False
 
 
 def setup_swebench_repo(
@@ -301,11 +122,10 @@ def setup_swebench_repo(
     )
 
 
-def create_workspace(
+def create_repository(
     instance: Optional[dict] = None,
     instance_id: Optional[str] = None,
     repo_base_dir: Optional[str] = None,
-    index_store_dir: Optional[str] = None,
 ):
     """
     Create a workspace for the given SWE-bench instance.
@@ -314,24 +134,67 @@ def create_workspace(
     if not instance:
         instance = load_instance(instance_id)
 
-    if not index_store_dir:
-        index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
-
     if not repo_base_dir:
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
 
-    repo_dir_name = instance["repo"].replace("/", "__")
-    repo_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
-    repo_dir = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
-    repo = GitRepository.from_repo(
-        git_repo_url=repo_url, repo_path=repo_dir, commit=instance["base_commit"]
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(repo_base_dir), exist_ok=True)
+
+    # Ensure the base directory exists
+    os.makedirs(repo_base_dir, exist_ok=True)
+
+    repo_dir_name = get_repo_dir_name(instance["repo"])
+    local_repo_path = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
+    lock_file_path = f"{local_repo_path}.lock"
+
+    # Ensure the directory for the lock file exists
+    os.makedirs(os.path.dirname(lock_file_path), exist_ok=True)
+
+    repo_path = f"{repo_base_dir}/swe-bench_{instance['instance_id']}"
+    if os.path.exists(repo_path):
+        try:
+            logger.info(f"Initializing GitRepository from existing repo {repo_path}")
+            return GitRepository(repo_path=repo_path)
+        except Exception as e:
+            logging.warning(f"Error initializing GitRepository: {e}")
+
+    with open(lock_file_path, "w") as lock_file:
+        logging.debug(f"Acquiring lock for {local_repo_path}")
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if not os.path.exists(local_repo_path):
+            # Clone from GitHub if local repo doesn't exist
+            github_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
+            try:
+                retry_clone(github_url, local_repo_path)
+                logging.info(f"Cloned {github_url} to {local_repo_path}")
+            except Exception as e:
+                logger.error(f"Failed to clone after multiple attempts: {e}")
+                raise
+        logging.debug(f"Releasing lock for {local_repo_path}")
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+    repo_url = f"file://{local_repo_path}"
+
+    return GitRepository.from_repo(
+        git_repo_url=repo_url, repo_path=repo_path, commit=instance["base_commit"]
     )
+
+
+def create_index(
+    instance: dict,
+    repository: Repository | None = None,
+    index_store_dir: Optional[str] = None,
+):
+    """
+    Create a workspace for the given SWE-bench instance.
+    """
+    if not index_store_dir:
+        index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+
+    if not repository:
+        repository = create_repository(instance)
 
     code_index = CodeIndex.from_index_name(
-        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repo
+        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
     )
-
-    return Workspace(
-        file_repo=repo,
-        code_index=code_index,
-    )
+    return code_index

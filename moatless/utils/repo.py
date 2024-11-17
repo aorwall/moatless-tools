@@ -1,8 +1,35 @@
 import logging
 import os
+import random
 import subprocess
+import time
 
 logger = logging.getLogger(__name__)
+
+
+def retry_clone(repo_url, repo_dir, max_attempts=3):
+    for attempt in range(max_attempts):
+        try:
+            logger.info(f"Cloning {repo_url} to {repo_dir} (attempt {attempt + 1})")
+            result = subprocess.run(
+                ["git", "clone", repo_url, repo_dir],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            logger.info(f"Cloned {repo_url} to {repo_dir}. Output: {result.stdout}")
+            return
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Clone attempt {attempt + 1} failed: {e.stderr}")
+            if attempt < max_attempts - 1:
+                if "Connection reset by peer" in e.stderr or "early EOF" in e.stderr:
+                    wait_time = (2**attempt) + (random.randint(0, 1000) / 1000)
+                    logger.info(f"Retrying in {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    raise  # Don't retry for other types of errors
+            else:
+                raise  # Raise the error on the last attempt
 
 
 def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
@@ -24,22 +51,75 @@ def get_repo_dir_name(repo: str):
     return repo.replace("/", "_")
 
 
-def maybe_clone(repo_url, repo_dir):
-    if not os.path.exists(f"{repo_dir}/.git"):
-        logger.info(f"Cloning repo '{repo_url}'")
-        # Clone the repo if the directory doesn't exist
-        result = subprocess.run(
-            ["git", "clone", repo_url, repo_dir],
+def clone_and_checkout(repo_url, repo_dir, commit):
+    if os.path.exists(f"{repo_dir}/.git"):
+        subprocess.run(
+            ["rm", "-rf", repo_dir],
             check=True,
             text=True,
             capture_output=True,
         )
 
-        if result.returncode == 0:
-            logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
-        else:
-            logger.info(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
+    # Ensure the URL is in the correct format for anonymous access
+    if repo_url.startswith("https://github.com/"):
+        repo_url = repo_url.replace("https://github.com/", "https://github.com/")
+
+    try:
+        logger.info(
+            f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}"
+        )
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "fetch", "--depth", "1", "origin", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        logger.info(
+            f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}"
+        )
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Shallow clone failed, attempting full clone: {e.stderr}")
+        subprocess.run(
+            ["git", "clone", repo_url, repo_dir],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        logger.info(
+            f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}"
+        )
+
+
+def maybe_clone(repo_url, repo_dir):
+    if not os.path.exists(f"{repo_dir}/.git"):
+        logger.info(f"Cloning repo '{repo_url}'")
+        try:
+            retry_clone(repo_url, repo_dir)
+        except Exception as e:
+            logger.error(f"Clone failed after multiple attempts: {e}")
             raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
+        logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
 
 
 def pull_latest(repo_dir):
@@ -159,6 +239,7 @@ def stage_all_files(repo_dir):
 
 
 def checkout_commit(repo_dir, commit_hash):
+    logger.info(f"Checking out commit {commit_hash} in {repo_dir}")
     try:
         subprocess.run(
             ["git", "reset", "--hard", commit_hash],
