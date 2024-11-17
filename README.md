@@ -14,13 +14,13 @@ The three main reasons I’ve been able to go from 27% to 38% solved instances i
 - **Claude 3.5 Sonnet and Computer Use**  
   The solution has been adjusted to use the `text_editor_20241022` tool introduced in the new version of Claude 3.5 Sonnet. This provides more stable results when editing existing code.  
 
-- **[moatless-testbeds](https://github.com/aorwall/moatless-testbeds)s**  
-  I set up a Kubernetes-based solution to run tests and provide feedback on test results to the agent. It’s worth noting that the agent has to independently identify the tests and can’t rely on the PASS_TO_PASS or FAIL_TO_PASS data for each instance.  
+- **[moatless-testbeds](https://github.com/aorwall/moatless-testbeds)**  
+  I set up a Kubernetes-based solution to run tests and provide feedback on test results to the agent. It’s worth noting that the agent has to independently identify the tests and can’t rely on the `PASS_TO_PASS` or `FAIL_TO_PASS` data for each instance.  
 
 - **More flexible model**  
   In the earlier version of Moatless Tools, the agent followed a rigid flow where it first retrieved content and then edited the code. Now, it can dynamically choose between actions for code retrieval or editing, depending on the situation.
 
-[Try the Claude 3.5 Sonnet v20241022 evaluation set up on Google Colab](https://colab.research.google.com/drive/1pKecc3pumsrOGzTOOCEqjRKzeCWLWQpj?usp=sharing)
+[Try the Claude 3.5 Sonnet v20241022 evaluation set up on Google Colab](https://colab.research.google.com/drive/1yOCXhTujvX4QIGJuO73UIVVqAqgwlhmC?usp=sharing)
 
 
 ### Version 0.0.2: Claude 3.5 Sonnet
