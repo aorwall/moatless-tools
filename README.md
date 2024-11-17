@@ -1,10 +1,10 @@
 # Moatless Tools
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
-_Right now I'm focusing on [moatless-tree-search](https://github.com/aorwall/moatless-tree-search), an extended version of moatless-tools that builds a tree structure of nodes with parallel solutions and uses tree search to find the optimal trajectory. The code in moatless-tools has been simplified and is now a streamlined version of this expanded codebase.
+_Right now I'm focusing on [moatless-tree-search](https://github.com/aorwall/moatless-tree-search), an extended version of moatless-tools that builds a tree structure of nodes with parallel solutions and uses tree search to find the optimal trajectory. The code in moatless-tools has been simplified and is now a streamlined version of this expanded codebase._
 
 ## SWE-Bench
-I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas and am currently sharing the sixth place on the SWE-Bench Lite Leaderboard. 
+I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas. 
 
 ### Version 0.0.3: Claude 3.5 Sonnet v20241022
 With version 0.0.3 I get 38.3% solve rate with Claude 3.5 Sonnet v20241022. Average cost per instance is $0.30.
