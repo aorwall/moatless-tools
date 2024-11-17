@@ -50,35 +50,35 @@ You can configure these settings by either:
 
 1. Create a `.env` file in the project root (copy from `.env.example`):
 
-   ```bash
-   cp .env.example .env
-   # Edit .env with your values
-   ```
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
 
 2. Or export the variables directly:
    
-   ```bash
-   # Directory for storing vector index store files  
-   export INDEX_STORE_DIR="/tmp/index_store"    
+```bash
+# Directory for storing vector index store files  
+export INDEX_STORE_DIR="/tmp/index_store"    
 
-   # Directory for storing clonedrepositories 
-   export REPO_DIR="/tmp/repos"
+# Directory for storing clonedrepositories 
+export REPO_DIR="/tmp/repos"
 
-   # Required: At least one LLM provider API key
-   export OPENAI_API_KEY="<your-key>"
-   export ANTHROPIC_API_KEY="<your-key>"
+# Required: At least one LLM provider API key
+export OPENAI_API_KEY="<your-key>"
+export ANTHROPIC_API_KEY="<your-key>"
 
-   # ...or Base URL for custom LLM API service (optional)
-   export CUSTOM_LLM_API_BASE="<your-base-url>"
-   export CUSTOM_LLM_API_KEY="<your-key>"
+# ...or Base URL for custom LLM API service (optional)
+export CUSTOM_LLM_API_BASE="<your-base-url>"
+export CUSTOM_LLM_API_KEY="<your-key>"
 
-   # Required: API Key for Voyage Embeddings
-   export VOYAGE_API_KEY="<your-key>"
+# Required: API Key for Voyage Embeddings
+export VOYAGE_API_KEY="<your-key>"
 
-   # Optional: Configuration for testbed environment (https://github.com/aorwall/moatless-testbeds)
-   export TESTBED_API_KEY="<your-key>"
-   export TESTBED_BASE_URL="<your-base-url>"
-   ```
+# Optional: Configuration for testbed environment (https://github.com/aorwall/moatless-testbeds)
+export TESTBED_API_KEY="<your-key>"
+export TESTBED_BASE_URL="<your-base-url>"
+```
 
 ## Example
 
