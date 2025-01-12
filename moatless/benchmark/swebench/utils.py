@@ -1,6 +1,7 @@
 import fcntl
 import logging
 import os
+import shutil
 from typing import Optional
 
 from moatless.benchmark.utils import (
@@ -153,10 +154,27 @@ def create_repository(
     repo_path = f"{repo_base_dir}/swe-bench_{instance['instance_id']}"
     if os.path.exists(repo_path):
         try:
-            logger.info(f"Initializing GitRepository from existing repo {repo_path}")
+            # Check if the commit exists in the repo
+            import subprocess
+
+            result = subprocess.run(
+                ["git", "cat-file", "-e", instance["base_commit"]],
+                cwd=repo_path,
+                capture_output=True,
+                check=True,
+            )
+            logger.info(
+                f"Found existing repo with commit {instance['base_commit']} at {repo_path}"
+            )
             return GitRepository(repo_path=repo_path)
+        except subprocess.CalledProcessError:
+            logger.warning(
+                f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}"
+            )
+            shutil.rmtree(repo_path)
         except Exception as e:
-            logging.warning(f"Error initializing GitRepository: {e}")
+            logging.warning(f"Error checking repository: {e}")
+            shutil.rmtree(repo_path)
 
     with open(lock_file_path, "w") as lock_file:
         logging.debug(f"Acquiring lock for {local_repo_path}")

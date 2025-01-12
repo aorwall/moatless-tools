@@ -5,13 +5,14 @@ from typing import List, Any
 from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions import RequestCodeChange, RunTests
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.completion.completion import CompletionModel
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,10 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
         self._code_index = code_index
 
     def execute(
-        self, args: RequestCodeChangeArgs, file_context: FileContext
+        self,
+        args: RequestCodeChangeArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         observation = super().execute(args, file_context)
 
@@ -105,13 +109,14 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
             return observation
 
         run_tests = RunTests(
+            fail_on_not_found=False,
             repository=self._repository,
             runtime=self._runtime,
             code_index=self._code_index,
         )
         test_observation = run_tests.execute(
             RunTestsArgs(
-                scratch_pad=args.scratch_pad,
+                thoughts=args.thoughts,
                 test_files=[args.file_path],
             ),
             file_context,
@@ -122,3 +127,49 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
 
         return observation
 
+    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+        criteria = super().get_evaluation_criteria(trajectory_length)
+        criteria.extend(RunTests.get_evaluation_criteria(trajectory_length))
+        return criteria
+
+    @classmethod
+    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+        return cls.generate_reward_scale_entries(
+            [
+                (
+                    90,
+                    100,
+                    "The code change is optimal with a perfect Git diff exactly matching the pseudo code, AND all tests pass successfully confirming the solution's correctness.",
+                ),
+                (
+                    75,
+                    89,
+                    "The code change significantly advances the solution with an accurate Git diff matching the pseudo code, AND most tests pass with only minor, easily fixable failures.",
+                ),
+                (
+                    50,
+                    74,
+                    "The code change is mostly correct but has minor issues or opportunities for optimization; the Git diff matches the pseudo code, AND tests have some failures that are minor or unforeseeable, with the agent showing understanding in interpreting results.",
+                ),
+                (
+                    25,
+                    49,
+                    "The code change is acceptable but has noticeable issues; AND tests have noticeable failures that may have been foreseeable but can be addressed with effort, like missing import statements.",
+                ),
+                (
+                    0,
+                    24,
+                    "The code change has minimal impact or introduces minor negative consequences, AND tests have significant failures with minimal or incorrect interpretation.",
+                ),
+                (
+                    -49,
+                    -1,
+                    "The code change is inappropriate or unhelpful; the Git diff does not match the pseudo code/instructions or shows no changes. Tests fail significantly with misinterpreted results. Penalize attempts to modify non-existent code elements based on severity.",
+                ),
+                (
+                    -100,
+                    -50,
+                    "The code change is counterproductive with severely flawed Git diff indicating no effective changes. Tests fail severely with failures that could have been anticipated. Heavily penalize severe hallucinations or continuous attempts to modify non-existent code elements.",
+                ),
+            ]
+        )

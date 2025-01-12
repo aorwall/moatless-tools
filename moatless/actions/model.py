@@ -4,7 +4,6 @@ import pkgutil
 from abc import ABC
 from typing import Dict, Type, Any, Optional
 
-from instructor.utils import classproperty
 from pydantic import Field, BaseModel, model_validator
 
 from moatless.completion.model import ToolCall, Completion, StructuredOutput
@@ -16,48 +15,67 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(StructuredOutput, ABC):
-    scratch_pad: str = Field(description="Your reasoning for the action.")
+    thoughts: str = Field(..., description="Your reasoning for the action.")
 
     class Config:
         title = "Action"
 
-    @classproperty
-    def name(cls):
-        return cls.Config.title if hasattr(cls.Config, "title") else cls.__name__
+    @classmethod
+    def get_name(cls) -> str:
+        """Returns the action name for the class based on Config title."""
+        return str(getattr(cls.Config, "title", cls.__name__))
+
+    def format_for_llm(self) -> str:
+        """Format the action name for LLM consumption"""
+        return str(self.name)
+
+    @classmethod
+    def format_name_for_llm(cls) -> str:
+        """Format the class name for LLM consumption"""
+        return str(cls.get_name())
 
     def to_tool_call(self) -> ToolCall:
-        return ToolCall(name=self.name, input=self.model_dump())
+        tool_input = self.model_dump()
+
+        return ToolCall(name=self.name, input=tool_input)
 
     @classmethod
     def from_tool_call(cls, tool_args: dict[str, Any], tool_name: str | None = None):
         return cls(**tool_args)
 
     def equals(self, other: "ActionArguments") -> bool:
-        return self.model_dump(exclude={"scratch_pad"}) == other.model_dump(
-            exclude={"scratch_pad"}
+        return self.model_dump(exclude={"thoughts"}) == other.model_dump(
+            exclude={"thoughts"}
         )
 
     def to_prompt(self):
         prompt = f"Action: {self.name}\n"
         prompt += "\n".join(
-            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"scratch_pad"}).items()]
+            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
         )
         return prompt
 
+    def short_summary(self) -> str:
+        return f"{self.name}()"
+
     @model_validator(mode="before")
     @classmethod
-    def fix_scratch_pad(cls, data: Any) -> Any:
-        """Allow scratch_pad to be null."""
+    def fix_thoughts(cls, data: Any) -> Any:
+        """Allow thoughts to be null."""
         if isinstance(data, dict):
-            if not data.get("scratch_pad"):
-                data["scratch_pad"] = ""
+            if "scratch_pad" in data:
+                data["thoughts"] = data["scratch_pad"]
+                del data["scratch_pad"]
+
+            if not data.get("thoughts"):
+                data["thoughts"] = ""
 
         return data
 
     @model_validator(mode="before")
     @classmethod
     def fix_null_fields(cls, data: Any) -> Any:
-        """Allow scratch_pad to be null."""
+        """Allow thoughts to be null."""
         if isinstance(data, dict):
             for key, value in data.items():
                 if value == "null":
@@ -113,9 +131,16 @@ class ActionArguments(StructuredOutput, ABC):
         return super().model_validate(obj)
 
 
+class RewardScaleEntry(BaseModel):
+    min_value: int
+    max_value: int
+    description: str
+
+
 class Observation(BaseModel):
-    message: str = Field(
-        description="The message returned to the agent, will be displayed in message history."
+    message: Optional[str] = Field(
+        None,
+        description="The message returned to the agent, will be displayed in message history.",
     )
     summary: Optional[str] = Field(
         None,

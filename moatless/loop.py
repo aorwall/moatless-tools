@@ -98,7 +98,6 @@ class AgenticLoop(BaseModel):
                 self.log(logger.error, f"Runtime error: {e.message}")
                 break
 
-
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
         child_node = Node(

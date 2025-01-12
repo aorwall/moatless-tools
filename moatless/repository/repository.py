@@ -1,6 +1,6 @@
 import importlib
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, Field
 
@@ -44,14 +44,21 @@ class Repository(BaseModel, ABC):
 
         return super().model_validate(obj)
 
+    @abstractmethod
+    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+        """
+        Lists files and directories in the specified directory.
+        Returns a dictionary with 'files' and 'directories' lists.
+        """
+        pass
+
 
 class InMemRepository(Repository):
     files: Dict[str, str] = Field(default_factory=dict)
 
-    def __init__(self, files: Dict[str, str] = None):
-        super().__init__()
-        if files is not None:
-            self.files = files
+    def __init__(self, files: Dict[str, str] = None, **kwargs):
+        files = files or {}
+        super().__init__(files=files, **kwargs)
 
     def get_file_content(self, file_path: str) -> Optional[str]:
         return self.files.get(file_path)
@@ -62,8 +69,11 @@ class InMemRepository(Repository):
     def save_file(self, file_path: str, updated_content: str):
         self.files[file_path] = updated_content
 
-    def get_relative_path(self, file_path: str) -> str:
-        return file_path
+    def is_directory(self, file_path: str) -> bool:
+        return False
+
+    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+        return {"files": [], "directories": []}
 
     def model_dump(self) -> Dict:
         return {"files": self.files}

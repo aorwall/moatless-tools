@@ -1,59 +1,198 @@
 import json
 import logging
-from enum import Enum
 from typing import Optional, List, Dict, Any, Union
 
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from pydantic import BaseModel, Field
 
 from moatless.actions.model import ActionArguments, Observation
+from moatless.agent.settings import AgentSettings
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import (
     Usage,
     Completion,
-    Message,
-    UserMessage,
-    AssistantMessage,
 )
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.value_function.model import Reward
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
-class MessageHistoryType(Enum):
-    MESSAGES = "messages"  # Provides all messages in sequence
-    SUMMARY = "summary"  # Generates one message with summarized history
-    REACT = "react"
+class ActionStep(BaseModel):
+    action: ActionArguments
+    observation: Optional[Observation] = None
+    completion: Optional[Completion] = None
 
+    def is_executed(self) -> bool:
+        """Check if this action step has been executed by verifying if it has observations."""
+        return self.observation is not None
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+
+        data["action"] = self.action.model_dump(**kwargs)
+        data["action"]["action_args_class"] = (
+            f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
+        )
+
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "ActionArguments":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["action"] = ActionArguments.model_validate(obj["action"])
+        return super().model_validate(obj, **kwargs)
+
+
+class FeedbackData(BaseModel):
+    """Structured feedback data model"""
+
+    feedback: str = Field(..., description="Direct feedback to the AI assistant")
+    analysis: Optional[str] = Field(
+        None, description="Analysis of the task and alternative branch attempts"
+    )
+    suggested_node_id: Optional[int] = Field(
+        None, description="ID of the node that should be expanded next (optional)"
+    )
+
+
+
+class Reward(StructuredOutput):
+    """A structured output for providing reward values and feedback for actions."""
+
+    class Config:
+        title = "ProvideReward"
+
+    explanation: Optional[str] = Field(
+        default=None,
+        description="An explanation and the reasoning behind your decision.",
+    )
+    feedback: Optional[str] = Field(
+        None, description="Feedback to the alternative branch."
+    )
+    value: int = Field(
+        ...,
+        description="A single integer value between -100 and 100 based on your confidence in the correctness of the action and its likelihood of resolving the issue",
+        ge=-100,
+        le=100,
+    )
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
+
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
 
-    action: Optional[ActionArguments] = Field(
-        None, description="The action associated with the node"
+    workspace: Optional[Workspace] = Field(
+        None, description="The workspace associated with the node"
     )
-    observation: Optional[Observation] = Field(
-        None, description="The output of the action"
+    artifact_changes: List[ArtifactChange] = Field(
+        default_factory=list,
+        description="The artifact changes associated with the node",
     )
+
+    user_message: Optional[str] = Field(
+        None, description="The user message for this node"
+    )
+    assistant_message: Optional[str] = Field(
+        None, description="The assistant response for this node"
+    )
+
+    action_steps: List[ActionStep] = Field(
+        default_factory=list,
+        description="The sequence of actions and observations for this node",
+    )
+
     file_context: Optional[FileContext] = Field(
         None, description="The file context state associated with the node"
     )
-    message: Optional[str] = Field(
-        None, description="The message associated with the node"
-    )
-    feedback: Optional[str] = Field(None, description="Feedback provided to the node")
+    # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
     completions: Dict[str, Completion] = Field(
         default_factory=dict, description="The completions used in this node"
     )
     possible_actions: List[str] = Field(
         default_factory=list, description="List of possible action types for this node"
     )
+    is_duplicate: Optional[bool] = Field(
+        None, description="Flag to indicate if the node is a duplicate"
+    )
+    terminal: bool = Field(
+        False, description="Flag to indicate if the node is a terminal node"
+    )
+    error: Optional[str] = Field(None, description="Error when running node")
+    reward: Optional[Reward] = Field(None, description="The reward of the node")
+    visits: int = Field(0, description="The number of times the node has been visited")
+    value: Optional[float] = Field(
+        None, description="The total value (reward) of the node"
+    )
+    max_expansions: Optional[int] = Field(
+        None, description="The maximum number of expansions"
+    )
+    agent_settings: Optional[AgentSettings] = Field(
+        None, description="The agent settings associated with the node"
+    )
+    feedback_data: Optional[FeedbackData] = Field(
+        None, description="Structured feedback data for the node"
+    )
+
+    @property
+    def action(self) -> Optional[ActionArguments]:
+        """Backward compatibility: Get action from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].action if self.action_steps else None
+
+    @action.setter
+    def action(self, value: Optional[ActionArguments]):
+        """Backward compatibility: Set action on the current/new action step"""
+
+        if not self.action_steps:
+            self.action_steps = [ActionStep(action=value)]
+        else:
+            self.action_steps[-1].action = value
+
+    @property
+    def observation(self) -> Optional[Observation]:
+        """Backward compatibility: Get observation from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].observation if self.action_steps else None
+
+    @observation.setter
+    def observation(self, value: Optional[Observation]):
+        """Backward compatibility: Set observation on the current/new action step"""
+        if value is None:
+            return
+
+        if not self.action_steps:
+            # Create new action step if setting observation on empty node
+            self.action_steps.append(ActionStep(action=self.action, observation=value))
+        else:
+            self.action_steps[-1].observation = value
+
+    @property
+    def message(self) -> Optional[str]:
+        """Backward compatibility: Get message maps to user_message"""
+        return self.user_message
+
+    @message.setter
+    def message(self, value: Optional[str]):
+        """Backward compatibility: Set message maps to user_message"""
+        self.user_message = value
 
     @classmethod
     def stub(cls, **kwargs):
-        return cls(node_id=0, **kwargs)
+        """Create a stub node with a unique ID."""
+        # Get the highest existing node ID from the kwargs or use 0
+        existing_nodes = kwargs.get("children", [])
+        highest_id = (
+            max([n.node_id for n in existing_nodes] + [kwargs.get("node_id", -1), -1])
+            + 1
+        )
+        return cls(node_id=highest_id, **kwargs)
 
     def is_leaf(self) -> bool:
         """Check if the node is a leaf node (no children)."""
@@ -69,10 +208,8 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
-        if self.observation and self.observation.terminal:
-            return True
 
-        return False
+        return self.terminal
 
     def is_finished(self) -> bool:
         """Determine if the node is succesfully finished"""
@@ -85,6 +222,12 @@ class Node(BaseModel):
         """Add a child node to this node."""
         child_node.parent = self
         self.children.append(child_node)
+
+    def set_parent(self, parent: "Node"):
+        if self.node_id == parent.node_id:
+            raise ValueError(f"Node can't have same id {self.node_id} parent")
+        self.parent = parent
+        parent.add_child(self)
 
     def get_depth(self) -> int:
         depth = 0
@@ -148,10 +291,22 @@ class Node(BaseModel):
         return expanded_nodes
 
     def get_all_nodes(self) -> List["Node"]:
+        if self.parent:
+            node = self.get_root()
+        else:
+            node = self
+
+        return node._get_all_nodes()
+
+    def get_leaf_nodes(self) -> List["Node"]:
+        """Get all leaf nodes ."""
+        return [node for node in self.get_root().get_all_nodes() if node.is_leaf()]
+
+    def _get_all_nodes(self) -> List["Node"]:
         nodes = []
         nodes.append(self)
         for child in self.children:
-            nodes.extend(child.get_all_nodes())
+            nodes.extend(child._get_all_nodes())
         return nodes
 
     def get_root(self) -> "Node":
@@ -160,323 +315,34 @@ class Node(BaseModel):
             node = node.parent
         return node
 
+    def calculate_mean_reward(self) -> float:
+        """
+        Calculate the mean trajectory reward for this node.
+
+        Returns:
+            float: The mean reward.
+        """
+        rewards = []
+        node = self
+        while node is not None:
+            rewards.append(node.value / node.visits if node.visits > 0 else 0)
+            node = node.parent
+
+        return sum(rewards) / len(rewards) if rewards else 0
+
     def total_usage(self) -> Usage:
         total_usage = Usage()
+
+        # Sum usage across all action steps
+        for step in self.action_steps:
+            if step.completion:
+                total_usage += step.completion.usage
 
         for completion in self.completions.values():
             if completion:
                 total_usage += completion.usage
 
         return total_usage
-
-    def generate_message_history(
-        self, message_history_type: MessageHistoryType = MessageHistoryType.MESSAGES
-    ) -> list[Message]:
-        previous_nodes = self.get_trajectory()[:-1]
-        if not previous_nodes:
-            return []
-        logger.info(
-            f"Generating message history for Node{self.node_id}: {message_history_type}"
-        )
-        if message_history_type == MessageHistoryType.SUMMARY:
-            messages = self._generate_summary_history(previous_nodes)
-        elif message_history_type == MessageHistoryType.REACT:
-            messages = self.generate_react_summary(previous_nodes)
-        else:  # MessageHistoryType.MESSAGES
-            messages = self._generate_message_history(previous_nodes)
-
-        return messages
-
-    def generate_react_summary(
-        self,
-        previous_nodes: List["Node"],
-        include_file_context: bool = True,
-        include_git_patch: bool = True,
-    ) -> list[Message]:
-        """Generate a sequence of messages in ReAct format."""
-        messages = [UserMessage(content=self.get_root().message)]
-
-        if len(previous_nodes) <= 1:
-            return messages
-
-        for previous_node in previous_nodes[1:]:
-            if previous_node.action:
-                # Create assistant message with thought and action
-                thought = (
-                    f"Thought: {previous_node.action.scratch_pad}"
-                    if hasattr(previous_node.action, "scratch_pad")
-                    else ""
-                )
-                action = f"Action: {previous_node.action.name}\nAction Input: {previous_node.action.model_dump_json(exclude={'scratch_pad'})}"
-                messages.append(AssistantMessage(content=f"{thought}\n{action}"))
-
-                # Create user message with observation
-                if previous_node.observation:
-                    if (
-                        hasattr(previous_node.observation, "summary")
-                        and previous_node.observation.summary
-                    ):
-                        observation = previous_node.observation.summary
-                    else:
-                        observation = previous_node.observation.message
-                else:
-                    logger.warning(f"No output found for Node{previous_node.node_id}")
-                    observation = "No output found."
-                messages.append(UserMessage(content=f"Observation: {observation}"))
-
-        if include_file_context and not self.file_context.is_empty():
-            thought = "Thought: I need to see all the code I have viewed so far"
-            action = "Action: ShowViewedCode"
-            messages.append(AssistantMessage(content=f"{thought}\n{action}"))
-
-            observation = self.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-            messages.append(UserMessage(content=f"Observation: {observation}"))
-
-        if include_git_patch:
-            git_patch = self.file_context.generate_git_patch()
-            if git_patch:
-                thought = "Thought: I need see the changes I done so far"
-                action = "Action: GitDiff"
-                messages.append(AssistantMessage(content=f"{thought}\n{action}"))
-
-                git_patch = self.file_context.generate_git_patch()
-                observation = f"```diff\n{git_patch}\n```"
-                messages.append(UserMessage(content=f"Observation: {observation}"))
-        return messages
-
-    def _generate_summary_history(
-        self,
-        previous_nodes: List["Node"],
-        include_file_context: bool = True,
-        include_git_patch: bool = True,
-    ) -> list[Message]:
-        """Generate a single message containing summarized history."""
-        formatted_history: List[str] = []
-        counter = 0
-
-        content = self.get_root().message
-
-        if not previous_nodes:
-            return [UserMessage(content=content)]
-
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.action:
-                counter += 1
-                formatted_state = (
-                    f"\n## {counter}. Action: {previous_node.action.name}\n"
-                )
-                formatted_state += previous_node.action.to_prompt()
-
-                if previous_node.observation:
-                    if (
-                        hasattr(previous_node.observation, "summary")
-                        and previous_node.observation.summary
-                        and i < len(previous_nodes) - 1
-                    ):
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.summary}"
-                        )
-                    else:
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.message}"
-                        )
-                else:
-                    logger.warning(f"No output found for Node{previous_node.node_id}")
-                    formatted_state += "\n\nObservation: No output found."
-
-                formatted_history.append(formatted_state)
-
-        content += "\n\nBelow is the history of previously executed actions and their observations.\n"
-        content += "<history>\n"
-        content += "\n".join(formatted_history)
-        content += "\n</history>\n\n"
-
-        if include_file_context:
-            content += "\n\nThe following code has already been viewed:\n"
-            content += self.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-
-        if include_git_patch:
-            git_patch = self.file_context.generate_git_patch()
-            if git_patch:
-                content += "\n\nThe current git diff is:\n"
-                content += "```diff\n"
-                content += git_patch
-                content += "\n```"
-
-        return [UserMessage(content=content)]
-
-    def _generate_message_history(
-        self, previous_nodes: List["Node"], show_full_file: bool = False
-    ) -> list[Message]:
-        """Generate a sequence of messages representing the full conversation history."""
-        messages: list[Message] = []
-        last_file_updates = {}
-
-        if show_full_file:
-            # Track when each file was last modified to show file contexts optimally.
-            # By showing each file's context only in the last message where it was modified,
-            # we improve prompt caching since earlier messages won't change when new files are modified.
-            for i, node in enumerate(previous_nodes):
-                if not node.parent:
-                    updated_files = set(
-                        [
-                            file.file_path
-                            for file in node.file_context.get_context_files()
-                        ]
-                    )
-                else:
-                    updated_files = node.file_context.get_updated_files(
-                        node.parent.file_context
-                    )
-                    for file in updated_files:
-                        last_file_updates[file] = i
-
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.message:
-                messages.append(UserMessage(content=previous_node.message))
-
-            if previous_node.action:
-                tool_call = previous_node.action.to_tool_call()
-                messages.append(AssistantMessage(tool_call=tool_call))
-
-                content = ""
-                if previous_node.observation:
-                    if show_full_file and previous_node.observation.summary:
-                        content += previous_node.observation.summary
-                    else:
-                        content += previous_node.observation.message
-
-                messages.append(UserMessage(content=content))
-
-            # Show file context for files that were last updated in this message
-            if not previous_node.parent:
-                updated_files = set(
-                    [
-                        file.file_path
-                        for file in previous_node.file_context.get_context_files()
-                    ]
-                )
-            else:
-                updated_files = previous_node.file_context.get_updated_files(
-                    previous_node.parent.file_context
-                )
-
-            files_to_show = set(
-                [f for f in updated_files if last_file_updates.get(f) == i]
-            )
-
-            for file_path in files_to_show:
-                context_file = previous_node.file_context.get_context_file(file_path)
-
-                if context_file.show_all_spans:
-                    args = ViewCodeArgs(
-                        scratch_pad=f"Let's view the content in {file_path}",
-                        files=[CodeSpan(file_path=file_path)],
-                    )
-                elif context_file.span_ids:
-                    args = ViewCodeArgs(
-                        scratch_pad=f"Let's view the content in {file_path}",
-                        files=[
-                            CodeSpan(
-                                file_path=file_path, span_ids=context_file.span_ids
-                            )
-                        ],
-                    )
-                else:
-                    continue
-
-                messages.append(AssistantMessage(tool_call=args.to_tool_call()))
-                messages.append(
-                    UserMessage(
-                        content=context_file.to_prompt(
-                            show_span_ids=False,
-                            show_line_numbers=True,
-                            exclude_comments=False,
-                            show_outcommented_code=True,
-                            outcomment_code_comment="... rest of the code",
-                        )
-                    )
-                )
-
-        feedback = self._format_feedback()
-        if feedback:
-            messages.append(UserMessage(content=feedback))
-
-        return messages
-
-    def _show_updated_context(
-        self,
-        previous_node: "Node",
-        show_full_file: bool,
-        last_file_updates: Dict[str, int],
-        i: int,
-    ) -> str:
-        updated_context = None
-        content = ""
-
-        if show_full_file:
-            # Show file context for files that were last updated in this message
-            if not previous_node.parent:
-                updated_files = set(
-                    [
-                        file.file_path
-                        for file in previous_node.file_context.get_context_files()
-                    ]
-                )
-            else:
-                updated_files = previous_node.file_context.get_updated_files(
-                    previous_node.parent.file_context
-                )
-
-            files_to_show = set(
-                [f for f in updated_files if last_file_updates.get(f) == i]
-            )
-
-            if files_to_show:
-                content += f"\n\nThe file context for the following files was updated by this action:\n"
-
-        elif previous_node.parent:
-            updated_context = previous_node.file_context.get_context_diff(
-                previous_node.parent.file_context
-            )
-        else:
-            updated_context = previous_node.file_context
-
-        if updated_context and not updated_context.is_empty():
-            context_prompt = previous_node.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-            content += f"\n\nCode added to context:\n{context_prompt}"
-
-            if not content:
-                logger.warning(
-                    f"Node{previous_node.node_id}: No content to add to messages"
-                )
-
-        return content
-
-    def _format_feedback(self) -> str:
-        """Generate formatted string for feedback."""
-        if not self.feedback:
-            return ""
-
-        return f"\n\n{self.feedback}"
 
     def equals(self, other: "Node"):
         if self.action and not other.action:
@@ -492,17 +358,14 @@ class Node(BaseModel):
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
-
-        self.action = None
+        self.action_steps = []
+        self.user_message = None
+        self.assistant_message = None
         self.visits = 0
         self.value = 0.0
-        self.observation = None
-        self.feedback = None
-        self.completions = {}
         self.is_duplicate = False
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
-
         self.children = []
 
     def clone_and_reset(self) -> "Node":
@@ -512,15 +375,19 @@ class Node(BaseModel):
         Returns:
             Node: A new node instance with reset state
         """
-        # Create a new node with same base attributes
+        # Find highest node ID in the tree to ensure uniqueness
+        root = self.get_root()
+        all_nodes = root.get_all_nodes()
+        highest_id = max(node.node_id for node in all_nodes) + 1
+
+        # Create a new node with same base attributes but new ID
         new_node = Node(
-            node_id=self.node_id,
+            node_id=highest_id,  # Use new unique ID
             parent=self.parent,
             visits=self.visits,
             value=self.value,
             max_expansions=self.max_expansions,
-            message=self.message,
-            feedback=self.feedback,
+            user_message=self.user_message,
             is_duplicate=self.is_duplicate,
             action=self.action,
             possible_actions=self.possible_actions.copy()
@@ -539,65 +406,95 @@ class Node(BaseModel):
             Dict[str, Any]: A dictionary representation of the node tree.
         """
 
-        def serialize_node(node: "Node") -> Dict[str, Any]:
-            exclude_set = {"parent", "children"}
-            if "exclude" in kwargs:
-                if isinstance(kwargs["exclude"], set):
-                    exclude_set.update(kwargs["exclude"])
-                elif isinstance(kwargs["exclude"], dict):
-                    exclude_set.update(kwargs["exclude"].keys())
+        exclude_set = {"parent", "children"}
+        if "exclude" in kwargs:
+            if isinstance(kwargs["exclude"], set):
+                exclude_set.update(kwargs["exclude"])
+            elif isinstance(kwargs["exclude"], dict):
+                exclude_set.update(kwargs["exclude"].keys())
 
-            new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
-            node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
+        new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
+        node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
 
-            if node.action and "action" not in exclude_set:
-                node_dict["action"] = node.action.model_dump(**kwargs)
-                node_dict["action"]["action_args_class"] = (
-                    f"{node.action.__class__.__module__}.{node.action.__class__.__name__}"
-                )
+        if self.completions and "completions" not in exclude_set:
+            node_dict["completions"] = {
+                key: completion.model_dump(**kwargs)
+                for key, completion in self.completions.items()
+                if completion
+            }
 
-            if node.completions and "completions" not in exclude_set:
-                node_dict["completions"] = {
-                    key: completion.model_dump(**kwargs)
-                    for key, completion in node.completions.items()
-                    if completion
-                }
+        if self.reward and "reward" not in exclude_set:
+            node_dict["reward"] = self.reward.model_dump(**kwargs)
 
-            if node.observation and "output" not in exclude_set:
-                node_dict["output"] = node.observation.model_dump(**kwargs)
+        if self.observation and "output" not in exclude_set:
+            node_dict["output"] = self.observation.model_dump(**kwargs)
 
-            if node.file_context and "file_context" not in exclude_set:
-                node_dict["file_context"] = node.file_context.model_dump(**kwargs)
+        if self.file_context and "file_context" not in exclude_set:
+            node_dict["file_context"] = self.file_context.model_dump(**kwargs)
 
-            if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
-                node_dict["children"] = [
-                    serialize_node(child) for child in node.children
-                ]
+        node_dict["action_steps"] = [
+            action_step.model_dump(**kwargs) for action_step in self.action_steps
+        ]
 
-            return node_dict
+        if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
+            node_dict["children"] = [
+                child.model_dump(**kwargs) for child in self.children
+            ]
 
-        return serialize_node(self)
+        return node_dict
 
     @classmethod
     def _reconstruct_node(
         cls,
         node_data: Dict[str, Any],
         repo: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
-        if node_data.get("action"):
-            node_data["action"] = ActionArguments.model_validate(node_data["action"])
+        """Update reconstruction to handle both old and new formats"""
 
-        if node_data.get("output"):
-            node_data["observation"] = Observation.model_validate(node_data["output"])
+        # Handle legacy format conversion
+        if "action" in node_data and not "action_steps" in node_data:
+            action = node_data.get("action")
+            observation = node_data.get("output")
+            completions = node_data.get("completions", {})
 
-        if node_data.get("completions"):
-            for key, completion_data in node_data["completions"].items():
-                completion = Completion.model_validate(completion_data)
-                node_data["completions"][key] = completion
+            if action or observation or completions:
+                node_data["action_steps"] = [
+                    {
+                        "action": action,
+                        "observation": observation,
+                        "completions": completions,
+                    }
+                ]
+
+        if "message" in node_data and not "user_message" in node_data:
+            node_data["user_message"] = node_data.pop("message")
+
+        if node_data.get("action_steps"):
+            node_data["action_steps"] = [
+                ActionStep.model_validate(step_data)
+                for step_data in node_data["action_steps"]
+            ]
+
+            # To keep backward compatiblity
+            for step in node_data["action_steps"]:
+                if step.observation and step.observation.terminal:
+                    node_data["terminal"] = True
+
+        if not "terminal" in node_data:
+            node_data["terminal"] = False
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(
-                repo=repo, data=node_data["file_context"]
+                repo=repo, runtime=runtime, data=node_data["file_context"]
+            )
+
+        node_data["visits"] = node_data.get("visits", 0)
+        node_data["value"] = node_data.get("value", 0.0)
+
+        if node_data.get("feedback_data"):
+            node_data["feedback_data"] = FeedbackData.model_validate(
+                node_data["feedback_data"]
             )
 
         if "children" in node_data:
@@ -607,7 +504,7 @@ class Node(BaseModel):
             node = super().model_validate(node_data)
 
             for child_data in children:
-                child = cls._reconstruct_node(child_data, repo=repo)
+                child = cls._reconstruct_node(child_data, repo=repo, runtime=runtime)
                 child.parent = node
                 node.children.append(child)
 
@@ -620,6 +517,7 @@ class Node(BaseModel):
         cls,
         data: Union[Dict[str, Any], List[Dict[str, Any]]],
         repo: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
         """
         Reconstruct a node tree from either dict (tree) or list format.
@@ -634,14 +532,17 @@ class Node(BaseModel):
         """
         # Handle list format
         if isinstance(data, list):
-            return cls._reconstruct_from_list(data, repo=repo)
+            return cls._reconstruct_from_list(data, repo=repo, runtime=runtime)
 
         # Handle single node reconstruction (dict format)
-        return cls._reconstruct_node(data, repo=repo)
+        return cls._reconstruct_node(data, repo=repo, runtime=runtime)
 
     @classmethod
     def _reconstruct_from_list(
-        cls, node_list: List[Dict], repo: Repository | None = None
+        cls,
+        node_list: List[Dict],
+        repo: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
         """
         Reconstruct tree from a flat list of nodes.
@@ -655,10 +556,11 @@ class Node(BaseModel):
         """
         # Create nodes without relationships first
         nodes_by_id = {}
+
         for node_data in node_list:
             parent_id = node_data.pop("parent_id", None)
             # Use the core reconstruct method for each node
-            node = cls._reconstruct_node(node_data, repo=repo)
+            node = cls._reconstruct_node(node_data, repo=repo, runtime=runtime)
             nodes_by_id[node.node_id] = (node, parent_id)
 
         # Connect parent-child relationships
@@ -682,7 +584,9 @@ class Node(BaseModel):
 
         for node in nodes:
             node_data = node.model_dump(exclude={"parent", "children"}, **kwargs)
-            node_data["parent_id"] = node.parent.node_id if node.parent else None
+            node_data["parent_id"] = (
+                node.parent.node_id if node.parent is not None else None
+            )
             node_list.append(node_data)
 
         return node_list
@@ -723,45 +627,263 @@ class Node(BaseModel):
         else:
             raise ValueError("Format must be either 'list' or 'tree'")
 
+    def truncate_children_by_id(self, max_id: int):
+        """Truncate children to only include nodes with IDs less than or equal to the specified value.
 
-def generate_ascii_tree(root: Node, current: Node | None = None) -> str:
+        Args:
+            max_id (int): Maximum node ID to keep (inclusive)
+        """
+        self.children = [child for child in self.children if child.node_id <= max_id]
+        # Recursively truncate remaining children
+        for child in self.children:
+            child.truncate_children_by_id(max_id)
+
+    def has_unexecuted_actions(self) -> bool:
+        """Check if any action step in this node has not been executed."""
+        return any(not step.is_executed() for step in self.action_steps)
+
+
+def generate_ascii_tree(
+    root: Node,
+    current: Optional[Node] = None,
+    include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
+    use_color: bool = True,
+    show_trajectory: bool = False,
+) -> str:
+    """Create an ASCII representation of the tree."""
     tree_lines = ["MCTS Tree"]
-    _append_ascii_node(root, "", True, tree_lines, current)
+    # Make sure we're starting from the actual root node
+    if root.parent:
+        root = root.get_root()
+
+    _append_ascii_node(
+        root,
+        "",
+        True,
+        tree_lines,
+        current,
+        include_explanation,
+        include_diffs,
+        include_feedback,
+        include_action_details,
+        include_file_context,
+        use_color,
+        show_trajectory,
+    )
     return "\n".join(tree_lines)
 
 
 def _append_ascii_node(
-    node: Node, prefix: str, is_last: bool, tree_lines: list[str], current: Node | None
-):
+    node: Node,
+    prefix: str,
+    is_last: bool,
+    tree_lines: list[str],
+    current: Node | None,
+    include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
+    use_color: bool = True,
+    show_trajectory: bool = False,
+) -> None:
+    # Get current trajectory nodes if we have a current node and trajectory marking is enabled
+    current_trajectory_nodes = []
+    if current and show_trajectory:
+        current_trajectory_nodes = current.get_trajectory()
+
+    # Build node information
     state_params = []
-
-    if node.action:
-        state_params.append(node.action.name)
-
-        if node.observation and node.observation.expect_correction:
+    if node.action_steps:
+        # Include all action names from action steps
+        action_names = [step.action.name for step in node.action_steps if step.action]
+        state_params.extend(action_names)
+        # Check if any action step expects correction
+        if any(
+            step.observation and step.observation.expect_correction
+            for step in node.action_steps
+        ):
             state_params.append("expect_correction")
 
-    state_info = f"Node{node.node_id}"
-    if state_params:
-        state_info += f"({', '.join(state_params)})"
+    # Build reward string
+    if not node.reward:
+        reward_str = "0"
+        node_str = f"Node{node.node_id}"
     else:
-        state_info += f"()"
+        if use_color:
+            if node.reward.value >= 75:
+                reward_str = color_green(node.reward.value)
+                node_str = color_green(f"Node{node.node_id}")
+            elif node.reward.value <= 0:
+                reward_str = color_red(node.reward.value)
+                node_str = color_red(f"Node{node.node_id}")
+            else:
+                reward_str = color_yellow(node.reward.value)
+                node_str = color_yellow(f"Node{node.node_id}")
+        else:
+            reward_str = str(node.reward.value)
+            node_str = f"Node{node.node_id}"
 
-    if current and node.node_id == current.node_id:
+    # Build state info without repeating node ID
+    state_info = ""
+    if state_params:
+        state_info = f"({', '.join(state_params)})"
+    else:
+        state_info = "()"
+
+    if use_color and current and node.node_id == current.node_id:
         state_info = color_white(state_info)
 
-    node_str = f"Node{node.node_id} [-]"
+    # Add expandable status
+    expandable_str = "expandable" if node.is_expandable() else "not-expandable"
+    if use_color:
+        expandable_str = (
+            color_green(expandable_str)
+            if node.is_expandable()
+            else color_red(expandable_str)
+        )
 
-    tree_lines.append(
-        f"{prefix}{'└── ' if is_last else '├── '}{node_str} {state_info}"
+    # Calculate the current node's connection prefix
+    connection = "└── " if is_last else "├── "
+
+    # Add star marker only if trajectory marking is enabled
+    trajectory_marker = (
+        "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
     )
 
+    # Add the node line with expandable status and optional trajectory marker
+    tree_lines.append(
+        f"{prefix}{connection}{trajectory_marker}{node_str} {state_info} "
+        f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
+        f"visits: {node.visits}, {expandable_str})"
+    )
+
+    # Calculate the content prefix - should align with the node's content
+    content_prefix = prefix + ("    " if is_last else "│   ")
+
+    # Add explanation if available
+    if include_explanation and node.reward and node.reward.explanation:
+        explanation_text = node.reward.explanation.strip()
+        _append_wrapped_text(
+            tree_lines, explanation_text, content_prefix, "│ Explanation: "
+        )
+
+    # Add feedback if available
+    if include_feedback and node.feedback_data:
+        tree_lines.append(f"{content_prefix}│ Feedback:")
+        _append_wrapped_text(
+            tree_lines,
+            node.feedback_data.feedback,
+            content_prefix,
+            "│ Direct Feedback: ",
+        )
+        _append_wrapped_text(
+            tree_lines, node.feedback_data.analysis, content_prefix, "│ Analysis: "
+        )
+
+    # Add diffs if available - only for Finish actions
+    if (
+        include_diffs
+        and node.file_context
+        and node.action
+        and node.action.name == "Finish"
+    ):
+        patch = node.file_context.generate_git_patch()
+        if patch.strip():
+            tree_lines.append(f"{content_prefix}│ Changes (git patch):")
+            for line in patch.split("\n"):
+                if line.strip():
+                    prefix_char = (
+                        "+"
+                        if line.startswith("+")
+                        else ("-" if line.startswith("-") else " ")
+                    )
+                    formatted_line = line.strip()
+                    if use_color:
+                        if prefix_char == "+":
+                            formatted_line = color_green(formatted_line)
+                        elif prefix_char == "-":
+                            formatted_line = color_red(formatted_line)
+                    tree_lines.append(f"{content_prefix}│  {formatted_line}")
+
+    # Add action details if available
+    if include_action_details and node.action_steps:
+        tree_lines.append(f"{content_prefix}│ Action Steps:")
+        for i, step in enumerate(node.action_steps, 1):
+            tree_lines.append(f"{content_prefix}│ Step {i}:")
+            tree_lines.append(f"{content_prefix}│  Action: {step.action.name}")
+            tree_lines.append(f"{content_prefix}│  Prompt: {step.action.to_prompt()}")
+            if step.observation:
+                tree_lines.append(
+                    f"{content_prefix}│  Output: {step.observation.message}"
+                )
+                if step.observation.extra:
+                    tree_lines.append(
+                        f"{content_prefix}│  Extra: {step.observation.extra}"
+                    )
+                if step.observation.expect_correction:
+                    tree_lines.append(f"{content_prefix}│  Expects Correction: True")
+
+    # Add file context if available
+    if include_file_context and node.file_context and not node.file_context.is_empty():
+        tree_lines.append(f"{content_prefix}│ File Context:")
+        context = node.file_context.create_prompt(
+            show_outcommented_code=True,
+            exclude_comments=True,
+            outcomment_code_comment="... code not in context",
+        )
+        _append_wrapped_text(tree_lines, context, content_prefix, "│  ")
+
+    # Process children with updated parameters
     child_prefix = prefix + ("    " if is_last else "│   ")
     children = node.children
-    for i, child in enumerate(node.children):
+    for i, child in enumerate(children):
         _append_ascii_node(
-            child, child_prefix, i == len(children) - 1, tree_lines, current
+            child,
+            child_prefix,
+            i == len(children) - 1,
+            tree_lines,
+            current,
+            include_explanation,
+            include_diffs,
+            include_feedback,
+            include_action_details,
+            include_file_context,
+            use_color,
+            show_trajectory,
         )
+
+
+def _append_wrapped_text(
+    tree_lines: list[str], text: str, prefix: str, header_prefix: str = "│ "
+):
+    """Helper function to wrap and append text with proper prefixes."""
+    words = text.split()
+    current_line = []
+    current_length = 0
+    max_line_length = 100 - len(prefix) - len(header_prefix)
+
+    # First line gets the header prefix
+    is_first_line = True
+
+    for word in words:
+        if current_length + len(word) + 1 <= max_line_length:
+            current_line.append(word)
+            current_length += len(word) + 1
+        else:
+            line_prefix = header_prefix if is_first_line else "│   "
+            tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
+            current_line = [word]
+            current_length = len(word)
+            is_first_line = False
+
+    if current_line:
+        line_prefix = header_prefix if is_first_line else "│   "
+        tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
 
 
 def color_red(text: Any) -> str:

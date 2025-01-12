@@ -27,7 +27,7 @@ class SemanticSearchArgs(SearchBaseArgs):
         ..., description="Natural language description of what you're looking for."
     )
     category: Optional[str] = Field(
-        None,
+        "implementation",
         description="The category of files to search for. This can be 'implementation' for core implementation files or 'test' for test files.",
     )
 
@@ -45,6 +45,12 @@ class SemanticSearchArgs(SearchBaseArgs):
         if not self.query.strip():
             raise ValueError("query cannot be empty")
         return self
+
+    def short_summary(self) -> str:
+        param_str = f"query={self.query[:20]}, category={self.category}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        return f"{self.name}({param_str})"
 
 
 class SemanticSearch(SearchBaseAction):
@@ -87,7 +93,7 @@ class SemanticSearch(SearchBaseAction):
             FewShotExample.create(
                 user_input="Find all implementations of database connection pooling in our codebase",
                 action=SemanticSearchArgs(
-                    scratch_pad="To find implementations of database connection pooling, we should search for code related to managing database connections efficiently. This might include classes or functions that handle connection creation, reuse, and management.",
+                    thoughts="To find implementations of database connection pooling, we should search for code related to managing database connections efficiently. This might include classes or functions that handle connection creation, reuse, and management.",
                     query="database connection pooling implementation",
                     category="implementation",
                 ),
@@ -95,7 +101,7 @@ class SemanticSearch(SearchBaseAction):
             FewShotExample.create(
                 user_input="We need to find all test cases related to user authentication in our test suite",
                 action=SemanticSearchArgs(
-                    scratch_pad="To find test cases related to user authentication, we should search for test files that contain assertions and scenarios specifically testing authentication functionality.",
+                    thoughts="To find test cases related to user authentication, we should search for test files that contain assertions and scenarios specifically testing authentication functionality.",
                     query="user authentication test cases",
                     file_pattern="tests/*.py",
                     category="test",

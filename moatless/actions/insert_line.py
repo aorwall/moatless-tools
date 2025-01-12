@@ -5,21 +5,22 @@ from typing import List
 from pydantic import Field
 
 from moatless.actions.action import Action
+from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
-from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 SNIPPET_LINES = 4
 
 
-class InsertLineArgs(ActionArguments):
+class InsertLinesArgs(ActionArguments):
     """
     Insert text at a specific line number in a file.
 
@@ -42,13 +43,20 @@ class InsertLineArgs(ActionArguments):
     class Config:
         title = "InsertLines"
 
+    def format_args_for_llm(self) -> str:
+        return f"""<path>{self.path}</path>
+<insert_line>{self.insert_line}</insert_line>
+<new_str>
+{self.new_str}
+</new_str>"""
 
-class InsertLine(Action, CodeModificationMixin):
+
+class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to insert text at a specific line in a file.
     """
 
-    args_schema = InsertLineArgs
+    args_schema = InsertLinesArgs
 
     def __init__(
         self,
@@ -63,7 +71,12 @@ class InsertLine(Action, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: InsertLineArgs, file_context: FileContext) -> Observation:
+    def execute(
+        self,
+        args: InsertLinesArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         if args.path.startswith("/repo"):
             args.path = args.path[5:]
         if args.path.startswith("/"):
@@ -82,6 +95,13 @@ class InsertLine(Action, CodeModificationMixin):
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
+            )
+
+        if not context_file.lines_is_in_context(args.insert_line - 1, args.insert_line):
+            return Observation(
+                message=f"Line {args.insert_line} is not in the visible portion of file {path}. Please provide a line number within the visible code, use ViewCode to see the code.",
+                properties={"fail_reason": "lines_not_in_context"},
+                expect_correction=True,
             )
 
         file_text = context_file.content.expandtabs()
@@ -131,25 +151,13 @@ class InsertLine(Action, CodeModificationMixin):
             message=success_msg,
             properties={"diff": diff, "success": True},
         )
-
-        if not self._runtime:
-            return observation
-
-        run_tests = RunTests(
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                scratch_pad=args.scratch_pad,
-                test_files=[args.path],
-            ),
-            file_context,
+        test_summary = self.run_tests(
+            file_path=str(path),
+            file_context=file_context,
         )
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation
 
@@ -158,8 +166,8 @@ class InsertLine(Action, CodeModificationMixin):
         return [
             FewShotExample.create(
                 user_input="Add a new import statement at the beginning of the file",
-                action=InsertLineArgs(
-                    scratch_pad="Adding import for datetime module",
+                action=InsertLinesArgs(
+                    thoughts="Adding import for datetime module",
                     path="utils/time_helper.py",
                     insert_line=1,
                     new_str="from datetime import datetime, timezone",
@@ -167,8 +175,8 @@ class InsertLine(Action, CodeModificationMixin):
             ),
             FewShotExample.create(
                 user_input="Add a new method to the UserProfile class",
-                action=InsertLineArgs(
-                    scratch_pad="Adding a method to update user preferences",
+                action=InsertLinesArgs(
+                    thoughts="Adding a method to update user preferences",
                     path="models/user.py",
                     insert_line=15,
                     new_str="""    def update_preferences(self, preferences: dict) -> None:
@@ -179,8 +187,8 @@ class InsertLine(Action, CodeModificationMixin):
             ),
             FewShotExample.create(
                 user_input="Add a new configuration option",
-                action=InsertLineArgs(
-                    scratch_pad="Adding Redis configuration settings",
+                action=InsertLinesArgs(
+                    thoughts="Adding Redis configuration settings",
                     path="config/settings.py",
                     insert_line=25,
                     new_str="""REDIS_CONFIG = {

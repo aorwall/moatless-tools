@@ -21,17 +21,31 @@ class FindClassArgs(SearchBaseArgs):
     """
 
     class_name: str = Field(
-        ..., description="Specific class name to include in the search."
+        ...,
+        description="Specific class name to search for (e.g., 'UserRepository', not 'app.models.UserRepository').",
     )
 
     @model_validator(mode="after")
     def validate_names(self) -> "FindClassArgs":
         if not self.class_name.strip():
             raise ValueError("class_name cannot be empty")
+        # Extract just the class name if a fully qualified name is provided
+        if "." in self.class_name:
+            original_name = self.class_name
+            self.class_name = self.class_name.split(".")[-1]
+            logger.info(
+                f"Using class name '{self.class_name}' from fully qualified name '{original_name}'"
+            )
         return self
 
     class Config:
         title = "FindClass"
+
+    def short_summary(self) -> str:
+        param_str = f"class_name={self.class_name}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        return f"{self.name}({param_str})"
 
 
 class FindClass(SearchBaseAction):
@@ -80,14 +94,14 @@ class FindClass(SearchBaseAction):
             FewShotExample.create(
                 user_input="I need to see the implementation of the DatabaseManager class to understand how it handles transactions",
                 action=FindClassArgs(
-                    scratch_pad="To examine how the DatabaseManager class handles transactions, we need to locate its implementation in the codebase.",
+                    thoughts="To examine how the DatabaseManager class handles transactions, we need to locate its implementation in the codebase.",
                     class_name="DatabaseManager",
                 ),
             ),
             FewShotExample.create(
                 user_input="Show me the UserAuthentication class in the auth module",
                 action=FindClassArgs(
-                    scratch_pad="Looking for the UserAuthentication class specifically in the authentication module.",
+                    thoughts="Looking for the UserAuthentication class specifically in the authentication module.",
                     class_name="UserAuthentication",
                     file_pattern="auth/*.py",
                 ),

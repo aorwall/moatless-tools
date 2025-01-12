@@ -53,12 +53,43 @@ def get_repo_dir_name(repo: str):
 
 def clone_and_checkout(repo_url, repo_dir, commit):
     if os.path.exists(f"{repo_dir}/.git"):
-        subprocess.run(
-            ["rm", "-rf", repo_dir],
-            check=True,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            # Check if the commit exists in the repo
+            result = subprocess.run(
+                ["git", "cat-file", "-e", commit],
+                cwd=repo_dir,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            # Commit exists, just checkout
+            subprocess.run(
+                ["git", "checkout", commit],
+                cwd=repo_dir,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
+            return
+        except subprocess.CalledProcessError:
+            logger.warning(
+                f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning"
+            )
+            subprocess.run(
+                ["rm", "-rf", repo_dir],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        except Exception as e:
+            logger.warning(f"Error checking repository: {e}, recloning")
+            subprocess.run(
+                ["rm", "-rf", repo_dir],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
 
     # Ensure the URL is in the correct format for anonymous access
     if repo_url.startswith("https://github.com/"):

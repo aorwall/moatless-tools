@@ -5,11 +5,11 @@ from typing import Optional, Tuple
 from pydantic import PrivateAttr
 
 from moatless.actions.model import Observation
-from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class CodeModificationMixin:
         return file_path
 
     def validate_file_access(
-        self, file_path: str, file_context: FileContext, allow_missing: bool = False
+        self, file_path: str, file_context: FileContext
     ) -> Tuple[Optional[Path], Optional[Observation]]:
         """
         Validate file access and return either a valid Path object or an error Observation.
@@ -41,67 +41,61 @@ class CodeModificationMixin:
         Args:
             file_path: The path to validate
             file_context: The file context
-            allow_missing: Whether to allow missing files (for file creation)
-
         Returns:
             Tuple of (Path object if valid, Error observation if invalid)
         """
         path = Path(file_path)
 
-        if not allow_missing and not file_context.file_exists(str(path)):
+        if not file_context.file_exists(str(path)):
             return None, Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
             )
 
-        if allow_missing and file_context.file_exists(str(path)):
+        if not file_context.has_file(str(path)):
             return None, Observation(
-                message=f"File already exists at: {path}. Cannot overwrite existing file.",
-                properties={"fail_reason": "file_exists"},
+                message=f"You have not yet viewed the file {path}. Use ViewCode to view the parts of the file that you want to modify.",
+                properties={"fail_reason": "file_not_in_context"},
             )
-
-        if not allow_missing:
-            context_file = file_context.get_context_file(str(path))
-            if not context_file:
-                return None, Observation(
-                    message=f"Could not get context for file: {path}",
-                    properties={"fail_reason": "context_error"},
-                )
 
         return path, None
 
-    def run_tests_and_update_observation(
+    def run_tests(
         self,
-        observation: Observation,
         file_path: str,
-        scratch_pad: str,
         file_context: FileContext,
-    ) -> Observation:
-        """Run tests and update the observation with test results"""
-        if not observation.properties or not observation.properties.get("diff"):
-            return observation
+    ) -> str:
+        if not file_context.has_runtime:
+            return ""
 
-        if not self._runtime:
-            return observation
+        if file_context.file_exists(file_path) and is_test(file_path):
+            file_context.add_test_file(file_path)
+        elif self._code_index:
+            # If the file is not a test file, find test files that might be related to the file
+            search_results = self._code_index.find_test_files(
+                file_path, query=file_path, max_results=2, max_spans=2
+            )
 
-        run_tests = RunTests(
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
+            for search_result in search_results:
+                file_context.add_test_file(search_result.file_path)
+        else:
+            logger.warning(f"No code index cannot find test files for {file_path}")
+            return ""
 
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                scratch_pad=scratch_pad,
-                test_files=[file_path],
-            ),
-            file_context,
-        )
+        file_context.run_tests()
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
+        response_msg = f"Running tests for the following files:\n"
+        for test_file in file_context.test_files:
+            response_msg += f"* {test_file.file_path}\n"
 
-        return observation
+        failure_details = file_context.get_test_failure_details()
+        if failure_details:
+            response_msg += f"\n{failure_details}"
+
+        summary = f"\n{file_context.get_test_summary()}"
+        response_msg += summary
+
+        return response_msg
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""

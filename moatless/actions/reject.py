@@ -5,6 +5,7 @@ from pydantic import Field
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 
 class RejectArgs(ActionArguments):
@@ -25,5 +26,10 @@ class RejectArgs(ActionArguments):
 class Reject(Action):
     args_schema: ClassVar[Type[ActionArguments]] = RejectArgs
 
-    def execute(self, args: RejectArgs, file_context: FileContext | None = None):
+    def execute(
+        self,
+        args: RejectArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ):
         return Observation(message=args.rejection_reason, terminal=True)
