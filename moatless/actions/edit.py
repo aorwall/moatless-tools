@@ -67,10 +67,11 @@ class EditActionArguments(ActionArguments):
     @field_validator("new_str")
     @classmethod
     def validate_new_str(cls, v, info):
-        if info.data.get("command") == "str_replace" and v is None:
-            raise ValueError(
-                "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
-            )
+        # TODO: To keep backward compatibility, but would like to uncomment this
+        #if info.data.get("command") == "str_replace" and v is None:
+        #    raise ValueError(
+        #        "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
+        #    )
         if info.data.get("command") == "insert" and v is None:
             raise ValueError("Parameter `new_str` is required for command: insert")
         return v

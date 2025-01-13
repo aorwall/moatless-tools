@@ -1,7 +1,8 @@
-import os
-import pytest
-from moatless.repository.file import FileRepository
 from pathlib import Path
+
+import pytest
+
+from moatless.repository.file import FileRepository
 
 
 @pytest.fixture
@@ -147,7 +148,7 @@ def test_matching_files_exact_filename(temp_repo):
 
 
 def test_find_exact_matches(temp_repo):
-    # Create a test file with a function definition
+    # Create a test file with special regex characters
     test_file = Path(temp_repo.repo_path) / "tests" / "test_functions.py"
     test_file.parent.mkdir(exist_ok=True)
     test_file.write_text("""
@@ -157,11 +158,28 @@ def some_other_function():
 def test_partitions():
     pass
 
+# Test special regex characters
+value = "[test].data"
+pattern = "*.+?|{test}$^"
+text = "This is a (test) string"
+
 def another_function():
     pass
 """)
 
-    # Test searching in a specific file
+    # Test searching with special regex characters
+    special_chars = [
+        "[test].data",
+        "*.+?|{test}$^",
+        "This is a (test) string"
+    ]
+
+    for search_text in special_chars:
+        matches = temp_repo.find_exact_matches(search_text, "tests/test_functions.py")
+        assert len(matches) == 1
+        assert matches[0][0] == "tests/test_functions.py"
+
+    # Test original function search still works
     matches = temp_repo.find_exact_matches("def test_partitions():", "tests/test_functions.py")
     assert len(matches) == 1
     assert matches[0] == ("tests/test_functions.py", 5)

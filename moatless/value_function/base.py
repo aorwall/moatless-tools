@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from moatless.completion.model import Completion
-from moatless.node import Node
+from moatless.node import Node, Reward
 
 logger = logging.getLogger(__name__)
 

@@ -14,12 +14,13 @@ from moatless.benchmark.utils import (
     count_identified_spans,
     get_missing_files,
     get_moatless_instance,
-    read_search_trees,
+    read_agentic_loops,
 )
 from moatless.file_context import FileContext
+from moatless.loop import AgenticLoop
 from moatless.node import Node
-from moatless.search_tree import SearchTree
 from moatless.utils.file import is_test
+from moatless.completion.model import Usage
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ def create_trajectory_stats(
     current_repeated = 1
     test_files = []
     last_action_dump = None
-    action_dumps = []
+    action_dumps = set()
 
     for node in nodes:
         if node.action:
@@ -265,22 +266,23 @@ def create_trajectory_stats(
                 if node.is_terminal():
                     result.final_failed_tests = failed_test_count
                     if failed_test_count > 0:
-                        result.flags.append("has_failed_tests")
+                        result.flags.append("failed_tests")
 
             if node.observation and node.observation.properties:
-                if "flags" in node.observation.properties:
-                    for flag in node.observation.properties["flags"]:
-                        if flag not in result.flags:
-                            result.flags.append(flag)
+                #if "flags" in node.observation.properties:
+                #    for flag in node.observation.properties["flags"]:
+                #        if flag not in result.flags:
+                #            result.flags.append(flag)
 
                 if "fail_reason" in node.observation.properties:
                     fail_reason = node.observation.properties["fail_reason"]
 
-                    if fail_reason not in ["no_spans_added"]:
+                    if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large"]:
                         result.failed_actions += 1
 
-                    if fail_reason not in result.flags:
-                        result.flags.append(fail_reason)
+                    if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large", "no_spans_found", "no_changes", "no_test_files", "file_exists", "file_not_found", "file_not_in_context", "string_already_exists", "string_not_found"]:
+                        if fail_reason not in result.flags:
+                            result.flags.append(fail_reason)
 
             if node.observation and node.observation.properties.get("diff"):
                 if hasattr(node.action, "file_path"):
@@ -296,22 +298,24 @@ def create_trajectory_stats(
                     result.edits += 1
 
             if "build_action" in node.completions:
-                result.max_build_tokens = max(
-                    result.max_build_tokens,
-                    node.completions["build_action"].usage.prompt_tokens
-                    + node.completions["build_action"].usage.completion_tokens
-                    + node.completions["build_action"].usage.cached_tokens,
-                )
+                completion = node.completions["build_action"]
+                if completion and completion.usage:
+                    result.max_build_tokens = max(
+                        result.max_build_tokens,
+                        completion.usage.get_total_prompt_tokens(completion.model) + completion.usage.completion_tokens
+                    )
 
                 if node.completions["build_action"].retries:
                     result.retries += node.completions["build_action"].retries
 
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
-            action_dumps.append(current_action_dump)
-
-            if current_action_dump in action_dumps[:-1]:
+            dump_str = str(current_action_dump)
+            if dump_str in action_dumps:
                 result.duplicated_actions += 1
+            else:
+                action_dumps.add(dump_str)
 
+            
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
         result.missing_test_files = len(missing_test_files)
@@ -371,11 +375,11 @@ def create_trajectory_stats(
 
 
 def to_result(
-    search_tree: SearchTree,
+    agentic_loop: AgenticLoop,
     eval_report: dict | None = None,
     external_result: dict | None = None,
 ) -> BenchmarkResult:
-    info = search_tree.metadata
+    info = agentic_loop.metadata
     instance = get_moatless_instance(info["instance_id"])
 
     if not eval_report:
@@ -388,10 +392,10 @@ def to_result(
         best_node = None
         actions_counter: Dict[str, int] = {}
 
-        if not search_tree.is_finished():
+        if not agentic_loop.is_finished():
             status = "running"
         else:
-            best_node = search_tree.get_best_trajectory()
+            best_node = agentic_loop.get_last_node()
             if not best_node:
                 status = "pending"
             elif (
@@ -407,7 +411,7 @@ def to_result(
             resolved = info.get("instance_id", "") in external_result["resolved_ids"]
 
         elif eval_report:
-            best_node = search_tree.get_best_trajectory()
+            best_node = agentic_loop.get_last_node()
             if best_node:
                 resolved = (
                     eval_report.get("node_results", {})
@@ -417,7 +421,9 @@ def to_result(
             else:
                 logger.warning(f"No best node found for {info['instance_id']}")
 
-        total_usage = search_tree.total_usage()
+        total_usage = agentic_loop.total_usage()
+        model = agentic_loop.agent._completion.model
+        total_prompt_tokens = total_usage.get_total_prompt_tokens(model)
 
         result = BenchmarkResult(
             instance_id=instance["instance_id"],
@@ -425,14 +431,14 @@ def to_result(
             status=status,
             resolved=resolved,
             duration=info.get("duration", 0),
-            total_cost=total_usage.completion_cost,
-            prompt_tokens=total_usage.prompt_tokens,
+            total_cost=total_usage.get_calculated_cost(model),
+            prompt_tokens=total_prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
             cached_tokens=total_usage.cached_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,
-            all_transitions=len(search_tree.root.get_all_nodes()),
+            all_transitions=len(agentic_loop.root.get_all_nodes()),
             solutions=0,
             rejected_solutions=0,
             resolved_solutions=0,
@@ -445,71 +451,71 @@ def to_result(
             flags=[],
         )
 
-        for leaf_node in search_tree.get_leaf_nodes():
-            traj = create_trajectory_stats(
-                leaf_node,
-                instance,
-                eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
-            )
-            result.trajectories.append(traj)
-            result.retries += traj.retries
+        leaf_node = agentic_loop.get_last_node()
+        traj = create_trajectory_stats(
+            leaf_node,
+            instance,
+            eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
+        )
+        result.trajectories.append(traj)
+        result.retries += traj.retries
 
-            for action, count in traj.actions.items():
-                result.actions[action] = result.actions.get(action, 0) + count
+        for action, count in traj.actions.items():
+            result.actions[action] = result.actions.get(action, 0) + count
 
-            result.max_repeated_actions = max(
-                result.max_repeated_actions, traj.max_repeated_actions
-            )
+        result.max_repeated_actions = max(
+            result.max_repeated_actions, traj.max_repeated_actions
+        )
 
-            if traj.status == "finished":
-                result.solutions += 1
-                if traj.reward and (
-                    result.max_reward is None or traj.reward > result.max_reward
-                ):
-                    result.max_reward = traj.reward
-            elif traj.status == "rejected":
-                result.rejected_solutions += 1
+        if traj.status == "finished":
+            result.solutions += 1
+            if traj.reward and (
+                result.max_reward is None or traj.reward > result.max_reward
+            ):
+                result.max_reward = traj.reward
+        elif traj.status == "rejected":
+            result.rejected_solutions += 1
 
-            if eval_report and "node_results" in eval_report:
-                if (
-                    eval_report["node_results"]
-                    .get(str(traj.state_id), {})
-                    .get("resolved")
-                    is not None
-                ):
-                    if traj.resolved is True:
-                        result.resolved_solutions += 1
-                        if traj.reward and (
-                            result.resolved_max_reward is None
-                            or traj.reward > result.resolved_max_reward
-                        ):
-                            result.resolved_max_reward = traj.reward
-                    elif traj.resolved is False:
-                        result.failed_solutions += 1
-                        if traj.reward and (
-                            result.failed_max_reward is None
-                            or traj.reward > result.failed_max_reward
-                        ):
-                            result.failed_max_reward = traj.reward
+        if eval_report and "node_results" in eval_report:
+            if (
+                eval_report["node_results"]
+                .get(str(traj.state_id), {})
+                .get("resolved")
+                is not None
+            ):
+                if traj.resolved is True:
+                    result.resolved_solutions += 1
+                    if traj.reward and (
+                        result.resolved_max_reward is None
+                        or traj.reward > result.resolved_max_reward
+                    ):
+                        result.resolved_max_reward = traj.reward
+                elif traj.resolved is False:
+                    result.failed_solutions += 1
+                    if traj.reward and (
+                        result.failed_max_reward is None
+                        or traj.reward > result.failed_max_reward
+                    ):
+                        result.failed_max_reward = traj.reward
 
-            if traj.edits > 0:
-                result.edits += 1
+        if traj.edits > 0:
+            result.edits += 1
 
-            if traj.test_edits > 0:
-                result.test_edits += 1
+        if traj.test_edits > 0:
+            result.test_edits += 1
 
-            result.failed_actions += traj.failed_actions
-            result.expect_corrections += traj.expect_corrections
+        result.failed_actions += traj.failed_actions
+        result.expect_corrections += traj.expect_corrections
 
-            for flag in traj.flags:
-                if flag not in result.flags:
-                    result.flags.append(flag)
+        for flag in traj.flags:
+            if flag not in result.flags:
+                result.flags.append(flag)
 
-            result.max_build_tokens = max(
-                result.max_build_tokens, traj.max_build_tokens
-            )
+        result.max_build_tokens = max(
+            result.max_build_tokens, traj.max_build_tokens
+        )
 
-            result.duplicated_actions += traj.duplicated_actions
+        result.duplicated_actions += traj.duplicated_actions
 
         if eval_report.get("error"):
             result.error = eval_report["error"]
@@ -519,15 +525,15 @@ def to_result(
 
         if (
             result.duplicated_actions > 0
-            and "has_duplicated_actions" not in result.flags
+            and "duplicated_actions" not in result.flags
         ):
-            result.flags.append("has_duplicated_actions")
-        if result.test_edits == 0 and "no_test_edits" not in result.flags:
-            result.flags.append("no_test_edits")
-        if result.failed_actions > 0 and "has_failed_actions" not in result.flags:
-            result.flags.append("has_failed_actions")
+            result.flags.append("duplicated_actions")
+        if result.test_edits == 0 and "no_test_patch" not in result.flags:
+            result.flags.append("no_test_patch")
+        if result.failed_actions > 0 and "failed_actions" not in result.flags:
+            result.flags.append("failed_actions")
         if result.retries > 0:
-            result.flags.append("has_retries")
+            result.flags.append("retries")
 
     except Exception as e:
         raise e
@@ -821,13 +827,13 @@ def generate_report(dir: str, split: str = "lite"):
         with open(result_path, "r") as f:
             external_result = json.load(f)
 
-    search_trees = read_search_trees(dir)
-    if not search_trees:
+    agentic_loops = read_agentic_loops(dir)
+    if not agentic_loops:
         raise ValueError("No trajectories found")
 
     results = []
-    for search_tree in search_trees:
-        instance_id = search_tree.metadata["instance_id"]
+    for agentic_loop in agentic_loops:
+        instance_id = agentic_loop.metadata["instance_id"]
 
         instance = get_moatless_instance(instance_id)
         if not instance:
@@ -843,7 +849,7 @@ def generate_report(dir: str, split: str = "lite"):
         except Exception as e:
             logger.exception(f"Failed to load eval report from {eval_result_file}: {e}")
 
-        result = to_result(search_tree, eval_report, external_result)
+        result = to_result(agentic_loop, eval_report, external_result)
         results.append(result)
 
     report_path = os.path.join(dir, "report.json")

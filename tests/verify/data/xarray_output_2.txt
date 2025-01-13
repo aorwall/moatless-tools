@@ -1,0 +1,2693 @@
+
+>>>>> Run tests
+============================= test session starts ==============================
+platform linux -- Python 3.9.19, pytest-6.2.3, py-1.11.0, pluggy-0.13.1
+rootdir: /testbed, configfile: setup.cfg
+plugins: xdist-2.2.1, hypothesis-6.108.2, forked-1.6.0, env-0.6.2, cov-5.0.0
+collected 112 items
+
+xarray/tests/test_combine.py ..........................F..F.........xFF. [ 38%]
+..FF...FFF......F.....FF.F.FFF....                                       [ 68%]
+xarray/tests/test_concat.py F.....FFF..FF.....F..F...FFFF.FFFF.          [100%]
+
+=================================== FAILURES ===================================
+___________________ TestCombineND.test_concat_once[new_dim] ____________________
+
+self = <xarray.tests.test_combine.TestCombineND object at 0x7ff755abbaf0>
+create_combined_ids = <function _create_combined_ids at 0x7ff755bcfaf0>
+concat_dim = 'new_dim'
+
+    @pytest.mark.parametrize("concat_dim", ["dim1", "new_dim"])
+    def test_concat_once(self, create_combined_ids, concat_dim):
+        shape = (2,)
+        combined_ids = create_combined_ids(shape)
+        ds = create_test_data
+>       result = _combine_all_along_first_dim(
+            combined_ids,
+            dim=concat_dim,
+            data_vars="all",
+            coords="different",
+            compat="no_conflicts",
+        )
+
+xarray/tests/test_combine.py:279:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim1: 8, dim2: 9)>
+array([[ 1.76405235,  0.40015721,  0.97873798,  2.2408932 ,  1.86755799,
+        ...63019835,  0.46278226,
+        -0.90729836,  0.0519454 ,  0.72909056,  0.12898291]])
+Attributes:
+    foo:      variable
+dims = {'new_dim': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'new_dim': 1} must be a superset of existing dimensions ('dim1', 'dim2')
+
+xarray/core/variable.py:1267: ValueError
+___________________ TestCombineND.test_concat_twice[new_dim] ___________________
+
+self = <xarray.tests.test_combine.TestCombineND object at 0x7ff7557da280>
+create_combined_ids = <function _create_combined_ids at 0x7ff755bcfaf0>
+concat_dim = 'new_dim'
+
+    @pytest.mark.parametrize("concat_dim", ["dim1", "new_dim"])
+    def test_concat_twice(self, create_combined_ids, concat_dim):
+        shape = (2, 3)
+        combined_ids = create_combined_ids(shape)
+>       result = _combine_nd(combined_ids, concat_dims=["dim1", concat_dim])
+
+xarray/tests/test_combine.py:314:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim1: 16, dim2: 9)>
+array([[ 1.76405235,  0.40015721,  0.97873798,  2.2408932 ,  1.86755799,
+       ...1529457 , -1.06419527,
+         0.43794661,  1.93897846, -1.02493087,  0.89933845]])
+Attributes:
+    foo:      variable
+dims = {'new_dim': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'new_dim': 1} must be a superset of existing dimensions ('dim1', 'dim2')
+
+xarray/core/variable.py:1267: ValueError
+______________ TestNestedCombine.test_nested_concat_along_new_dim ______________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff755b98b20>
+
+    def test_nested_concat_along_new_dim(self):
+        objs = [
+            Dataset({"a": ("x", [10]), "x": [0]}),
+            Dataset({"a": ("x", [20]), "x": [0]}),
+        ]
+        expected = Dataset({"a": (("t", "x"), [[10], [20]]), "x": [0]})
+>       actual = combine_nested(objs, concat_dim="t")
+
+xarray/tests/test_combine.py:407:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 1)>
+array([10]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_____________________ TestNestedCombine.test_nested_merge ______________________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff7552e4d30>
+
+    def test_nested_merge(self):
+        data = Dataset({"x": 0})
+        actual = combine_nested([data, data, data], concat_dim=None)
+        assert_identical(data, actual)
+
+        ds1 = Dataset({"a": ("x", [1, 2]), "x": [0, 1]})
+        ds2 = Dataset({"a": ("x", [2, 3]), "x": [1, 2]})
+        expected = Dataset({"a": ("x", [1, 2, 3]), "x": [0, 1, 2]})
+        actual = combine_nested([ds1, ds2], concat_dim=None)
+        assert_identical(expected, actual)
+        actual = combine_nested([ds1, ds2], concat_dim=[None])
+        assert_identical(expected, actual)
+
+        tmp1 = Dataset({"x": 0})
+        tmp2 = Dataset({"x": np.nan})
+        actual = combine_nested([tmp1, tmp2], concat_dim=None)
+        assert_identical(tmp1, actual)
+        actual = combine_nested([tmp1, tmp2], concat_dim=[None])
+        assert_identical(tmp1, actual)
+
+        # Single object, with a concat_dim explicitly provided
+        # Test the issue reported in GH #1988
+        objs = [Dataset({"x": 0, "y": 1})]
+        dim = DataArray([100], name="baz", dims="baz")
+        actual = combine_nested(objs, concat_dim=[dim])
+        expected = Dataset({"x": ("baz", [0]), "y": ("baz", [1])}, {"baz": [100]})
+        assert_identical(expected, actual)
+
+        # Just making sure that auto_combine is doing what is
+        # expected for non-scalar values, too.
+        objs = [Dataset({"x": ("z", [0, 1]), "y": ("z", [1, 2])})]
+        dim = DataArray([100], name="baz", dims="baz")
+>       actual = combine_nested(objs, concat_dim=[dim])
+
+xarray/tests/test_combine.py:450:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (z: 2)>
+array([0, 1]), dims = {'baz': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'baz': 1} must be a superset of existing dimensions ('z',)
+
+xarray/core/variable.py:1267: ValueError
+____________________ TestNestedCombine.test_auto_combine_2d ____________________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff7552d5be0>
+
+    def test_auto_combine_2d(self):
+        ds = create_test_data
+
+        partway1 = concat([ds(0), ds(3)], dim="dim1")
+        partway2 = concat([ds(1), ds(4)], dim="dim1")
+        partway3 = concat([ds(2), ds(5)], dim="dim1")
+>       expected = concat([partway1, partway2, partway3], dim="dim2")
+
+xarray/tests/test_combine.py:499:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim3: 10, dim1: 16)>
+array([[ 2.38314477e+00,  9.44479487e-01, -9.12822225e-01,
+         1.11701629e...       -4.75524858e-01, -1.65777023e-01, -6.49717421e-01,
+         1.63138295e+00]])
+Attributes:
+    foo:      variable
+dims = {'dim2': 9}, shape = dict_values([9])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim2': 9} must be a superset of existing dimensions ('dim3', 'dim1')
+
+xarray/core/variable.py:1267: ValueError
+__________ TestNestedCombine.test_combine_nested_missing_data_new_dim __________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff7553dcb80>
+
+    def test_combine_nested_missing_data_new_dim(self):
+        # Your data includes "time" and "station" dimensions, and each year's
+        # data has a different set of stations.
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        expected = Dataset(
+            {"a": (("t", "x"), [[np.nan, 2, 3], [1, 2, np.nan]])}, {"x": [0, 1, 2]}
+        )
+>       actual = combine_nested(datasets, concat_dim="t")
+
+xarray/tests/test_combine.py:515:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([nan,  2.,  3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+________ TestNestedCombine.test_combine_nested_fill_value[fill_value0] _________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff7557da520>
+fill_value = nan
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_combine_nested_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = combine_nested(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:581:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([nan,  2.,  3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_____________ TestNestedCombine.test_combine_nested_fill_value[2] ______________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff754be6a30>
+fill_value = 2
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_combine_nested_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = combine_nested(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:581:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2, 2, 3]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+____________ TestNestedCombine.test_combine_nested_fill_value[2.0] _____________
+
+self = <xarray.tests.test_combine.TestNestedCombine object at 0x7ff754bfea90>
+fill_value = 2.0
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_combine_nested_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = combine_nested(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:581:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:456: in combine_nested
+    return _nested_combine(
+xarray/core/combine.py:300: in _nested_combine
+    combined = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2., 2., 3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_________________ TestCombineAuto.test_infer_order_from_coords _________________
+
+self = <xarray.tests.test_combine.TestCombineAuto object at 0x7ff7553f1400>
+
+    def test_infer_order_from_coords(self):
+        data = create_test_data()
+        objs = [data.isel(dim2=slice(4, 9)), data.isel(dim2=slice(4))]
+>       actual = combine_by_coords(objs)
+
+xarray/tests/test_combine.py:647:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:672: in combine_by_coords
+    concatenated = _combine_nd(
+xarray/core/combine.py:191: in _combine_nd
+    combined_ids = _combine_all_along_first_dim(
+xarray/core/combine.py:219: in _combine_all_along_first_dim
+    new_combined_ids[new_id] = _combine_1d(
+xarray/core/combine.py:241: in _combine_1d
+    combined = concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim3: 10, dim1: 8)>
+array([[ 7.45430757e-01, -4.66021564e-02,  2.58116351e-03,
+         4.86505051e-...1e+00,  2.40144790e-01,  6.76517955e-01,
+        -7.47539876e-02,  3.49987707e-01]])
+Attributes:
+    foo:      variable
+dims = {'dim2': 4}, shape = dict_values([4])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim2': 4} must be a superset of existing dimensions ('dim3', 'dim1')
+
+xarray/core/variable.py:1267: ValueError
+___________________ TestAutoCombineOldAPI.test_auto_combine ____________________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff754bfaa00>
+
+    def test_auto_combine(self):
+        objs = [Dataset({"x": [0]}), Dataset({"x": [1]})]
+        actual = auto_combine(objs)
+        expected = Dataset({"x": [0, 1]})
+        assert_identical(expected, actual)
+
+        actual = auto_combine([actual])
+        assert_identical(expected, actual)
+
+        objs = [Dataset({"x": [0, 1]}), Dataset({"x": [2]})]
+        actual = auto_combine(objs)
+        expected = Dataset({"x": [0, 1, 2]})
+        assert_identical(expected, actual)
+
+        # ensure auto_combine handles non-sorted variables
+        objs = [
+            Dataset({"x": ("a", [0]), "y": ("a", [0])}),
+            Dataset({"y": ("a", [1]), "x": ("a", [1])}),
+        ]
+        actual = auto_combine(objs)
+        expected = Dataset({"x": ("a", [0, 1]), "y": ("a", [0, 1])})
+        assert_identical(expected, actual)
+
+        objs = [Dataset({"x": [0], "y": [0]}), Dataset({"y": [1], "x": [1]})]
+        with raises_regex(ValueError, "too many .* dimensions"):
+            auto_combine(objs)
+
+        objs = [Dataset({"x": 0}), Dataset({"x": 1})]
+        with raises_regex(ValueError, "cannot infer dimension"):
+            auto_combine(objs)
+
+        objs = [Dataset({"x": [0], "y": [0]}), Dataset({"x": [0]})]
+        with raises_regex(ValueError, "'y' is not present in all datasets"):
+>           auto_combine(objs)
+
+xarray/tests/test_combine.py:759:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._GeneratorContextManager object at 0x7ff754bcc550>
+typ = None, value = None, traceback = None
+
+    def __exit__(self, typ, value, traceback):
+        if typ is None:
+            try:
+>               next(self.gen)
+E               Failed: DID NOT RAISE <class 'ValueError'>
+
+/opt/miniconda3/envs/testbed/lib/python3.9/contextlib.py:126: Failed
+__________ TestAutoCombineOldAPI.test_auto_combine_previously_failed ___________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff755a5ee20>
+
+    def test_auto_combine_previously_failed(self):
+        # In the above scenario, one file is missing, containing the data for
+        # one year's data for one variable.
+        datasets = [
+            Dataset({"a": ("x", [0]), "x": [0]}),
+            Dataset({"b": ("x", [0]), "x": [0]}),
+            Dataset({"a": ("x", [1]), "x": [1]}),
+        ]
+        expected = Dataset({"a": ("x", [0, 1]), "b": ("x", [0, np.nan])}, {"x": [0, 1]})
+        actual = auto_combine(datasets)
+        assert_identical(expected, actual)
+
+        # Your data includes "time" and "station" dimensions, and each year's
+        # data has a different set of stations.
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        expected = Dataset(
+            {"a": (("t", "x"), [[np.nan, 2, 3], [1, 2, np.nan]])}, {"x": [0, 1, 2]}
+        )
+>       actual = auto_combine(datasets, concat_dim="t")
+
+xarray/tests/test_combine.py:782:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:846: in auto_combine
+    return _old_auto_combine(
+xarray/core/combine.py:907: in _old_auto_combine
+    concatenated = [
+xarray/core/combine.py:908: in <listcomp>
+    _auto_concat(
+xarray/core/combine.py:958: in _auto_concat
+    return concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([nan,  2.,  3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+______________ TestAutoCombineOldAPI.test_auto_combine_no_concat _______________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff755759700>
+
+    def test_auto_combine_no_concat(self):
+        objs = [Dataset({"x": 0}), Dataset({"y": 1})]
+        actual = auto_combine(objs)
+        expected = Dataset({"x": 0, "y": 1})
+        assert_identical(expected, actual)
+
+        objs = [Dataset({"x": 0, "y": 1}), Dataset({"y": np.nan, "z": 2})]
+        actual = auto_combine(objs)
+        expected = Dataset({"x": 0, "y": 1, "z": 2})
+        assert_identical(expected, actual)
+
+        data = Dataset({"x": 0})
+        actual = auto_combine([data, data, data], concat_dim=None)
+        assert_identical(data, actual)
+
+        # Single object, with a concat_dim explicitly provided
+        # Test the issue reported in GH #1988
+        objs = [Dataset({"x": 0, "y": 1})]
+        dim = DataArray([100], name="baz", dims="baz")
+        actual = auto_combine(objs, concat_dim=dim)
+        expected = Dataset({"x": ("baz", [0]), "y": ("baz", [1])}, {"baz": [100]})
+        assert_identical(expected, actual)
+
+        # Just making sure that auto_combine is doing what is
+        # expected for non-scalar values, too.
+        objs = [Dataset({"x": ("z", [0, 1]), "y": ("z", [1, 2])})]
+        dim = DataArray([100], name="baz", dims="baz")
+>       actual = auto_combine(objs, concat_dim=dim)
+
+xarray/tests/test_combine.py:819:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:846: in auto_combine
+    return _old_auto_combine(
+xarray/core/combine.py:907: in _old_auto_combine
+    concatenated = [
+xarray/core/combine.py:908: in <listcomp>
+    _auto_concat(
+xarray/core/combine.py:958: in _auto_concat
+    return concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (z: 2)>
+array([0, 1]), dims = {'baz': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'baz': 1} must be a superset of existing dimensions ('z',)
+
+xarray/core/variable.py:1267: ValueError
+_______ TestAutoCombineOldAPI.test_auto_combine_fill_value[fill_value0] ________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff755acc6d0>
+fill_value = nan
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_auto_combine_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = auto_combine(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:849:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:846: in auto_combine
+    return _old_auto_combine(
+xarray/core/combine.py:907: in _old_auto_combine
+    concatenated = [
+xarray/core/combine.py:908: in <listcomp>
+    _auto_concat(
+xarray/core/combine.py:958: in _auto_concat
+    return concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([nan,  2.,  3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+____________ TestAutoCombineOldAPI.test_auto_combine_fill_value[2] _____________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff755ad95e0>
+fill_value = 2
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_auto_combine_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = auto_combine(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:849:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:846: in auto_combine
+    return _old_auto_combine(
+xarray/core/combine.py:907: in _old_auto_combine
+    concatenated = [
+xarray/core/combine.py:908: in <listcomp>
+    _auto_concat(
+xarray/core/combine.py:958: in _auto_concat
+    return concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2, 2, 3]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+___________ TestAutoCombineOldAPI.test_auto_combine_fill_value[2.0] ____________
+
+self = <xarray.tests.test_combine.TestAutoCombineOldAPI object at 0x7ff7557ba520>
+fill_value = 2.0
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_auto_combine_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = auto_combine(datasets, concat_dim="t", fill_value=fill_value)
+
+xarray/tests/test_combine.py:849:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/combine.py:846: in auto_combine
+    return _old_auto_combine(
+xarray/core/combine.py:907: in _old_auto_combine
+    concatenated = [
+xarray/core/combine.py:908: in <listcomp>
+    _auto_concat(
+xarray/core/combine.py:958: in _auto_concat
+    return concat(
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2., 2., 3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+______________________________ test_concat_compat ______________________________
+
+error = <class 'ValueError'>
+pattern = 'coordinates in some datasets but not others'
+
+    @contextmanager
+    def raises_regex(error, pattern):
+        __tracebackhide__ = True
+        with pytest.raises(error) as excinfo:
+>           yield
+
+xarray/tests/__init__.py:108:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def test_concat_compat():
+        ds1 = Dataset(
+            {
+                "has_x_y": (("y", "x"), [[1, 2]]),
+                "has_x": ("x", [1, 2]),
+                "no_x_y": ("z", [1, 2]),
+            },
+            coords={"x": [0, 1], "y": [0], "z": [-1, -2]},
+        )
+        ds2 = Dataset(
+            {
+                "has_x_y": (("y", "x"), [[3, 4]]),
+                "has_x": ("x", [1, 2]),
+                "no_x_y": (("q", "z"), [[1, 2]]),
+            },
+            coords={"x": [0, 1], "y": [1], "z": [-1, -2], "q": [0]},
+        )
+
+        result = concat([ds1, ds2], dim="y", data_vars="minimal", compat="broadcast_equals")
+        assert_equal(ds2.no_x_y, result.no_x_y.transpose())
+
+        for var in ["has_x", "no_x_y"]:
+            assert "y" not in result[var]
+
+        with raises_regex(ValueError, "coordinates in some datasets but not others"):
+>           concat([ds1, ds2], dim="q")
+
+xarray/tests/test_concat.py:46:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+objs = <itertools.chain object at 0x7ff754bfe280>, dim = 'q', data_vars = 'all'
+coords = 'different', compat = 'equals', positions = None, fill_value = <NA>
+join = 'outer'
+
+    def concat(
+        objs,
+        dim,
+        data_vars="all",
+        coords="different",
+        compat="equals",
+        positions=None,
+        fill_value=dtypes.NA,
+        join="outer",
+    ):
+        """Concatenate xarray objects along a new or existing dimension.
+
+        Parameters
+        ----------
+        objs : sequence of Dataset and DataArray objects
+            xarray objects to concatenate together. Each object is expected to
+            consist of variables and coordinates with matching shapes except for
+            along the concatenated dimension.
+        dim : str or DataArray or pandas.Index
+            Name of the dimension to concatenate along. This can either be a new
+            dimension name, in which case it is added along axis=0, or an existing
+            dimension name, in which case the location of the dimension is
+            unchanged. If dimension is provided as a DataArray or Index, its name
+            is used as the dimension to concatenate along and the values are added
+            as a coordinate.
+        data_vars : {'minimal', 'different', 'all' or list of str}, optional
+            These data variables will be concatenated together:
+              * 'minimal': Only data variables in which the dimension already
+                appears are included.
+              * 'different': Data variables which are not equal (ignoring
+                attributes) across all datasets are also concatenated (as well as
+                all for which dimension already appears). Beware: this option may
+                load the data payload of data variables into memory if they are not
+                already loaded.
+              * 'all': All data variables will be concatenated.
+              * list of str: The listed data variables will be concatenated, in
+                addition to the 'minimal' data variables.
+            If objects are DataArrays, data_vars must be 'all'.
+        coords : {'minimal', 'different', 'all' or list of str}, optional
+            These coordinate variables will be concatenated together:
+              * 'minimal': Only coordinates in which the dimension already appears
+                are included.
+              * 'different': Coordinates which are not equal (ignoring attributes)
+                across all datasets are also concatenated (as well as all for which
+                dimension already appears). Beware: this option may load the data
+                payload of coordinate variables into memory if they are not already
+                loaded.
+              * 'all': All coordinate variables will be concatenated, except
+                those corresponding to other dimensions.
+              * list of str: The listed coordinate variables will be concatenated,
+                in addition to the 'minimal' coordinates.
+        compat : {'identical', 'equals', 'broadcast_equals', 'no_conflicts', 'override'}, optional
+            String indicating how to compare non-concatenated variables of the same name for
+            potential conflicts. This is passed down to merge.
+
+            - 'broadcast_equals': all values must be equal when variables are
+              broadcast against each other to ensure common dimensions.
+            - 'equals': all values and dimensions must be the same.
+            - 'identical': all values, dimensions and attributes must be the
+              same.
+            - 'no_conflicts': only values which are not null in both datasets
+              must be equal. The returned dataset then contains the combination
+              of all non-null values.
+            - 'override': skip comparing and pick variable from first dataset
+        positions : None or list of integer arrays, optional
+            List of integer arrays which specifies the integer positions to which
+            to assign each dataset along the concatenated dimension. If not
+            supplied, objects are concatenated in the provided order.
+        fill_value : scalar, optional
+            Value to use for newly missing values
+        join : {'outer', 'inner', 'left', 'right', 'exact'}, optional
+            String indicating how to combine differing indexes
+            (excluding dim) in objects
+
+            - 'outer': use the union of object indexes
+            - 'inner': use the intersection of object indexes
+            - 'left': use indexes from the first object with each dimension
+            - 'right': use indexes from the last object with each dimension
+            - 'exact': instead of aligning, raise `ValueError` when indexes to be
+              aligned are not equal
+            - 'override': if indexes are of same size, rewrite indexes to be
+              those of the first object with that dimension. Indexes for the same
+              dimension must have the same size in all objects.
+
+        indexers, mode, concat_over : deprecated
+
+        Returns
+        -------
+        concatenated : type of objs
+
+        See also
+        --------
+        merge
+        auto_combine
+        """
+        # TODO: add ignore_index arguments copied from pandas.concat
+        # TODO: support concatenating scalar coordinates even if the concatenated
+        # dimension already exists
+        from .dataset import Dataset
+        from .dataarray import DataArray
+
+        try:
+            first_obj, objs = utils.peek_at(objs)
+        except StopIteration:
+            raise ValueError("must supply at least one object to concatenate")
+
+        if compat not in _VALID_COMPAT:
+            raise ValueError(
+                "compat=%r invalid: must be 'broadcast_equals', 'equals', 'identical', 'no_conflicts' or 'override'"
+                % compat
+            )
+
+        if isinstance(first_obj, DataArray):
+            f = _dataarray_concat
+        elif isinstance(first_obj, Dataset):
+            f = _dataset_concat
+        else:
+            raise TypeError(
+                "can only concatenate xarray Dataset and DataArray "
+                "objects, got %s" % type(first_obj)
+            )
+>       return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+
+xarray/core/concat.py:131:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+datasets = (<xarray.Dataset>
+Dimensions:  (x: 2, y: 2, z: 2)
+Coordinates:
+  * y        (y) int64 0 1
+  * x        (x) int64 0 1
+ ...0
+Data variables:
+    has_x_y  (y, x) float64 nan nan 3.0 4.0
+    has_x    (x) int64 1 2
+    no_x_y   (q, z) int64 1 2)
+dim = 'q', data_vars = 'all', coords = 'different', compat = 'equals'
+positions = None, fill_value = <NA>, join = 'outer', ignore_missing_vars = False
+
+    def _dataset_concat(
+        datasets,
+        dim,
+        data_vars,
+        coords,
+        compat,
+        positions,
+        fill_value=dtypes.NA,
+        join="outer",
+        ignore_missing_vars=False,
+    ):
+        """
+        Concatenate a sequence of datasets along a new or existing dimension
+        """
+        from .dataset import Dataset
+
+        dim, coord = _calc_concat_dim_coord(dim)
+        # Make sure we're working on a copy (we'll be loading variables)
+        datasets = [ds.copy() for ds in datasets]
+        datasets = align(
+            *datasets, join=join, copy=False, exclude=[dim], fill_value=fill_value
+        )
+
+        dim_coords, dims_sizes, coord_names, data_names = _parse_datasets(datasets)
+        dim_names = set(dim_coords)
+        unlabeled_dims = dim_names - coord_names
+
+        both_data_and_coords = coord_names & data_names
+        if both_data_and_coords:
+            raise ValueError(
+                "%r is a coordinate in some datasets but not others." % both_data_and_coords
+            )
+        # we don't want the concat dimension in the result dataset yet
+        dim_coords.pop(dim, None)
+        dims_sizes.pop(dim, None)
+
+        # case where concat dimension is a coordinate or data_var but not a dimension
+        if (dim in coord_names or dim in data_names) and dim not in dim_names:
+            datasets = [ds.expand_dims(dim) for ds in datasets]
+
+        # determine which variables to concatentate
+        concat_over, equals, concat_dim_lengths = _calc_concat_over(
+            datasets, dim, dim_names, data_vars, coords, compat
+        )
+
+        # determine which variables to merge, and then merge them according to compat
+        variables_to_merge = (coord_names | data_names) - concat_over - dim_names
+        result_vars = {}
+        if variables_to_merge:
+            to_merge = {var: [] for var in variables_to_merge}
+
+            for ds in datasets:
+                absent_merge_vars = variables_to_merge - set(ds.variables)
+                if absent_merge_vars and not ignore_missing_vars:
+                    raise ValueError(
+                        "variables %r are present in some datasets but not others. "
+                        % absent_merge_vars
+                    )
+
+                for var in variables_to_merge:
+                    if var in ds.variables:
+                        to_merge[var].append(ds.variables[var])
+
+            for var in variables_to_merge:
+                if to_merge[var]:
+                    result_vars[var] = unique_variable(
+                        var, to_merge[var], compat=compat, equals=equals.get(var, None)
+                    )
+        else:
+            result_vars = {}
+        result_vars.update(dim_coords)
+
+        # assign attrs and encoding from first dataset
+        result_attrs = datasets[0].attrs
+        result_encoding = datasets[0].encoding
+
+        # check that global attributes are fixed across all datasets if necessary
+        for ds in datasets[1:]:
+            if compat == "identical" and not utils.dict_equiv(ds.attrs, result_attrs):
+                raise ValueError("Dataset global attributes not equal.")
+
+        # we've already verified everything is consistent; now, calculate
+        # shared dimension sizes so we can expand the necessary variables
+        def ensure_common_dims(vars):
+            # ensure each variable with the given name shares the same
+            # dimensions and the same shape for all of them except along the
+            # concat dimension
+            common_dims = tuple(pd.unique([d for v in vars for d in v.dims]))
+            if dim not in common_dims:
+                common_dims = (dim,) + common_dims
+            for var, dim_len in zip(vars, concat_dim_lengths):
+                if var.dims != common_dims:
+                    common_shape = tuple(dims_sizes.get(d, dim_len) for d in common_dims)
+                    var = var.set_dims(common_dims, common_shape)
+                yield var
+
+        # Get all variable names across all datasets
+        all_vars = set().union(*(ds.variables for ds in datasets))
+
+        # Update concat_over to include all variables if ignore_missing_vars is True
+        if ignore_missing_vars:
+            concat_over = all_vars - set(dim_coords) - variables_to_merge
+
+        # stack up each variable to fill-out the dataset (in order)
+        # n.b. this loop preserves variable order, needed for groupby.
+        concat_dim_sizes = [ds.sizes.get(dim, 1) for ds in datasets]
+        concat_dim_size = sum(concat_dim_sizes)
+        for k in all_vars if ignore_missing_vars else datasets[0].variables:
+            if k in concat_over:
+                vars = []
+                for ds, size in zip(datasets, concat_dim_sizes):
+                    if k in ds.variables:
+                        var = ds.variables[k]
+                        if dim not in var.dims:
+>                           var = var.set_dims({dim: size})
+
+xarray/core/concat.py:377:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (y: 2, x: 2)>
+array([[ 1.,  2.],
+       [nan, nan]])
+dims = {'q': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'q': 1} must be a superset of existing dimensions ('y', 'x')
+
+xarray/core/variable.py:1267: ValueError
+
+During handling of the above exception, another exception occurred:
+
+    def test_concat_compat():
+        ds1 = Dataset(
+            {
+                "has_x_y": (("y", "x"), [[1, 2]]),
+                "has_x": ("x", [1, 2]),
+                "no_x_y": ("z", [1, 2]),
+            },
+            coords={"x": [0, 1], "y": [0], "z": [-1, -2]},
+        )
+        ds2 = Dataset(
+            {
+                "has_x_y": (("y", "x"), [[3, 4]]),
+                "has_x": ("x", [1, 2]),
+                "no_x_y": (("q", "z"), [[1, 2]]),
+            },
+            coords={"x": [0, 1], "y": [1], "z": [-1, -2], "q": [0]},
+        )
+
+        result = concat([ds1, ds2], dim="y", data_vars="minimal", compat="broadcast_equals")
+        assert_equal(ds2.no_x_y, result.no_x_y.transpose())
+
+        for var in ["has_x", "no_x_y"]:
+            assert "y" not in result[var]
+
+        with raises_regex(ValueError, "coordinates in some datasets but not others"):
+>           concat([ds1, ds2], dim="q")
+
+xarray/tests/test_concat.py:46:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._GeneratorContextManager object at 0x7ff755acc880>
+typ = <class 'ValueError'>
+value = ValueError("new dimensions {'q': 1} must be a superset of existing dimensions ('y', 'x')")
+traceback = <traceback object at 0x7ff755399cc0>
+
+    def __exit__(self, typ, value, traceback):
+        if typ is None:
+            try:
+                next(self.gen)
+            except StopIteration:
+                return False
+            else:
+                raise RuntimeError("generator didn't stop")
+        else:
+            if value is None:
+                # Need to force instantiation so we can reliably
+                # tell if we get the same exception back
+                value = typ()
+            try:
+>               self.gen.throw(typ, value, traceback)
+E               AssertionError: exception ValueError("new dimensions {'q': 1} must be a superset of existing dimensions ('y', 'x')") did not match pattern 'coordinates in some datasets but not others'
+
+/opt/miniconda3/envs/testbed/lib/python3.9/contextlib.py:137: AssertionError
+__________ TestConcatDataset.test_concat_coords_kwarg[dim1-different] __________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff754bfab50>
+data = <xarray.Dataset>
+Dimensions:  (dim1: 8, dim2: 9, dim4: 3, time: 20)
+Coordinates:
+  * time     (time) datetime64[ns] 20...0.2301 -1.027 ... 0.9492 1.574 0.02885
+    var2     (dim1, dim2) float64 0.2031 1.135 -0.07869 ... 2.201 0.2366 -0.4834
+dim = 'dim1', coords = 'different'
+
+    @pytest.mark.parametrize("coords", ["different", "minimal", "all"])
+    @pytest.mark.parametrize("dim", ["dim1", "dim2"])
+    def test_concat_coords_kwarg(self, data, dim, coords):
+        data = data.copy(deep=True)
+        # make sure the coords argument behaves as expected
+        data.coords["extra"] = ("dim4", np.arange(3))
+        datasets = [g for _, g in data.groupby(dim, squeeze=True)]
+
+>       actual = concat(datasets, data[dim], coords=coords)
+
+xarray/tests/test_concat.py:86:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim2: 9)>
+array([-1.5918841 ,  0.23007228, -1.02666544, -0.7027144 ,  1.53526323,
+        0.62909652,  0.79481585,  0.90832436,  0.6541459 ])
+Attributes:
+    foo:      variable
+dims = {'dim1': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim1': 1} must be a superset of existing dimensions ('dim2',)
+
+xarray/core/variable.py:1267: ValueError
+___________ TestConcatDataset.test_concat_coords_kwarg[dim1-minimal] ___________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff755b98580>
+data = <xarray.Dataset>
+Dimensions:  (dim1: 8, dim2: 9, dim4: 3, time: 20)
+Coordinates:
+  * time     (time) datetime64[ns] 20...1.558 -0.6844 -0.4746 ... -1.132 -1.774
+    var2     (dim1, dim2) float64 -0.8227 1.605 1.766 ... -1.733 -0.1307 -0.412
+dim = 'dim1', coords = 'minimal'
+
+    @pytest.mark.parametrize("coords", ["different", "minimal", "all"])
+    @pytest.mark.parametrize("dim", ["dim1", "dim2"])
+    def test_concat_coords_kwarg(self, data, dim, coords):
+        data = data.copy(deep=True)
+        # make sure the coords argument behaves as expected
+        data.coords["extra"] = ("dim4", np.arange(3))
+        datasets = [g for _, g in data.groupby(dim, squeeze=True)]
+
+>       actual = concat(datasets, data[dim], coords=coords)
+
+xarray/tests/test_concat.py:86:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim2: 9)>
+array([-1.55836664, -0.68440079, -0.47464053,  0.43749054,  0.61911472,
+       -0.62527923,  0.59901682, -0.27976736,  1.34419451])
+Attributes:
+    foo:      variable
+dims = {'dim1': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim1': 1} must be a superset of existing dimensions ('dim2',)
+
+xarray/core/variable.py:1267: ValueError
+_____________ TestConcatDataset.test_concat_coords_kwarg[dim1-all] _____________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff755acc250>
+data = <xarray.Dataset>
+Dimensions:  (dim1: 8, dim2: 9, dim4: 3, time: 20)
+Coordinates:
+  * time     (time) datetime64[ns] 20...6 -0.9004 1.024 ... 0.0627 1.229 -0.5215
+    var2     (dim1, dim2) float64 -0.305 1.764 0.5671 ... -0.6065 0.3106 1.266
+dim = 'dim1', coords = 'all'
+
+    @pytest.mark.parametrize("coords", ["different", "minimal", "all"])
+    @pytest.mark.parametrize("dim", ["dim1", "dim2"])
+    def test_concat_coords_kwarg(self, data, dim, coords):
+        data = data.copy(deep=True)
+        # make sure the coords argument behaves as expected
+        data.coords["extra"] = ("dim4", np.arange(3))
+        datasets = [g for _, g in data.groupby(dim, squeeze=True)]
+
+>       actual = concat(datasets, data[dim], coords=coords)
+
+xarray/tests/test_concat.py:86:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim2: 9)>
+array([-0.06560352, -0.90035666,  1.02375257,  0.64753373, -1.37454989,
+        1.58772175, -0.14703739,  1.08140336,  0.20491848])
+Attributes:
+    foo:      variable
+dims = {'dim1': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim1': 1} must be a superset of existing dimensions ('dim2',)
+
+xarray/core/variable.py:1267: ValueError
+_____________ TestConcatDataset.test_concat_coords_kwarg[dim2-all] _____________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7557592e0>
+data = <xarray.Dataset>
+Dimensions:  (dim1: 8, dim2: 9, dim4: 3, time: 20)
+Coordinates:
+  * time     (time) datetime64[ns] 20...at64 -0.4436 0.4112 0.05441 ... 0.4407 -1.054
+    var2     (dim1, dim2) float64 -2.033 0.00843 -0.2782 ... -1.157 1.308
+dim = 'dim2', coords = 'all'
+
+    @pytest.mark.parametrize("coords", ["different", "minimal", "all"])
+    @pytest.mark.parametrize("dim", ["dim1", "dim2"])
+    def test_concat_coords_kwarg(self, data, dim, coords):
+        data = data.copy(deep=True)
+        # make sure the coords argument behaves as expected
+        data.coords["extra"] = ("dim4", np.arange(3))
+        datasets = [g for _, g in data.groupby(dim, squeeze=True)]
+
+>       actual = concat(datasets, data[dim], coords=coords)
+
+xarray/tests/test_concat.py:86:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim4: 3)>
+array([0, 1, 2]), dims = {'dim2': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim2': 1} must be a superset of existing dimensions ('dim4',)
+
+xarray/core/variable.py:1267: ValueError
+________________________ TestConcatDataset.test_concat _________________________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7553009a0>
+data = <xarray.Dataset>
+Dimensions:  (dim1: 8, dim2: 9, time: 20)
+Coordinates:
+  * time     (time) datetime64[ns] 2000-01-01 ...0.3172 -1.258 -1.535 ... -0.7783 -0.4847
+    var2     (dim1, dim2) float64 0.9675 0.2625 0.4725 ... 0.6946 0.1426 -1.08
+
+    def test_concat(self, data):
+        split_data = [
+            data.isel(dim1=slice(3)),
+            data.isel(dim1=3),
+            data.isel(dim1=slice(4, None)),
+        ]
+>       assert_identical(data, concat(split_data, "dim1"))
+
+xarray/tests/test_concat.py:100:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (dim2: 9)>
+array([-0.29971489, -0.79677996, -0.64352134, -1.04297402, -1.48808616,
+       -1.35704246, -0.47901079,  2.21235968,  2.69764899])
+Attributes:
+    foo:      variable
+dims = {'dim1': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'dim1': 1} must be a superset of existing dimensions ('dim2',)
+
+xarray/core/variable.py:1267: ValueError
+___________________ TestConcatDataset.test_concat_autoalign ____________________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7556d9a90>
+
+    def test_concat_autoalign(self):
+        ds1 = Dataset({"foo": DataArray([1, 2], coords=[("x", [1, 2])])})
+        ds2 = Dataset({"foo": DataArray([1, 2], coords=[("x", [1, 3])])})
+>       actual = concat([ds1, ds2], "y")
+
+xarray/tests/test_concat.py:157:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([ 1.,  2., nan]), dims = {'y': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'y': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_________________ TestConcatDataset.test_concat_promote_shape __________________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7553eab50>
+
+    def test_concat_promote_shape(self):
+        # mixed dims within variables
+        objs = [Dataset({}, {"x": 0}), Dataset({"x": [1]})]
+        actual = concat(objs, "x")
+        expected = Dataset({"x": [0, 1]})
+        assert_identical(actual, expected)
+
+        objs = [Dataset({"x": [0]}), Dataset({}, {"x": 1})]
+        actual = concat(objs, "x")
+        assert_identical(actual, expected)
+
+        # mixed dims between variables
+        objs = [Dataset({"x": [2], "y": 3}), Dataset({"x": [4], "y": 5})]
+        actual = concat(objs, "x")
+        expected = Dataset({"x": [2, 4], "y": ("x", [3, 5])})
+        assert_identical(actual, expected)
+
+        # mixed dims in coord variable
+        objs = [Dataset({"x": [0]}, {"y": -1}), Dataset({"x": [1]}, {"y": ("x", [-2])})]
+        actual = concat(objs, "x")
+        expected = Dataset({"x": [0, 1]}, {"y": ("x", [-1, -2])})
+        assert_identical(actual, expected)
+
+        # scalars with mixed lengths along concat dim -- values should repeat
+        objs = [Dataset({"x": [0]}, {"y": -1}), Dataset({"x": [1, 2]}, {"y": -2})]
+        actual = concat(objs, "x")
+        expected = Dataset({"x": [0, 1, 2]}, {"y": ("x", [-1, -2, -2])})
+        assert_identical(actual, expected)
+
+        # broadcast 1d x 1d -> 2d
+        objs = [
+            Dataset({"z": ("x", [-1])}, {"x": [0], "y": [0]}),
+            Dataset({"z": ("y", [1])}, {"x": [1], "y": [0]}),
+        ]
+>       actual = concat(objs, "x")
+
+xarray/tests/test_concat.py:276:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (y: 1)>
+array([1]), dims = {'x': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'x': 1} must be a superset of existing dimensions ('y',)
+
+xarray/core/variable.py:1267: ValueError
+____________ TestConcatDataset.test_concat_fill_value[fill_value0] _____________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7557a84c0>
+fill_value = nan
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = concat(datasets, dim="t", fill_value=fill_value)
+
+xarray/tests/test_concat.py:327:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([nan,  2.,  3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_________________ TestConcatDataset.test_concat_fill_value[2] __________________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff7556c2fd0>
+fill_value = 2
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = concat(datasets, dim="t", fill_value=fill_value)
+
+xarray/tests/test_concat.py:327:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2, 2, 3]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+________________ TestConcatDataset.test_concat_fill_value[2.0] _________________
+
+self = <xarray.tests.test_concat.TestConcatDataset object at 0x7ff755348a00>
+fill_value = 2.0
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        datasets = [
+            Dataset({"a": ("x", [2, 3]), "x": [1, 2]}),
+            Dataset({"a": ("x", [1, 2]), "x": [0, 1]}),
+        ]
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = Dataset(
+            {"a": (("t", "x"), [[fill_value, 2, 3], [1, 2, fill_value]])},
+            {"x": [0, 1, 2]},
+        )
+>       actual = concat(datasets, dim="t", fill_value=fill_value)
+
+xarray/tests/test_concat.py:327:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([2., 2., 3.]), dims = {'t': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'t': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_______________________ TestConcatDataArray.test_concat ________________________
+
+self = <xarray.tests.test_concat.TestConcatDataArray object at 0x7ff755bab130>
+
+    def test_concat(self):
+        ds = Dataset(
+            {
+                "foo": (["x", "y"], np.random.random((2, 3))),
+                "bar": (["x", "y"], np.random.random((2, 3))),
+            },
+            {"x": [0, 1]},
+        )
+        foo = ds["foo"]
+        bar = ds["bar"]
+
+        # from dataset array:
+        expected = DataArray(
+            np.array([foo.values, bar.values]),
+            dims=["w", "x", "y"],
+            coords={"x": [0, 1]},
+        )
+>       actual = concat([foo, bar], "w")
+
+xarray/tests/test_concat.py:349:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:454: in _dataarray_concat
+    ds = _dataset_concat(
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 2, y: 3)>
+array([[0.04226174, 0.08608286, 0.50232614],
+       [0.71263776, 0.87615686, 0.78781576]])
+dims = {'w': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'w': 1} must be a superset of existing dimensions ('x', 'y')
+
+xarray/core/variable.py:1267: ValueError
+_____________________ TestConcatDataArray.test_concat_lazy _____________________
+
+self = <xarray.tests.test_concat.TestConcatDataArray object at 0x7ff755b982b0>
+
+    @requires_dask
+    def test_concat_lazy(self):
+        import dask.array as da
+
+        arrays = [
+            DataArray(
+                da.from_array(InaccessibleArray(np.zeros((3, 3))), 3), dims=["x", "y"]
+            )
+            for _ in range(2)
+        ]
+        # should not raise
+>       combined = concat(arrays, dim="z")
+
+xarray/tests/test_concat.py:399:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:454: in _dataarray_concat
+    ds = _dataset_concat(
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3, y: 3)>
+dask.array<array, shape=(3, 3), dtype=float64, chunksize=(3, 3), chunktype=numpy.ndarray>
+dims = {'z': 1}, shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'z': 1} must be a superset of existing dimensions ('x', 'y')
+
+xarray/core/variable.py:1267: ValueError
+___________ TestConcatDataArray.test_concat_fill_value[fill_value0] ____________
+
+self = <xarray.tests.test_concat.TestConcatDataArray object at 0x7ff7556ddbb0>
+fill_value = nan
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        foo = DataArray([1, 2], coords=[("x", [1, 2])])
+        bar = DataArray([1, 2], coords=[("x", [1, 3])])
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = DataArray(
+            [[1, 2, fill_value], [1, fill_value, 2]],
+            dims=["y", "x"],
+            coords={"x": [1, 2, 3]},
+        )
+>       actual = concat((foo, bar), dim="y", fill_value=fill_value)
+
+xarray/tests/test_concat.py:416:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:454: in _dataarray_concat
+    ds = _dataset_concat(
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([ 1.,  2., nan]), dims = {'y': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'y': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+________________ TestConcatDataArray.test_concat_fill_value[2] _________________
+
+self = <xarray.tests.test_concat.TestConcatDataArray object at 0x7ff754bfe4f0>
+fill_value = 2
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        foo = DataArray([1, 2], coords=[("x", [1, 2])])
+        bar = DataArray([1, 2], coords=[("x", [1, 3])])
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = DataArray(
+            [[1, 2, fill_value], [1, fill_value, 2]],
+            dims=["y", "x"],
+            coords={"x": [1, 2, 3]},
+        )
+>       actual = concat((foo, bar), dim="y", fill_value=fill_value)
+
+xarray/tests/test_concat.py:416:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:454: in _dataarray_concat
+    ds = _dataset_concat(
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([1, 2, 2]), dims = {'y': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'y': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+_______________ TestConcatDataArray.test_concat_fill_value[2.0] ________________
+
+self = <xarray.tests.test_concat.TestConcatDataArray object at 0x7ff755348670>
+fill_value = 2.0
+
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_concat_fill_value(self, fill_value):
+        foo = DataArray([1, 2], coords=[("x", [1, 2])])
+        bar = DataArray([1, 2], coords=[("x", [1, 3])])
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = DataArray(
+            [[1, 2, fill_value], [1, fill_value, 2]],
+            dims=["y", "x"],
+            coords={"x": [1, 2, 3]},
+        )
+>       actual = concat((foo, bar), dim="y", fill_value=fill_value)
+
+xarray/tests/test_concat.py:416:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+xarray/core/concat.py:131: in concat
+    return f(objs, dim, data_vars, coords, compat, positions, fill_value, join)
+xarray/core/concat.py:454: in _dataarray_concat
+    ds = _dataset_concat(
+xarray/core/concat.py:377: in _dataset_concat
+    var = var.set_dims({dim: size})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xarray.Variable (x: 3)>
+array([1., 2., 2.]), dims = {'y': 1}
+shape = dict_values([1])
+
+    def set_dims(self, dims, shape=None):
+        """Return a new variable with given set of dimensions.
+        This method might be used to attach new dimension(s) to variable.
+
+        When possible, this operation does not copy this variable's data.
+
+        Parameters
+        ----------
+        dims : str or sequence of str or dict
+            Dimensions to include on the new variable. If a dict, values are
+            used to provide the sizes of new dimensions; otherwise, new
+            dimensions are inserted with length 1.
+
+        Returns
+        -------
+        Variable
+        """
+        if isinstance(dims, str):
+            dims = [dims]
+
+        if shape is None and utils.is_dict_like(dims):
+            shape = dims.values()
+
+        missing_dims = set(self.dims) - set(dims)
+        if missing_dims:
+>           raise ValueError(
+                "new dimensions %r must be a superset of "
+                "existing dimensions %r" % (dims, self.dims)
+            )
+E           ValueError: new dimensions {'y': 1} must be a superset of existing dimensions ('x',)
+
+xarray/core/variable.py:1267: ValueError
+=============================== warnings summary ===============================
+xarray/tests/test_combine.py: 16 warnings
+xarray/tests/test_concat.py: 10 warnings
+  /testbed/xarray/core/alignment.py:300: FutureWarning: Index.__or__ operating as a set operation is deprecated, in the future this will be a logical operation matching Series.__or__.  Use index.union(other) instead
+    index = joiner(matching_indexes)
+
+xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join[inner-expected1]
+xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join[inner-expected1]
+xarray/tests/test_concat.py::TestConcatDataset::test_concat_join_kwarg
+xarray/tests/test_concat.py::TestConcatDataArray::test_concat_join_kwarg
+  /testbed/xarray/core/alignment.py:300: FutureWarning: Index.__and__ operating as a set operation is deprecated, in the future this will be a logical operation matching Series.__and__.  Use index.intersection(other) instead
+    index = joiner(matching_indexes)
+
+xarray/tests/test_concat.py::test_concat_compat
+  /testbed/xarray/core/dataarray.py:680: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison
+    return key in self.data
+
+xarray/tests/test_concat.py: 316 warnings
+  /testbed/xarray/core/formatting.py:142: DeprecationWarning: `np.float` is a deprecated alias for the builtin `float`. To silence this warning, use `float` by itself. Doing this will not modify any behavior and is safe. If you specifically wanted the numpy scalar type, use `np.float64` here.
+  Deprecated in NumPy 1.20; for more details and guidance: https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations
+    elif isinstance(x, (float, np.float)):
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_1d
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_2d
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_3d
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_single_dataset
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_redundant_nesting
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_ignore_empty_list
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_uneven_depth_input
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_uneven_length_input
+PASSED xarray/tests/test_combine.py::TestTileIDsFromNestedList::test_infer_from_datasets
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_1d
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_2d
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_no_dimension_coords
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_coord_not_monotonic
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_coord_monotonically_decreasing
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_no_concatenation_needed
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_2d_plus_bystander_dim
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_string_coords
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_lexicographic_sort_string_coords
+PASSED xarray/tests/test_combine.py::TestTileIDsFromCoords::test_datetime_coords
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_new_tile_id[old_id0-new_id0]
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_new_tile_id[old_id1-new_id1]
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_new_tile_id[old_id2-new_id2]
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_new_tile_id[old_id3-new_id3]
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_new_tile_id[old_id4-new_id4]
+PASSED xarray/tests/test_combine.py::TestNewTileIDs::test_get_new_tile_ids
+PASSED xarray/tests/test_combine.py::TestCombineND::test_concat_once[dim1]
+PASSED xarray/tests/test_combine.py::TestCombineND::test_concat_only_first_dim
+PASSED xarray/tests/test_combine.py::TestCombineND::test_concat_twice[dim1]
+PASSED xarray/tests/test_combine.py::TestCheckShapeTileIDs::test_check_depths
+PASSED xarray/tests/test_combine.py::TestCheckShapeTileIDs::test_check_lengths
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_nested_concat
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join[outer-expected0]
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join[inner-expected1]
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join[left-expected2]
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join[right-expected3]
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_join_exact
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_empty_input
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_concat_multiple_dims
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_concat_name_symmetry
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_concat_one_dim_merge_another
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_invalid_hypercube_input
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_merge_one_dim_concat_another
+PASSED xarray/tests/test_combine.py::TestNestedCombine::test_combine_concat_over_redundant_nesting
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_by_coords
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join[outer-expected0]
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join[inner-expected1]
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join[left-expected2]
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join[right-expected3]
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_coords_join_exact
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_leaving_bystander_dimensions
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_by_coords_previously_failed
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_by_coords_still_fails
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_combine_by_coords_no_concat
+PASSED xarray/tests/test_combine.py::TestCombineAuto::test_check_for_impossible_ordering
+PASSED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_still_fails
+PASSED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_order_by_appearance_not_coords
+PASSED xarray/tests/test_combine.py::TestAutoCombineDeprecation::test_auto_combine_with_concat_dim
+PASSED xarray/tests/test_combine.py::TestAutoCombineDeprecation::test_auto_combine_with_merge_and_concat
+PASSED xarray/tests/test_combine.py::TestAutoCombineDeprecation::test_auto_combine_with_coords
+PASSED xarray/tests/test_combine.py::TestAutoCombineDeprecation::test_auto_combine_without_coords
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim1-different]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim1-minimal]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim2-different]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_simple[dim2-minimal]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_2
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-different]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-minimal]
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_dim_precedence
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_data_vars
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_constant_index
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_size0
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_errors
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_join_kwarg
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_do_not_promote
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_dim_is_variable
+PASSED xarray/tests/test_concat.py::TestConcatDataset::test_concat_multiindex
+PASSED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_encoding
+PASSED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_join_kwarg
+XFAIL xarray/tests/test_combine.py::TestNestedCombine::test_nested_concat_too_many_dims_at_once
+FAILED xarray/tests/test_combine.py::TestCombineND::test_concat_once[new_dim]
+FAILED xarray/tests/test_combine.py::TestCombineND::test_concat_twice[new_dim]
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_nested_concat_along_new_dim
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_nested_merge - V...
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_auto_combine_2d
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_missing_data_new_dim
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_fill_value[fill_value0]
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_fill_value[2]
+FAILED xarray/tests/test_combine.py::TestNestedCombine::test_combine_nested_fill_value[2.0]
+FAILED xarray/tests/test_combine.py::TestCombineAuto::test_infer_order_from_coords
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_previously_failed
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_no_concat
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_fill_value[fill_value0]
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_fill_value[2]
+FAILED xarray/tests/test_combine.py::TestAutoCombineOldAPI::test_auto_combine_fill_value[2.0]
+FAILED xarray/tests/test_concat.py::test_concat_compat - AssertionError: exce...
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-different]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-minimal]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim1-all]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_coords_kwarg[dim2-all]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat - ValueErr...
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_autoalign
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_promote_shape
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[fill_value0]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[2]
+FAILED xarray/tests/test_concat.py::TestConcatDataset::test_concat_fill_value[2.0]
+FAILED xarray/tests/test_concat.py::TestConcatDataArray::test_concat - ValueE...
+FAILED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_lazy - V...
+FAILED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[fill_value0]
+FAILED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[2]
+FAILED xarray/tests/test_concat.py::TestConcatDataArray::test_concat_fill_value[2.0]
+============ 32 failed, 79 passed, 1 xfailed, 347 warnings in 5.76s ============
+

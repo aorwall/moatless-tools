@@ -104,12 +104,14 @@ class ActionAgent(BaseModel):
         system_prompt = self.generate_system_prompt()
         action_args = [action.args_schema for action in self.actions]
 
-        messages = self.message_generator.generate(node)
-        logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
         try:
+            messages = self.message_generator.generate(node)
+            logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
+
             completion_response = self._completion.create_completion(
                 messages, system_prompt=system_prompt, response_model=action_args
             )
+            node.completions["build_action"] = completion_response.completion
 
             if completion_response.structured_outputs:
                 node.action_steps = [
@@ -118,8 +120,6 @@ class ActionAgent(BaseModel):
                 ]
 
             node.assistant_message = completion_response.text_response
-
-            node.completions["build_action"] = completion_response.completion
         except Exception as e:
             node.terminal = True
             node.error = traceback.format_exc()

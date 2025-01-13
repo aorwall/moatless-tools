@@ -1,24 +1,28 @@
+import os
+import subprocess
+import tempfile
+import textwrap
+from unittest.mock import Mock
+
+import pytest
+from git import Repo
+
 from moatless.benchmark.swebench import setup_swebench_repo
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.file_context import FileContext, ContextFile
-from moatless.repository import FileRepository
 from moatless.repository.repository import InMemRepository
-from moatless.schema import FileWithSpans
-import pytest
-from unittest.mock import Mock, patch
-import textwrap
-import os
-import tempfile
-import subprocess
-from git import Repo
 
 
 def test_file_context_to_dict():
     repo_dir = setup_swebench_repo(instance_id="psf__requests-863")
     file_context = FileContext.from_dir(repo_dir, max_tokens=5000)
-    assert file_context.model_dump() == {"files": [], "max_tokens": 5000}
+    assert file_context.model_dump() == {
+        "files": [], 
+        "test_files": [],
+        "max_tokens": 5000
+    }
 
     file_context.add_span_to_context(
         file_path="requests/models.py", span_id="Request.register_hook"
@@ -39,6 +43,7 @@ def test_file_context_to_dict():
                 ],
             }
         ],
+        "test_files": [],
         "max_tokens": 5000,
     }
 
@@ -85,16 +90,16 @@ def test_to_prompt_string_outcommented_code_block_with_line_numbers():
     )
     module.append_children([codeblock1, codeblock2, codeblock3, codeblock4])
 
-    print(module.to_prompt(show_line_numbers=True))
+    print(f"\"{module.to_prompt(show_line_numbers=True)}\"")
 
     assert (
         module.to_prompt(show_line_numbers=True)
         == """      # ...
-2     
+     2	
       # ...
-6     
-7     # Regular comment
-8     # with linebreak
+     6	
+     7	# Regular comment
+     8	# with linebreak
       # ..."""
     )
 
@@ -142,9 +147,9 @@ def test_to_prompt():
     print(prompt)
 
     assert prompt.startswith("django/dispatch/dispatcher.py")
-    assert "1     import threading" in prompt
-    assert "9     def _make_id(target):" in prompt
-    assert "224   \n          # ... rest of the code" in prompt
+    assert "     1\timport threading" in prompt
+    assert "     9\tdef _make_id(target):" in prompt
+    assert "\n          # ... rest of the code" in prompt
 
 
 def test_generate_patch():
@@ -169,8 +174,8 @@ def test_generate_patch():
 
 
 def test_generate_one_line_patch():
-    original_content = "Content of file 1"
-    modified_content = "Modified content of file 1"
+    original_content = "Content of file 1\n"
+    modified_content = "Modified content of file 1\n"
 
     repo = InMemRepository({"file1.txt": original_content})
     context_file = ContextFile(file_path="file1.txt", repo=repo)
@@ -271,7 +276,7 @@ def test_contextfile_flow_verification():
 
 def test_context_file_model_dump():
     # Setup
-    repo = InMemRepository({"test_file.txt": "Original content"})
+    repo = InMemRepository({"test_file.txt": "Original content\n"})
 
     # Test without patch
     context_file = ContextFile(file_path="test_file.txt", spans=[], repo=repo)
@@ -285,7 +290,7 @@ def test_context_file_model_dump():
     }
 
     # Test with patch
-    context_file.apply_changes("Modified content")
+    context_file.apply_changes("Modified content\n")
     dump_with_patch = context_file.model_dump()
 
     assert dump_with_patch["file_path"] == "test_file.txt"
@@ -299,7 +304,7 @@ def test_context_file_model_dump():
 def test_file_context_model_dump():
     # Setup
     repo = InMemRepository(
-        {"file1.txt": "Content of file 1", "file2.txt": "Content of file 2"}
+        {"file1.txt": "Content of file 1\n", "file2.txt": "Content of file 2\n"}
     )
     file_context = FileContext(repo=repo)
 
@@ -432,3 +437,38 @@ def test_generate_full_patch():
                 ), f"Content of {file_name} does not match expected content after applying patch"
 
         print("Patch successfully applied and verified in a real Git repository")
+
+
+def test_context_file_status_indicators():
+    # Setup
+    repo = InMemRepository({"test_file.txt": "Original content\n"})
+    file_context = FileContext(repo=repo)
+    
+    # Add file and verify initial state
+    context_file = file_context.add_file("test_file.txt")
+    assert not context_file.was_edited
+    assert not context_file.was_viewed
+    
+    # Test editing
+    context_file.apply_changes("Modified content\n")
+    assert context_file.was_edited
+    
+    # Test viewing
+    context_file.add_line_span(1, 1)
+    assert context_file.was_edited
+    assert context_file.was_viewed
+    
+    # Test cloning - status indicators should not be copied
+    cloned_context = file_context.clone()
+    cloned_file = cloned_context.get_file("test_file.txt")
+    assert not cloned_file.was_edited
+    assert not cloned_file.was_viewed
+    
+    # Verify original still has its indicators
+    assert context_file.was_edited
+    assert context_file.was_viewed
+    
+    # Verify indicators are excluded from serialization
+    dump = context_file.model_dump()
+    assert "was_edited" not in dump
+    assert "was_viewed" not in dump

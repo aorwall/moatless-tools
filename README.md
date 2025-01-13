@@ -1,10 +1,16 @@
 # Moatless Tools
 Moatless Tools is a hobby project where I experiment with some ideas I have about how LLMs can be used to edit code in large existing codebases. I believe that rather than relying on an agent to reason its way to a solution, it is crucial to build good tools to insert the right context into the prompt and handle the response.
 
-_Right now I'm focusing on [moatless-tree-search](https://github.com/aorwall/moatless-tree-search), an extended version of moatless-tools that builds a tree structure of nodes with parallel solutions and uses tree search to find the optimal trajectory. The code in moatless-tools has been simplified and is now a streamlined version of this expanded codebase._
+_For the implementation used in the paper [SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement](https://arxiv.org/abs/2410.20285), please see [moatless-tree-search](https://github.com/aorwall/moatless-tree-search)._
 
 ## SWE-Bench
 I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas. 
+
+### Version 0.0.4: Deepseek V3
+With version 0.0.4 I get 30.7% solve rate (92 instances) using the open-source Deepseek V3 model. The most notable aspect of this is the extremely low cost - the entire evaluation run costs less than $4 ($0.0127 per instance), achieving **24 resolved instances per dollar spent**.
+
+* [Deepseek V3 evaluation results](https://experiments.moatless.ai/evaluations/moatless_tools_v4_deepseek_chat_3_temp_0_iter_20_fmt_react)  
+* [Claude 3.5 Sonnet v20241022 evaluation results](https://experiments.moatless.ai/evaluations/moatless_tools_v4_claude_3_5_sonnet_20241022_temp_0_iter_20_fmt_tool_call)
 
 ### Version 0.0.3: Claude 3.5 Sonnet v20241022
 With version 0.0.3 I get 38.3% solve rate with Claude 3.5 Sonnet v20241022. Average cost per instance is $0.30.

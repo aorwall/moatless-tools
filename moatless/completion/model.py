@@ -9,6 +9,28 @@ from pydantic import BaseModel, model_validator, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
+# Model costs per million tokens
+MODEL_COSTS = {
+    "claude-3-5-haiku-20241022": {
+        "input": 0.80,
+        "output": 4.0,
+        "cache": 0.08,
+        "cached_included": False
+    },
+    "claude-3-5-sonnet-20241022": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache": 0.30,
+        "cached_included": False
+    },
+    "deepseek/deepseek-chat": {
+        "input": 0.14,
+        "output": 0.28,
+        "cache": 0.014,
+        "cached_included": True
+    }
+}
+
 
 class Message(BaseModel):
     role: str = Field(..., description="The role of the sender")
@@ -57,6 +79,50 @@ class Usage(BaseModel):
     completion_tokens: int = 0
     prompt_tokens: int = 0
     cached_tokens: int = 0
+
+    def get_total_prompt_tokens(self, model: str) -> int:
+        """Get total prompt tokens based on model's token counting behavior."""
+        if model not in MODEL_COSTS:
+            return self.prompt_tokens
+        
+        if MODEL_COSTS[model]["cached_included"]:
+            # For models like deepseek where cached tokens are included in prompt_tokens
+            return self.prompt_tokens
+        else:
+            # For models like Claude where cached tokens are separate
+            return self.prompt_tokens + self.cached_tokens
+
+    def get_calculated_cost(self, model: str) -> float:
+        """Get the calculated cost based on instance token counts and model."""
+        if self.completion_cost > 0:
+            return self.completion_cost
+        return self.calculate_cost(
+            model,
+            self.prompt_tokens,
+            self.completion_tokens,
+            self.cached_tokens
+        )
+
+    @staticmethod
+    def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int, cached_tokens: int = 0) -> float:
+        """Calculate cost based on token counts and model."""
+        if model not in MODEL_COSTS:
+            return 0.0
+                
+        rates = MODEL_COSTS[model]
+        if rates["cached_included"]:
+            # For models like deepseek where cached tokens are included in prompt_tokens
+            # We need to subtract cached tokens from the input cost calculation
+            non_cached_tokens = prompt_tokens - cached_tokens
+            input_cost = non_cached_tokens * rates["input"] / 1_000_000
+            cache_cost = cached_tokens * rates["cache"] / 1_000_000 if cached_tokens else 0
+        else:
+            # For models like Claude where cached tokens are separate
+            input_cost = prompt_tokens * rates["input"] / 1_000_000
+            cache_cost = cached_tokens * rates["cache"] / 1_000_000 if cached_tokens else 0
+            
+        output_cost = completion_tokens * rates["output"] / 1_000_000
+        return input_cost + output_cost + cache_cost
 
     @classmethod
     def from_completion_response(
@@ -113,7 +179,8 @@ class Usage(BaseModel):
                 logger.debug(
                     f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
                 )
-                cost = 0
+                # Use our own cost calculation if litellm fails
+                cost = cls.calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
             except Exception as e:
                 logger.debug(
                     f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"

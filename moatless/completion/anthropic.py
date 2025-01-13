@@ -196,9 +196,16 @@ class AnthtropicCompletionModel(CompletionModel):
                     }
                 )
                 messages.append(
-                    self._create_user_message(
-                        tool_call_id, f"The response was invalid. Fix the errors: {e}"
-                    )
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "tool_use_id": tool_call_id,
+                                "content": f"<validation_error>\nThe response was invalid. Fix the errors: {e}\n</validation_error>",
+                                "type": "tool_result",
+                            }
+                        ],
+                    }
                 )
                 retry_count += 1
                 raise CompletionRejectError(
@@ -207,6 +214,7 @@ class AnthtropicCompletionModel(CompletionModel):
                     messages=messages,
                 ) from e
             except Exception as e:
+                logger.exception(f"Failed to get completion response")
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",
                     messages=messages,

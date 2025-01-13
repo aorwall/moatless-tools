@@ -1,4 +1,3 @@
-import pytest
 from moatless.completion.model import extract_json_from_message
 
 def test_extract_single_json_codeblock():

@@ -5,6 +5,7 @@ import re
 import time
 
 from moatless.codeblocks.module import Module
+from moatless.loop import AgenticLoop
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
 from moatless.search_tree import SearchTree
@@ -48,7 +49,7 @@ def get_moatless_instance(instance_id: str, split: str | None = None):
     if not _moatless_instances:
         load_moatless_datasets(split)
 
-    instance = _moatless_instances.get(split).get(instance_id)
+    instance = _moatless_instances.get(instance_id)
     if not instance:
         raise ValueError(f"Instance {instance_id} not found.")
 
@@ -371,6 +372,17 @@ def calculate_estimated_context_window(instance, results):
 
     return expected_changes, sum_tokens
 
+def read_agentic_loops(dir: str) -> list[AgenticLoop]:
+    loops = []
+    for root, _, files in os.walk(dir):
+        loop_path = os.path.join(root, "loop.json")
+        if not os.path.exists(loop_path):
+            continue
+
+        with open(loop_path) as f:
+            loop = AgenticLoop.from_file(loop_path)
+            loops.append(loop)
+    return loops
 
 def read_search_trees(dir: str) -> list[SearchTree]:
     search_trees = []

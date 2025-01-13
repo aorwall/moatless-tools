@@ -14,7 +14,6 @@ from moatless.completion.model import (
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.value_function.model import Reward
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -60,22 +59,16 @@ class FeedbackData(BaseModel):
 
 
 
-class Reward(StructuredOutput):
-    """A structured output for providing reward values and feedback for actions."""
-
-    class Config:
-        title = "ProvideReward"
+class Reward(BaseModel):
+    """Reward from value function."""
 
     explanation: Optional[str] = Field(
         default=None,
-        description="An explanation and the reasoning behind your decision.",
-    )
-    feedback: Optional[str] = Field(
-        None, description="Feedback to the alternative branch."
+        description="An explanation and the reasoning behind the decision.",
     )
     value: int = Field(
         ...,
-        description="A single integer value between -100 and 100 based on your confidence in the correctness of the action and its likelihood of resolving the issue",
+        description="Reward value.",
         ge=-100,
         le=100,
     )

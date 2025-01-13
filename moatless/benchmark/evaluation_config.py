@@ -47,6 +47,15 @@ DEEPSEEK_REACT_CONFIG = {
     "message_history": "react",
 }
 
+# Configuration for deepseek-chat with tool_call format
+GEMINI_FLASH_TOOL_CALL_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "gemini/gemini-2.0-flash-exp",
+    "response_format": "tool_call",
+    "message_history": "messages",
+    "thoughts_in_action": False,
+}
+
 # Configuration for GPT-4o-mini with tool_call format
 GPT4O_MINI_CONFIG = {
     **DEFAULT_CONFIG,
@@ -72,8 +81,17 @@ CLAUDE_35_SONNET_CONFIG = {
     "response_format": "tool_call",
     "message_history": "messages",
     "thoughts_in_action": False,
-    "split": "lite_and_verified_solvable",
 }
+
+# Configuration for GPT-4o with tool_call format
+CLAUDE_35_HAIKU_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "claude-3-5-haiku-20241022",
+    "response_format": "tool_call",
+    "message_history": "messages",
+    "thoughts_in_action": False,
+}
+
 
 
 # Configuration for single instance runs

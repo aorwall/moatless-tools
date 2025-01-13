@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,9 @@ class AgenticLoop(BaseModel):
     max_cost: Optional[float] = Field(
         None, description="The maximum cost spent on tokens before finishing."
     )
+    event_handlers: List[Callable] = Field(
+        default_factory=list, description="Event handlers for loop events", exclude=True
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -41,6 +45,7 @@ class AgenticLoop(BaseModel):
         message: str,
         file_context: Optional[FileContext] = None,
         repository: Repository | None = None,
+        runtime: Optional[RuntimeEnvironment] = None,
         agent: Optional[ActionAgent] = None,
         metadata: Optional[Dict[str, Any]] = None,
         persist_path: Optional[str] = None,
@@ -48,12 +53,13 @@ class AgenticLoop(BaseModel):
         max_cost: Optional[float] = None,
     ) -> "AgenticLoop":
         """Create a new AgenticLoop instance."""
+
         if not file_context:
-            file_context = FileContext(repo=repository)
+            file_context = FileContext(repo=repository, runtime=runtime)
 
         root = Node(
             node_id=0,
-            message=message,
+            user_message=message,
             file_context=file_context,
         )
 
@@ -70,8 +76,10 @@ class AgenticLoop(BaseModel):
         """Run the agentic loop until completion or max iterations."""
         self.assert_runnable()
 
-        current_node = self.root
+        current_node = self.get_last_node()
         self.log(logger.info, generate_ascii_tree(self.root))
+
+        self.emit_event("loop_started", {})
 
         while not self.is_finished():
             total_cost = self.total_usage().completion_cost
@@ -94,9 +102,32 @@ class AgenticLoop(BaseModel):
                 self.agent.run(current_node)
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, current_node))
+
+                # Emit iteration event
+                self.emit_event(
+                    "loop_iteration",
+                    {
+                        "iteration": len(self.root.get_all_nodes()),
+                        "total_cost": total_cost,
+                        "current_node_id": current_node.node_id,
+                        "total_nodes": len(self.root.get_all_nodes()),
+                    },
+                )
+
             except RuntimeError as e:
                 self.log(logger.error, f"Runtime error: {e.message}")
+                self.emit_event("loop_error", {"error": str(e)})
                 break
+
+        self.emit_event(
+            "loop_completed",
+            {
+                "total_iterations": len(self.root.get_all_nodes()),
+                "total_cost": self.total_usage().completion_cost,
+            },
+        )
+
+        return self.get_last_node()
 
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
@@ -127,6 +158,12 @@ class AgenticLoop(BaseModel):
     def get_last_node(self) -> Node:
         """Get the last node in the action sequence."""
         return self.root.get_all_nodes()[-1]
+
+    def get_node_by_id(self, node_id: int) -> Node | None:
+        return next(
+            (node for node in self.root.get_all_nodes() if node.node_id == node_id),
+            None,
+        )
 
     def total_usage(self) -> Usage:
         """Calculate total token usage across all nodes."""
@@ -234,19 +271,26 @@ class AgenticLoop(BaseModel):
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the AgenticLoop."""
         # Get all fields except the ones we'll handle separately
-        data = {
-            field: getattr(self, field)
-            for field in self.model_fields
-            if field not in ["root", "agent", "persist_path"]
-        }
+        data = super().model_dump(exclude={"event_handlers", "agent", "root"})
 
-        # Remove persist_path if it exists
         data.pop("persist_path", None)
-
-        # Add agent
         data["agent"] = self.agent.model_dump(**kwargs)
-
-        # Add root last
         data["nodes"] = self.root.dump_as_list(**kwargs)
 
         return data
+
+    def add_event_handler(self, handler: Callable):
+        """Add an event handler for loop events."""
+        self.event_handlers.append(handler)
+
+    def emit_event(self, event_type: str, data: dict):
+        """Emit an event to all registered handlers."""
+        logger.info(f"Emit event {event_type}")
+        for handler in self.event_handlers:
+            handler(
+                {
+                    "event_type": event_type,
+                    "data": data,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )

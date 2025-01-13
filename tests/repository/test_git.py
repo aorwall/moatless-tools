@@ -1,6 +1,6 @@
-import os
 import pytest
 from git import Repo
+
 from moatless.repository.git import GitRepository
 
 

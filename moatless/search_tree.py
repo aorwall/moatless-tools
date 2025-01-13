@@ -152,7 +152,7 @@ class SearchTree(BaseModel):
         )
 
     @classmethod
-    def model_validate(cls, obj: Any, repository: Repository | None = None):
+    def model_validate(cls, obj: Any, repository: Repository | None = None, runtime: RuntimeEnvironment | None = None):
         if isinstance(obj, dict):
             obj = obj.copy()
 
@@ -204,13 +204,6 @@ class SearchTree(BaseModel):
                 repository=repository,
                 code_index=code_index,
                 runtime=runtime,
-            )
-
-        if "feedback_generator" in data and isinstance(
-            data["feedback_generator"], dict
-        ):
-            data["feedback_generator"] = BaseFeedbackGenerator.model_validate(
-                data["feedback_generator"]
             )
 
         return cls.model_validate(data, repository)
@@ -552,9 +545,6 @@ class SearchTree(BaseModel):
         if not self.agent.actions:
             raise RuntimeError("SearchTree agent must have actions.")
 
-        # if self.root.file_context._repo is None:
-        #    raise ValueError("SearchTree root node file context must have a repository.")
-
         return True
 
     @classmethod
@@ -593,7 +583,6 @@ class SearchTree(BaseModel):
                 node_id=0,
                 max_expansions=max_expansions,
                 user_message=message,
-                reward=Reward(value=100),
                 file_context=file_context,
             )
 

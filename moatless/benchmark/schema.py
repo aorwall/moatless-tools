@@ -10,11 +10,11 @@ from moatless.agent.settings import AgentSettings
 from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Usage
-from moatless.discriminator import Discriminator
-from moatless.feedback.feedback import FeedbackGenerator
+from moatless.discriminator.base import BaseDiscriminator
+from moatless.feedback import BaseFeedbackGenerator
 from moatless.schema import MessageHistoryType
-from moatless.selector.selector import Selector
-from moatless.value_function.base import ValueFunction
+from moatless.selector import BaseSelector
+from moatless.value_function.base import BaseValueFunction
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -70,24 +70,23 @@ class TreeSearchSettings(BaseModel):
     )
 
     agent_settings: AgentSettings = Field(
-        ..., description="Settings for creating the agent"
+        ...,
+        description="Settings for creating the agent"
     )
 
-    selector: Optional[Selector] = Field(
-        default=None, description="Custom selector for tree search"
-    )
+    selector: Optional[BaseSelector] = Field(default=None, description="Custom selector for tree search")
 
-    value_function: Optional[ValueFunction] = Field(
+    value_function: Optional[BaseValueFunction] = Field(
         None,
         description="The value function to use for the tree search.",
     )
 
-    discriminator: Optional[Discriminator] = Field(
+    discriminator: Optional[BaseDiscriminator] = Field(
         None,
         description="The discriminator to use for the tree search.",
     )
 
-    feedback_generator: Optional[FeedbackGenerator] = Field(
+    feedback_generator: Optional[BaseFeedbackGenerator] = Field(
         None,
         description="The feedback generator to use for the tree search.",
     )
@@ -204,11 +203,10 @@ class Evaluation(BaseModel):
     instances: List[EvaluationInstance] = Field(default_factory=list)
 
     def get_instance(self, instance_id: str) -> EvaluationInstance | None:
-        return next(
-            instance
-            for instance in self.instances
-            if instance.instance_id == instance_id
-        )
+        for instance in self.instances:
+            if instance.instance_id == instance_id:
+                return instance
+        return None
 
 
 class EvaluationDatasetSplit(BaseModel):

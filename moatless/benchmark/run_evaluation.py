@@ -89,21 +89,20 @@ def setup_loggers(logs_dir: str):
 
     return console_logger, file_logger
 
-
 def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
     """Load a dataset split from the datasets directory."""
+    current_dir = os.getcwd()
+    datasets_dir = os.path.join(current_dir, "datasets")
     dataset_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "datasets",
+        datasets_dir,
         f"{dataset_name}_dataset.json",
     )
     if not os.path.exists(dataset_path):
-        return None
+        raise FileNotFoundError(f"Dataset path '{dataset_path}' not found")
 
     with open(dataset_path) as f:
         data = json.load(f)
         return EvaluationDatasetSplit(**data)
-
 
 class SimpleEvaluationMonitor:
     def __init__(self, repository, evaluation, console_logger, file_logger):
@@ -117,7 +116,7 @@ class SimpleEvaluationMonitor:
         self.logger = file_logger
 
         # Load initial instances
-        for instance in self.repository.list_instances(self.evaluation.evaluation_name):
+        for instance in self.evaluation.instances:
             self.instances_data[instance.instance_id] = instance
 
         self._log_settings()
@@ -161,6 +160,8 @@ class SimpleEvaluationMonitor:
             self.console.info(line)
             self.logger.info(line)
 
+
+
     def handle_event(self, event):
         """Handle evaluation events by logging them"""
         event_type = event.event_type
@@ -173,16 +174,8 @@ class SimpleEvaluationMonitor:
             self.logger.info("Evaluation started")
             return
 
-        if not instance_id and event_type != "evaluation_started":
-            self.console.warning(f"Instance ID not found in event data: {data}")
-            self.logger.warning(f"Instance ID not found in event data: {data}")
-            return
-
-        # Load/reload instance from repository to get latest state
-        instance = self.repository.load_instance(
-            self.evaluation.evaluation_name, instance_id
-        )
-        if instance:
+        if instance_id:
+            instance = self.evaluation.get_instance(instance_id)
             self.instances_data[instance_id] = instance
 
             if event_type == "instance_started":
@@ -344,7 +337,7 @@ def print_config(config: dict, console_logger: logging.Logger):
     console_logger.info("\n" + "=" * 50 + "\n")
 
 
-async def run_evaluation(config: dict):
+def run_evaluation(config: dict):
     """Run evaluation using provided configuration"""
 
     evaluations_dir = os.getenv("MOATLESS_DIR", "./evals")
@@ -400,6 +393,9 @@ async def run_evaluation(config: dict):
             file_logger.error(f"Dataset split '{config['split']}' not found")
             sys.exit(1)
         instance_ids = dataset.instance_ids
+
+    if not instance_ids:
+        raise ValueError("No instance IDs provided")
 
     model_settings = CompletionModel(
         model=config["model"],
@@ -460,57 +456,56 @@ async def run_evaluation(config: dict):
 
     try:
         # Run evaluation
-        await loop.run_in_executor(
-            ThreadPoolExecutor(),
-            lambda: runner.run_evaluation(instance_ids=instance_ids),
-        )
+        runner.run_evaluation(instance_ids=instance_ids)
+        
         # Log final summary
         monitor.log_final_summary()
     except Exception as e:
         error_msg = f"Fatal error in evaluation: {str(e)}"
         console_logger.error(error_msg)
         file_logger.error(error_msg, exc_info=True)
-        sys.exit(1)
-
+        raise e 
+        
 
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
         description="Run evaluation with specified configuration"
     )
+    
+    # Base config selection
     parser.add_argument(
         "--config",
         choices=list(CONFIG_MAP.keys()),
         default="default",
         help="Configuration preset to use",
     )
-    parser.add_argument("--split", help="Dataset split to use (overrides config)")
-    parser.add_argument(
-        "--instance-ids",
-        nargs="+",
-        help="Specific instance IDs to evaluate (overrides split)",
-    )
+    
+    # Model settings
     parser.add_argument("--model", help="Model to use (overrides config)")
-    parser.add_argument(
-        "--num-workers", type=int, help="Number of workers (overrides config)"
-    )
-    parser.add_argument(
-        "--max-iterations", type=int, help="Max iterations (overrides config)"
-    )
-    parser.add_argument(
-        "--max-expansions", type=int, help="Max expansions (overrides config)"
-    )
-    parser.add_argument(
-        "--max-cost", type=float, help="Max cost in dollars (overrides config)"
-    )
-    parser.add_argument(
-        "--evaluation-name", help="Name for this evaluation run (overrides config)"
-    )
-    parser.add_argument(
-        "--rerun-errors",
-        action="store_true",
-        help="Rerun instances that previously errored",
-    )
+    parser.add_argument("--api-key", help="API key for the model")
+    parser.add_argument("--base-url", help="Base URL for the model API")
+    parser.add_argument("--response-format", choices=["tool_call", "react"], help="Response format for the model")
+    parser.add_argument("--thoughts-in-action", action="store_true", help="Enable thoughts in action")
+    parser.add_argument("--temperature", type=float, help="Temperature for model sampling")
+    
+    # Dataset settings
+    parser.add_argument("--split", help="Dataset split to use (overrides config)")
+    parser.add_argument("--instance-ids", nargs="+", help="Specific instance IDs to evaluate (overrides split)")
+    
+    # Tree search settings
+    parser.add_argument("--max-iterations", type=int, help="Max iterations (overrides config)")
+    parser.add_argument("--max-expansions", type=int, help="Max expansions (overrides config)")
+    parser.add_argument("--max-cost", type=float, help="Max cost in dollars (overrides config)")
+    
+    # Runner settings
+    parser.add_argument("--num-workers", type=int, help="Number of workers (overrides config)")
+    parser.add_argument("--message-history", choices=["messages", "summary", "react"], help="Message history type")
+    
+    # Evaluation settings
+    parser.add_argument("--evaluation-name", help="Name for this evaluation run (overrides config)")
+    parser.add_argument("--rerun-errors", action="store_true", help="Rerun instances that previously errored")
+    
     return parser.parse_args()
 
 
@@ -525,6 +520,16 @@ def get_config_from_args(args):
         config["instance_ids"] = args.instance_ids
     if args.model:
         config["model"] = args.model
+    if args.api_key:
+        config["api_key"] = args.api_key
+    if args.base_url:
+        config["base_url"] = args.base_url
+    if args.response_format:
+        config["response_format"] = args.response_format
+    if args.thoughts_in_action:
+        config["thoughts_in_action"] = True
+    if args.temperature is not None:
+        config["temperature"] = args.temperature
     if args.num_workers is not None:
         config["num_workers"] = args.num_workers
     if args.max_iterations is not None:
@@ -533,6 +538,8 @@ def get_config_from_args(args):
         config["max_expansions"] = args.max_expansions
     if args.max_cost is not None:
         config["max_cost"] = args.max_cost
+    if args.message_history:
+        config["message_history"] = args.message_history
     if args.evaluation_name:
         config["evaluation_name"] = args.evaluation_name
     if args.rerun_errors:
@@ -547,12 +554,5 @@ if __name__ == "__main__":
 
     # Get configuration
     config = get_config_from_args(args)
-
-    # Set up asyncio loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        loop.run_until_complete(run_evaluation(config))
-    finally:
-        loop.close()
+    run_evaluation(config)
+    

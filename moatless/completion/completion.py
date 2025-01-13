@@ -329,23 +329,21 @@ class CompletionModel(BaseModel):
     @classmethod
     def model_validate(cls, obj):
         if isinstance(obj, dict) and "response_format" in obj:
-            if "claude-3-5" in obj["model"]:
-                from moatless.completion.anthropic import AnthtropicCompletionModel
-
-                return AnthtropicCompletionModel(**obj)
-
             response_format = LLMResponseFormat(obj["response_format"])
             obj["response_format"] = response_format
 
+            if response_format == LLMResponseFormat.REACT:
+                from moatless.completion.react import ReActCompletionModel
+                return ReActCompletionModel(**obj)
+                
+            if "claude-3-5" in obj["model"]:
+                from moatless.completion.anthropic import AnthtropicCompletionModel
+                return AnthtropicCompletionModel(**obj)
+            
             if response_format == LLMResponseFormat.TOOLS:
                 from moatless.completion.tool_call import ToolCallCompletionModel
-
                 return ToolCallCompletionModel(**obj)
-            elif response_format == LLMResponseFormat.REACT:
-                from moatless.completion.react import ReActCompletionModel
-
-                return ReActCompletionModel(**obj)
-
+           
         return cls(**obj)
 
     @model_validator(mode="after")

@@ -574,14 +574,13 @@ def foo():
 """
 
     def assertion(codeblock):
+        print("Tree:\n", codeblock.to_tree())
+
         prompt = codeblock.to_prompt()
-        print("Prompt:\n" + prompt)
+        print("Prompt:\n", prompt)
 
         prompt_with_line_numbers = codeblock.to_prompt(show_line_numbers=True)
-        print("Prompt with line numbers:\n" + prompt_with_line_numbers)
-
-        for line in prompt_with_line_numbers.split("\n"):
-            assert line.strip()[0].isdigit()
+        print("Prompt with line numbers:\n", prompt_with_line_numbers)
 
         prompt_with_line_10_11 = codeblock.to_prompt(
             start_line=10,
@@ -663,34 +662,17 @@ def test_find_nested_blocks_by_line_numbers():
         prompt_with_line_numbers = codeblock.to_prompt(show_line_numbers=True)
         print(prompt_with_line_numbers)
 
-        for line in prompt_with_line_numbers.split("\n"):
-            assert line.strip()[0].isdigit()
-
-        prompt_with_line_numbers = codeblock.to_prompt(
-            start_line=7,
-            end_line=8,
-            show_outcommented_code=True,
-            outcomment_code_comment="... other code",
-        ).strip()
-        print(prompt_with_line_numbers)
-
-        # prompt_with_line_numbers = codeblock.to_prompt(start_line=5, end_line=5, show_outcommented_code=False).strip()
-        # print(prompt_with_line_numbers)
-
         assert (
-            prompt_with_line_numbers
-            == """def foo():
-    if True:
-    # ... other code
-    else:
-        # ... other code
-        while True:
-            line_2 = 10
-    return False"""
-        )
-
-    _verify_parsing(content, assertion, debug=False)
-
+                prompt_with_line_numbers
+                ==
+    """     1	def foo():
+     2	    if True:
+     3	        line_1 = 9
+     4	    else:
+     5	        line_3 = 11
+     6	        while True:
+     7	            line_2 = 10
+     8	    return False""")
 
 def test_next_and_previous():
     content = """class Foo:

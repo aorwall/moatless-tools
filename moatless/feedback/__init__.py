@@ -1,1 +1,1 @@
-from moatless.feedback.feedback import FeedbackGenerator
+from moatless.feedback.base import BaseFeedbackGenerator
