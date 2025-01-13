@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional, Type, ClassVar
+from fnmatch import fnmatch
+from typing import List, Optional, Tuple, Type, ClassVar
 
 from pydantic import Field, model_validator
 
@@ -45,11 +46,24 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
+    def short_summary(self) -> str:
+        param_str = f"code_snippet={self.code_snippet}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        return f"{self.name}({param_str})"
+
 
 class FindCodeSnippet(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
 
-    def _search_for_context(self, args: FindCodeSnippetArgs) -> FileContext:
+    max_hits: int = Field(
+        10,
+        description="The maximum number of search results to return. Default is 10.",
+    )
+
+    def _search_for_context(
+        self, args: FindCodeSnippetArgs
+    ) -> Tuple[FileContext, bool]:
         logger.info(
             f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})"
         )
@@ -58,16 +72,23 @@ class FindCodeSnippet(SearchBaseAction):
             search_text=args.code_snippet, file_pattern=args.file_pattern
         )
 
+        if args.file_pattern and len(matches) > 1:
+            matches = [
+                (file_path, line_num)
+                for file_path, line_num in matches
+                if fnmatch(file_path, args.file_pattern)
+            ]
+
         search_result_context = FileContext(repo=self._repository)
-        for file_path, start_line in matches:
+        for file_path, start_line in matches[: self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())
             end_line = start_line + num_lines - 1
 
             search_result_context.add_line_span_to_context(
-                file_path, start_line, end_line
+                file_path, start_line, end_line, add_extra=False
             )
 
-        return search_result_context
+        return search_result_context, False
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -75,14 +96,14 @@ class FindCodeSnippet(SearchBaseAction):
             FewShotExample.create(
                 user_input="I need to understand how the User class is structured in our authentication system. Let me find its definition.",
                 action=FindCodeSnippetArgs(
-                    scratch_pad="To find the User class definition, I'll search for the exact class declaration line 'class User(BaseModel):'",
+                    thoughts="To find the User class definition, I'll search for the exact class declaration line 'class User(BaseModel):'",
                     code_snippet="class User(BaseModel):",
                 ),
             ),
             FewShotExample.create(
                 user_input="The system seems to use a default timeout value. I should check where DEFAULT_TIMEOUT is defined in the configuration.",
                 action=FindCodeSnippetArgs(
-                    scratch_pad="To find the timeout configuration, I'll search for the exact variable declaration 'DEFAULT_TIMEOUT =' in config files",
+                    thoughts="To find the timeout configuration, I'll search for the exact variable declaration 'DEFAULT_TIMEOUT =' in config files",
                     code_snippet="DEFAULT_TIMEOUT =",
                     file_pattern="**/config/*.py",
                 ),
@@ -90,7 +111,7 @@ class FindCodeSnippet(SearchBaseAction):
             FewShotExample.create(
                 user_input="To understand how request processing works, I need to examine the _handlers dictionary in the processor service.",
                 action=FindCodeSnippetArgs(
-                    scratch_pad="To find the handlers mapping, I'll search for the exact dictionary declaration '_handlers =' in the processor service",
+                    thoughts="To find the handlers mapping, I'll search for the exact dictionary declaration '_handlers =' in the processor service",
                     code_snippet="_handlers =",
                     file_pattern="services/processor.py",
                 ),

@@ -1,9 +1,9 @@
 import pytest
-from unittest.mock import Mock
 
 from moatless.actions.create_file import CreateFile, CreateFileArgs
 from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository
+
 
 @pytest.fixture
 def repository():
@@ -30,6 +30,21 @@ def test_create_file_basic(repository, file_context):
     content = file_context.get_file("new_file.py").content
     assert "def greet" in content
     assert "diff" in observation.properties
+
+def test_create_file_already_exists(repository, file_context):
+    # First create a file
+    repository.save_file("existing.py", "# existing content")
+    
+    action = CreateFile(repository=repository)
+    args = CreateFileArgs(
+        path="existing.py",
+        file_text="# new content",
+        scratch_pad="Trying to create an existing file"
+    )
+    
+    observation = action.execute(args, file_context)
+    
+    assert observation.properties["fail_reason"] == "file_exists"
 
 def test_create_file_with_path(repository, file_context):
     action = CreateFile(repository=repository)

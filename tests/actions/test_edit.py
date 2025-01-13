@@ -1,11 +1,13 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from moatless.actions.edit import ClaudeEditTool, EditActionArguments
 from moatless.actions.model import Observation
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
-from moatless.repository.repository import Repository
+from moatless.repository.repository import InMemRepository
+
 
 @pytest.fixture
 def repo(tmp_path):
@@ -29,12 +31,11 @@ def add(a, b):
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
 
-    print(file_path)
     return "/src/test.py"
 
 @pytest.fixture
-def edit_action():
-    return ClaudeEditTool()
+def edit_action(repository):
+    return ClaudeEditTool(repository=repository)
 
 def test_view_command(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -64,15 +65,31 @@ def test_view_with_range(edit_action, file_context, test_file):
     assert "print(" in result.message
     assert "def add" not in result.message
 
+def test_create_command(edit_action, file_context, repo):
+    new_file = Path(repo.repo_path) / "new.py"
+    content = "print('New file')\n"
+    
+    args = EditActionArguments(
+        scratch_pad="Create a new file",
+        command="create",
+        path=str(new_file),
+        file_text=content
+    )
+    
+    result = edit_action.execute(args, file_context)
+    assert isinstance(result, Observation)
+    assert "File created successfully" in result.message
+
 def test_str_replace_command(edit_action, file_context, test_file):
     args = EditActionArguments(
         scratch_pad="Replace string in file",
         command="str_replace",
         path=str(test_file),
-        old_str='    print("Hello, World!")',
-        new_str='    print("Hi, World!")'
+        old_str='print("Hello, World!")',
+        new_str='print("Hi, World!")'
     )
-    
+
+    file_context.add_file(test_file, show_all_spans=True)
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
     assert result.properties.get("diff")
@@ -93,24 +110,43 @@ def test_insert_command(edit_action, file_context, test_file):
     assert "# This is a test function" in file_context.get_file(str(test_file)).content
 
 
+def test_file_not_found(edit_action, file_context, repo):
+    non_existent = Path(repo.repo_path) / "nonexistent.py"
+    args = EditActionArguments(
+        scratch_pad="Try to view non-existent file",
+        command="view",
+        path=str(non_existent)
+    )
+    
+    result = edit_action.execute(args, file_context)
+    assert isinstance(result, Observation)
+    assert result.expect_correction
+    assert "does not exist. Please provide a valid path" in result.message
 
-def test_str_replace_multiple_occurrences(edit_action, file_context, test_file):
+
+def test_str_replace_multiple_occurrences(edit_action, file_context, repo):
     # Modify file to have multiple occurrences
+    file_path = Path(repo.repo_path) / "src" / "test_multiple.py"
+    content = """print('test')
+print('test')
+"""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(content)
 
-    file_context.get_file(str(test_file)).apply_changes("print('test')\nprint('test')")
+    file_context.add_file("src/test_multiple.py", show_all_spans=True)
 
     args = EditActionArguments(
         scratch_pad="Replace string with multiple occurrences",
         command="str_replace",
-        path=str(test_file),
+        path="src/test_multiple.py",
         old_str="print('test')",
         new_str="print('updated')"
     )
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.expect_correction
     assert "Multiple occurrences" in result.message
+    assert result.properties.get("flags") == ["multiple_occurrences"]
 
 def test_invalid_insert_line(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -123,4 +159,6 @@ def test_invalid_insert_line(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.expect_correction 
+    assert result.expect_correction
+
+

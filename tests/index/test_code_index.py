@@ -1,14 +1,14 @@
+import pytest
+
 from moatless.benchmark.swebench import (
     setup_swebench_repo,
     create_index,
 )
 from moatless.benchmark.utils import get_moatless_instance, get_moatless_instances
 from moatless.index import IndexSettings, CodeIndex
-from moatless.index.settings import CommentStrategy
-from moatless.repository import GitRepository, FileRepository
-
-import pytest
 from moatless.index.code_index import is_test
+from moatless.index.settings import CommentStrategy
+from moatless.repository import FileRepository
 
 
 @pytest.mark.parametrize(

@@ -2,10 +2,10 @@ import logging
 import os
 from typing import Any, Dict, Optional, List
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field
 
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import UserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 
@@ -158,7 +158,7 @@ class GitRepository(FileRepository):
 
             try:
                 response = self.completion.create_text_completion(
-                    messages=[UserMessage(content=prompt)],
+                    messages=[ChatCompletionUserMessage(role="user", content=prompt)],
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:

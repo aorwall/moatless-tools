@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import Optional, List, Union, Tuple, Any, Type, ClassVar
+from typing import Optional, List, Tuple, Any, Type, ClassVar
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -9,16 +9,18 @@ from moatless.actions.model import (
     ActionArguments,
     FewShotExample,
     Observation,
+    RewardScaleEntry,
 )
 from moatless.codeblocks import CodeBlock, get_parser_by_path, PythonParser
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.file import do_diff, remove_duplicate_lines
 from moatless.repository.repository import Repository
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ class RequestCodeChangeArgs(ActionArguments):
     )
 
     class Config:
-        title = "RequestCodeChange"
+        title = "ApplyChange"
 
     @model_validator(mode="before")
     @classmethod
@@ -155,12 +157,22 @@ class RequestCodeChange(Action):
         completion_model: CompletionModel | None = None,
         **data,
     ):
+        import warnings
+
+        warnings.warn(
+            "RequestCodeChange is deprecated. Use StringReplace from moatless/actions/string_replace.py instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(**data)
         self._repository = repository
         self._completion_model = completion_model
 
     def execute(
-        self, args: RequestCodeChangeArgs, file_context: FileContext
+        self,
+        args: RequestCodeChangeArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         logger.info(
             f"RequestCodeChange: file_path={args.file_path}, start_line={args.start_line}, end_line={args.end_line}, change_type={args.change_type}"
@@ -208,7 +220,7 @@ class RequestCodeChange(Action):
             context_file = file_context.get_file(args.file_path)
             message = f"File {args.file_path} is not in context."
             if context_file.module:
-                message += f"At least one span must be added. Use RequestMoreContext to one ore more of the available spans: {self.span_id_list(context_file.module.span_ids)}"
+                message += f"At least one span must be added. Use ViewCode to one ore more of the available spans: {self.span_id_list(context_file.module.span_ids)}"
 
             return Observation(
                 message=message,
@@ -286,20 +298,6 @@ class RequestCodeChange(Action):
             observation.execution_completion = completion
             return observation
 
-    def create_replacement_block(
-        self, messages: List[Union[UserMessage, AssistantMessage]]
-    ) -> Tuple[str, Any]:
-        try:
-            replace_code, completion = self._completion_model.create_text_completion(
-                messages=messages,
-                system_prompt=self._system_prompt(),
-            )
-
-            return replace_code, completion
-        except Exception as e:
-            logger.exception(f"Error applying change. Retrying...")
-            raise e
-
     def _system_prompt(self) -> str:
         system_prompt = ROLE_PROMPT
 
@@ -344,7 +342,9 @@ class RequestCodeChange(Action):
             args.pseudo_code,
         )
 
-        messages.append(UserMessage(content=user_message))
+        from litellm.types.llms.openai import ChatCompletionUserMessage
+
+        messages.append(ChatCompletionUserMessage(role="user", content=user_message))
         response, completion = self._completion_model.create_text_completion(
             messages=messages,
             system_prompt=self._system_prompt(),
@@ -471,7 +471,7 @@ class RequestCodeChange(Action):
         self, context_file: ContextFile, args: RequestCodeChangeArgs
     ) -> Optional[str]:
         if not args.start_line:
-            message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the RequestMoreContext function."
+            message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the ViewCode function."
             return message
 
         if not args.end_line:
@@ -501,7 +501,7 @@ Please provide instructions for the code change again."""
                 and code_block.belongs_to_span
                 and code_block.belongs_to_span.span_id not in context_file.span_ids
             ):
-                return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the RequestMoreContext to add the correct line numbers or span ids to context."
+                return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the ViewCode to add the correct line numbers or span ids to context."
             # TODO: Handle if no code block is found
 
         code_lines = context_file.content.split("\n")
@@ -951,6 +951,63 @@ Please provide instructions for the code change again."""
             list_str += f" * {span_id}\n"
         return list_str
 
+    @classmethod
+    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+        criteria = super().get_evaluation_criteria(trajectory_length)
+        criteria.extend(
+            [
+                "Instruction Clarity: Ensure that instructions and pseudocode are clear and actionable.",
+                "Instruction Compliance: The git diff must *exactly* implement the provided pseudo_code. Identify any discrepancies, omissions, or additions. If discrepancies exist, you should lower the reward accordingly.",
+                "Code Modification Accuracy and Quality: Check for correct identification of code spans, accuracy of changes, syntax errors, logical flaws, unintended modifications, and unintended side effects.",
+                "Python-Specific Features Utilization: Assess whether the agent has appropriately utilized Python-specific features that enhance the solution.",
+                "Common Git Diff Issues and Unintended Changes: Check for issues such as incorrect line numbers, unintended additions or deletions, formatting errors, changes to unrelated parts of the code, and heavily penalize unintended changes.",
+                "Addressing Test Failures: Verify if the agent is properly addressing test failures from previous `RunTests` actions.",
+            ]
+        )
+        return criteria
+
+    @classmethod
+    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+        return cls.generate_reward_scale_entries(
+            [
+                (
+                    90,
+                    100,
+                    "The code change is optimal, with a perfect Git diff exactly matching the pseudo code, and requires no further changes.",
+                ),
+                (
+                    75,
+                    89,
+                    "The code change significantly advances the solution, with an accurate Git diff exactly matching the pseudo code,.",
+                ),
+                (
+                    50,
+                    74,
+                    "The code change is mostly correct but has minor issues or opportunities for optimization; the Git diff exactly matching the pseudo code,.",
+                ),
+                (
+                    25,
+                    49,
+                    "The code change is acceptable but has noticeable issues or is less effective than possible alternatives;",
+                ),
+                (
+                    0,
+                    24,
+                    "The code change has minimal impact or introduces minor negative consequences",
+                ),
+                (
+                    -49,
+                    -1,
+                    "The code change is inappropriate, unhelpful, or introduces new issues; the action did not result in any successful code changes. The Git diff does not match the pseud code and instructions, contains significant inaccuracies or shows no changes. Penalize attempts to modify non-existent code elements (hallucinations) based on severity.",
+                ),
+                (
+                    -100,
+                    -50,
+                    "The code change is counterproductive, causing significant setbacks or demonstrating persistent repetition without learning. The Git diff is severely flawed or indicates that no effective changes were made. Heavily penalize severe hallucinations or continuous attempts to modify non-existent code elements.",
+                ),
+            ]
+        )
+
     def model_dump(self, **kwargs):
         dump = super().model_dump(**kwargs)
         dump["completion_model"] = self._completion_model.model_dump(**kwargs)
@@ -971,7 +1028,7 @@ Please provide instructions for the code change again."""
             FewShotExample.create(
                 user_input="Add error handling to the process_payment method in the PaymentProcessor class",
                 action=RequestCodeChangeArgs(
-                    scratch_pad="We need to add try-catch blocks to handle potential payment processing errors.",
+                    thoughts="We need to add try-catch blocks to handle potential payment processing errors.",
                     file_path="payment/processor.py",
                     instructions="Add error handling to catch and handle payment processing exceptions",
                     pseudo_code="""try:
@@ -988,7 +1045,7 @@ except PaymentError as e:
             FewShotExample.create(
                 user_input="Add import for the logging module",
                 action=RequestCodeChangeArgs(
-                    scratch_pad="We need to add the logging import at the top of the file.",
+                    thoughts="We need to add the logging import at the top of the file.",
                     file_path="utils/helper.py",
                     instructions="Add import for the logging module",
                     pseudo_code="import logging",

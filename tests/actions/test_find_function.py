@@ -1,6 +1,9 @@
+from unittest.mock import Mock
+
 from moatless.actions.find_function import FindFunction, FindFunctionArgs
 from moatless.benchmark.swebench import create_repository, create_index
 from moatless.benchmark.utils import get_moatless_instance
+from moatless.completion import CompletionModel
 from moatless.file_context import FileContext
 
 
@@ -10,9 +13,10 @@ def test_find_function_init_method():
     repository = create_repository(instance)
     code_index = create_index(instance, repository)
     file_context = FileContext(repo=repository)
+    completion_model = CompletionModel(model="test")
 
     action = FindFunction(
-        repository=repository, code_index=code_index
+        repository=repository, code_index=code_index, completion_model=completion_model
     )
 
     action_args = FindFunctionArgs(
@@ -33,9 +37,10 @@ def test_find_function():
     repository = create_repository(instance)
     code_index = create_index(instance, repository)
     file_context = FileContext(repo=repository)
+    completion_model = CompletionModel(model="test")
 
     action = FindFunction(
-        repository=repository, code_index=code_index
+        repository=repository, code_index=code_index, completion_model=completion_model
     )
 
     action_args = FindFunctionArgs(

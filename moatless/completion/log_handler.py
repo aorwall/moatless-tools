@@ -28,8 +28,23 @@ class LogHandler(CustomLogger):
 
         log_entry = {"timestamp": now.isoformat(), "data": data}
 
+        # Check if instance_id exists in kwargs
+        instance_id = None
+        if (
+            "kwargs" in data
+            and "litellm_params" in data["kwargs"]
+            and "metadata" in data["kwargs"]["litellm_params"]
+        ):
+            instance_id = data["kwargs"]["litellm_params"]["metadata"].get(
+                "instance_id"
+            )
+
+        # Use instance_id directory if available, otherwise use default log_dir
+        log_path = f"{self.log_dir}/{instance_id}" if instance_id else self.log_dir
+        os.makedirs(log_path, exist_ok=True)
+
         try:
-            with open(f"{self.log_dir}/{timestamped_filename}", "a") as f:
+            with open(f"{log_path}/{timestamped_filename}", "a") as f:
                 f.write(json.dumps(log_entry, default=str, indent=4) + "\n")
         except Exception as e:
             logger.error(f"Failed to write log: {e}")

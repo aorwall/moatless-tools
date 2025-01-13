@@ -2,17 +2,22 @@ import logging
 from abc import ABC
 from typing import List, Optional, Type, Any, ClassVar, Tuple
 
-from pydantic import Field, PrivateAttr, BaseModel
+from litellm.types.llms.openai import (
+    ChatCompletionAssistantMessage,
+    ChatCompletionUserMessage,
+)
+from pydantic import Field, PrivateAttr, BaseModel, field_validator
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion import CompletionModel
-from moatless.completion.model import UserMessage, AssistantMessage, Completion
+from moatless.completion.model import Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 from moatless.repository.repository import Repository
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +40,7 @@ The previous messages will contain:
 
 3. Respond with the Identify Action:
    * Select and respond with the code sections that best match the search request
-   * Provide your analysis in the scratch_pad field
+   * Provide your analysis in the thoughts field
    * List the relevant file paths with start and end line numbers in the identified_spans field
 """
 
@@ -45,6 +50,14 @@ class SearchBaseArgs(ActionArguments, ABC):
         default=None,
         description="A glob pattern to filter search results to specific files or directories.",
     )
+
+    @field_validator("file_pattern")
+    @classmethod
+    def validate_file_pattern(cls, v):
+        if v:
+            if "," in v:
+                raise ValueError("File pattern cannot contain commas")
+        return v
 
 
 class IdentifiedSpans(BaseModel):
@@ -59,11 +72,11 @@ class IdentifiedSpans(BaseModel):
     )
 
 
-class Identify(ActionArguments):
+class Identify(StructuredOutput):
     """Identify if the provided search result is relevant to the reported issue."""
 
-    scratch_pad: str = Field(
-        ...,
+    thoughts: Optional[str] = Field(
+        None,
         description="Your thoughts and analysis on the search results and how they relate to the reported issue.",
     )
 
@@ -84,12 +97,16 @@ class SearchBaseAction(Action):
         8000,
         description="The maximum number of tokens allowed in the identified code sections.",
     )
+    max_identify_prompt_tokens: int = Field(
+        16000,
+        description="The maximum number of tokens allowed in the identify prompt.",
+    )
     max_hits: int = Field(
         10,
         description="The maximum number of search hits to display.",
     )
-    completion_model: Optional[CompletionModel] = Field(
-        None,
+    completion_model: CompletionModel = Field(
+        ...,
         description="The completion model used to identify relevant code sections in search results.",
     )
 
@@ -98,9 +115,9 @@ class SearchBaseAction(Action):
 
     def __init__(
         self,
-        repository: Repository | None = None,
+        repository: Repository = None,
         code_index: CodeIndex | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: CompletionModel = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)
@@ -108,7 +125,10 @@ class SearchBaseAction(Action):
         self._code_index = code_index
 
     def execute(
-        self, args: SearchBaseArgs, file_context: FileContext | None = None
+        self,
+        args: SearchBaseArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         if file_context is None:
             raise ValueError(
@@ -117,19 +137,33 @@ class SearchBaseAction(Action):
 
         properties = {"search_hits": [], "search_tokens": 0}
 
-        search_result_context = self._search_for_context(args)
+        search_result_context, alternative_suggestion = self._search_for_context(args)
 
         if search_result_context.is_empty():
             properties["fail_reason"] = "no_search_hits"
             return Observation(message="No search results found", properties=properties)
 
         properties["search_tokens"] = search_result_context.context_size()
+        properties["search_hits"] = search_result_context.model_dump(exclude_none=True)
 
         completion = None
+
         if (
-            search_result_context.context_size() > self.max_search_tokens
-            or search_result_context.span_count() > self.max_hits
+            search_result_context.span_count() == 1
+            and search_result_context.context_size() > self.max_identify_tokens
         ):
+            logger.warning(
+                f"{self.name}: Conext for {search_result_context.create_summary()} is too large ({search_result_context.context_size()} tokens)."
+            )
+            properties["fail_reason"] = "search_too_large"
+            return Observation(
+                message="Search too large. Found a single code section that is too large to view. Please refine the search query.",
+                properties=properties,
+            )
+        elif (
+            search_result_context.context_size() > self.max_search_tokens
+            and search_result_context.span_count() > 1
+        ) or search_result_context.span_count() > self.max_hits:
             logger.info(
                 f"{self.name}: Search too large. {properties['search_tokens']} tokens and {search_result_context.span_count()} hits, will ask for clarification."
             )
@@ -140,6 +174,14 @@ class SearchBaseAction(Action):
         span_count = search_result_context.span_count()
         search_result_str = f"Found {span_count} code sections."
 
+        # Apply previous changes to view context
+        # TODO: Refactor
+        for file in file_context.files:
+            if view_context.has_file(file.file_path) and file.patch:
+                view_context.get_file(file.file_path).set_patch(file.patch)
+
+        new_span_ids = file_context.add_file_context(view_context)
+
         if view_context.is_empty():
             search_result_str += (
                 "\n\nNone of the search results was relevant to the task."
@@ -147,20 +189,21 @@ class SearchBaseAction(Action):
             summary = "Didn't find any relevant code sections in the search results."
             message = search_result_str
         else:
-            summary = "Found relevant code sections in the search results."
-            search_result_str += "\n\nViewed relevant code:"
-            message = (
-                search_result_str
-                + "\n"
-                + view_context.create_prompt(
-                    show_span_ids=False,
-                    show_line_numbers=True,
-                    exclude_comments=False,
-                    show_outcommented_code=True,
-                )
+            viewed_str = "that has already been viewed" if not new_span_ids else ""
+
+            if alternative_suggestion:
+                summary = f"Did not find an exact match but found the following alternative suggestions {viewed_str}:\n{view_context.create_summary()}"
+            else:
+                summary = f"Found the following relevant code spans {viewed_str}:\n{view_context.create_summary()}"
+
+            message = "Found the following relevant code:\n"
+            message += view_context.create_prompt(
+                show_span_ids=False,
+                show_line_numbers=True,
+                exclude_comments=False,
+                show_outcommented_code=True,
             )
 
-        new_span_ids = file_context.add_file_context(view_context)
         properties["new_span_ids"] = new_span_ids
 
         logger.info(
@@ -174,10 +217,12 @@ class SearchBaseAction(Action):
             execution_completion=completion,
         )
 
-    def _search_for_context(self, args: SearchBaseArgs) -> FileContext:
+    def _search_for_context(self, args: SearchBaseArgs) -> Tuple[FileContext, bool]:
+        alternative_suggestion = False
         search_result = self._search(args)
         if not search_result.hits:
             search_result = self._search_for_alternative_suggestion(args)
+            alternative_suggestion = True
             logger.info(
                 f"{self.name}: No relevant search results found. Will use alternative suggestion with {search_result.hits} hits."
             )
@@ -191,7 +236,7 @@ class SearchBaseAction(Action):
                     hit.file_path, span.span_id, add_extra=True
                 )
 
-        return search_result_context
+        return search_result_context, alternative_suggestion
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         if not self.add_to_context:
@@ -237,6 +282,7 @@ class SearchBaseAction(Action):
             exclude_comments=False,
             show_outcommented_code=True,
             outcomment_code_comment="...",
+            max_tokens=self.max_identify_prompt_tokens,
         )
 
         content = "Search request:"
@@ -244,33 +290,36 @@ class SearchBaseAction(Action):
 
         content += "\n\nIdentify the relevant code sections in the search results to use them. "
         content += f"\n\n<search_results>\n{search_result_str}\n</search_result>\n"
-        identify_message = UserMessage(content=content)
+        identify_message = ChatCompletionUserMessage(role="user", content=content)
 
         messages = [identify_message]
         completion = None
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            identified_code, completion = self.completion_model.create_completion(
+            completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=IDENTIFY_SYSTEM_PROMPT,
                 response_model=Identify,
             )
             logger.info(
-                f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.\n{identified_code.identified_spans}"
+                f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
 
             view_context = FileContext(repo=self._repository)
-            if identified_code.identified_spans:
-                for identified_spans in identified_code.identified_spans:
-                    view_context.add_line_span_to_context(
-                        identified_spans.file_path,
-                        identified_spans.start_line,
-                        identified_spans.end_line,
-                        add_extra=True,
-                    )
-            else:
-                return view_context, completion
+            if not completion_response.structured_outputs:
+                logger.warning("No identified code in response")
+                return view_context, completion_response.completion
+
+            for identified_code in completion_response.structured_outputs:
+                if identified_code.identified_spans:
+                    for identified_spans in identified_code.identified_spans:
+                        view_context.add_line_span_to_context(
+                            identified_spans.file_path,
+                            identified_spans.start_line,
+                            identified_spans.end_line,
+                            add_extra=True,
+                        )
 
             tokens = view_context.context_size()
 
@@ -280,26 +329,106 @@ class SearchBaseAction(Action):
                 )
 
                 messages.append(
-                    AssistantMessage(content=identified_code.model_dump_json())
+                    ChatCompletionAssistantMessage(
+                        role="assistant", content=identified_code.model_dump_json()
+                    )
                 )
 
                 messages.append(
-                    UserMessage(
+                    ChatCompletionUserMessage(
+                        role="user",
                         content=f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_search_tokens} tokens. "
-                        f"Please identify a smaller subset of the most relevant code sections."
+                        f"Please identify a smaller subset of the most relevant code sections.",
                     )
                 )
             else:
                 logger.info(
                     f"Identified code sections are within the token limit ({tokens} tokens)."
                 )
-                return view_context, completion
+                return view_context, completion_response.completion
 
         # If we've exhausted all retries and still too large
         raise CompletionRejectError(
             f"Unable to reduce code selection to under {self.max_search_tokens} tokens after {MAX_RETRIES} attempts",
             last_completion=completion,
         )
+
+    @classmethod
+    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+        evaluation_criteria = super().get_evaluation_criteria(trajectory_length)
+        evaluation_criteria.extend(
+            [
+                "Query Relevance: Evaluate if the search query or parameters are well-defined and likely to find relevant code.",
+                "Search Scope Appropriateness: Check if the file patterns and class/function names narrow down the search effectively.",
+                "Relevance of Search Results: Assess whether the search results are directly related to the problem and useful for making progress.",
+                "Size of Search Results: Ensure that the code context provided is appropriately sized—not too large to overwhelm nor too small to be unhelpful.",
+            ]
+        )
+
+        return evaluation_criteria
+
+    @classmethod
+    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+        if trajectory_length <= 3:
+            return cls.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The search action is excellent, with well-defined parameters yielding only highly relevant results.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The search action is good, with reasonable parameters yielding relevant results.",
+                    ),
+                    (
+                        25,
+                        74,
+                        "The search action have issues with parameters or yields few or no relevant results.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks.",
+                    ),
+                ]
+            )
+        else:
+            return cls.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The search action significantly advances the solution, providing highly relevant and appropriately sized search results.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The search action contributes positively towards solving the problem, with relevant results and minor issues.",
+                    ),
+                    (
+                        50,
+                        74,
+                        "The search action is acceptable but may have issues with relevance or provides search results that are too large or too small.",
+                    ),
+                    (
+                        25,
+                        49,
+                        "The search action provides results that are not helpful due to relevance or size issues.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The search action has minimal impact, providing few relevant results.",
+                    ),
+                    (
+                        -50,
+                        -1,
+                        "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks.",
+                    ),
+                ]
+            )
 
     @classmethod
     def model_validate(cls, obj: Any) -> "SearchBaseAction":

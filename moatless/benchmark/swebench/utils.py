@@ -1,6 +1,7 @@
 import fcntl
 import logging
 import os
+import shutil
 from typing import Optional
 
 from moatless.benchmark.utils import (
@@ -121,6 +122,11 @@ def setup_swebench_repo(
         base_dir=repo_base_dir,
     )
 
+def instance_repo_path(instance_id: str, repo_base_dir: str | None = None) -> str:
+    """Get the path to the repository for an instance."""
+    if repo_base_dir is None:
+        repo_base_dir = os.getenv("MOATLESS_REPO_DIR", "./repos")
+    return os.path.join(repo_base_dir, f"swe-bench_{instance_id}")
 
 def create_repository(
     instance: Optional[dict] = None,
@@ -136,6 +142,9 @@ def create_repository(
 
     if not repo_base_dir:
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
+    
+    # Convert to absolute path
+    repo_base_dir = os.path.abspath(repo_base_dir)
 
     # Ensure the directory exists
     os.makedirs(os.path.dirname(repo_base_dir), exist_ok=True)
@@ -144,19 +153,36 @@ def create_repository(
     os.makedirs(repo_base_dir, exist_ok=True)
 
     repo_dir_name = get_repo_dir_name(instance["repo"])
-    local_repo_path = f"{repo_base_dir}/swe-bench_{repo_dir_name}"
+    local_repo_path = os.path.join(repo_base_dir, f"swe-bench_{repo_dir_name}")
     lock_file_path = f"{local_repo_path}.lock"
 
     # Ensure the directory for the lock file exists
     os.makedirs(os.path.dirname(lock_file_path), exist_ok=True)
 
-    repo_path = f"{repo_base_dir}/swe-bench_{instance['instance_id']}"
+    repo_path = instance_repo_path(instance["instance_id"], repo_base_dir)
     if os.path.exists(repo_path):
         try:
-            logger.info(f"Initializing GitRepository from existing repo {repo_path}")
+            # Check if the commit exists in the repo
+            import subprocess
+
+            result = subprocess.run(
+                ["git", "cat-file", "-e", instance["base_commit"]],
+                cwd=repo_path,
+                capture_output=True,
+                check=True,
+            )
+            logger.info(
+                f"Found existing repo with commit {instance['base_commit']} at {repo_path}"
+            )
             return GitRepository(repo_path=repo_path)
+        except subprocess.CalledProcessError:
+            logger.warning(
+                f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}"
+            )
+            shutil.rmtree(repo_path)
         except Exception as e:
-            logging.warning(f"Error initializing GitRepository: {e}")
+            logging.warning(f"Error checking repository: {e}")
+            shutil.rmtree(repo_path)
 
     with open(lock_file_path, "w") as lock_file:
         logging.debug(f"Acquiring lock for {local_repo_path}")
@@ -173,7 +199,8 @@ def create_repository(
         logging.debug(f"Releasing lock for {local_repo_path}")
         fcntl.flock(lock_file, fcntl.LOCK_UN)
 
-    repo_url = f"file://{local_repo_path}"
+    # Use absolute path for file URL
+    repo_url = f"file://{os.path.abspath(local_repo_path)}"
 
     return GitRepository.from_repo(
         git_repo_url=repo_url, repo_path=repo_path, commit=instance["base_commit"]

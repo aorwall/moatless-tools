@@ -1,8 +1,8 @@
-import pytest
-from moatless.repository.repository import InMemRepository
-from moatless.repository.file import FileRepository
-import tempfile
 import os
+import tempfile
+
+from moatless.repository.file import FileRepository
+from moatless.repository.repository import InMemRepository
 
 
 def test_inmem_repository_dump_and_validate():

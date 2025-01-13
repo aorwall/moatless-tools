@@ -1,16 +1,15 @@
-import json
-from typing import Literal, Union, Type
+from typing import Union, Type
 
 import pytest
 from instructor import OpenAISchema
 from pydantic import Field
 
 from moatless.actions.action import Action, ActionArguments
-from moatless.actions.finish import Finish, FinishArgs
 from moatless.actions.code_change import RequestCodeChange, RequestCodeChangeArgs
-from moatless.actions.view_code import ViewCode, ViewCodeArgs
 from moatless.actions.find_function import FindFunction
+from moatless.actions.finish import Finish, FinishArgs
 from moatless.actions.semantic_search import SemanticSearch, SemanticSearchArgs
+from moatless.actions.view_code import ViewCode, ViewCodeArgs
 
 
 def test_action_schema():

@@ -1,11 +1,9 @@
 import os
 
-from llama_index.core.base.embeddings.base import BaseEmbedding
-
 from moatless.index.retry_voyage_embedding import VoyageEmbeddingWithRetry
 
 
-def get_embed_model(model_name: str) -> BaseEmbedding:
+def get_embed_model(model_name: str) -> "BaseEmbedding":
     if model_name.startswith("voyage"):
         try:
             from llama_index.embeddings.voyageai import VoyageEmbedding
