@@ -224,7 +224,8 @@ class ActionAgent(BaseModel):
                         "InsertLinesArgs",
                     ]:
                         prompt += f"\nTask: {example.user_input}"
-                        prompt += f"\nThought: {thoughts}\n"
+                        if self.thoughts_in_action:
+                            prompt += f"\nThought: {thoughts}\n"
                         prompt += f"Action: {str(example.action.name)}\n"
 
                         if example.action.__class__.__name__ == "StringReplaceArgs":

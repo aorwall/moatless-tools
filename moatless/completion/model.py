@@ -248,6 +248,8 @@ class Completion(BaseModel):
         retries: int | None = None,
         flags: list[str] | None = None,
     ) -> Optional["Completion"]:
+        if completion_response is None:
+            raise ValueError("Completion response is None")
         if isinstance(completion_response, BaseModel):
             response = completion_response.model_dump()
         elif isinstance(completion_response, dict):

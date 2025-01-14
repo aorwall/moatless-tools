@@ -84,16 +84,27 @@ class CodeModificationMixin:
 
         file_context.run_tests()
 
-        response_msg = f"Running tests for the following files:\n"
-        for test_file in file_context.test_files:
-            response_msg += f"* {test_file.file_path}\n"
+        response_msg = ""
+        if not file_context.test_files:
+            response_msg = "No test files found. Consider adding tests to verify the changes.\n"
+        elif file_context.has_test_patch():
+            response_msg = "Running tests for the updated test files:\n"
+        else:
+            response_msg = "Running existing tests to verify no regressions."
+
+        if file_context.test_files:
+            for test_file in file_context.test_files:
+                response_msg += f"* {test_file.file_path}\n"
 
         failure_details = file_context.get_test_failure_details()
         if failure_details:
             response_msg += f"\n{failure_details}"
-
+        
         summary = f"\n{file_context.get_test_summary()}"
         response_msg += summary
+
+        if not failure_details and not file_context.has_test_patch():
+            response_msg += f"\nConsider adding new test cases for the changes."
 
         return response_msg
 

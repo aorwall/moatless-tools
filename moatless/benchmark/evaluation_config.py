@@ -45,6 +45,7 @@ DEEPSEEK_REACT_CONFIG = {
     "model": "deepseek/deepseek-chat",
     "response_format": "react",
     "message_history": "react",
+    "thoughts_in_action": True,
 }
 
 # Configuration for deepseek-chat with tool_call format
@@ -53,7 +54,7 @@ GEMINI_FLASH_TOOL_CALL_CONFIG = {
     "model": "gemini/gemini-2.0-flash-exp",
     "response_format": "tool_call",
     "message_history": "messages",
-    "thoughts_in_action": False,
+    "thoughts_in_action": True,
 }
 
 # Configuration for GPT-4o-mini with tool_call format
@@ -72,6 +73,22 @@ GPT4O_CONFIG = {
     "response_format": "tool_call",
     "message_history": "messages",
     "thoughts_in_action": True,
+}
+
+O1_PREVIEW_CONFIG= {
+    **DEFAULT_CONFIG,
+    "model": "o1-preview-2024-09-12",
+    "response_format": "react",
+    "message_history": "react",
+    "thoughts_in_action": False,
+}
+
+O1_MINI_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "o1-mini-2024-09-12",
+    "response_format": "react",
+    "message_history": "react",
+    "thoughts_in_action": False,
 }
 
 # Configuration for GPT-4o with tool_call format

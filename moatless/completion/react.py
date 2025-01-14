@@ -34,15 +34,15 @@ class ReActCompletionModel(CompletionModel):
         system_prompt += dedent(f"""\n# Response format
 
 Use the following format:
-
-Thought: You should always think about what to do
+{'' if not self.thoughts_in_action else '''
+Thought: You should always think about what to do'''}
 Action: The action to take followed by the input arguments based on the schema below
 
 Use one of the following actions and provide input arguments matching the schema.
                             
 {'\n\n'.join(action_input_schemas)}
 
-Important: Do not include multiple Thought-Action blocks. Do not include code blocks or additional text outside of this format.
+Important: Do not include multiple{' Thought-' if self.thoughts_in_action else ''} Action blocks. Do not include code blocks or additional text outside of this format.
 """)
 
         messages.insert(0, {"role": "system", "content": system_prompt})
@@ -66,14 +66,21 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             try:
                 self._validate_react_format(response_text)
 
-                thought_start = response_text.find("Thought:")
-                action_start = response_text.find("Action:")
+                thought = ""
+                if self.thoughts_in_action:
+                    thought_start = response_text.find("Thought:")
+                    action_start = response_text.find("Action:")
 
-                if thought_start == -1 or action_start == -1:
-                    raise ValueError("Missing Thought or Action sections")
+                    if thought_start == -1 or action_start == -1:
+                        raise ValueError("Missing Thought or Action sections")
 
-                thought = response_text[thought_start + 8 : action_start].strip()
-                action_input = response_text[action_start + 7 :].strip()
+                    thought = response_text[thought_start + 8 : action_start].strip()
+                    action_input = response_text[action_start + 7 :].strip()
+                else:
+                    action_start = response_text.find("Action:")
+                    if action_start == -1:
+                        raise ValueError("Missing Action section")
+                    action_input = response_text[action_start + 7 :].strip()
 
                 # Extract action name and input
                 action_lines = action_input.split("\n", 1)
@@ -174,17 +181,20 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             )
 
         # Check if all sections exist
-        if thought_count < 1 or action_count < 1:
-            raise ValueError("Response must have one 'Thought:' and 'Action:' section")
+        if self.thoughts_in_action and thought_count < 1:
+            raise ValueError("Response must have one 'Thought:' section when thoughts_in_action is True")
+        if action_count < 1:
+            raise ValueError("Response must have one 'Action:' section")
 
-        # Find the starting lines for each section
-        thought_line = next(
-            (i for i, line in enumerate(lines) if line.startswith("Thought:")), -1
-        )
-        action_line = next(
-            (i for i, line in enumerate(lines) if line.startswith("Action:")), -1
-        )
+        if self.thoughts_in_action:
+            # Find the starting lines for each section
+            thought_line = next(
+                (i for i, line in enumerate(lines) if line.startswith("Thought:")), -1
+            )
+            action_line = next(
+                (i for i, line in enumerate(lines) if line.startswith("Action:")), -1
+            )
 
-        # Check if sections are in correct order
-        if not (thought_line < action_line):
-            raise ValueError("Sections must be in order: Thought, Action")
+            # Check if sections are in correct order
+            if not (thought_line < action_line):
+                raise ValueError("Sections must be in order: Thought, Action")

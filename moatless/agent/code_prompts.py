@@ -70,6 +70,20 @@ REACT_CORE_OPERATION_RULES = """
    - Any risks to watch for
   """
 
+REACT_CORE_OPERATION_RULES_NO_THOUGHTS = """
+# Core Operation Rules
+
+1. EVERY response must follow EXACTLY this format:
+   Action: ONE specific action to take
+
+2. After each Action you will receive an Observation to inform your next step.
+
+3. Focus on:
+   - Using previous Observations to inform your next action
+   - Choosing specific actions that progress toward the goal
+   - Being precise and accurate in your actions
+"""
+
 SUMMARY_CORE_OPERATION_RULES = """
 # Core Operation Rules
 
@@ -204,7 +218,7 @@ def generate_workflow_prompt(actions, has_runtime: bool = False) -> str:
 
 WORKFLOW_PROMPT = None  # This will be set dynamically when creating the agent
 
-def generate_guideline_prompt(has_runtime: bool = False) -> str:
+def generate_guideline_prompt(has_runtime: bool = False, thoughts_in_action: bool = True) -> str:
     prompt = """
 # Important Guidelines
 
@@ -224,7 +238,8 @@ def generate_guideline_prompt(has_runtime: bool = False) -> str:
    - Always update or add tests to verify your changes.
    - If tests fail, analyze the output and do necessary corrections."""
 
-    prompt += """
+    if thoughts_in_action:
+        prompt += """
 
  * **Task Completion**
    - Finish the task only when the task is fully resolved and verified.
@@ -234,6 +249,18 @@ def generate_guideline_prompt(has_runtime: bool = False) -> str:
    - Keep a detailed record of all code sections you have viewed and actions you have taken.
    - Before performing a new action, check your history to ensure you are not repeating previous steps.
    - Use the information you've already gathered to inform your next steps without re-fetching the same data.
+"""
+    else:
+        prompt += """
+
+ * **Task Completion**
+   - Finish the task only when the task is fully resolved and verified.
+   - Do not suggest code reviews or additional changes beyond the scope.
+
+ * **Efficient Operation**
+   - Use previous observations to inform your next actions.
+   - Avoid repeating actions unnecessarily.
+   - Focus on direct, purposeful steps toward the goal.
 """
     return prompt
 

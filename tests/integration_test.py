@@ -58,6 +58,20 @@ pytest.mark.llm_integration = pytest.mark.skipif(
             "message_history_type": MessageHistoryType.MESSAGES,
             "thoughts_in_action": True
         },
+        # o1 preview
+        {
+            "model": "o1-preview-2024-09-12",
+            "response_format": LLMResponseFormat.REACT,
+            "message_history_type": MessageHistoryType.REACT,
+            "thoughts_in_action": False
+        },
+        # o1 Mini
+        {
+            "model": "o1-mini-2024-09-12",
+            "response_format": LLMResponseFormat.REACT,
+            "message_history_type": MessageHistoryType.REACT,
+            "thoughts_in_action": False
+        },
         # DeepSeek Chat
         {
             "model": "deepseek/deepseek-chat",
@@ -70,6 +84,13 @@ pytest.mark.llm_integration = pytest.mark.skipif(
             "model": "gemini/gemini-2.0-flash-exp",
             "response_format": LLMResponseFormat.TOOLS,
             "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": True
+        },
+        # Gemini Flash Think
+        {
+            "model": "gemini/gemini-2.0-flash-thinking-exp",
+            "response_format": LLMResponseFormat.REACT,
+            "message_history_type": MessageHistoryType.REACT,
             "thoughts_in_action": True
         },
         # Llama 3.1 70B Instruct
@@ -87,7 +108,7 @@ pytest.mark.llm_integration = pytest.mark.skipif(
             "thoughts_in_action": False
         }
     ],
-    ids=["claude-3-5-sonnet", "claude-3-5-haiku", "gpt-4o", "gpt-4o-mini", "deepseek-chat", "gemini-2.0-flash", "llama-3.1-70b", "qwen-2.5-coder"]
+    ids=["claude-3-5-sonnet", "claude-3-5-haiku", "gpt-4o", "gpt-4o-mini", "o1-preview", "o1-mini", "deepseek-chat", "gemini-2.0-flash", "gemini-2.0-flash-think", "llama-3.1-70b", "qwen-2.5-coder"]
 )
 @pytest.mark.llm_integration
 def test_basic_coding_task(model):

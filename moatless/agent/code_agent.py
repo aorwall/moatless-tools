@@ -28,6 +28,7 @@ from moatless.agent.code_prompts import (
     REACT_CORE_OPERATION_RULES,
     ADDITIONAL_NOTES,
     generate_workflow_prompt,
+    REACT_CORE_OPERATION_RULES_NO_THOUGHTS,
     CLAUDE_REACT_PROMPT,
     generate_guideline_prompt,
 )
@@ -77,15 +78,16 @@ class CodingAgent(ActionAgent):
         action_completion_model = completion_model.clone(
             response_format=action_completion_format
         )
+        supports_anthropic_computer_use = hasattr(completion_model, "supports_anthropic_computer_use") and completion_model.supports_anthropic_computer_use
 
-        if hasattr(completion_model, "supports_anthropic_computer_use") and completion_model.supports_anthropic_computer_use:
+        if supports_anthropic_computer_use:
             actions = create_claude_coding_actions(
                 repository=repository,
                 code_index=code_index,
                 completion_model=action_completion_model,
                 runtime=runtime,
             )
-            system_prompt = CLAUDE_REACT_PROMPT
+            
             action_type = "Claude actions with computer use capability"
             use_few_shots = False
         else:
@@ -98,19 +100,29 @@ class CodingAgent(ActionAgent):
             action_type = "standard edit code actions"
             use_few_shots = True
 
+
+        if not supports_anthropic_computer_use:
             # Generate workflow prompt based on available actions
             workflow_prompt = generate_workflow_prompt(actions, runtime is not None)
 
             # Compose system prompt based on model type and format
             system_prompt = AGENT_ROLE
             if completion_model.response_format == LLMResponseFormat.REACT:
-                system_prompt += REACT_CORE_OPERATION_RULES
+                if thoughts_in_action:
+                    system_prompt += REACT_CORE_OPERATION_RULES
+                else:
+                    system_prompt += REACT_CORE_OPERATION_RULES_NO_THOUGHTS
             elif completion_model.response_format == LLMResponseFormat.TOOLS:
-                system_prompt += REACT_GUIDELINES
+                if thoughts_in_action:
+                    system_prompt += REACT_GUIDELINES
+                else:
+                    system_prompt += REACT_GUIDELINES_NO_THOUGHTS
 
             # Add workflow and guidelines
-            system_prompt += workflow_prompt + generate_guideline_prompt(runtime is not None) + ADDITIONAL_NOTES
-
+            system_prompt += workflow_prompt + generate_guideline_prompt(runtime is not None, thoughts_in_action) + ADDITIONAL_NOTES
+        else:
+            system_prompt = CLAUDE_REACT_PROMPT
+           
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,
             include_file_context=True,

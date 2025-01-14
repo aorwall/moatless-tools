@@ -239,13 +239,20 @@ class MessageHistoryGenerator(BaseModel):
         # Convert node messages to react format
         for action, observation in node_messages:
             # Add thought and action message
-            thought = (
-                f"Thought: {action.thoughts}" if hasattr(action, "thoughts") else ""
-            )
+            if self.thoughts_in_action:
+                thought = (
+                    f"Thought: {action.thoughts}" if hasattr(action, "thoughts") else ""
+                )
+            else:
+                thought = ""
             action_str = f"Action: {action.name}"
             action_input = action.format_args_for_llm()
 
-            assistant_content = f"{thought}\n{action_str}"
+            if thought:
+                assistant_content = f"{thought}\n{action_str}"
+            else:
+                assistant_content = action_str
+
             if action_input:
                 assistant_content += f"\n{action_input}"
 
