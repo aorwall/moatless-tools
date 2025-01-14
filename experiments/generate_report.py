@@ -8,6 +8,7 @@ import shutil
 from collections import Counter
 from datetime import datetime
 
+from dotenv import load_dotenv
 from moatless.benchmark.report import BenchmarkResult, to_result, to_dataframe, to_trajectory_dataframe, read_reports
 from moatless.benchmark.utils import get_moatless_instances
 from moatless.loop import AgenticLoop
@@ -20,6 +21,7 @@ logging.basicConfig(
     level=logging.WARNING,
 )
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 instance_splits: Dict[str, List[str]] = {}
