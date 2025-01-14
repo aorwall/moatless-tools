@@ -280,7 +280,7 @@ def create_trajectory_stats(
                     if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large"]:
                         result.failed_actions += 1
 
-                    if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large", "no_spans_found", "no_changes", "no_test_files", "file_exists", "file_not_found", "file_not_in_context", "string_already_exists", "string_not_found"]:
+                    if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large", "no_spans_found", "no_changes", "no_test_files", "file_exists", "file_not_found", "file_not_in_context", "string_already_exists", "string_not_found", "invalid_path"]:
                         if fail_reason not in result.flags:
                             result.flags.append(fail_reason)
 
@@ -402,7 +402,7 @@ def to_result(
                 best_node.action and best_node.action.name == "Error"
             ) or best_node.error:
                 status = "error"
-            elif not best_node.file_context.generate_git_patch():
+            elif not best_node.file_context.generate_git_patch(ignore_tests=True):
                 status = "no_patch"
             else:
                 status = "completed"
